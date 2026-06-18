@@ -1,0 +1,250 @@
+{
+  "schemaVersion": 1,
+  "releaseTag": "binaries-v1",
+  "repo": "telltaleatheist/briefcase",
+  "baseUrl": "https://github.com/telltaleatheist/briefcase/releases/download/binaries-v1",
+  "note": "AI/whisper models are NOT here — they download from Hugging Face at runtime.",
+  "components": [
+    {
+      "id": "ffmpeg-tools",
+      "name": "FFmpeg & FFprobe",
+      "kind": "binary",
+      "required": true,
+      "artifacts": [
+        {
+          "platform": "darwin",
+          "arch": "arm64",
+          "url": "https://github.com/telltaleatheist/briefcase/releases/download/binaries-v1/ffmpeg-tools-darwin-arm64.tar.gz",
+          "file": "ffmpeg-tools-darwin-arm64.tar.gz",
+          "sha256": "802d14109e0ac0dc37c06cb9c95db8e0e69c848f9e911b2f6b093c752c09aa84",
+          "bytes": 24148420,
+          "entry": "ffmpeg"
+        },
+        {
+          "platform": "darwin",
+          "arch": "x64",
+          "url": "https://github.com/telltaleatheist/briefcase/releases/download/binaries-v1/ffmpeg-tools-darwin-x64.tar.gz",
+          "file": "ffmpeg-tools-darwin-x64.tar.gz",
+          "sha256": "aa3f9be5d07e00e95e526af48cc8a41f8deff3bf9ba15b76d23387847a2e61f5",
+          "bytes": 47474181,
+          "entry": "ffmpeg"
+        },
+        {
+          "platform": "win32",
+          "arch": "x64",
+          "url": "https://github.com/telltaleatheist/briefcase/releases/download/binaries-v1/ffmpeg-tools-win32-x64.zip",
+          "file": "ffmpeg-tools-win32-x64.zip",
+          "sha256": "041a4a887ac47ba9e2713e3b3b48df7041471ade0d31e79daad1be8f7b0dd989",
+          "bytes": 51174807,
+          "entry": "ffmpeg.exe"
+        }
+      ]
+    },
+    {
+      "id": "whisper",
+      "name": "Whisper (speech-to-text)",
+      "kind": "binary",
+      "required": true,
+      "artifacts": [
+        {
+          "platform": "darwin",
+          "arch": "arm64",
+          "url": "https://github.com/telltaleatheist/briefcase/releases/download/binaries-v1/whisper-darwin-arm64.tar.gz",
+          "file": "whisper-darwin-arm64.tar.gz",
+          "sha256": "8562cb5f1e0329a8ec69b173576e265d52551fd46b880000c784544a62afaf7d",
+          "bytes": 864993,
+          "entry": "whisper-cli-arm64"
+        },
+        {
+          "platform": "darwin",
+          "arch": "x64",
+          "url": "https://github.com/telltaleatheist/briefcase/releases/download/binaries-v1/whisper-darwin-x64.tar.gz",
+          "file": "whisper-darwin-x64.tar.gz",
+          "sha256": "acad8080ffa3a3d0f8b2ce47eaa0f91f8dbeec9e271872867e96250901d1b908",
+          "bytes": 1160425,
+          "entry": "whisper-cli-x64"
+        },
+        {
+          "platform": "win32",
+          "arch": "x64",
+          "url": "https://github.com/telltaleatheist/briefcase/releases/download/binaries-v1/whisper-win32-x64.zip",
+          "file": "whisper-win32-x64.zip",
+          "sha256": "a2959a1b21bd58f44387e77a592900b088219a80f0108532f8e12642e24eb2a9",
+          "bytes": 1714118,
+          "entry": "whisper-cli.exe"
+        }
+      ]
+    },
+    {
+      "id": "llama",
+      "name": "Llama (local AI inference)",
+      "kind": "binary",
+      "required": false,
+      "artifacts": [
+        {
+          "platform": "darwin",
+          "arch": "arm64",
+          "url": "https://github.com/telltaleatheist/briefcase/releases/download/binaries-v1/llama-darwin-arm64.tar.gz",
+          "file": "llama-darwin-arm64.tar.gz",
+          "sha256": "973966715f3e1a89432b768ce5c1c6f542352aead14921c2b43807a490be8381",
+          "bytes": 4857599,
+          "entry": "llama-server-arm64"
+        },
+        {
+          "platform": "darwin",
+          "arch": "x64",
+          "url": "https://github.com/telltaleatheist/briefcase/releases/download/binaries-v1/llama-darwin-x64.tar.gz",
+          "file": "llama-darwin-x64.tar.gz",
+          "sha256": "84ae70b693253a3e244e10adc68728d4649a4873274106c8754b5f7c486b0b40",
+          "bytes": 5012902,
+          "entry": "llama-server-x64"
+        },
+        {
+          "platform": "win32",
+          "arch": "x64",
+          "url": "https://github.com/telltaleatheist/briefcase/releases/download/binaries-v1/llama-win32-x64.zip",
+          "file": "llama-win32-x64.zip",
+          "sha256": "5697d85c7303db313c082c6e39afb58666d2f930a611d72e3d117620c7055247",
+          "bytes": 9657928,
+          "entry": "llama-server.exe"
+        }
+      ]
+    },
+    {
+      "id": "yt-dlp",
+      "name": "yt-dlp (video downloader)",
+      "kind": "binary",
+      "required": true,
+      "artifacts": [
+        {
+          "platform": "darwin",
+          "arch": "universal",
+          "url": "https://github.com/telltaleatheist/briefcase/releases/download/binaries-v1/yt-dlp-darwin-universal.tar.gz",
+          "file": "yt-dlp-darwin-universal.tar.gz",
+          "sha256": "6397a1b096b2746076bde0c275993b15959bd6319c57e78215d066b28aeb2f84",
+          "bytes": 63270192,
+          "entry": "yt-dlp_macos_dir/yt-dlp_macos"
+        },
+        {
+          "platform": "win32",
+          "arch": "x64",
+          "url": "https://github.com/telltaleatheist/briefcase/releases/download/binaries-v1/yt-dlp-win32-x64.zip",
+          "file": "yt-dlp-win32-x64.zip",
+          "sha256": "61b27597f73ca3491d2a60b329fa5e1e6d6fa6885321da6e848b6cffb5c96599",
+          "bytes": 18958218,
+          "entry": "yt-dlp_win_dir/yt-dlp.exe"
+        }
+      ]
+    }
+  ],
+  "models": [
+    {
+      "id": "whisper-model-tiny",
+      "name": "Whisper Tiny (fastest)",
+      "kind": "whisper-model",
+      "required": false,
+      "description": "Smallest, fastest, lowest accuracy. Good for quick drafts.",
+      "artifacts": [
+        {
+          "platform": "darwin",
+          "arch": "universal",
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
+          "file": "ggml-tiny.bin",
+          "sha256": "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
+          "bytes": 77691713,
+          "entry": "ggml-tiny.bin"
+        },
+        {
+          "platform": "win32",
+          "arch": "universal",
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
+          "file": "ggml-tiny.bin",
+          "sha256": "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
+          "bytes": 77691713,
+          "entry": "ggml-tiny.bin"
+        },
+        {
+          "platform": "linux",
+          "arch": "universal",
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
+          "file": "ggml-tiny.bin",
+          "sha256": "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
+          "bytes": 77691713,
+          "entry": "ggml-tiny.bin"
+        }
+      ]
+    },
+    {
+      "id": "whisper-model-base",
+      "name": "Whisper Base (recommended)",
+      "kind": "whisper-model",
+      "required": false,
+      "description": "Balanced speed and accuracy. Recommended default.",
+      "artifacts": [
+        {
+          "platform": "darwin",
+          "arch": "universal",
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
+          "file": "ggml-base.bin",
+          "sha256": "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
+          "bytes": 147951465,
+          "entry": "ggml-base.bin"
+        },
+        {
+          "platform": "win32",
+          "arch": "universal",
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
+          "file": "ggml-base.bin",
+          "sha256": "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
+          "bytes": 147951465,
+          "entry": "ggml-base.bin"
+        },
+        {
+          "platform": "linux",
+          "arch": "universal",
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
+          "file": "ggml-base.bin",
+          "sha256": "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
+          "bytes": 147951465,
+          "entry": "ggml-base.bin"
+        }
+      ]
+    },
+    {
+      "id": "whisper-model-small",
+      "name": "Whisper Small (most accurate)",
+      "kind": "whisper-model",
+      "required": false,
+      "description": "Best accuracy, slower and larger.",
+      "artifacts": [
+        {
+          "platform": "darwin",
+          "arch": "universal",
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
+          "file": "ggml-small.bin",
+          "sha256": "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
+          "bytes": 487601967,
+          "entry": "ggml-small.bin"
+        },
+        {
+          "platform": "win32",
+          "arch": "universal",
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
+          "file": "ggml-small.bin",
+          "sha256": "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
+          "bytes": 487601967,
+          "entry": "ggml-small.bin"
+        },
+        {
+          "platform": "linux",
+          "arch": "universal",
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
+          "file": "ggml-small.bin",
+          "sha256": "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
+          "bytes": 487601967,
+          "entry": "ggml-small.bin"
+        }
+      ]
+    }
+  ]
+}

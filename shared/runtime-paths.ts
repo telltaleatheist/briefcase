@@ -6,6 +6,8 @@
  */
 
 import * as path from 'path';
+import * as fs from 'fs';
+import * as os from 'os';
 
 // Try to load electron, but don't fail if not available (e.g., when called from backend)
 let app: any = null;
@@ -13,6 +15,66 @@ try {
   app = require('electron').app;
 } catch {
   // Electron not available - we're probably in the backend process
+}
+
+/**
+ * Downloaded-component resolution (download-on-demand).
+ * Mirrors backend/src/bridges/runtime-paths.ts — derives <configDir> from
+ * os.homedir() (no Electron `app`) so binaries fetched by ComponentManagerService
+ * into <configDir>/components/<id>/ take precedence over bundled paths.
+ */
+interface DownloadedRecord {
+  dir: string;
+  entry: string;
+  kind: string;
+}
+
+function getBriefcaseConfigDir(): string {
+  const userDataPath =
+    process.env.APPDATA ||
+    (process.platform === 'darwin'
+      ? path.join(process.env.HOME || os.homedir(), 'Library', 'Application Support')
+      : path.join(process.env.HOME || os.homedir(), '.config'));
+  return path.join(userDataPath, 'briefcase');
+}
+
+function getDownloadedComponents(): Record<string, DownloadedRecord> {
+  try {
+    const p = path.join(getBriefcaseConfigDir(), 'components', 'installed.json');
+    if (fs.existsSync(p)) {
+      return JSON.parse(fs.readFileSync(p, 'utf8')).components || {};
+    }
+  } catch {
+    // ignore — fall back to bundled
+  }
+  return {};
+}
+
+function downloadedEntry(
+  comps: Record<string, DownloadedRecord>,
+  id: string,
+  fileOverride?: string,
+): string | null {
+  const rec = comps[id];
+  if (!rec) return null;
+  const full = path.join(rec.dir, fileOverride || rec.entry);
+  return fs.existsSync(full) ? full : null;
+}
+
+/** A downloaded whisper model file, preferring base > tiny > small > any. */
+function getDownloadedWhisperModel(): string | null {
+  const dir = path.join(getBriefcaseConfigDir(), 'models', 'whisper');
+  try {
+    if (!fs.existsSync(dir)) return null;
+    const ggml = fs.readdirSync(dir).filter((f) => /^ggml-.*\.bin$/.test(f));
+    if (ggml.length === 0) return null;
+    for (const pref of ['ggml-base.bin', 'ggml-tiny.bin', 'ggml-small.bin']) {
+      if (ggml.includes(pref)) return path.join(dir, pref);
+    }
+    return path.join(dir, ggml[0]);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -151,49 +213,35 @@ export function getRuntimePaths() {
   const platformFolder = getPlatformFolder();
   const pythonDir = getPythonDir(resourcesPath);
 
+  // Downloaded components (download-on-demand) take precedence over bundled paths.
+  const comps = getDownloadedComponents();
+  const ext = process.platform === 'win32' ? '.exe' : '';
+
   return {
-    // FFmpeg from npm installer package
-    ffmpeg: path.join(
-      resourcesPath,
-      'node_modules',
-      '@ffmpeg-installer',
-      platformFolder,
-      getBinaryName('ffmpeg')
-    ),
+    // FFmpeg — downloaded ffmpeg-tools component, else npm installer package
+    ffmpeg:
+      downloadedEntry(comps, 'ffmpeg-tools', `ffmpeg${ext}`) ||
+      path.join(resourcesPath, 'node_modules', '@ffmpeg-installer', platformFolder, getBinaryName('ffmpeg')),
 
-    // FFprobe from npm installer package
-    ffprobe: path.join(
-      resourcesPath,
-      'node_modules',
-      '@ffprobe-installer',
-      platformFolder,
-      getBinaryName('ffprobe')
-    ),
+    // FFprobe — downloaded ffmpeg-tools component, else npm installer package
+    ffprobe:
+      downloadedEntry(comps, 'ffmpeg-tools', `ffprobe${ext}`) ||
+      path.join(resourcesPath, 'node_modules', '@ffprobe-installer', platformFolder, getBinaryName('ffprobe')),
 
-    // yt-dlp from utilities folder - ALWAYS bundled (onedir build for fast startup)
-    ytdlp: path.join(
-      resourcesPath,
-      'utilities',
-      'bin',
-      getYtDlpRelativePath()
-    ),
+    // yt-dlp — downloaded component (onedir), else bundled
+    ytdlp:
+      downloadedEntry(comps, 'yt-dlp') ||
+      path.join(resourcesPath, 'utilities', 'bin', getYtDlpRelativePath()),
 
-    // whisper.cpp - standalone binary, no Python needed!
-    // macOS has architecture-specific binaries
-    whisperCpp: path.join(
-      resourcesPath,
-      'utilities',
-      'bin',
-      getWhisperBinaryName()
-    ),
+    // whisper.cpp standalone binary — downloaded component, else bundled
+    whisperCpp:
+      downloadedEntry(comps, 'whisper') ||
+      path.join(resourcesPath, 'utilities', 'bin', getWhisperBinaryName()),
 
-    // Whisper model file
-    whisperModel: path.join(
-      resourcesPath,
-      'utilities',
-      'models',
-      'ggml-tiny.bin'
-    ),
+    // Whisper model file — downloaded model, else bundled tiny
+    whisperModel:
+      getDownloadedWhisperModel() ||
+      path.join(resourcesPath, 'utilities', 'models', 'ggml-tiny.bin'),
 
     // Python from bundled runtime - ALWAYS bundled
     // Windows: python.exe in root of python dir (embedded package)

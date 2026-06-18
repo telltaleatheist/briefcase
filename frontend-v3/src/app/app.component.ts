@@ -8,11 +8,14 @@ import { QueueService } from './services/queue.service';
 import { LibraryService } from './services/library.service';
 import { OnboardingComponent } from './components/onboarding/onboarding.component';
 import { QuitConfirmComponent } from './components/quit-confirm/quit-confirm.component';
+import { DownloadDockComponent } from './components/download-dock/download-dock.component';
+import { SetupWizardComponent } from './components/setup-wizard/setup-wizard.component';
+import { ComponentService } from './services/component.service';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, NavigationComponent, OnboardingComponent, QuitConfirmComponent],
+  imports: [RouterOutlet, NavigationComponent, OnboardingComponent, QuitConfirmComponent, DownloadDockComponent, SetupWizardComponent],
   template: `
     <!-- Show onboarding if needed -->
     @if (showOnboarding()) {
@@ -26,10 +29,20 @@ import { QuitConfirmComponent } from './components/quit-confirm/quit-confirm.com
           <router-outlet />
         </main>
       </div>
+
+      <!-- Auto-opened on launch when required download-on-demand components are missing -->
+      @if (showComponentSetup()) {
+        <app-setup-wizard mode="setup"
+          (completed)="onComponentSetupDone()"
+          (closed)="onComponentSetupDone()" />
+      }
     }
 
     <!-- Chrome-style "press again to quit" toast (driven by the Electron main process) -->
     <app-quit-confirm />
+
+    <!-- Download-on-demand progress dock (controls its own visibility) -->
+    <app-download-dock />
   `,
   styles: [`
     .app-container {
@@ -62,16 +75,41 @@ export class AppComponent implements OnInit {
   private libraryService = inject(LibraryService);
   // Inject QueueService to ensure it initializes eagerly and restores queue
   private queueService = inject(QueueService);
+  private componentService = inject(ComponentService);
 
   // Onboarding state
   showOnboarding = signal(false);
   private onboardingChecked = false;
+
+  // Download-on-demand setup state
+  showComponentSetup = signal(false);
+  private componentsChecked = false;
 
   async ngOnInit() {
     this.themeService.initializeTheme();
 
     // Check if onboarding is needed
     await this.checkOnboarding();
+
+    // If we're not gating on onboarding, check for missing required components
+    if (!this.showOnboarding()) {
+      this.checkComponents();
+    }
+  }
+
+  /** Auto-open the setup wizard if any required, supported component is missing. */
+  private checkComponents() {
+    if (this.componentsChecked) return;
+    this.componentsChecked = true;
+    this.componentService.listComponents().subscribe((components) => {
+      if (this.componentService.hasMissingRequired(components)) {
+        this.showComponentSetup.set(true);
+      }
+    });
+  }
+
+  onComponentSetupDone() {
+    this.showComponentSetup.set(false);
   }
 
   private async checkOnboarding() {
@@ -105,5 +143,7 @@ export class AppComponent implements OnInit {
 
   onOnboardingComplete() {
     this.showOnboarding.set(false);
+    // After onboarding, check whether required components still need downloading.
+    this.checkComponents();
   }
 }

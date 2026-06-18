@@ -114,6 +114,30 @@ export interface ModelDownloadCancelled {
   modelId: string;
 }
 
+// Component (binary/model) download events — download-on-demand
+export interface ComponentDownloadProgress {
+  componentId: string;
+  phase: 'download' | 'verify' | 'extract' | 'install';
+  progress: number;
+  downloadedMB: number;
+  totalMB: number;
+  speed?: string;
+  eta?: string;
+}
+
+export interface ComponentDownloadComplete {
+  componentId: string;
+}
+
+export interface ComponentDownloadError {
+  componentId: string;
+  error: string;
+}
+
+export interface ComponentDownloadCancelled {
+  componentId: string;
+}
+
 @Injectable({
   providedIn: 'root'
 })
@@ -142,6 +166,10 @@ export class WebsocketService implements OnDestroy {
   private modelDownloadCompleteCallbacks: ((event: ModelDownloadComplete) => void)[] = [];
   private modelDownloadErrorCallbacks: ((event: ModelDownloadError) => void)[] = [];
   private modelDownloadCancelledCallbacks: ((event: ModelDownloadCancelled) => void)[] = [];
+  private componentDownloadProgressCallbacks: ((event: ComponentDownloadProgress) => void)[] = [];
+  private componentDownloadCompleteCallbacks: ((event: ComponentDownloadComplete) => void)[] = [];
+  private componentDownloadErrorCallbacks: ((event: ComponentDownloadError) => void)[] = [];
+  private componentDownloadCancelledCallbacks: ((event: ComponentDownloadCancelled) => void)[] = [];
 
   connect(): void {
     if (this.socket?.connected) {
@@ -279,6 +307,26 @@ export class WebsocketService implements OnDestroy {
     this.socket.on('model.download.cancelled', (event: ModelDownloadCancelled) => {
       console.log('WS model.download.cancelled received:', event);
       this.modelDownloadCancelledCallbacks.forEach(cb => cb(event));
+    });
+
+    // Component (binary/model) download events
+    this.socket.on('component.download.progress', (event: ComponentDownloadProgress) => {
+      this.componentDownloadProgressCallbacks.forEach(cb => cb(event));
+    });
+
+    this.socket.on('component.download.complete', (event: ComponentDownloadComplete) => {
+      console.log('WS component.download.complete received:', event);
+      this.componentDownloadCompleteCallbacks.forEach(cb => cb(event));
+    });
+
+    this.socket.on('component.download.error', (event: ComponentDownloadError) => {
+      console.log('WS component.download.error received:', event);
+      this.componentDownloadErrorCallbacks.forEach(cb => cb(event));
+    });
+
+    this.socket.on('component.download.cancelled', (event: ComponentDownloadCancelled) => {
+      console.log('WS component.download.cancelled received:', event);
+      this.componentDownloadCancelledCallbacks.forEach(cb => cb(event));
     });
 
     // Legacy events for backward compatibility
@@ -425,6 +473,35 @@ export class WebsocketService implements OnDestroy {
     this.modelDownloadCancelledCallbacks.push(callback);
     return () => {
       this.modelDownloadCancelledCallbacks = this.modelDownloadCancelledCallbacks.filter(cb => cb !== callback);
+    };
+  }
+
+  // Component download event subscriptions
+  onComponentDownloadProgress(callback: (event: ComponentDownloadProgress) => void): () => void {
+    this.componentDownloadProgressCallbacks.push(callback);
+    return () => {
+      this.componentDownloadProgressCallbacks = this.componentDownloadProgressCallbacks.filter(cb => cb !== callback);
+    };
+  }
+
+  onComponentDownloadComplete(callback: (event: ComponentDownloadComplete) => void): () => void {
+    this.componentDownloadCompleteCallbacks.push(callback);
+    return () => {
+      this.componentDownloadCompleteCallbacks = this.componentDownloadCompleteCallbacks.filter(cb => cb !== callback);
+    };
+  }
+
+  onComponentDownloadError(callback: (event: ComponentDownloadError) => void): () => void {
+    this.componentDownloadErrorCallbacks.push(callback);
+    return () => {
+      this.componentDownloadErrorCallbacks = this.componentDownloadErrorCallbacks.filter(cb => cb !== callback);
+    };
+  }
+
+  onComponentDownloadCancelled(callback: (event: ComponentDownloadCancelled) => void): () => void {
+    this.componentDownloadCancelledCallbacks.push(callback);
+    return () => {
+      this.componentDownloadCancelledCallbacks = this.componentDownloadCancelledCallbacks.filter(cb => cb !== callback);
     };
   }
 

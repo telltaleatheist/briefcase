@@ -155,6 +155,33 @@ export interface ModelDownloadCancelledPayload {
 }
 
 /**
+ * Component (binary/model) Download Events
+ * Used by ComponentManagerService for download-on-demand binaries and whisper models.
+ */
+export interface ComponentDownloadProgressPayload {
+  componentId: string;
+  phase: 'download' | 'verify' | 'extract' | 'install';
+  progress: number;
+  downloadedMB: number;
+  totalMB: number;
+  speed?: string;
+  eta?: string;
+}
+
+export interface ComponentDownloadCompletePayload {
+  componentId: string;
+}
+
+export interface ComponentDownloadErrorPayload {
+  componentId: string;
+  error: string;
+}
+
+export interface ComponentDownloadCancelledPayload {
+  componentId: string;
+}
+
+/**
  * WebSocket Event Names
  * Using const enum for type safety and better autocomplete
  */
@@ -186,6 +213,12 @@ export enum WebSocketEvent {
   MODEL_DOWNLOAD_ERROR = 'model.download.error',
   MODEL_DOWNLOAD_CANCELLED = 'model.download.cancelled',
 
+  // Component (binary/model) Download Events
+  COMPONENT_DOWNLOAD_PROGRESS = 'component.download.progress',
+  COMPONENT_DOWNLOAD_COMPLETE = 'component.download.complete',
+  COMPONENT_DOWNLOAD_ERROR = 'component.download.error',
+  COMPONENT_DOWNLOAD_CANCELLED = 'component.download.cancelled',
+
   // Connection Management
   CONNECTION = 'connection',
   DISCONNECT = 'disconnect',
@@ -213,6 +246,12 @@ export enum InternalEvent {
   MODEL_DOWNLOAD_COMPLETE = 'model.download.complete',
   MODEL_DOWNLOAD_ERROR = 'model.download.error',
   MODEL_DOWNLOAD_CANCELLED = 'model.download.cancelled',
+
+  // Component (binary/model) download events
+  COMPONENT_DOWNLOAD_PROGRESS = 'component.download.progress',
+  COMPONENT_DOWNLOAD_COMPLETE = 'component.download.complete',
+  COMPONENT_DOWNLOAD_ERROR = 'component.download.error',
+  COMPONENT_DOWNLOAD_CANCELLED = 'component.download.cancelled',
 }
 
 /**
@@ -246,4 +285,10 @@ export interface WebSocketEventMap {
   [WebSocketEvent.MODEL_DOWNLOAD_COMPLETE]: ModelDownloadCompletePayload;
   [WebSocketEvent.MODEL_DOWNLOAD_ERROR]: ModelDownloadErrorPayload;
   [WebSocketEvent.MODEL_DOWNLOAD_CANCELLED]: ModelDownloadCancelledPayload;
+
+  // Component download events
+  [WebSocketEvent.COMPONENT_DOWNLOAD_PROGRESS]: ComponentDownloadProgressPayload;
+  [WebSocketEvent.COMPONENT_DOWNLOAD_COMPLETE]: ComponentDownloadCompletePayload;
+  [WebSocketEvent.COMPONENT_DOWNLOAD_ERROR]: ComponentDownloadErrorPayload;
+  [WebSocketEvent.COMPONENT_DOWNLOAD_CANCELLED]: ComponentDownloadCancelledPayload;
 }

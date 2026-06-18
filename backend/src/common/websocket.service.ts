@@ -202,6 +202,28 @@ export class WebSocketService {
   }
 
   /**
+   * Component (binary/model) Download Events
+   */
+  emitComponentDownloadProgress(payload: WebSocketEventMap[WebSocketEvent.COMPONENT_DOWNLOAD_PROGRESS]): void {
+    this.emit(WebSocketEvent.COMPONENT_DOWNLOAD_PROGRESS, payload);
+  }
+
+  emitComponentDownloadComplete(payload: WebSocketEventMap[WebSocketEvent.COMPONENT_DOWNLOAD_COMPLETE]): void {
+    this.logger.log(`Component download complete: ${payload.componentId}`);
+    this.emit(WebSocketEvent.COMPONENT_DOWNLOAD_COMPLETE, payload);
+  }
+
+  emitComponentDownloadError(payload: WebSocketEventMap[WebSocketEvent.COMPONENT_DOWNLOAD_ERROR]): void {
+    this.logger.error(`Component download error: ${payload.componentId} - ${payload.error}`);
+    this.emit(WebSocketEvent.COMPONENT_DOWNLOAD_ERROR, payload);
+  }
+
+  emitComponentDownloadCancelled(payload: WebSocketEventMap[WebSocketEvent.COMPONENT_DOWNLOAD_CANCELLED]): void {
+    this.logger.log(`Component download cancelled: ${payload.componentId}`);
+    this.emit(WebSocketEvent.COMPONENT_DOWNLOAD_CANCELLED, payload);
+  }
+
+  /**
    * Advanced Methods for Future Use
    */
 

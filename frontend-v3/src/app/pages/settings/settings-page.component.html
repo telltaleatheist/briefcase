@@ -76,6 +76,25 @@
       </div>
     </section>
 
+    <!-- Components (download-on-demand binaries & models) -->
+    <section class="settings-section">
+      <div class="section-header">
+        <div class="section-icon">📦</div>
+        <div class="section-info">
+          <h2>Components</h2>
+          <p>Download tools (ffmpeg, yt-dlp, whisper) and transcription models on demand</p>
+        </div>
+      </div>
+      <div class="section-content">
+        <div class="section-actions">
+          <button class="action-btn primary" (click)="openComponentSetup()">
+            <span class="btn-icon">📦</span>
+            <span>Manage Components</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
     <!-- Default AI Model Section -->
     <section class="settings-section">
       <div class="section-header">
@@ -371,5 +390,14 @@
   <app-ai-setup-wizard
     (closed)="closeAiWizard()"
     (completed)="onWizardCompleted()"
+  />
+}
+
+<!-- Component Setup Wizard Modal (config mode) -->
+@if (componentSetupOpen()) {
+  <app-setup-wizard
+    mode="config"
+    (closed)="closeComponentSetup()"
+    (completed)="closeComponentSetup()"
   />
 }

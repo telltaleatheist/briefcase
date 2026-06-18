@@ -5,9 +5,70 @@
 
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import { Logger } from '@nestjs/common';
 
 const logger = new Logger('RuntimePaths');
+
+/**
+ * Downloaded-component resolution (download-on-demand).
+ *
+ * Binaries fetched by ComponentManagerService live under
+ * <configDir>/components/<id>/, recorded in components/installed.json. We must
+ * derive <configDir> without Electron's `app` (the backend is a plain Node
+ * process), mirroring ComponentManagerService / SharedConfigService.getConfigDir().
+ */
+interface DownloadedRecord {
+  dir: string;
+  entry: string;
+  kind: string;
+}
+
+function getBriefcaseConfigDir(): string {
+  const userDataPath =
+    process.env.APPDATA ||
+    (process.platform === 'darwin'
+      ? path.join(process.env.HOME || os.homedir(), 'Library', 'Application Support')
+      : path.join(process.env.HOME || os.homedir(), '.config'));
+  return path.join(userDataPath, 'briefcase');
+}
+
+function getDownloadedComponents(): Record<string, DownloadedRecord> {
+  try {
+    const p = path.join(getBriefcaseConfigDir(), 'components', 'installed.json');
+    if (fs.existsSync(p)) {
+      return JSON.parse(fs.readFileSync(p, 'utf8')).components || {};
+    }
+  } catch {
+    // ignore — fall back to bundled
+  }
+  return {};
+}
+
+/** Absolute path to a downloaded component's file, or null if not installed/missing. */
+function downloadedEntry(
+  comps: Record<string, DownloadedRecord>,
+  id: string,
+  fileOverride?: string,
+): string | null {
+  const rec = comps[id];
+  if (!rec) return null;
+  const full = path.join(rec.dir, fileOverride || rec.entry);
+  return fs.existsSync(full) ? full : null;
+}
+
+/** The downloaded whisper-models dir if it exists and holds at least one ggml-*.bin. */
+function getDownloadedWhisperModelsDir(): string | null {
+  const dir = path.join(getBriefcaseConfigDir(), 'models', 'whisper');
+  try {
+    if (fs.existsSync(dir) && fs.readdirSync(dir).some((f) => /^ggml-.*\.bin$/.test(f))) {
+      return dir;
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
 
 /**
  * Check if running in a packaged Electron app
@@ -181,12 +242,21 @@ export function getRuntimePaths(): RuntimePaths {
     llamaPath = path.join(resourcesPath, 'utilities', 'bin', getLlamaBinaryName());
   }
 
+  // Prefer downloaded components (download-on-demand) over bundled paths.
+  const comps = getDownloadedComponents();
+  ffmpegPath = downloadedEntry(comps, 'ffmpeg-tools', `ffmpeg${ext}`) || ffmpegPath;
+  ffprobePath = downloadedEntry(comps, 'ffmpeg-tools', `ffprobe${ext}`) || ffprobePath;
+  ytdlpPath = downloadedEntry(comps, 'yt-dlp') || ytdlpPath;
+  whisperPath = downloadedEntry(comps, 'whisper') || whisperPath;
+  llamaPath = downloadedEntry(comps, 'llama') || llamaPath;
+  const whisperModelsDir = getDownloadedWhisperModelsDir() || path.join(resourcesPath, 'utilities', 'models');
+
   return {
     ffmpeg: ffmpegPath,
     ffprobe: ffprobePath,
     ytdlp: ytdlpPath,
     whisper: whisperPath,
-    whisperModelsDir: path.join(resourcesPath, 'utilities', 'models'),
+    whisperModelsDir,
     llama: llamaPath,
     llamaModelsDir: path.join(resourcesPath, 'utilities', 'models', 'llama'),
   };
@@ -230,6 +300,12 @@ export function getWhisperLibraryPath(): string | undefined {
     return undefined;
   }
 
+  // Downloaded whisper ships its dylibs co-located in the component dir.
+  const downloaded = getDownloadedComponents()['whisper'];
+  if (downloaded && fs.existsSync(downloaded.dir)) {
+    return downloaded.dir;
+  }
+
   const resourcesPath = getResourcesPath();
   const binDir = path.join(resourcesPath, 'utilities', 'bin');
 
@@ -243,6 +319,12 @@ export function getWhisperLibraryPath(): string | undefined {
 export function getLlamaLibraryPath(): string | undefined {
   if (process.platform !== 'darwin') {
     return undefined;
+  }
+
+  // Downloaded llama ships its dylibs co-located in the component dir.
+  const downloaded = getDownloadedComponents()['llama'];
+  if (downloaded && fs.existsSync(downloaded.dir)) {
+    return downloaded.dir;
   }
 
   const resourcesPath = getResourcesPath();

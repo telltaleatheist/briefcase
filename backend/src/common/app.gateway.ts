@@ -147,6 +147,29 @@ export class AppGateway
   }
 
   /**
+   * Component (binary/model) download events
+   */
+  @OnEvent(InternalEvent.COMPONENT_DOWNLOAD_PROGRESS)
+  handleComponentDownloadProgress(payload: any): void {
+    this.websocketService.emitComponentDownloadProgress(payload);
+  }
+
+  @OnEvent(InternalEvent.COMPONENT_DOWNLOAD_COMPLETE)
+  handleComponentDownloadComplete(payload: any): void {
+    this.websocketService.emitComponentDownloadComplete(payload);
+  }
+
+  @OnEvent(InternalEvent.COMPONENT_DOWNLOAD_ERROR)
+  handleComponentDownloadError(payload: any): void {
+    this.websocketService.emitComponentDownloadError(payload);
+  }
+
+  @OnEvent(InternalEvent.COMPONENT_DOWNLOAD_CANCELLED)
+  handleComponentDownloadCancelled(payload: any): void {
+    this.websocketService.emitComponentDownloadCancelled(payload);
+  }
+
+  /**
    * Health Check Methods
    */
 

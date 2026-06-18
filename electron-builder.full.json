@@ -13,12 +13,20 @@
     {
       "from": "assets",
       "to": "assets",
-      "filter": ["tray-icon-*.png", "tray-icon-*.ico"]
+      "filter": [
+        "tray-icon-*.png",
+        "tray-icon-*.ico",
+        "manifest.json"
+      ]
     },
     {
       "from": "backend/node_modules",
       "to": "backend/node_modules",
-      "filter": ["**/*", "!@ffmpeg-installer/**", "!@ffprobe-installer/**"]
+      "filter": [
+        "**/*",
+        "!@ffmpeg-installer/**",
+        "!@ffprobe-installer/**"
+      ]
     },
     {
       "from": "backend/dist",
@@ -27,12 +35,9 @@
     {
       "from": "dist-electron/shared",
       "to": "dist-electron/shared",
-      "filter": ["**/*"]
-    },
-    {
-      "from": "utilities/models",
-      "to": "utilities/models",
-      "filter": ["ggml-tiny.bin", "ggml-base.bin", "ggml-small.bin"]
+      "filter": [
+        "**/*"
+      ]
     }
   ],
   "files": [
@@ -61,14 +66,19 @@
     "!**/node_modules/@ffmpeg-installer/**",
     "!**/node_modules/@ffprobe-installer/**"
   ],
-  "asarUnpack": ["utilities/**"],
+  "asarUnpack": [
+    "utilities/**"
+  ],
   "mac": {
     "category": "public.app-category.utilities",
     "icon": "assets/icon.icns",
     "target": [
       {
         "target": "dmg",
-        "arch": ["arm64", "x64"]
+        "arch": [
+          "arm64",
+          "x64"
+        ]
       }
     ],
     "hardenedRuntime": true,
@@ -76,64 +86,7 @@
     "entitlements": "assets/entitlements.mac.plist",
     "entitlementsInherit": "assets/entitlements.mac.plist",
     "artifactName": "${productName}-${version}-${arch}.${ext}",
-    "extraResources": [
-      {
-        "from": "node_modules/@ffmpeg-installer/darwin-arm64",
-        "to": "node_modules/@ffmpeg-installer/darwin-arm64"
-      },
-      {
-        "from": "node_modules/@ffprobe-installer/darwin-arm64",
-        "to": "node_modules/@ffprobe-installer/darwin-arm64"
-      },
-      {
-        "from": "node_modules/@ffmpeg-installer/darwin-x64",
-        "to": "node_modules/@ffmpeg-installer/darwin-x64"
-      },
-      {
-        "from": "node_modules/@ffprobe-installer/darwin-x64",
-        "to": "node_modules/@ffprobe-installer/darwin-x64"
-      },
-      {
-        "from": "utilities/bin/yt-dlp_macos_dir",
-        "to": "utilities/bin/yt-dlp_macos_dir"
-      },
-      {
-        "from": "utilities/bin",
-        "to": "utilities/bin",
-        "filter": [
-          "whisper-cli-arm64",
-          "whisper-cli-x64",
-          "libwhisper.1-arm64.dylib",
-          "libwhisper.1-x64.dylib",
-          "libggml-arm64.dylib",
-          "libggml-x64.dylib",
-          "libggml-base-arm64.dylib",
-          "libggml-base-x64.dylib",
-          "libggml-cpu-arm64.dylib",
-          "libggml-cpu-x64.dylib",
-          "libggml-blas-arm64.dylib",
-          "libggml-blas-x64.dylib",
-          "libggml-metal-arm64.dylib",
-          "llama-server-arm64",
-          "llama-server-x64",
-          "libllama-arm64.dylib",
-          "libllama-x64.dylib",
-          "llama-libggml-arm64.dylib",
-          "llama-libggml-x64.dylib",
-          "llama-libggml-base-arm64.dylib",
-          "llama-libggml-base-x64.dylib",
-          "llama-libggml-cpu-arm64.dylib",
-          "llama-libggml-cpu-x64.dylib",
-          "llama-libggml-metal-arm64.dylib",
-          "llama-libggml-blas-arm64.dylib",
-          "llama-libggml-blas-x64.dylib",
-          "llama-libggml-rpc-arm64.dylib",
-          "llama-libggml-rpc-x64.dylib",
-          "libmtmd-arm64.dylib",
-          "libmtmd-x64.dylib"
-        ]
-      }
-    ],
+    "extraResources": [],
     "extendInfo": {
       "LSUIElement": false
     }
@@ -141,8 +94,16 @@
   "dmg": {
     "format": "ULFO",
     "contents": [
-      { "x": 130, "y": 220 },
-      { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+      {
+        "x": 130,
+        "y": 220
+      },
+      {
+        "x": 410,
+        "y": 220,
+        "type": "link",
+        "path": "/Applications"
+      }
     ]
   },
   "win": {
@@ -150,47 +111,13 @@
     "target": [
       {
         "target": "nsis",
-        "arch": ["x64"]
+        "arch": [
+          "x64"
+        ]
       }
     ],
     "artifactName": "${productName}-Setup-${version}.${ext}",
-    "extraResources": [
-      {
-        "from": "node_modules/@ffmpeg-installer/win32-x64",
-        "to": "node_modules/@ffmpeg-installer/win32-x64"
-      },
-      {
-        "from": "node_modules/@ffprobe-installer/win32-x64",
-        "to": "node_modules/@ffprobe-installer/win32-x64"
-      },
-      {
-        "from": "utilities/bin/yt-dlp_win_dir",
-        "to": "utilities/bin/yt-dlp_win_dir"
-      },
-      {
-        "from": "utilities/bin",
-        "to": "utilities/bin",
-        "filter": [
-          "whisper-cli.exe",
-          "whisper.dll",
-          "llama-server.exe",
-          "llama.dll",
-          "mtmd.dll",
-          "ggml.dll",
-          "ggml-base.dll",
-          "ggml-cpu.dll",
-          "ggml-cpu-*.dll",
-          "ggml-rpc.dll",
-          "ggml-vulkan.dll",
-          "libcurl-x64.dll",
-          "libomp140.x86_64.dll",
-          "MSVCP140.dll",
-          "MSVCP140_CODECVT_IDS.dll",
-          "VCRUNTIME140.dll",
-          "VCRUNTIME140_1.dll"
-        ]
-      }
-    ]
+    "extraResources": []
   },
   "nsis": {
     "oneClick": false,
@@ -210,33 +137,13 @@
   },
   "linux": {
     "icon": "assets/icon.png",
-    "target": ["AppImage", "deb"],
+    "target": [
+      "AppImage",
+      "deb"
+    ],
     "category": "Utility",
     "artifactName": "${productName}-${version}.${ext}",
-    "extraResources": [
-      {
-        "from": "node_modules/@ffmpeg-installer/linux-x64",
-        "to": "node_modules/@ffmpeg-installer/linux-x64"
-      },
-      {
-        "from": "node_modules/@ffprobe-installer/linux-x64",
-        "to": "node_modules/@ffprobe-installer/linux-x64"
-      },
-      {
-        "from": "utilities/bin/yt-dlp_linux_dir",
-        "to": "utilities/bin/yt-dlp_linux_dir"
-      },
-      {
-        "from": "utilities/bin",
-        "to": "utilities/bin",
-        "filter": [
-          "whisper-cli",
-          "llama-server",
-          "libllama.so",
-          "libggml-llama.so"
-        ]
-      }
-    ]
+    "extraResources": []
   },
   "publish": {
     "provider": "github",

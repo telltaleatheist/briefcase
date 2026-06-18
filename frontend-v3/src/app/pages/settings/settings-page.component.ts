@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { AiSetupWizardComponent } from '../../components/ai-setup-wizard/ai-setup-wizard.component';
+import { SetupWizardComponent } from '../../components/setup-wizard/setup-wizard.component';
 import { AiSetupService } from '../../services/ai-setup.service';
 import { LibraryService } from '../../services/library.service';
 import { firstValueFrom } from 'rxjs';
@@ -32,7 +33,7 @@ interface PromptsResponse {
 @Component({
   selector: 'app-settings-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, AiSetupWizardComponent],
+  imports: [CommonModule, FormsModule, AiSetupWizardComponent, SetupWizardComponent],
   templateUrl: './settings-page.component.html',
   styleUrls: ['./settings-page.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush
@@ -47,6 +48,9 @@ export class SettingsPageComponent implements OnInit {
 
   // AI Setup Wizard state
   wizardOpen = signal(false);
+
+  // Component setup wizard (download-on-demand) state
+  componentSetupOpen = signal(false);
 
   // AI status
   aiConfigured = signal(false);
@@ -154,6 +158,14 @@ export class SettingsPageComponent implements OnInit {
     this.wizardOpen.set(false);
     await this.refreshAiStatus();
     await this.loadAvailableModels();
+  }
+
+  openComponentSetup() {
+    this.componentSetupOpen.set(true);
+  }
+
+  closeComponentSetup() {
+    this.componentSetupOpen.set(false);
   }
 
   // Category Management
