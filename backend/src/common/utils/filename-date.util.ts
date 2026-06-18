@@ -122,10 +122,15 @@ export class FilenameDateUtil {
    * Ensure filename starts with a date (YYYY-MM-DD format)
    * If no date exists, adds the provided date
    * If date exists, keeps it (no duplication)
-   * IMPORTANT: Only adds a date if uploadDate is explicitly provided.
-   * Does NOT fall back to current date - upload date must be the actual content creation date.
+   *
+   * Date priority:
+   * 1. A date already in the filename (kept as-is)
+   * 2. `uploadDate` — the actual content creation/upload date, when known
+   * 3. `fallbackDate` — opt-in fallback (e.g. the download/import date) used ONLY when the
+   *    real upload date can't be determined. Callers that must never guess a date should
+   *    omit this argument, preserving the original "no date unless we know it" behavior.
    */
-  static ensureDatePrefix(filename: string, uploadDate?: string): string {
+  static ensureDatePrefix(filename: string, uploadDate?: string, fallbackDate?: string): string {
     const ext = this.getExtension(filename);
     const dateInfo = this.extractDateInfo(filename);
 
@@ -135,10 +140,11 @@ export class FilenameDateUtil {
       return `${dateInfo.date} ${sanitizedTitle}${ext}`;
     }
 
-    // No date in filename - add one ONLY if uploadDate is provided
-    if (uploadDate) {
+    // No date in filename - use the real upload date, else the opt-in fallback date
+    const effectiveDate = uploadDate || fallbackDate;
+    if (effectiveDate) {
       const sanitizedTitle = this.sanitizeTitle(dateInfo.title);
-      return `${uploadDate} ${sanitizedTitle}${ext}`;
+      return `${effectiveDate} ${sanitizedTitle}${ext}`;
     }
 
     // No date available - return filename without date prefix

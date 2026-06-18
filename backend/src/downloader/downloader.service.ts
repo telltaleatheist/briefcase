@@ -518,15 +518,16 @@ export class DownloaderService implements OnModuleInit {
         outputTemplate = path.join(downloadFolder, `${displayNameWithDate}.%(ext)s`);
         this.logger.log(`Using sanitized displayName for output: ${displayNameWithDate}`);
       } else {
-        // Fallback to yt-dlp's dynamic title extraction
-        // Include upload_date in filename if available from yt-dlp metadata
-        // If upload_date is not available, do NOT use download date - leave filename without date prefix
+        // Fallback to yt-dlp's dynamic title extraction.
+        // Prefer yt-dlp's upload_date metadata for the prefix here. If it's missing, the prefix
+        // is left off at this stage and processOutputFilename() fills in the download date as a
+        // fallback after the download completes.
         // Format: "YYYY-MM-DD Title.ext" if upload_date exists, or "Title.ext" if not
         // Using yt-dlp's conditional: %(field&if_true|if_false)s
         const datePrefix = `%(upload_date&%(upload_date>%Y-%m-%d )s|)s`;
         const maxTitleLength = 200; // Conservative limit to stay under 255 total
         outputTemplate = path.join(downloadFolder, `${datePrefix}%(title.200)s.%(ext)s`);
-        this.logger.log(`Using yt-dlp title extraction for output template (upload_date only, no fallback to download date)`);
+        this.logger.log(`Using yt-dlp title extraction for output template (download-date fallback applied post-download)`);
       }
       
       // Create ytDlpManager instance
@@ -1005,8 +1006,21 @@ export class DownloaderService implements OnModuleInit {
               }
             }
 
-            // If no fallback succeeded, throw the original error
+            // If no fallback succeeded, surface a clear error.
             if (!outputFile) {
+              // Reddit serves video and audio as separate v.redd.it streams. When the audio
+              // downloads but the video stream returns 403 across every quality and protocol
+              // (DASH, HLS, and the progressive fallback), the video content is blocked or
+              // removed on Reddit's side — no client option can retrieve it. Replace the raw
+              // yt-dlp Python traceback with a message that explains what actually happened.
+              if (options.url.includes('reddit.com')
+                  && /403|fragment \d+ not found|unable to download video data|downloaded file is empty/i.test(errorMsg)) {
+                throw new Error(
+                  "Reddit refused this video's stream (HTTP 403). The post's audio is reachable but its "
+                  + "video is blocked — usually because the video was removed, or is age/region-restricted, "
+                  + "on Reddit's side. Other Reddit videos should still download normally."
+                );
+              }
               throw initialError;
             }
           }
@@ -1279,7 +1293,51 @@ export class DownloaderService implements OnModuleInit {
       throw error;
     }
   }
-  
+
+  /**
+   * Get a Reddit post's upload date via yt-dlp's own extractor.
+   *
+   * Reddit's public ".json" endpoint (our previous date source in getRedditVideoUrlFromJson)
+   * now returns 403, so video downloads stopped getting a date prefix. yt-dlp's Reddit
+   * extractor still returns the post date as `upload_date` (YYYYMMDD) / `timestamp`, so use
+   * that as the fallback. Returns YYYY-MM-DD, or undefined if it can't be determined.
+   */
+  private async getRedditUploadDateViaYtDlp(url: string): Promise<string | undefined> {
+    try {
+      const ytDlpManager = new YtDlpManager();
+      ytDlpManager
+        .input(url.split('?')[0])
+        .addOption('--dump-json')
+        .addOption('--simulate')
+        .addOption('--no-playlist')
+        .addOption('--flat-playlist')
+        .addOption('--no-warnings')
+        .addOption('--cookies-from-browser', 'chrome');
+
+      const output = await ytDlpManager.run();
+      if (output && output.trim()) {
+        const info = JSON.parse(output.trim());
+        // Preferred: upload_date as YYYYMMDD
+        const d = info?.upload_date;
+        if (typeof d === 'string' && d.length === 8) {
+          const formatted = `${d.substring(0, 4)}-${d.substring(4, 6)}-${d.substring(6, 8)}`;
+          this.logger.log(`Reddit upload date via yt-dlp: ${formatted}`);
+          return formatted;
+        }
+        // Fallback: derive from Unix timestamp (seconds)
+        if (typeof info?.timestamp === 'number') {
+          const dt = new Date(info.timestamp * 1000);
+          const formatted = `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+          this.logger.log(`Reddit upload date via yt-dlp (from timestamp): ${formatted}`);
+          return formatted;
+        }
+      }
+    } catch (err) {
+      this.logger.warn(`Reddit upload-date via yt-dlp failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return undefined;
+  }
+
   /**
    * Download a Reddit video directly using Node.js HTTPS + ffmpeg muxing.
    * Bypasses yt-dlp entirely — fetches video+audio from v.redd.it CDN and muxes.
@@ -2022,8 +2080,13 @@ export class DownloaderService implements OnModuleInit {
       const filename = path.basename(filePath);
       const directory = path.dirname(filePath);
 
-      // Use the utility to ensure proper date format
-      const newFilename = FilenameDateUtil.ensureDatePrefix(filename, uploadDate);
+      // This runs immediately after a download completes, so "today" is the download date.
+      // When the real upload date can't be determined, fall back to the download date so the
+      // file still gets a date prefix instead of none.
+      const downloadDate = new Date().toISOString().split('T')[0];
+
+      // Use the utility to ensure proper date format (upload date preferred, download date fallback)
+      const newFilename = FilenameDateUtil.ensureDatePrefix(filename, uploadDate, downloadDate);
 
       // Only rename if the filename changed
       if (newFilename !== filename) {
@@ -2139,14 +2202,16 @@ export class DownloaderService implements OnModuleInit {
             height: 0,
           };
         }
-        // Not a video — might be an image post, return basic info from URL
+        // Reddit's .json API returned nothing (it now 403s). Recover the post's upload date
+        // from yt-dlp's extractor so the download still gets the correct date prefix.
+        const uploadDate = await this.getRedditUploadDateViaYtDlp(url);
         const titleFromUrl = this.extractTitleFromRedditUrl(url);
         return {
           title: titleFromUrl || 'Reddit Post',
           uploader: 'Reddit',
           duration: 0,
           thumbnail: '',
-          uploadDate: undefined,
+          uploadDate,
           description: '',
           formats: [],
           width: 0,
