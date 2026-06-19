@@ -10,7 +10,6 @@ interface ElectronAPI {
   openMultipleFiles: (filePaths: string[]) => Promise<{ success: boolean; error?: string }>;
   showInFolder: (filePath: string) => Promise<void>;
   openExternal: (url: string) => Promise<void>;
-  getBackendUrl: () => Promise<string>;
   getAppVersion: () => Promise<string>;
   saveConsoleLogs: (filename: string, content: string) => Promise<string>;
   openEditorWindow: (videoData: { videoId: string; videoPath?: string; videoTitle: string }) => Promise<{ success: boolean; error?: string }>;
@@ -146,23 +145,6 @@ export class ElectronService {
       await window.electron!.showInFolder(filePath);
     } catch (error) {
       console.error('Error showing in folder:', error);
-    }
-  }
-
-  /**
-   * Get the backend URL from Electron
-   */
-  async getBackendUrl(): Promise<string> {
-    if (!this.isElectron) {
-      // Default to localhost in development
-      return 'http://localhost:3001';
-    }
-
-    try {
-      return await window.electron!.getBackendUrl();
-    } catch (error) {
-      console.error('Error getting backend URL:', error);
-      return 'http://localhost:3001';
     }
   }
 

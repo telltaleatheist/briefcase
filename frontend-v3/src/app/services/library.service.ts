@@ -5,6 +5,7 @@ import { map, catchError } from 'rxjs/operators';
 import { VideoWeek, VideoItem } from '../models/video.model';
 import { JobRequest } from '../models/task.model';
 import { Library, NewLibrary } from '../models/library.model';
+import { getApiBase } from '../core/runtime-url';
 
 export interface ApiResponse<T> {
   success: boolean;
@@ -132,7 +133,7 @@ export interface LibraryClip {
   providedIn: 'root'
 })
 export class LibraryService {
-  private readonly API_BASE = 'http://localhost:3000/api';
+  private readonly API_BASE = getApiBase();
 
   // State management
   videos = signal<VideoItem[]>([]);

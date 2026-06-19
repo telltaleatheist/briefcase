@@ -17,6 +17,7 @@ import { VideoItem, VideoWeek } from '../../models/video.model';
 import { LibraryService } from '../../services/library.service';
 import { TourService } from '../../services/tour.service';
 import { CascadeComponent } from '../cascade/cascade.component';
+import { getApiBase } from '../../core/runtime-url';
 
 @Component({
   selector: 'app-video-info-page',
@@ -148,7 +149,7 @@ export class VideoInfoPageComponent implements OnInit {
   getVideoStreamUrl(): string {
     const id = this.videoId || this.route.snapshot.paramMap.get('id');
     if (!id) return '';
-    return `http://localhost:3000/api/database/videos/${id}/stream`;
+    return `${getApiBase()}/database/videos/${id}/stream`;
   }
 
   private loadVideoInfo(videoId: string): void {
@@ -511,7 +512,7 @@ export class VideoInfoPageComponent implements OnInit {
       });
 
       // Call backend to update dates
-      this.http.patch<any>(`http://localhost:3000/api/database/videos/${id}/metadata`, {
+      this.http.patch<any>(`${getApiBase()}/database/videos/${id}/metadata`, {
         uploadDate: this.editedUploadDate || null,
         downloadDate: this.editedDownloadDate
       }).subscribe({
@@ -723,7 +724,7 @@ export class VideoInfoPageComponent implements OnInit {
 
   private loadChildren(videoId: string): void {
     // Load children
-    this.http.get<any>(`http://localhost:3000/api/database/videos/${videoId}/children`)
+    this.http.get<any>(`${getApiBase()}/database/videos/${videoId}/children`)
       .subscribe({
         next: (response) => {
           if (response.success && response.children) {
@@ -743,7 +744,7 @@ export class VideoInfoPageComponent implements OnInit {
       });
 
     // Load parents
-    this.http.get<any>(`http://localhost:3000/api/database/videos/${videoId}/parents`)
+    this.http.get<any>(`${getApiBase()}/database/videos/${videoId}/parents`)
       .subscribe({
         next: (response) => {
           if (response.success && response.parents) {
@@ -829,7 +830,7 @@ export class VideoInfoPageComponent implements OnInit {
       return parts.length > 1 ? parts[parts.length - 1] : itemId;
     });
 
-    this.http.post<any>(`http://localhost:3000/api/database/videos/${currentId}/add-children`, {
+    this.http.post<any>(`${getApiBase()}/database/videos/${currentId}/add-children`, {
       childIds
     }).subscribe({
       next: (response) => {
@@ -859,7 +860,7 @@ export class VideoInfoPageComponent implements OnInit {
 
   removeChild(childId: string): void {
     const currentId = this.videoId || this.route.snapshot.paramMap.get('id');
-    this.http.post<any>(`http://localhost:3000/api/database/videos/${currentId}/remove-child/${childId}`, {})
+    this.http.post<any>(`${getApiBase()}/database/videos/${currentId}/remove-child/${childId}`, {})
       .subscribe({
         next: (response) => {
           if (response.success) {
@@ -879,7 +880,7 @@ export class VideoInfoPageComponent implements OnInit {
     }
 
     const currentId = this.videoId || this.route.snapshot.paramMap.get('id');
-    this.http.post<any>(`http://localhost:3000/api/database/videos/${currentId}/remove-all-children`, {})
+    this.http.post<any>(`${getApiBase()}/database/videos/${currentId}/remove-all-children`, {})
       .subscribe({
         next: (response) => {
           if (response.success) {
@@ -918,7 +919,7 @@ export class VideoInfoPageComponent implements OnInit {
     const currentId = this.videoId || this.route.snapshot.paramMap.get('id');
 
     // Remove all children
-    this.http.post<any>(`http://localhost:3000/api/database/videos/${currentId}/remove-all-children`, {})
+    this.http.post<any>(`${getApiBase()}/database/videos/${currentId}/remove-all-children`, {})
       .subscribe({
         next: (response) => {
           if (response.success) {
@@ -1027,7 +1028,7 @@ export class VideoInfoPageComponent implements OnInit {
     if (!id || this.isRefreshingThumbnail) return;
 
     this.isRefreshingThumbnail = true;
-    this.http.post<any>(`http://localhost:3000/api/database/videos/${id}/regenerate-thumbnail`, {})
+    this.http.post<any>(`${getApiBase()}/database/videos/${id}/regenerate-thumbnail`, {})
       .subscribe({
         next: (response) => {
           this.isRefreshingThumbnail = false;

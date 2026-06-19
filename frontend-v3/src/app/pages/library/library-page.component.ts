@@ -39,6 +39,7 @@ import { WebArchiveService } from '../../services/web-archive.service';
 import { QueueJob, QueueTask, createQueueJob, createQueueTask } from '../../models/queue-job.model';
 import { ExportIndicatorComponent } from '../../components/export-indicator/export-indicator.component';
 import { TrimOpenerModalComponent } from '../../components/trim-opener-modal/trim-opener-modal.component';
+import { getApiBase } from '../../core/runtime-url';
 
 // Local queue item for the processing section
 export interface ProcessingQueueItem {
@@ -2132,7 +2133,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     try {
       const libResponse = await firstValueFrom(
         this.http.get<{ success: boolean; aiModel: string | null }>(
-          `http://localhost:3000/api/database/libraries/default-ai-model`
+          `${getApiBase()}/database/libraries/default-ai-model`
         )
       );
       defaultModel = libResponse?.aiModel || null;
@@ -2144,7 +2145,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       try {
         const configResponse = await firstValueFrom(
           this.http.get<{ success: boolean; defaultAI: { provider: string; model: string } | null }>(
-            `http://localhost:3000/api/config/default-ai`
+            `${getApiBase()}/config/default-ai`
           )
         );
         if (configResponse?.defaultAI) {
@@ -2561,7 +2562,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       console.log(`[FETCH INFO] Starting fetch for job ${job.id}: ${item.url}`);
 
       // Fetch in background (don't await - let them all run in parallel)
-      this.http.get<any>(`http://localhost:3000/api/downloader/info?url=${encodeURIComponent(item.url)}`)
+      this.http.get<any>(`${getApiBase()}/downloader/info?url=${encodeURIComponent(item.url)}`)
         .subscribe({
           next: (response) => {
             console.log(`[FETCH INFO] Response for job ${job.id}:`, response);
@@ -3176,7 +3177,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     for (const video of videos) {
       try {
         await firstValueFrom(
-          this.http.post(`http://localhost:3000/api/database/videos/${video.id}/regenerate-thumbnail`, {})
+          this.http.post(`${getApiBase()}/database/videos/${video.id}/regenerate-thumbnail`, {})
         );
         refreshedIds.add(video.id);
       } catch (error: any) {
@@ -3207,7 +3208,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     try {
       for (const parentId of video.parentIds) {
         await firstValueFrom(
-          this.http.post(`http://localhost:3000/api/database/videos/${parentId}/remove-child/${video.id}`, {})
+          this.http.post(`${getApiBase()}/database/videos/${parentId}/remove-child/${video.id}`, {})
         );
       }
       this.notificationService.success('Removed', `"${video.name}" removed from parent`);
@@ -3226,7 +3227,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
 
     try {
       await firstValueFrom(
-        this.http.post(`http://localhost:3000/api/database/videos/${video.id}/remove-all-children`, {})
+        this.http.post(`${getApiBase()}/database/videos/${video.id}/remove-all-children`, {})
       );
       this.notificationService.success('Removed', `All children removed from "${video.name}"`);
       this.loadLibrary();

@@ -18,6 +18,7 @@ import {
 import { TaskType } from '../models/task.model';
 import { WebsocketService, TaskStarted, TaskProgress, TaskCompleted, TaskFailed } from './websocket.service';
 import { LibraryService, BackendJobRequest, BackendTask } from './library.service';
+import { getApiBase } from '../core/runtime-url';
 
 const STORAGE_KEY = 'briefcase-queue-jobs';
 const RETENTION_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -26,7 +27,7 @@ const RETENTION_MS = 24 * 60 * 60 * 1000; // 24 hours
   providedIn: 'root'
 })
 export class QueueService implements OnDestroy {
-  private readonly API_BASE = 'http://localhost:3000/api';
+  private readonly API_BASE = getApiBase();
 
   private http = inject(HttpClient);
   private websocketService = inject(WebsocketService);

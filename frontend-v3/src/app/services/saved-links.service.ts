@@ -3,6 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable, BehaviorSubject } from 'rxjs';
 import { tap } from 'rxjs/operators';
 import { WebsocketService } from './websocket.service';
+import { getApiBase } from '../core/runtime-url';
 
 export interface SavedLink {
   id: string;
@@ -23,7 +24,7 @@ export interface SavedLink {
   providedIn: 'root'
 })
 export class SavedLinksService {
-  private readonly API_BASE = 'http://localhost:3000/api';
+  private readonly API_BASE = getApiBase();
 
   private savedLinksSubject = new BehaviorSubject<SavedLink[]>([]);
   savedLinks$ = this.savedLinksSubject.asObservable();

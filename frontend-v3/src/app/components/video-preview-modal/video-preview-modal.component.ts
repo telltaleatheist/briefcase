@@ -1,5 +1,6 @@
 import { Component, EventEmitter, Input, Output, signal, ViewChild, ElementRef, HostListener, AfterViewChecked } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { getBackendOrigin } from '../../core/runtime-url';
 
 export interface PreviewItem {
   id: string;
@@ -500,8 +501,8 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
   @ViewChild('imageElement') imageElement!: ElementRef<HTMLImageElement>;
   @ViewChild('floatingWindow') floatingWindow!: ElementRef<HTMLDivElement>;
 
-  // Backend URL - fallback to localhost:3000 which is the backend default
-  private backendUrl = 'http://localhost:3000';
+  // Backend origin — same server that served the page (see core/runtime-url.ts).
+  private backendUrl = getBackendOrigin();
 
   // Image extensions for detection
   private readonly imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg', '.avif'];
@@ -521,11 +522,8 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
       this.isPlaying.set(false);
       this.pendingAutoplay = true;
       this.needsCenter = true;
-      // Initialize backend URL first, then load media
-      this.initBackendUrl().then(() => {
-        // Load the current media after a delay to ensure DOM is ready
-        setTimeout(() => this.loadCurrentMedia(), 100);
-      });
+      // Load the current media after a delay to ensure DOM is ready
+      setTimeout(() => this.loadCurrentMedia(), 100);
     } else if (!value) {
       // Modal closing - pause video if playing
       if (this.videoPlayer?.nativeElement) {
@@ -679,23 +677,6 @@ export class VideoPreviewModalComponent implements AfterViewChecked {
     return url;
   };
 
-  private async initBackendUrl() {
-    try {
-      if ((window as any).electron?.getBackendUrl) {
-        const url = await (window as any).electron.getBackendUrl();
-        if (url) {
-          this.backendUrl = url;
-          console.log('Backend URL initialized:', this.backendUrl);
-        } else {
-          console.log('Using fallback backend URL:', this.backendUrl);
-        }
-      } else {
-        console.log('Electron API not available, using fallback backend URL:', this.backendUrl);
-      }
-    } catch (error) {
-      console.warn('Failed to get backend URL, using fallback:', this.backendUrl, error);
-    }
-  }
 
   ngAfterViewChecked() {
     // Center window after it's rendered

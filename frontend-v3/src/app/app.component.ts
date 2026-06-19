@@ -85,6 +85,15 @@ export class AppComponent implements OnInit {
   showComponentSetup = signal(false);
   private componentsChecked = false;
 
+  /**
+   * True only inside the desktop (Electron) shell. A LAN browser client (phone,
+   * tablet) has no `window.electron`, no native folder picker, and no business
+   * managing binary/model downloads — those are desktop-only concerns.
+   */
+  private get isElectron(): boolean {
+    return !!(window as any).electron;
+  }
+
   async ngOnInit() {
     this.themeService.initializeTheme();
 
@@ -106,6 +115,9 @@ export class AppComponent implements OnInit {
   private checkComponents() {
     if (this.componentsChecked) return;
     this.componentsChecked = true;
+    // Binaries/models are installed and managed on the desktop. A browser client
+    // can't download them anywhere useful, so never pop the setup wizard there.
+    if (!this.isElectron) return;
     this.componentService.listComponents().subscribe((components) => {
       if (this.componentService.hasMissingEssential(components)) {
         this.showComponentSetup.set(true);
@@ -120,6 +132,15 @@ export class AppComponent implements OnInit {
   private async checkOnboarding() {
     if (this.onboardingChecked) return;
     this.onboardingChecked = true;
+
+    // Web client (phone/tablet browser): the onboarding flow creates/links a
+    // library via the native folder picker, which doesn't exist outside Electron.
+    // Skip it entirely and let the library page connect to whatever library the
+    // desktop already has active (GET /api/database/libraries/active).
+    if (!this.isElectron) {
+      this.showOnboarding.set(false);
+      return;
+    }
 
     // Check if onboarding was completed
     const onboardingComplete = localStorage.getItem('briefcase-onboarding-complete') === 'true';

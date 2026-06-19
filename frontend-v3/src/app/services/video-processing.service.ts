@@ -5,12 +5,13 @@ import { map, catchError } from 'rxjs/operators';
 import { VideoJob, VideoTask, VideoJobSettings, QueueStats, ProcessingWebSocketMessage } from '../models/video-processing.model';
 import { WebsocketService, TaskStarted, TaskProgress, TaskCompleted, TaskFailed } from './websocket.service';
 import { LibraryService, BackendJobRequest, BackendTask, BackendTaskType } from './library.service';
+import { getApiBase } from '../core/runtime-url';
 
 @Injectable({
   providedIn: 'root'
 })
 export class VideoProcessingService {
-  private readonly API_BASE = 'http://localhost:3000/api';
+  private readonly API_BASE = getApiBase();
 
   private http = inject(HttpClient);
   private websocketService = inject(WebsocketService);

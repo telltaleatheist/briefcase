@@ -40,6 +40,7 @@ import { ContextMenuComponent, ContextMenuAction, ContextMenuPosition } from './
 import { MarkerDialogComponent, MarkerDialogData } from './marker-dialog/marker-dialog.component';
 import { KeyboardShortcutsDialogComponent } from './keyboard-shortcuts-dialog/keyboard-shortcuts-dialog.component';
 import { TabBarComponent } from './tab-bar/tab-bar.component';
+import { getApiBase } from '../../core/runtime-url';
 
 // Tool types for editor
 export enum EditorTool {
@@ -127,7 +128,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
   private tourService = inject(TourService);
   private websocketService = inject(WebsocketService);
 
-  private readonly API_BASE = 'http://localhost:3000/api';
+  private readonly API_BASE = getApiBase();
   private readonly MAX_TABS = 15;
 
   // Tab management

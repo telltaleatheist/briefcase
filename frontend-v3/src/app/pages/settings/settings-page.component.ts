@@ -8,6 +8,7 @@ import { SetupWizardComponent } from '../../components/setup-wizard/setup-wizard
 import { AiSetupService } from '../../services/ai-setup.service';
 import { LibraryService } from '../../services/library.service';
 import { firstValueFrom } from 'rxjs';
+import { getApiBase } from '../../core/runtime-url';
 
 interface AnalysisCategory {
   id: string;
@@ -45,7 +46,7 @@ export class SettingsPageComponent implements OnInit, OnDestroy {
   private aiSetupService = inject(AiSetupService);
   private http = inject(HttpClient);
   private libraryService = inject(LibraryService);
-  private readonly API_BASE = 'http://localhost:3000/api';
+  private readonly API_BASE = getApiBase();
   private modelsChangedSub?: Subscription;
 
   // AI Setup Wizard state
@@ -127,7 +128,7 @@ export class SettingsPageComponent implements OnInit, OnDestroy {
 
   private async loadCategories() {
     try {
-      const response = await fetch('http://localhost:3000/api/config/analysis-categories');
+      const response = await fetch(`${getApiBase()}/config/analysis-categories`);
       if (response.ok) {
         const data = await response.json();
         this.categories.set(data.categories || this.defaultCategories);
@@ -246,7 +247,7 @@ export class SettingsPageComponent implements OnInit, OnDestroy {
 
   private async saveCategories() {
     try {
-      await fetch('http://localhost:3000/api/config/analysis-categories', {
+      await fetch(`${getApiBase()}/config/analysis-categories`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ categories: this.categories() })
@@ -385,7 +386,7 @@ export class SettingsPageComponent implements OnInit, OnDestroy {
   private async loadPrompts() {
     this.loadingPrompts.set(true);
     try {
-      const response = await fetch('http://localhost:3000/api/config/analysis-prompts');
+      const response = await fetch(`${getApiBase()}/config/analysis-prompts`);
       if (response.ok) {
         const data: PromptsResponse = await response.json();
         this.prompts.set(data.prompts);
@@ -410,7 +411,7 @@ export class SettingsPageComponent implements OnInit, OnDestroy {
   async savePrompt(promptKey: keyof AnalysisPrompts, value: string) {
     this.savingPrompts.set(true);
     try {
-      const response = await fetch('http://localhost:3000/api/config/analysis-prompts', {
+      const response = await fetch(`${getApiBase()}/config/analysis-prompts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompts: { [promptKey]: value } })
@@ -458,7 +459,7 @@ export class SettingsPageComponent implements OnInit, OnDestroy {
 
     this.savingPrompts.set(true);
     try {
-      const response = await fetch('http://localhost:3000/api/config/analysis-prompts/reset', {
+      const response = await fetch(`${getApiBase()}/config/analysis-prompts/reset`, {
         method: 'POST'
       });
 

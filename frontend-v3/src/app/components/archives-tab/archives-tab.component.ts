@@ -15,6 +15,7 @@ import { createQueueTask } from '../../models/queue-job.model';
 import { CascadeComponent } from '../cascade/cascade.component';
 import { NewTabDialogComponent } from '../new-tab-dialog/new-tab-dialog.component';
 import { VideoItem, VideoWeek } from '../../models/video.model';
+import { getApiBase } from '../../core/runtime-url';
 
 @Component({
   selector: 'app-archives-tab',
@@ -336,7 +337,7 @@ export class ArchivesTabComponent implements OnInit, OnDestroy {
     }
 
     // Resolve default AI model (library-specific first, then global)
-    const API_BASE = 'http://localhost:3000/api';
+    const API_BASE = getApiBase();
     let defaultModel: string | null = null;
     try {
       const libResponse = await firstValueFrom(

@@ -2,6 +2,7 @@ import { Injectable, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, of } from 'rxjs';
 import { map, catchError } from 'rxjs/operators';
+import { getApiBase } from '../core/runtime-url';
 
 export type ComponentKind = 'binary' | 'whisper-model' | 'llama-model';
 
@@ -24,7 +25,7 @@ export interface ComponentStatus {
  */
 @Injectable({ providedIn: 'root' })
 export class ComponentService {
-  private readonly API_BASE = 'http://localhost:3000/api';
+  private readonly API_BASE = getApiBase();
 
   /** Last-known component list, kept reactive for the settings/wizard UI. */
   readonly components = signal<ComponentStatus[]>([]);

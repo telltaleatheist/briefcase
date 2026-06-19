@@ -2,6 +2,7 @@ import { Injectable, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, of, Subject } from 'rxjs';
 import { map, catchError } from 'rxjs/operators';
+import { getApiBase } from '../core/runtime-url';
 
 export interface AIAvailability {
   hasLocal: boolean;
@@ -56,7 +57,7 @@ export interface AISetupStatus {
   providedIn: 'root'
 })
 export class AiSetupService {
-  private readonly API_BASE = 'http://localhost:3000/api';
+  private readonly API_BASE = getApiBase();
 
   // Reactive state
   availability = signal<AIAvailability>({

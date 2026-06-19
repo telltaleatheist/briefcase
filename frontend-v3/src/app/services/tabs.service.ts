@@ -2,6 +2,7 @@ import { Injectable, signal, computed } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
+import { getApiBase } from '../core/runtime-url';
 
 export interface VideoTab {
   id: string;
@@ -28,7 +29,7 @@ export interface AddVideoToTabResponse {
   providedIn: 'root'
 })
 export class TabsService {
-  private baseUrl = 'http://localhost:3000/api';
+  private baseUrl = getApiBase();
 
   // Cached tabs list (signal)
   tabs = signal<VideoTab[]>([]);

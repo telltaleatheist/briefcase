@@ -17,6 +17,7 @@ import { QueueItemTask } from '../../models/queue.model';
 import { AiSetupService, AIAvailability } from '../../services/ai-setup.service';
 import { LibraryService } from '../../services/library.service';
 import { firstValueFrom } from 'rxjs';
+import { getApiBase } from '../../core/runtime-url';
 
 interface AIModelOption {
   value: string;
@@ -35,7 +36,7 @@ export class QueueItemConfigModalComponent implements OnInit, OnDestroy {
   private aiSetupService = inject(AiSetupService);
   private libraryService = inject(LibraryService);
   private http = inject(HttpClient);
-  private readonly API_BASE = 'http://localhost:3000/api';
+  private readonly API_BASE = getApiBase();
   private modelsChangedSub?: Subscription;
 
   // Inputs

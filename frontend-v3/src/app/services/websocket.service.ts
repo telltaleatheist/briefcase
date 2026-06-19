@@ -1,5 +1,6 @@
 import { Injectable, signal, OnDestroy } from '@angular/core';
 import { io, Socket } from 'socket.io-client';
+import { getBackendOrigin } from '../core/runtime-url';
 
 export interface TaskProgress {
   taskId: string;
@@ -143,7 +144,9 @@ export interface ComponentDownloadCancelled {
 })
 export class WebsocketService implements OnDestroy {
   private socket: Socket | null = null;
-  private readonly SOCKET_URL = 'http://localhost:3000';
+  // Same origin that served the page — works in Electron (loopback) and from a
+  // LAN browser (http://<host>.local:<port>). See core/runtime-url.ts.
+  private readonly SOCKET_URL = getBackendOrigin();
 
   // Signals for reactive updates
   connected = signal(false);

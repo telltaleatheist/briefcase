@@ -23,7 +23,6 @@ interface ElectronAPI {
     resourcesPath: string;
     isDevelopment: boolean;
   }>;
-  getBackendUrl: () => Promise<string>;
   environment: {
     isDevelopment: boolean;
     resourcesPath: string;
@@ -92,7 +91,6 @@ contextBridge.exposeInMainWorld('electron', {
   scanDirectoryForMedia: (directoryPath: string) => ipcRenderer.invoke('scan-directory-for-media', directoryPath),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   getBinaryPaths: () => ipcRenderer.invoke('get-binary-paths'),
-  getBackendUrl: () => ipcRenderer.invoke('get-backend-url'),
   environment: {
     isDevelopment,
     resourcesPath,

@@ -56,24 +56,12 @@ export function setupIpcHandlers(
   webCaptureService = new WebCaptureService();
 
   // Register handlers
-  setupConfigHandlers();
   setupDownloadHandlers();
   setupFileSystemHandlers();
   setupUpdateHandlers();
   setupSettingsHandlers();
   setupWindowHandlers();
   setupWebCaptureHandlers();
-}
-
-/**
- * Set up configuration-related IPC handlers
- * SIMPLIFIED: Just backend URL now - no more path configuration
- */
-function setupConfigHandlers(): void {
-  // Get backend URL
-  ipcMain.handle('get-backend-url', () => {
-    return backendServiceRef.getBackendUrl();
-  });
 }
 
 /**

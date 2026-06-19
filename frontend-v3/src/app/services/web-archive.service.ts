@@ -3,6 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { ElectronService } from './electron.service';
 import { LibraryService } from './library.service';
+import { getApiBase } from '../core/runtime-url';
 
 export interface WebArchiveDomain {
   domain: string;
@@ -38,7 +39,7 @@ export class WebArchiveService {
   private electronService = inject(ElectronService);
   private libraryService = inject(LibraryService);
 
-  private readonly API_BASE = 'http://localhost:3000/api';
+  private readonly API_BASE = getApiBase();
 
   domains = signal<WebArchiveDomain[]>([]);
   archives = signal<WebArchiveItem[]>([]);

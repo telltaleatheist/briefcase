@@ -7,6 +7,7 @@ import { VideoJobSettings } from '../../models/video-processing.model';
 import { AiSetupService } from '../../services/ai-setup.service';
 import { TourService } from '../../services/tour.service';
 import { LibraryService } from '../../services/library.service';
+import { getApiBase } from '../../core/runtime-url';
 
 interface CustomInstructionHistoryItem {
   id: number;
@@ -34,7 +35,7 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges, OnDestroy 
   private cdr = inject(ChangeDetectorRef);
   private tourService = inject(TourService);
   private libraryService = inject(LibraryService);
-  private readonly API_BASE = 'http://localhost:3000/api';
+  private readonly API_BASE = getApiBase();
   private modelsChangedSub?: Subscription;
 
   @Input() isOpen = false;

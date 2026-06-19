@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { ElectronService } from './electron.service';
+import { getApiBase } from '../core/runtime-url';
 
 interface LogEntry {
   timestamp: string;
@@ -15,7 +16,7 @@ interface LogEntry {
 export class LoggerService {
   private http = inject(HttpClient);
   private electronService = inject(ElectronService);
-  private readonly API_BASE = 'http://localhost:3000/api';
+  private readonly API_BASE = getApiBase();
   private logs: LogEntry[] = [];
   private maxLogs = 1000;
   private autoSaveInterval: any;

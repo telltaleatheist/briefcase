@@ -8,6 +8,7 @@ import { TourService } from '../../services/tour.service';
 
 import { CascadeComponent } from '../cascade/cascade.component';
 import { VideoWeek, VideoItem } from '../../models/video.model';
+import { getApiBase } from '../../core/runtime-url';
 
 export interface ExportSection {
   id: string;
@@ -95,7 +96,7 @@ export class ExportDialogComponent implements OnInit {
   queuedJobCount = 0;
   queuedJobIds: string[] = [];
 
-  // Pending jobs (built on "Export" click, submitted on "Start"/"Take Me There")
+  // Pending jobs (built on "Export" click, submitted on "Start"/"Take Me There`)
   private pendingJobs: any[] = [];
 
   // Sections list configuration
@@ -113,7 +114,7 @@ export class ExportDialogComponent implements OnInit {
   // Map section IDs to ExportSection for lookup
   private sectionMap = new Map<string, ExportSection>();
 
-  private readonly API_BASE = 'http://localhost:3000/api';
+  private readonly API_BASE = getApiBase();
 
   private tourService = inject(TourService);
   private http = inject(HttpClient);
@@ -124,7 +125,7 @@ export class ExportDialogComponent implements OnInit {
     // Prepare sections for cascade list
     const cascadeSections: ExportSection[] = [];
 
-    // Always add "Export Changes" option at the top (for scale/other changes to full video)
+    // Always add `Export Changes" option at the top (for scale/other changes to full video)
     // Use 0 as start and a very large number as end to represent full video
     cascadeSections.push({
       id: '__full_video__',
