@@ -15,7 +15,6 @@
     "paths": {
       "@/*": ["*"]
     },
-    "incremental": true,
     "skipLibCheck": true,
     "strictPropertyInitialization": false,
     "strictBindCallApply": true,
