@@ -4,6 +4,13 @@
   padding: 16px;
   margin-bottom: 16px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+
+  // Short viewports (landscape phones): trim the chrome around the search box
+  // so the video list keeps as much vertical room as possible.
+  @media (max-height: 500px) {
+    padding: 8px;
+    margin-bottom: 0;
+  }
 }
 
 .search-bar {

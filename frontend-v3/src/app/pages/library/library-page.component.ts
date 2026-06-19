@@ -110,6 +110,11 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   private webArchiveService = inject(WebArchiveService);
   private cdr = inject(ChangeDetectorRef);
 
+  /** True when running in a plain browser (LAN web client) rather than Electron. */
+  get isWeb(): boolean {
+    return !this.electronService.isElectron;
+  }
+
   @ViewChild(CascadeComponent) private cascadeComponent?: CascadeComponent;
   @ViewChild(UrlInputComponent) private urlInputComponent?: UrlInputComponent;
   @ViewChild(TabsTabComponent) private tabsTabComponent?: TabsTabComponent;
@@ -480,8 +485,12 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       }, 500);
     }
 
-    // Auto-start welcome tour on first app visit, then chain to tab-specific tour
-    if (!this.tourService.isTourCompleted('welcome')) {
+    // Auto-start welcome tour on first app visit, then chain to tab-specific tour.
+    // Skip entirely on the web client — the tour is anchored to desktop-sized
+    // chrome and just obscures the (small) screen on a phone.
+    if (this.isWeb) {
+      // no tour on mobile/web
+    } else if (!this.tourService.isTourCompleted('welcome')) {
       // Queue the library tour to run after welcome tour completes
       this.tourService.queueTour(this.activeTab());
       this.tourService.tryAutoStartTour('welcome');
@@ -2740,9 +2749,12 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       console.log('[LibraryPage] Processing queue:', this.processingQueue());
     }
 
-    // Auto-start tour for this tab if user hasn't seen it
+    // Auto-start tour for this tab if user hasn't seen it (desktop only — the
+    // tour is anchored to desktop chrome and just gets in the way on a phone).
     // Use longer delay (800ms) to ensure Angular has rendered the new tab content
-    this.tourService.tryAutoStartTour(tab, 800);
+    if (!this.isWeb) {
+      this.tourService.tryAutoStartTour(tab, 800);
+    }
   }
 
   // Open the manage-components wizard to download or re-download tools & models

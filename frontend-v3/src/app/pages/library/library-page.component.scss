@@ -606,6 +606,16 @@
 }
 
 @media (max-width: 768px) {
+  // Nothing inside the page should be able to force horizontal overflow on a
+  // phone — the desktop layout was wider than the viewport, clipping the right
+  // edge of titles/buttons.
+  .library-page,
+  .page-content,
+  .main-container {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
   .nav-rail {
     width: 48px;
     padding: 8px 4px;
@@ -623,31 +633,49 @@
 
   .page-content {
     padding: 8px;
-    gap: 6px;
+    gap: 8px;
   }
 
   .page-header {
     flex-direction: column;
-    align-items: flex-start;
+    align-items: stretch;
+    gap: 8px;
 
     .header-content {
       .page-title {
-        font-size: 24px;
+        font-size: 20px;
+        margin: 0;
       }
 
+      // Redundant on a phone (also shown in the top library switcher); reclaim
+      // the vertical space for actual content.
       .page-subtitle {
-        font-size: 14px;
+        display: none;
       }
     }
 
+    // Compact wrapping row of content-sized buttons instead of a full-width
+    // vertical stack that buried the library behind a wall of giant buttons.
     .header-actions {
       width: 100%;
-      flex-direction: column;
+      flex-direction: row;
+      flex-wrap: wrap;
+      gap: 8px;
 
       .btn {
-        width: 100%;
+        flex: 0 1 auto;
+        width: auto;
+        min-width: 0;
         justify-content: center;
+        padding: 9px 12px;
+        font-size: 13px;
       }
+    }
+
+    // Import relies on the native (Electron) file picker, which doesn't exist
+    // in a phone browser — hide it there.
+    &.is-web .header-actions .btn.action-import {
+      display: none;
     }
   }
 
@@ -674,8 +702,77 @@
 
 @media (max-width: 600px) {
   .page-content {
-    padding: 4px;
-    gap: 4px;
+    padding: 6px;
+    gap: 6px;
+  }
+
+  // Shrink to icon-forward buttons; keep Download readable as the primary action.
+  .page-header .header-actions .btn {
+    padding: 8px 10px;
+
+    .btn-icon {
+      font-size: 15px;
+    }
+  }
+}
+
+// Short viewports — landscape phones (wide but ~390px tall) and small windows.
+// Width-based rules don't fire here (the viewport is wide), so the desktop
+// header chrome would eat the entire height and push the list off-screen.
+// Compact everything vertical so the library list gets the available space.
+@media (max-height: 500px) {
+  .nav-rail {
+    width: 56px;
+    padding: 6px 4px;
+  }
+
+  .nav-rail-item {
+    padding: 6px 2px;
+
+    // Icon-only keeps each item short so all of them fit the limited height.
+    .nav-label {
+      display: none;
+    }
+
+    .nav-icon {
+      font-size: 18px;
+    }
+  }
+
+  .page-content {
+    padding: 8px 12px;
+    gap: 6px;
+  }
+
+  .page-header {
+    gap: 8px;
+
+    // Match the base selector depth (.header-content .page-title) so this wins.
+    .header-content {
+      .page-title {
+        font-size: 18px;
+        margin: 0;
+      }
+
+      .page-subtitle {
+        display: none;
+      }
+    }
+
+    .header-actions {
+      gap: 6px;
+
+      .btn {
+        padding: 7px 10px;
+        font-size: 13px;
+      }
+    }
+  }
+
+  // Redundant with the page title; drop it so the list gets the vertical space.
+  // Scoped under .library-page to outrank the later base `.library-toolbar` rule.
+  .library-page .library-toolbar {
+    display: none;
   }
 }
 

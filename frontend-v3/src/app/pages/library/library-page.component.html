@@ -81,7 +81,7 @@
   <!-- Page Content -->
   <div class="page-content">
     <!-- Page Header -->
-    <div class="page-header">
+    <div class="page-header" [class.is-web]="isWeb">
       <div class="header-content">
         <h1 class="page-title">
           @if (activeTab() === 'queue') {
@@ -114,7 +114,7 @@
           <span>Download</span>
         </button>
         <button
-          class="btn btn-primary"
+          class="btn btn-primary action-import"
           (click)="openImportDialog()"
           title="Import media files from your computer">
           <span class="btn-icon">📁</span>

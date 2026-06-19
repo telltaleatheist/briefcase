@@ -33,6 +33,11 @@ app-root {
   width: 100%;
 }
 
+// Smooth momentum scrolling for the (touch) scroll regions on mobile/web clients.
+.cdk-virtual-scroll-viewport {
+  -webkit-overflow-scrolling: touch;
+}
+
 // Router animations
 @keyframes fadeIn {
   from {
