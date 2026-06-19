@@ -1,6 +1,6 @@
 {
   "name": "briefcase",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Briefcase - Professional media library manager with AI analysis",
   "asar": true,
   "main": "dist-electron/electron/main.js",
