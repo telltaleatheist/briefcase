@@ -97,12 +97,17 @@ export class AppComponent implements OnInit {
     }
   }
 
-  /** Auto-open the setup wizard if any required, supported component is missing. */
+  /**
+   * Auto-open the setup wizard only when an essential component (ffmpeg/ffprobe
+   * or yt-dlp) is missing. Models and the whisper/llama engines are allowed to
+   * download in the background while the library loads — their dropdowns refresh
+   * on completion.
+   */
   private checkComponents() {
     if (this.componentsChecked) return;
     this.componentsChecked = true;
     this.componentService.listComponents().subscribe((components) => {
-      if (this.componentService.hasMissingRequired(components)) {
+      if (this.componentService.hasMissingEssential(components)) {
         this.showComponentSetup.set(true);
       }
     });

@@ -8,6 +8,7 @@
     "allowSyntheticDefaultImports": true,
     "target": "ES2021",
     "sourceMap": true,
+    "noEmitOnError": true,
     "rootDir": "./src",
     "outDir": "./dist",
     "baseUrl": "./src",

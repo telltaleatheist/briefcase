@@ -18,6 +18,7 @@ import { QueueTabComponent } from '../../components/queue-tab/queue-tab.componen
 import { SaveForLaterTabComponent } from '../../components/save-for-later-tab/save-for-later-tab.component';
 import { ArchivesTabComponent } from '../../components/archives-tab/archives-tab.component';
 import { SettingsPageComponent } from '../settings/settings-page.component';
+import { SetupWizardComponent } from '../../components/setup-wizard/setup-wizard.component';
 import { LibraryShortcutsDialogComponent } from '../../components/library-shortcuts-dialog/library-shortcuts-dialog.component';
 import { VideoWeek, VideoItem, ChildrenConfig, VideoChild, ItemProgress } from '../../models/video.model';
 import { Library, NewLibrary, OpenLibrary } from '../../models/library.model';
@@ -84,6 +85,7 @@ export interface ProcessingTask {
     SaveForLaterTabComponent,
     ArchivesTabComponent,
     SettingsPageComponent,
+    SetupWizardComponent,
     ExportIndicatorComponent,
     TrimOpenerModalComponent
   ],
@@ -322,6 +324,9 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   // Tab State
   activeTab = signal<'library' | 'queue' | 'tabs' | 'manager' | 'saved' | 'archives' | 'settings'>('library');
 
+  // Manage-components wizard (download / re-download tools & models)
+  componentManagerOpen = signal(false);
+
   // Default task settings (loaded from localStorage)
   private defaultTaskSettings: QueueItemTask[] = [];
 
@@ -507,17 +512,10 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       return;
     }
 
-    // Libraries exist - now check AI availability
-    const availability = await this.aiSetupService.checkAIAvailability();
-    const setupStatus = this.aiSetupService.getSetupStatus();
-
-    if (setupStatus.needsSetup) {
-      // AI not configured - show wizard
-      this.aiWizardOpen.set(true);
-    } else {
-      // AI is configured and libraries exist - load them
-      this.loadCurrentLibrary();
-    }
+    // Libraries exist - load them. AI is no longer prompted at startup; it's
+    // configured from Settings, or on demand when the user runs an analysis.
+    this.aiSetupService.checkAIAvailability();
+    this.loadCurrentLibrary();
   }
 
   // Handle AI wizard completion
@@ -2744,6 +2742,11 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     // Auto-start tour for this tab if user hasn't seen it
     // Use longer delay (800ms) to ensure Angular has rendered the new tab content
     this.tourService.tryAutoStartTour(tab, 800);
+  }
+
+  // Open the manage-components wizard to download or re-download tools & models
+  openComponentManager() {
+    this.componentManagerOpen.set(true);
   }
 
   // ========================================

@@ -50,6 +50,23 @@ export class ComponentService {
     return components.some((c) => c.required && c.supported && !c.installed);
   }
 
+  /**
+   * Components that must be present before the app is usable: downloading
+   * (yt-dlp) and transcoding/probing (ffmpeg + ffprobe, both shipped inside the
+   * ffmpeg-tools component). Everything else — the whisper/llama engines and all
+   * models — can finish downloading in the background while the library loads.
+   */
+  static readonly ESSENTIAL_IDS = ['ffmpeg-tools', 'yt-dlp'];
+
+  isEssential(id: string): boolean {
+    return ComponentService.ESSENTIAL_IDS.includes(id);
+  }
+
+  /** True if an essential, supported component is not yet installed. */
+  hasMissingEssential(components: ComponentStatus[]): boolean {
+    return components.some((c) => this.isEssential(c.id) && c.supported && !c.installed);
+  }
+
   installComponent(id: string): Observable<{ success: boolean; message: string }> {
     return this.http.post<any>(`${this.API_BASE}/config/install-component`, { id }).pipe(
       map((res) => ({ success: res.success || false, message: res.message || 'Install started' })),

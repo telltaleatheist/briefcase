@@ -1,6 +1,7 @@
 import { Injectable, computed, signal } from '@angular/core';
 import { ComponentService } from './component.service';
 import { WebsocketService } from './websocket.service';
+import { AiSetupService } from './ai-setup.service';
 
 export type ItemStatus = 'queued' | 'downloading' | 'done' | 'failed';
 
@@ -51,6 +52,7 @@ export class SetupDownloadService {
   constructor(
     private components: ComponentService,
     private ws: WebsocketService,
+    private aiSetup: AiSetupService,
   ) {
     this.ws.onComponentDownloadProgress((e) => {
       this.progress.update((p) => ({
@@ -61,6 +63,10 @@ export class SetupDownloadService {
     this.ws.onComponentDownloadComplete((e) => {
       this.doneIds.update((s) => new Set(s).add(e.componentId));
       this.components.listComponents().subscribe();
+      // Tell model-listing surfaces (analysis config dialogs, settings) to
+      // re-fetch so a freshly downloaded whisper/AI model shows up immediately,
+      // without needing an app restart.
+      this.aiSetup.notifyModelsChanged();
       this.finishCurrent(e.componentId);
     });
     this.ws.onComponentDownloadError((e) => {

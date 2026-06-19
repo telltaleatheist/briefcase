@@ -72,6 +72,16 @@ export const COGITO_MODELS: CogitoModelDef[] = [
     layers: 64,
     description: 'Best quality. Needs 24GB+ GPU or a Mac with 32GB+ unified memory.',
   },
+  {
+    id: 'cogito-70b',
+    name: 'Cogito 70B',
+    filename: 'deepcogito_cogito-v1-preview-llama-70B-Q4_K_M.gguf',
+    url: `${HF_BARTOWSKI}/deepcogito_cogito-v1-preview-llama-70B-GGUF/resolve/main/deepcogito_cogito-v1-preview-llama-70B-Q4_K_M.gguf`,
+    sizeGB: 42.52,
+    minRAM: 48,
+    layers: 80,
+    description: 'Maximum quality. Needs a 48GB+ GPU or a Mac with 64GB+ unified memory.',
+  },
 ];
 
 // ---------------- Whisper (speech-to-text) ----------------

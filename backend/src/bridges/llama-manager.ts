@@ -126,6 +126,7 @@ export class LlamaManager extends EventEmitter implements OnModuleDestroy {
         'cogito-8b': 'cogito-v1-preview-llama-8B',
         'cogito-14b': 'cogito-v1-preview-qwen-14B',
         'cogito-32b': 'cogito-v1-preview-qwen-32B',
+        'cogito-70b': 'cogito-v1-preview-llama-70B',
       };
       const pattern = modelPatterns[defaultModelId];
       if (pattern) {

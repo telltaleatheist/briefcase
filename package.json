@@ -1,6 +1,6 @@
 {
   "name": "briefcase",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Briefcase - Professional media library manager with AI analysis",
   "asar": true,
   "main": "dist-electron/electron/main.js",
@@ -18,8 +18,8 @@
     "clean:all": "npm run clean:mac && npm run clean:win && npm run clean:linux && rimraf dist-electron backup",
     "prebuild:all": "npm run verify:deps || npm run install:backend",
     "build:all": "npm run build:shared && npm run build:backend && npm run build:frontend && npm run build:electron && npm run build:preload",
-    "build:backend": "cd backend && npm install --prefer-offline && npm run build",
-    "build:backend:fast": "cd backend && npm run build",
+    "build:backend": "cd backend && npm install --prefer-offline && npm run build && node -e \"const fs=require('fs');if(!fs.existsSync('dist/main.js')||!fs.existsSync('dist/app.module.js')){console.error('Backend build incomplete: dist/main.js or dist/app.module.js missing — aborting');process.exit(1)}\"",
+    "build:backend:fast": "cd backend && npm run build && node -e \"const fs=require('fs');if(!fs.existsSync('dist/main.js')||!fs.existsSync('dist/app.module.js')){console.error('Backend build incomplete: dist/main.js or dist/app.module.js missing — aborting');process.exit(1)}\"",
     "build:frontend": "cd frontend-v3 && npm run build",
     "build:frontend:dev": "cd frontend-v3 && npx ng build --configuration=development",
     "build:fast": "npm run build:shared && npm run build:backend:fast && npm run build:frontend:dev && npm run build:electron && npm run build:preload",

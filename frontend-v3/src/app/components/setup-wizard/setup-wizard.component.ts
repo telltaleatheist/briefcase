@@ -183,8 +183,14 @@ type Step = 'welcome' | 'tools' | 'models' | 'ai' | 'review' | 'finishing';
               <div class="finishing">
                 @if (dl.running()) {
                   <div class="engine-spinner"></div>
-                  <h3>Setting things up…</h3>
-                  <p class="finishing-sub">Downloading the components Briefcase needs. This can run in the background.</p>
+                  @if (essentialPending()) {
+                    <h3>Setting things up…</h3>
+                    <p class="finishing-sub">Installing the essential tools Briefcase needs to run.</p>
+                  } @else {
+                    <div class="done-check">✓</div>
+                    <h3>You're ready to go</h3>
+                    <p class="finishing-sub">Essential tools are installed. Models keep downloading in the background — feel free to keep working.</p>
+                  }
                   <div class="finish-bar"><div class="finish-bar-fill" [style.width.%]="dl.aggregatePct()"></div></div>
                 } @else {
                   <div class="done-check">✓</div>
@@ -202,7 +208,7 @@ type Step = 'welcome' | 'tools' | 'models' | 'ai' | 'review' | 'finishing';
           }
           <span class="spacer"></span>
           @if (step() === 'finishing') {
-            <button class="btn btn-primary" [disabled]="dl.running()" (click)="finish()">
+            <button class="btn btn-primary" [disabled]="essentialPending()" (click)="finish()">
               {{ mode === 'config' ? 'Done' : 'Open Briefcase' }}
             </button>
           } @else if (step() === 'review') {
@@ -272,6 +278,19 @@ export class SetupWizardComponent implements OnInit {
   readonly llamaModels = computed(() => this.all().filter((c) => c.kind === 'llama-model' && c.supported));
   readonly reviewItems = computed(() => this.all().filter((c) => this.dl.isSelected(c.id) && !c.installed));
   readonly totalBytes = computed(() => this.reviewItems().reduce((s, c) => s + (c.sizeBytes || 0), 0));
+
+  /**
+   * True while an essential tool (ffmpeg/ffprobe, yt-dlp) is still queued or
+   * downloading. We block "Open Briefcase" only on these — models are allowed to
+   * keep downloading in the background once the essentials are in place.
+   */
+  readonly essentialPending = computed(() =>
+    this.dl.order().some(
+      (id) =>
+        this.componentService.isEssential(id) &&
+        (this.dl.statusOf(id) === 'queued' || this.dl.statusOf(id) === 'downloading'),
+    ),
+  );
 
   readonly recommendedName = computed(() => {
     const id = this.system()?.recommendedModel;

@@ -1,7 +1,8 @@
-import { Component, signal, ChangeDetectionStrategy, inject, OnInit, Input } from '@angular/core';
+import { Component, signal, ChangeDetectionStrategy, inject, OnInit, OnDestroy, Input } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
+import { Subscription } from 'rxjs';
 import { AiSetupWizardComponent } from '../../components/ai-setup-wizard/ai-setup-wizard.component';
 import { SetupWizardComponent } from '../../components/setup-wizard/setup-wizard.component';
 import { AiSetupService } from '../../services/ai-setup.service';
@@ -38,13 +39,14 @@ interface PromptsResponse {
   styleUrls: ['./settings-page.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush
 })
-export class SettingsPageComponent implements OnInit {
+export class SettingsPageComponent implements OnInit, OnDestroy {
   @Input() embedded = false;
 
   private aiSetupService = inject(AiSetupService);
   private http = inject(HttpClient);
   private libraryService = inject(LibraryService);
   private readonly API_BASE = 'http://localhost:3000/api';
+  private modelsChangedSub?: Subscription;
 
   // AI Setup Wizard state
   wizardOpen = signal(false);
@@ -111,6 +113,16 @@ export class SettingsPageComponent implements OnInit {
     await this.loadAvailableModels();
     await this.loadPrompts();
     await this.loadWhisperGpuMode();
+
+    // Refresh the AI model list when a model finishes downloading so newly
+    // downloaded local/whisper models appear without an app restart.
+    this.modelsChangedSub = this.aiSetupService.modelsChanged$.subscribe(() => {
+      this.loadAvailableModels();
+    });
+  }
+
+  ngOnDestroy() {
+    this.modelsChangedSub?.unsubscribe();
   }
 
   private async loadCategories() {
@@ -274,23 +286,23 @@ export class SettingsPageComponent implements OnInit {
       const availability = await this.aiSetupService.checkAIAvailability();
       const models: Array<{ value: string; label: string; provider: string }> = [];
 
-      // Add downloaded Local AI models first (fetched dynamically)
-      if (availability.hasLocal) {
-        try {
-          const localModelsResult = await firstValueFrom(this.aiSetupService.getLocalModels());
-          if (localModelsResult?.models) {
-            const downloadedModels = localModelsResult.models.filter(m => m.downloaded);
-            downloadedModels.forEach(model => {
-              models.push({
-                value: `local:${model.id}`,
-                label: `${model.name} (Local)`,
-                provider: 'local'
-              });
+      // Add downloaded Local AI models first. Fetch them directly rather than
+      // gating on availability.hasLocal, which can be stale right after a
+      // download and would otherwise hide just-downloaded models.
+      try {
+        const localModelsResult = await firstValueFrom(this.aiSetupService.getLocalModels());
+        if (localModelsResult?.models) {
+          const downloadedModels = localModelsResult.models.filter(m => m.downloaded);
+          downloadedModels.forEach(model => {
+            models.push({
+              value: `local:${model.id}`,
+              label: `${model.name} (Local)`,
+              provider: 'local'
             });
-          }
-        } catch (error) {
-          console.error('Failed to fetch local models:', error);
+          });
         }
+      } catch (error) {
+        console.error('Failed to fetch local models:', error);
       }
 
       // Add Ollama models (fetched dynamically by aiSetupService)
