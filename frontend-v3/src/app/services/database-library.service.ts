@@ -360,44 +360,6 @@ export class DatabaseLibraryService {
     );
   }
 
-  /**
-   * Pause batch analysis
-   */
-  async pauseBatch(): Promise<{ success: boolean; message: string }> {
-    const baseUrl = await this.getBaseUrl();
-    return firstValueFrom(
-      this.http.post<{ success: boolean; message: string }>(
-        `${baseUrl}/batch/pause`,
-        {}
-      )
-    );
-  }
-
-  /**
-   * Resume batch analysis
-   */
-  async resumeBatch(): Promise<{ success: boolean; message: string }> {
-    const baseUrl = await this.getBaseUrl();
-    return firstValueFrom(
-      this.http.post<{ success: boolean; message: string }>(
-        `${baseUrl}/batch/resume`,
-        {}
-      )
-    );
-  }
-
-  /**
-   * Stop batch analysis
-   */
-  async stopBatch(): Promise<{ success: boolean; message: string }> {
-    const baseUrl = await this.getBaseUrl();
-    return firstValueFrom(
-      this.http.post<{ success: boolean; message: string }>(
-        `${baseUrl}/batch/stop`,
-        {}
-      )
-    );
-  }
 
   /**
    * Get all tags with counts (grouped by type: people, topic, other, uses cache if available)
