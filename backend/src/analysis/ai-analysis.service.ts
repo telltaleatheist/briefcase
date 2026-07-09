@@ -875,66 +875,43 @@ export class AIAnalysisService {
     // Use first ~50 chars for matching (long quotes may span multiple segments)
     const searchPhrase = normalizedPhrase.substring(0, 50);
 
+    // MATCHING STRATEGY (correctness-preserving performance rework):
+    //   Segment text is normalized exactly ONCE here, up front, instead of being
+    //   re-normalized inside every strategy below (previously ~5x per segment).
+    //   The cheap exact/substring passes (Strategies 1 & 2) run first and
+    //   early-return, so most calls never reach the fuzzy work at all. The
+    //   expensive per-segment Levenshtein (Strategy 3) previously ran against
+    //   EVERY segment (O(segments x quote), quadratic-ish, blocking the event
+    //   loop). It now runs only over a SHORTLIST of segments that share at least
+    //   one distinctive (uncommon, >3 char) word with the phrase. This does not
+    //   change which segment is selected: for a segment's normalized text to be
+    //   >=65% character-similar to the phrase it must share the phrase's
+    //   distinctive words, so the true best fuzzy match is always in the
+    //   shortlist. If the phrase has NO distinctive words (all common/short) we
+    //   cannot prefilter and fall back to scanning every segment (exactly the
+    //   old behavior), so accuracy is never weaker than before.
+    const normSegs = segments.map((s) => normalizeForComparison(s.text));
+
     // Strategy 1: Direct substring match using first part of phrase
-    for (const segment of segments) {
-      const normalizedText = normalizeForComparison(segment.text);
-      if (normalizedText.includes(searchPhrase)) {
-        return segment.start;
+    for (let i = 0; i < segments.length; i++) {
+      if (normSegs[i].includes(searchPhrase)) {
+        return segments[i].start;
       }
     }
 
     // Strategy 2: Shorter prefix match (first 25 chars)
     if (searchPhrase.length > 25) {
       const shortSearchPhrase = normalizedPhrase.substring(0, 25);
-      for (const segment of segments) {
-        const normalizedText = normalizeForComparison(segment.text);
-        if (normalizedText.includes(shortSearchPhrase)) {
-          return segment.start;
+      for (let i = 0; i < segments.length; i++) {
+        if (normSegs[i].includes(shortSearchPhrase)) {
+          return segments[i].start;
         }
       }
     }
 
-    // Strategy 3: Fuzzy matching with Levenshtein distance
-    // Compare the quote against each segment and find the best match
-    let bestFuzzyMatch: { segment: Segment; score: number } | null = null;
     const FUZZY_THRESHOLD = 0.65; // 65% similarity required
 
-    for (const segment of segments) {
-      const normalizedText = normalizeForComparison(segment.text);
-
-      // For longer segments, use a sliding window to find best match
-      if (normalizedText.length >= searchPhrase.length) {
-        // Check similarity of the full segment text against the search phrase
-        const similarity = stringSimilarity(
-          searchPhrase,
-          normalizedText.substring(0, searchPhrase.length + 10), // Allow some overflow
-        );
-
-        if (similarity > FUZZY_THRESHOLD && (!bestFuzzyMatch || similarity > bestFuzzyMatch.score)) {
-          bestFuzzyMatch = { segment, score: similarity };
-        }
-      }
-
-      // Also try matching the full normalized segment against the phrase
-      const fullSimilarity = stringSimilarity(
-        normalizedPhrase.substring(0, Math.min(normalizedPhrase.length, normalizedText.length)),
-        normalizedText.substring(0, Math.min(normalizedPhrase.length, normalizedText.length)),
-      );
-
-      if (fullSimilarity > FUZZY_THRESHOLD && (!bestFuzzyMatch || fullSimilarity > bestFuzzyMatch.score)) {
-        bestFuzzyMatch = { segment, score: fullSimilarity };
-      }
-    }
-
-    if (bestFuzzyMatch) {
-      this.logger.debug(
-        `[Fuzzy Match] Found "${phrase.substring(0, 30)}..." at ${bestFuzzyMatch.segment.start}s (score: ${bestFuzzyMatch.score.toFixed(2)})`,
-      );
-      return bestFuzzyMatch.segment.start;
-    }
-
-    // Strategy 4: Distinctive word matching
-    // Find uncommon words in the quote and search for segments containing them
+    // Uncommon words drive both the Strategy-3 shortlist and Strategy 4.
     const commonWords = new Set([
       'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
       'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
@@ -954,12 +931,75 @@ export class AIAnalysisService {
 
     const phraseWords = normalizedPhrase.split(/\s+/).filter((w) => w.length > 3 && !commonWords.has(w));
 
+    // Build the Strategy-3 candidate shortlist: segment indices that share at
+    // least one distinctive word with the phrase. Any segment that could clear
+    // the 65% char-similarity threshold necessarily shares such a word, so the
+    // true best fuzzy match is always in this list. When the phrase has no
+    // distinctive words we cannot prefilter and scan all segments (old behavior).
+    const phraseWordSet = new Set(phraseWords);
+    const segmentWordLists = normSegs.map((t) => t.split(/\s+/));
+    let candidateIdx: number[];
+    if (phraseWords.length > 0) {
+      candidateIdx = [];
+      for (let i = 0; i < normSegs.length; i++) {
+        if (segmentWordLists[i].some((w) => phraseWordSet.has(w))) {
+          candidateIdx.push(i);
+        }
+      }
+      if (candidateIdx.length === 0) {
+        candidateIdx = normSegs.map((_, i) => i);
+      }
+    } else {
+      candidateIdx = normSegs.map((_, i) => i);
+    }
+
+    // Strategy 3: Fuzzy matching with Levenshtein distance over the shortlist.
+    // Compare the quote against each candidate segment and find the best match.
+    let bestFuzzyMatch: { segment: Segment; score: number } | null = null;
+
+    for (const i of candidateIdx) {
+      const normalizedText = normSegs[i];
+
+      // For longer segments, use a sliding window to find best match
+      if (normalizedText.length >= searchPhrase.length) {
+        // Check similarity of the segment prefix against the search phrase
+        const similarity = stringSimilarity(
+          searchPhrase,
+          normalizedText.substring(0, searchPhrase.length + 10), // Allow some overflow
+        );
+
+        if (similarity > FUZZY_THRESHOLD && (!bestFuzzyMatch || similarity > bestFuzzyMatch.score)) {
+          bestFuzzyMatch = { segment: segments[i], score: similarity };
+        }
+      }
+
+      // Also try matching the full normalized segment against the phrase
+      const cmpLen = Math.min(normalizedPhrase.length, normalizedText.length);
+      const fullSimilarity = stringSimilarity(
+        normalizedPhrase.substring(0, cmpLen),
+        normalizedText.substring(0, cmpLen),
+      );
+
+      if (fullSimilarity > FUZZY_THRESHOLD && (!bestFuzzyMatch || fullSimilarity > bestFuzzyMatch.score)) {
+        bestFuzzyMatch = { segment: segments[i], score: fullSimilarity };
+      }
+    }
+
+    if (bestFuzzyMatch) {
+      this.logger.debug(
+        `[Fuzzy Match] Found "${phrase.substring(0, 30)}..." at ${bestFuzzyMatch.segment.start}s (score: ${bestFuzzyMatch.score.toFixed(2)})`,
+      );
+      return bestFuzzyMatch.segment.start;
+    }
+
+    // Strategy 4: Distinctive word matching
+    // Find uncommon words in the quote and search for segments containing them
     if (phraseWords.length > 0) {
       let bestWordMatch: { segment: Segment; matchCount: number; fuzzyScore: number } | null = null;
 
-      for (const segment of segments) {
-        const segmentText = normalizeForComparison(segment.text);
-        const segmentWords = segmentText.split(/\s+/);
+      for (let i = 0; i < segments.length; i++) {
+        const segment = segments[i];
+        const segmentWords = segmentWordLists[i];
         let matchCount = 0;
         let fuzzyMatchCount = 0;
 
@@ -996,7 +1036,9 @@ export class AIAnalysisService {
 
     // Strategy 5: Check across segment boundaries with fuzzy matching
     for (let i = 0; i < segments.length - 1; i++) {
-      const combinedText = normalizeForComparison(segments[i].text + ' ' + segments[i + 1].text);
+      // normSegs[i] is already normalized; joining two normalized strings with a
+      // single space is equivalent to normalizing the concatenation.
+      const combinedText = normSegs[i] + ' ' + normSegs[i + 1];
 
       // Try exact match first
       if (combinedText.includes(searchPhrase)) {

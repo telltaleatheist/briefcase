@@ -1157,6 +1157,15 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       // Update file size and hash in database
       this.eventService.emitTaskProgress(taskId, 'strip-black-bars', 90, 'Updating metadata...');
       this.updateTaskProgress(taskId, 90, 'Updating metadata...');
+      // Recompute the identity metadata from the NEW file and write it. The
+      // on-disk file has already been atomically swapped above, so the DB row
+      // MUST be updated to describe the new file: file_hash is the app's
+      // dedup/identity key and a stale hash silently corrupts dedup. We do NOT
+      // swallow a failure here (the old behavior only warned, leaving the row
+      // describing the OLD file while the bytes on disk are the NEW file) — the
+      // swap itself succeeded and is correct, but an un-reconciled row is a real
+      // integrity error, so we surface it as a failed task. Never fall back to
+      // leaving the old identity in place.
       try {
         const stats = fs.statSync(videoPath);
         const newHash = await this.fileScannerService.quickHashFile(videoPath, stats.size);
@@ -1166,7 +1175,12 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
           `UPDATE videos SET duration_seconds = ?, file_size_bytes = ?, file_hash = ?, last_processed_date = ? WHERE id = ?`
         ).run(newDuration, stats.size, newHash, new Date().toISOString(), videoId);
       } catch (err) {
-        this.logger.warn(`[STRIP-BARS] Failed to update metadata: ${(err as Error).message}`);
+        throw new Error(
+          `Strip-black-bars swapped the file but FAILED to update its identity metadata ` +
+          `(file_hash/size/duration) for video ${videoId}: ${(err as Error).message}. The ` +
+          `on-disk file is the new stripped file; the DB row still describes the OLD file and ` +
+          `must be re-scanned/re-hashed.`,
+        );
       }
 
       // Regenerate thumbnail
@@ -1465,13 +1479,26 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       this.eventService.emitTaskProgress(taskId, 'export-clip', 90, 'Clearing metadata...');
       this.updateTaskProgress(taskId, 90, 'Clearing metadata...');
 
-      // Recalculate file hash from the new contents BEFORE the DB transaction
+      // Recalculate the file hash from the NEW contents BEFORE the DB transaction
       // (hashing is async and cannot run inside a better-sqlite3 transaction).
-      let newFileHash: string | null = null;
+      // file_hash is the app's dedup/identity key: the file has already been
+      // swapped, so the row MUST carry the new hash. We do NOT fall back to
+      // leaving the old hash in place (the old behavior swallowed a hashing
+      // failure and then silently omitted file_hash from the UPDATE, leaving the
+      // row describing the OLD file). The swap itself is correct and intact, but
+      // an un-reconciled identity is a real integrity error, so we surface it as
+      // a failed task instead.
+      let newFileHash: string;
       try {
         const stats = fs.statSync(opts.videoPath);
         newFileHash = await this.fileScannerService.quickHashFile(opts.videoPath, stats.size);
-      } catch (_) {}
+      } catch (err) {
+        throw new Error(
+          `Export-clip overwrite swapped the file but FAILED to recompute its identity hash ` +
+          `for video ${opts.videoId}: ${(err as Error).message}. The on-disk file is the new ` +
+          `clip; the DB row still describes the OLD file and must be re-scanned/re-hashed.`,
+        );
+      }
 
       // Clear all stale metadata AND update the video record in ONE transaction so
       // we can never leave the row half-cleared (e.g. transcript deleted but the
@@ -1479,14 +1506,6 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       const newDuration = extractionResult.duration || 0;
       const db = this.databaseService.getDatabase();
       const nowIso = new Date().toISOString();
-      const updateFields = newFileHash
-        ? `duration_seconds = ?, file_size_bytes = ?, file_hash = ?, has_transcript = 0, has_analysis = 0, last_processed_date = ?, upload_date = ?, download_date = ?, added_at = ?, source_url = ?, ai_description = ?, suggested_title = ?`
-        : `duration_seconds = ?, file_size_bytes = ?, has_transcript = 0, has_analysis = 0, last_processed_date = ?, upload_date = ?, download_date = ?, added_at = ?, source_url = ?, ai_description = ?, suggested_title = ?`;
-
-      const params = newFileHash
-        ? [newDuration, extractionResult.fileSize || 0, newFileHash, nowIso, originalMetadata.uploadDate, originalMetadata.downloadDate, originalMetadata.addedAt, originalMetadata.sourceUrl, originalMetadata.aiDescription, originalMetadata.suggestedTitle, opts.videoId]
-        : [newDuration, extractionResult.fileSize || 0, nowIso, originalMetadata.uploadDate, originalMetadata.downloadDate, originalMetadata.addedAt, originalMetadata.sourceUrl, originalMetadata.aiDescription, originalMetadata.suggestedTitle, opts.videoId];
-
       const clearAndUpdate = db.transaction(() => {
         // These helpers each open their own prepared statements against the same
         // connection and participate in this transaction.
@@ -1494,7 +1513,21 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         this.databaseService.deleteAnalysisSections(opts.videoId);
         this.databaseService.deleteCustomMarkers(opts.videoId);
         this.databaseService.deleteAnalysis(opts.videoId);
-        db.prepare(`UPDATE videos SET ${updateFields} WHERE id = ?`).run(...params);
+        db.prepare(
+          `UPDATE videos SET duration_seconds = ?, file_size_bytes = ?, file_hash = ?, has_transcript = 0, has_analysis = 0, last_processed_date = ?, upload_date = ?, download_date = ?, added_at = ?, source_url = ?, ai_description = ?, suggested_title = ? WHERE id = ?`
+        ).run(
+          newDuration,
+          extractionResult.fileSize || 0,
+          newFileHash,
+          nowIso,
+          originalMetadata.uploadDate,
+          originalMetadata.downloadDate,
+          originalMetadata.addedAt,
+          originalMetadata.sourceUrl,
+          originalMetadata.aiDescription,
+          originalMetadata.suggestedTitle,
+          opts.videoId,
+        );
       });
       clearAndUpdate();
 
