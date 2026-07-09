@@ -176,7 +176,7 @@ export function buildBoundaryDetectionPrompt(
 ): string {
   const titleContext = videoTitle ? `Video: ${videoTitle}\n` : '';
   const prevContext = previousTopic
-    ? `Previous section was about: "${previousTopic}"\n`
+    ? `Prior section ended on: "${previousTopic}"\n`
     : '';
 
   // Format duration for display
@@ -190,25 +190,25 @@ export function buildBoundaryDetectionPrompt(
 
     // Add guidance for short videos (under 3 minutes)
     if (videoDurationSeconds < 180) {
-      shortVideoGuidance = `- SHORT VIDEO: Most clips under 3 minutes cover a single topic. Only mark a boundary if there is a COMPLETELY DIFFERENT subject (not just a subtopic or different angle on the same subject).
-`;
+      shortVideoGuidance =
+        '- Short clip: it likely covers ONE subject. Mark a boundary only for a genuinely different subject.\n';
     }
   }
 
-  return `Mark where the topic/subject changes in this transcript.
+  const firstChunkLine = isFirstChunk
+    ? '- Do not mark the very first words — chapter 1 already starts at 0:00.\n'
+    : '';
+
+  return `Find where the SUBJECT changes in this transcript. Output JSON only.
 ${titleContext}${durationContext}${prevContext}
-Rules:
-- Only mark SIGNIFICANT topic changes, not minor tangents
-${shortVideoGuidance}- Return the exact phrase (3-8 words) where each new topic begins
-${isFirstChunk ? '- Do NOT include the very first words (chapter 1 starts automatically at 0:00)\n' : ''}- Also summarize what topic this section ends with (for context to next chunk)
+A boundary is where the speaker turns to a clearly different subject — not a new example, tangent, or angle on the same subject.
+- Copy the exact 3-8 word phrase from the transcript where the new subject begins.
+${shortVideoGuidance}${firstChunkLine}- Also note, in a few words, what the transcript is discussing at its end.
 
-Return JSON:
-{
-  "boundaries": ["exact phrase where topic 2 starts", "exact phrase where topic 3 starts"],
-  "end_topic": "Brief description of what the section ends discussing"
-}
+Output exactly this shape and nothing else:
+{"boundaries": ["exact phrase where the next subject begins"], "end_topic": "what it is discussing at the end"}
 
-If no topic changes occur, return: {"boundaries": [], "end_topic": "..."}
+If the subject never changes, output: {"boundaries": [], "end_topic": "..."}
 
 Transcript:
 ${chunkText}`;
@@ -221,42 +221,26 @@ ${chunkText}`;
 // optionally detects category flags within the chapter's content.
 
 /**
- * Get granularity-based flagging instructions
- * @param granularity - 1 (very strict) to 10 (extremely aggressive)
+ * Map the user's 1-10 sensitivity slider onto a single, mechanical flagging
+ * threshold line.
+ *
+ * This ONLY moves the confidence bar for what counts as a match — it never
+ * relaxes the PROMOTING-vs-DEBUNKING guard, and even at the top of the range it
+ * still requires the speaker to actually assert the thing (no dog-whistle /
+ * subtext / "reminds me of a category" flagging, which destroys precision on a
+ * 14B-class model and self-flags counter-apologetics content). The old 1-10
+ * escalation that told the model to "flag ANYTHING tenuous" and "create
+ * categories freely" was removed for exactly that reason.
+ *
+ * @param granularity - 1 (strict) to 10 (broad); default handled by the caller.
  */
-function getGranularityInstructions(granularity: number): { approach: string; rule: string } {
-  if (granularity <= 2) {
-    return {
-      approach: 'BE VERY STRICT - only flag content that CLEARLY and DEFINITIVELY matches categories. Require strong, unambiguous evidence.',
-      rule: 'ONLY flag if you are highly confident the content matches. When in doubt, do NOT flag. Prefer false negatives over false positives.',
-    };
-  } else if (granularity <= 4) {
-    return {
-      approach: 'BE STRICT - flag content with HIGH confidence matches only. Require clear evidence.',
-      rule: 'Flag when you have strong confidence the content matches a category. Skip borderline or ambiguous cases.',
-    };
-  } else if (granularity <= 6) {
-    return {
-      approach: 'BE BALANCED - flag content with reasonable confidence. Include clear matches and likely matches.',
-      rule: 'Flag content that reasonably matches categories. Include likely matches but skip very weak associations.',
-    };
-  } else if (granularity <= 8) {
-    return {
-      approach: 'BE BROAD - flag content liberally. Include edge cases and possible matches.',
-      rule: 'FLAG GENEROUSLY - if content MIGHT qualify for a category, flag it. Include edge cases and possible matches.',
-    };
-  } else if (granularity === 9) {
-    return {
-      approach: 'BE VERY AGGRESSIVE - flag ALL possible matches including weak associations. Better to over-flag than miss anything.',
-      rule: 'FLAG EVERYTHING that could possibly relate to any category. Missing a potential flag is unacceptable. Include even weak or tangential associations.',
-    };
-  } else {
-    // Level 10: MAXIMUM AGGRESSION
-    return {
-      approach: 'MAXIMUM DETECTION MODE - Flag ANYTHING that could CONCEIVABLY, REMOTELY, or TANGENTIALLY relate to ANY category. Cast the widest possible net. When in doubt, FLAG IT. You are being paid to find matches - find them all, no matter how tenuous.',
-      rule: 'FLAG AGGRESSIVELY AND LIBERALLY. If a word, phrase, tone, implication, or subtext could POSSIBLY be interpreted as relating to a category - even through multiple degrees of separation - FLAG IT. This includes: indirect references, metaphors, analogies, dog whistles, coded language, implications, things that REMIND you of a category, adjacent topics, things that could lead to category topics, and anything that makes you even slightly think of a category. Your job is to surface EVERY POSSIBLE match. False positives are acceptable and expected. Missing a potential match is a FAILURE. When uncertain, ALWAYS flag. Create new categories freely if existing ones don\'t fit. Err on the side of maximum coverage. The user wants to catch EVERYTHING.',
-    };
+function getSensitivityLine(granularity: number): string {
+  if (granularity <= 3) {
+    return 'Sensitivity: strict. Flag only clear, explicit matches you are confident about. When unsure, do not flag.';
+  } else if (granularity <= 7) {
+    return 'Sensitivity: balanced. Flag clear matches and reasonably likely ones; skip vague or tangential cases.';
   }
+  return 'Sensitivity: broad. Flag clear and borderline matches, but the speaker must still be asserting the thing itself — never flag a mere mention, a criticism, or an implication.';
 }
 
 export function buildChapterAnalysisPrompt(
@@ -273,81 +257,70 @@ export function buildChapterAnalysisPrompt(
   const hasCategories = enabledCategories.length > 0;
 
   const categoryList = enabledCategories
-    .map((c) => `- **${c.name}**: ${c.description}`)
+    .map((c) => `- ${c.name}: ${c.description}`)
     .join('\n');
 
-  const categoryNames = enabledCategories.map((c) => c.name).join(', ');
+  const firstCategory = hasCategories ? enabledCategories[0].name : 'hate';
 
   const prevContext = previousChapterSummary
-    ? `\nPrevious chapter covered: "${previousChapterSummary}"\n`
+    ? `Previous chapter: "${previousChapterSummary}"\n`
     : '';
 
   const customContext = customInstructions
-    ? `\nUSER CONTEXT:\n${customInstructions}\n`
+    ? `Viewer context: ${customInstructions}\n`
     : '';
 
-  // Get granularity-based instructions (default to 5 - balanced)
+  // Map the 1-10 slider (default 5 = balanced) onto a single threshold line.
   const granularity = analysisGranularity ?? 5;
-  const granularityInstr = getGranularityInstructions(granularity);
+  const sensitivityLine = getSensitivityLine(granularity);
 
-  // Category section
-  const categorySection = hasCategories
-    ? `
-3. Flag specific problematic quotes. Categories:
-${categoryList}`
+  // The flags field in the output-shape example (only when categories exist).
+  const flagsField = hasCategories
+    ? `,\n  "flags": [{"category": "${firstCategory}", "description": "why the quote matches", "quote": "exact words from the transcript"}]`
     : '';
 
-  const flagsInstruction = hasCategories
-    ? `,
-  "flags": [
-    {"category": "${categoryNames.split(', ')[0]}", "description": "one sentence why", "quote": "EXACT words copied from transcript"}
-  ]`
+  // The bullet in the "Produce" list.
+  const flagsListItem = hasCategories
+    ? '\n- flags: quotes matching a category below; use [] when none match.'
     : '';
 
-  const flagsNote = hasCategories
+  // The full flagging rulebook — the debunking-vs-promoting guard is the #1
+  // correctness axis for this counter-apologetics use case, so it leads.
+  const flagsBlock = hasCategories
     ? `
 
-DETECTION SENSITIVITY: ${granularity}/10 - ${granularityInstr.approach}
+THE TEST FOR EVERY FLAG — is the speaker SAYING THIS IS TRUE, or SAYING IT IS FALSE?
+Flag ONLY when the speaker asserts, promotes, defends, or urges the claim.
+Never flag a speaker who debunks, fact-checks, doubts, mocks, or reports a claim — even when they repeat the claim's words in order to knock it down. Skepticism ("that's a hoax", "there's no evidence", "the courts threw it out") is never a flag.
+Judge the whole chapter's stance, not one sentence: if the speaker's point is that the claim is FALSE, flag nothing from it, including the sentence where they state the claim they are about to refute.
 
-FLAGS RULES:
-1. ${granularityInstr.rule}
-2. "quote" = copy/paste exact words from TRANSCRIPT above. Do NOT paraphrase or summarize.
-3. Each unique quote gets exactly ONE flag with ONE category. Never flag the same quote twice.
-4. category should be one of: ${categoryNames}
-   - OR create a new category if content doesn't fit (use lowercase-with-dashes, e.g., "cult-tactics")
-   - Do NOT combine categories (wrong: "hate-conspiracy", right: pick one or create new)
-5. "flags": [] ONLY if absolutely nothing matches any category
+Worked examples:
+- "The election was stolen, they cheated and everyone knows it." -> FLAG {conspiracy} (asserts it as true)
+- "People keep claiming the election was stolen, but every court threw it out for lack of evidence." -> NO FLAG (refutes it)
 
-CRITICAL - DEBUNKING vs PROMOTING:
-- Do NOT flag someone DEBUNKING or expressing SKEPTICISM about conspiracy theories, pseudoscience, or misinformation
-- Saying "this is fake", "this is a hoax", or "I don't know how they came to that conclusion" about unverified/extraordinary claims is HEALTHY SKEPTICISM, not misinformation
-- Only flag content that PROMOTES false claims, not content that QUESTIONS them
-- If the speaker is clearly analyzing, critiquing, or debunking dubious claims, their skeptical statements should NOT be flagged
+CATEGORIES:
+${categoryList}
 
-EXAMPLE FLAG:
-{"category": "hate", "description": "dehumanizing language toward immigrants", "quote": "these people are like animals invading our country"}
+Flagging rules:
+- quote = exact words copied from the TRANSCRIPT. Never paraphrase, translate, or invent one.
+- One quote, one flag, one category. Choose the single best fit; never merge two names (not "hate-conspiracy"). If nothing fits but it clearly qualifies, coin a new lowercase-dashed name.
+- description = one sentence on why it matches, and it must describe the speaker ENDORSING the claim.
 
-WRONG: Two flags for same content with different categories
-WRONG: Combined categories like "misinformation-conspiracy"
-WRONG: Paraphrasing the quote instead of copying exact words
-RIGHT: One flag per quote, one category (existing or new), exact transcript words`
+${sensitivityLine}`
     : '';
 
-  const flagsListItem = hasCategories ? '\n- flags: array of problematic quotes' : '';
-
-  return `Analyze this transcript chapter.${hasCategories ? ' ' + granularityInstr.approach : ''}
+  return `Label chapter ${chapterNumber} of a video transcript. Output JSON only.
 Video: ${videoTitle}
-Chapter: ${chapterNumber}
 ${prevContext}${customContext}
-Return JSON with:
-- title: 1-3 sentence description
-- summary: 2-3 sentence summary${flagsListItem}${categorySection}
+Produce:
+- title: one sentence (max ~15 words) naming what this chapter is about.
+- summary: 2-3 sentences on what the speaker actually says.${flagsListItem}
 
-JSON format:
+Output exactly this shape and nothing else:
 {
   "title": "...",
-  "summary": "..."${flagsInstruction}
-}${flagsNote}
+  "summary": "..."${flagsField}
+}${flagsBlock}
 
 TRANSCRIPT:
 ${chapterText}`;
@@ -357,78 +330,59 @@ ${chapterText}`;
 // Metadata from Chapters Prompts
 // -----------------------------------------------------------------------------
 
-export const DESCRIPTION_FROM_CHAPTERS_PROMPT = `Generate a 2-3 sentence description of this video based on its chapters.
+export const DESCRIPTION_FROM_CHAPTERS_PROMPT = `Write a 2-3 sentence description of this video from its chapters. Say specifically what it covers — the people, claims, and topics the chapters name, not generic filler. Output only the description, no preamble.
 
-Video title: {videoTitle}
-
+Video: {videoTitle}
 Chapters:
 {chaptersList}
-
-Rules:
-- Describe what the video covers based on the chapter summaries
-- Be specific about the content, not generic
-- 2-3 sentences maximum
 
 Description:`;
 
-export const TAGS_FROM_CHAPTERS_PROMPT = `Extract people and topics from these video chapters.
+export const TAGS_FROM_CHAPTERS_PROMPT = `List the people and topics in these video chapters. Output JSON only.
+- people: proper names of people mentioned in the chapters, Title Case.
+- topics: 3-8 subjects, 1-3 words each, Title Case.
 
-Return JSON: {"people": ["Name"], "topics": ["Topic"]}
+Output exactly this shape and nothing else:
+{"people": ["Jane Doe"], "topics": ["Election Fraud", "Immigration"]}
 
-Rules:
-- People: proper names only (from chapter content)
-- Topics: 3-8 themes, 1-3 words each
-- Title case
+Chapters:
+{chaptersList}`;
+
+export const TITLE_FROM_CHAPTERS_PROMPT = `Write a filename describing this video, from its chapters. Output only the filename.
 
 Chapters:
 {chaptersList}
-
-JSON:`;
-
-export const TITLE_FROM_CHAPTERS_PROMPT = `Generate a concise, descriptive filename for this video based on its chapters.
-
-Current filename: {currentTitle}
-Chapters:
-{chaptersList}
+Current filename (reference only): {currentTitle}
 
 Rules:
-- Lowercase, spaces allowed, max 80 chars
-- Format: "[speaker name] - [key quote or action]" or "[speaker] on [topic] - [notable statement]"
-- Lead with the main speaker's name if identifiable FROM THE CHAPTERS
-- If speaker cannot be identified, use descriptive title without a name (e.g., "pastor claims voting democrat is sinful")
-- NEVER use names from these examples as defaults - only use names actually found in the chapters
-- Include the most notable/quotable phrase in the title
-- Be specific about what was SAID, not just the topic
-- No dates, extensions, special chars, or parentheses
+- lowercase; separate words with spaces (not hyphens or underscores); max 80 chars; no dates, file extension, parentheses, or special characters
+- if the chapters name the main speaker, lead with them: "speaker name - the striking thing they said"
+- if no speaker is identifiable, describe what was said: "pastor claims voting democrat is sinful"
+- capture the single most notable or quotable point, using a short verbatim phrase when one stands out
+- use only names and facts that appear in these chapters
 
-Good examples (DO NOT copy these names - identify speakers from the actual chapters):
-- "trump on howard stern - i walk into changing rooms because im the owner"
-- "pastor claims democrats are demonic and voting for them is sinful"
-- "lauren witzke - god must destroy civilization over trans healthcare"
+The two lines below show the SHAPE only — do not reuse their names or wording, take everything from the chapters above:
+- "<speaker> - <their most striking quote>"
+- "<role> claims <specific claim>"
 
-Output ONLY the filename, nothing else:`;
+Filename:`;
 
-export const TITLE_FROM_WEBPAGE_PROMPT = `Generate a concise, descriptive filename for this saved webpage based on its content.
+export const TITLE_FROM_WEBPAGE_PROMPT = `Write a filename for this saved webpage from its content. Output only the filename.
 
-Current filename: {currentTitle}
-Page content (truncated):
+Current filename (reference only): {currentTitle}
+Page content:
 {pageText}
 
 Rules:
-- Lowercase, spaces allowed, max 80 chars
-- Format: "[speaker/author] - [key quote or action]" or "[source] on [topic] - [notable statement]"
-- Lead with the main person or source if clearly identifiable FROM THE CONTENT
-- If no clear person, use a descriptive topical title (e.g., "senate passes surveillance bill extending section 702")
-- Include the most notable/quotable phrase if present
-- Be specific about what the page is ABOUT, not just generic keywords
-- No dates, extensions, special chars, or parentheses
+- lowercase; separate words with spaces (not hyphens or underscores); max 80 chars; no dates, file extension, parentheses, or special characters
+- if a person or source is clearly the subject, lead with them; otherwise use a specific topical title, e.g. "senate passes surveillance bill extending section 702"
+- lead with the single most notable point; use only what appears in the content
 
-Good examples (DO NOT copy these — identify the subject from the actual content):
-- "reuters - pentagon confirms ukraine aid shipment delayed"
-- "forgiato blow on trump rally crowd size controversy"
-- "cnn opinion - why nato expansion failed diplomacy"
+The two lines below show the SHAPE only — do not reuse their names or wording:
+- "<source> - <specific development>"
+- "<person> on <topic>"
 
-Output ONLY the filename, nothing else:`;
+Filename:`;
 
 // =============================================================================
 // DEFAULT PROMPTS EXPORT

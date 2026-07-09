@@ -10,10 +10,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AIProviderService, AIProviderConfig } from './ai-provider.service';
 import { OllamaService } from './ollama.service';
-import { SharedConfigService } from '../config/shared-config.service';
 import { numCtxMaxForModel, stripThinkTags, parseProviderModel } from './model-utils';
 import * as fs from 'fs';
-import * as path from 'path';
 import {
   buildBoundaryDetectionPrompt,
   buildChapterAnalysisPrompt,
@@ -22,17 +20,8 @@ import {
   TAGS_FROM_CHAPTERS_PROMPT,
   TITLE_FROM_CHAPTERS_PROMPT,
   TITLE_FROM_WEBPAGE_PROMPT,
-  DEFAULT_PROMPTS,
   AnalysisCategory,
 } from './prompts/analysis-prompts';
-
-// Interface for custom prompts loaded from config
-interface CustomPrompts {
-  description?: string;
-  title?: string;
-  tags?: string;
-  quotes?: string;
-}
 
 // =============================================================================
 // INTERFACES
@@ -517,64 +506,10 @@ function getModelLimits(modelName: string, contextTokens: number): ModelLimits {
 export class AIAnalysisService {
   private readonly logger = new Logger(AIAnalysisService.name);
 
-  // Custom prompts cache
-  private customPromptsCache: CustomPrompts | null = null;
-  private customPromptsCacheTime: number = 0;
-  private readonly CACHE_TTL = 30000; // 30 seconds
-
   constructor(
     private readonly aiProviderService: AIProviderService,
     private readonly ollamaService: OllamaService,
-    private readonly configService: SharedConfigService,
   ) {}
-
-  /**
-   * Load custom prompts from config file
-   */
-  private loadCustomPrompts(): CustomPrompts {
-    const now = Date.now();
-    if (
-      this.customPromptsCache &&
-      now - this.customPromptsCacheTime < this.CACHE_TTL
-    ) {
-      return this.customPromptsCache;
-    }
-
-    let prompts: CustomPrompts = {};
-    try {
-      // Resolve via the app's platform-aware config dir (matches where
-      // analysis-categories.json lives) — the old code hardcoded the macOS
-      // "Library/Application Support" path, so custom prompts were never found
-      // on Windows/Linux.
-      const configPath = path.join(
-        this.configService.getConfigDir(),
-        'prompts.json',
-      );
-
-      if (fs.existsSync(configPath)) {
-        const content = fs.readFileSync(configPath, 'utf-8');
-        const parsed = JSON.parse(content);
-        prompts = parsed.prompts || {};
-      }
-    } catch (error) {
-      this.logger.warn('Failed to load custom prompts, using defaults:', error);
-    }
-
-    this.customPromptsCache = prompts;
-    this.customPromptsCacheTime = now;
-    return prompts;
-  }
-
-  /**
-   * Get the effective prompt (custom or default)
-   */
-  private getPrompt(promptKey: keyof CustomPrompts): string {
-    const customPrompts = this.loadCustomPrompts();
-    if (customPrompts[promptKey]) {
-      return customPrompts[promptKey]!;
-    }
-    return DEFAULT_PROMPTS[promptKey];
-  }
 
   /**
    * Main entry point: Analyze transcript using AI
