@@ -96,6 +96,12 @@ export class VideoPreviewComponent implements OnInit, AfterViewInit, OnDestroy {
   transcriptText: string | null = null;
   transcriptExists = false;
 
+  // D1: distinguish "load failed" from "genuinely empty". When a fetch throws
+  // (transient network/backend error) we set these instead of rendering the
+  // data as absent — so a hiccup never looks like the data was deleted.
+  sectionsLoadError = false;
+  transcriptLoadError = false;
+
   // Auto-scroll state
   autoScrollEnabled = true;
   currentTabIndex = 0; // Track which tab is active (0=Analysis, 1=Search, 2=Transcript)
@@ -215,6 +221,7 @@ export class VideoPreviewComponent implements OnInit, AfterViewInit, OnDestroy {
       // Load sections (custom markers and AI analysis sections) from database
       // Load sections regardless of whether there's an analysis - custom markers should always show
       if (videoId) {
+        this.sectionsLoadError = false;
         try {
           // Parse analysis sections from the database
           const sections = await this.databaseLibraryService.getAnalysisSections(videoId);
@@ -244,13 +251,22 @@ export class VideoPreviewComponent implements OnInit, AfterViewInit, OnDestroy {
             console.log('Loaded', this.timelineSections.length, 'sections (includes custom markers and AI analysis)');
           }
         } catch (error) {
-          console.warn('Failed to load sections:', error);
-          this.metadata = null;
+          // D1: a failed fetch is NOT "no sections". Flag the error state and
+          // leave any previously-loaded sections/metadata intact rather than
+          // wiping them to null (which reads as "data deleted").
+          console.error('Failed to load sections:', error);
+          this.sectionsLoadError = true;
+          this.notificationService.toastOnly(
+            'error',
+            'Could not load analysis',
+            'A network or server error prevented loading analysis sections. Your data is safe — try again.'
+          );
         }
       }
 
       // Load transcript from database if available
       if (videoId && hasTranscript) {
+        this.transcriptLoadError = false;
         try {
           const dbTranscript = await this.databaseLibraryService.getTranscript(videoId);
           if (dbTranscript && dbTranscript.srt_format) {
@@ -263,9 +279,16 @@ export class VideoPreviewComponent implements OnInit, AfterViewInit, OnDestroy {
             this.transcriptText = null;
           }
         } catch (error) {
+          // D1: a failed fetch is NOT "no transcript". Flag the error state and
+          // do not clear transcriptText/transcriptExists — a hiccup must not
+          // look like the transcript was removed.
           console.error('Failed to load transcript:', error);
-          this.transcriptExists = false;
-          this.transcriptText = null;
+          this.transcriptLoadError = true;
+          this.notificationService.toastOnly(
+            'error',
+            'Could not load transcript',
+            'A network or server error prevented loading the transcript. Your data is safe — try again.'
+          );
         }
       }
       // For custom videos or videos without analysis/transcript, we don't have metadata or transcript
@@ -1495,8 +1518,20 @@ Tip: Right-click on the timeline for additional options.
       return;
     }
 
-    // Get all sections from database
-    const dbSections = await this.databaseLibraryService.getAnalysisSections(videoId);
+    // Get all sections from database. D1: on failure, surface an error and bail
+    // rather than opening the dialog with a misleadingly-empty section list.
+    let dbSections;
+    try {
+      dbSections = await this.databaseLibraryService.getAnalysisSections(videoId);
+    } catch (error) {
+      console.error('Failed to load sections for export:', error);
+      this.notificationService.toastOnly(
+        'error',
+        'Could not load analysis',
+        'A network or server error prevented loading sections. Your data is safe — try again.'
+      );
+      return;
+    }
 
     // Import and open the ExportDialogComponent
     const { ExportDialogComponent } = await import('../export-dialog/export-dialog.component');
@@ -1602,8 +1637,20 @@ Tip: Right-click on the timeline for additional options.
       return;
     }
 
-    // Get the filtered sections from the database
-    const dbSections = await this.databaseLibraryService.getAnalysisSections(videoId);
+    // Get the filtered sections from the database. D1: on failure, surface an
+    // error and bail rather than treating it as "no sections".
+    let dbSections;
+    try {
+      dbSections = await this.databaseLibraryService.getAnalysisSections(videoId);
+    } catch (error) {
+      console.error('Failed to load sections for bulk export:', error);
+      this.notificationService.toastOnly(
+        'error',
+        'Could not load analysis',
+        'A network or server error prevented loading sections. Your data is safe — try again.'
+      );
+      return;
+    }
 
     // Filter sections based on active category filters
     const enabledCategories = new Set(

@@ -35,6 +35,7 @@ import {
   CreateClipRequest,
 } from './interfaces/library.interface';
 import { parseAnalysisReport, extractCategories, saveAnalysisMetadata } from './parsers/analysis-parser';
+import { isPathInsideRoots, pathsEqual } from '../common/utils/path-security.util';
 import * as path from 'path';
 import * as os from 'os';
 
@@ -76,6 +77,59 @@ export class LibraryController {
         }
       }
     });
+  }
+
+  /**
+   * Roots that user media may legitimately live inside. Any path we serve or
+   * stream in response to a client-supplied path MUST be contained within one
+   * of these — this is the LAN-exposure containment boundary (A1). Roots come
+   * from the library manager (every library's clips folder) plus the legacy
+   * app-data library directory.
+   */
+  private getAllowedMediaRoots(): string[] {
+    const roots: string[] = [];
+
+    for (const lib of this.libraryManagerService.getAllLibraries()) {
+      if (lib.clipsFolderPath) {
+        roots.push(lib.clipsFolderPath);
+      }
+    }
+
+    try {
+      const paths = this.libraryService.getLibraryPaths();
+      if (paths?.libraryDir) {
+        roots.push(paths.libraryDir);
+      }
+    } catch (error) {
+      // Legacy app-data library dir is optional; if it can't be resolved we
+      // simply don't add it as a root (fail closed, never fail open).
+      this.logger.warn(`Could not resolve legacy library dir: ${(error as Error).message}`);
+    }
+
+    return roots;
+  }
+
+  /**
+   * True when `candidate` is a path we are allowed to read/serve: either it
+   * lives inside a known library root, or it exactly matches a media file
+   * already tracked in the database (videos are commonly referenced in place,
+   * outside the clips folder). Fails closed on any error — a client-supplied
+   * path is never trusted just because a lookup threw.
+   */
+  private isAllowedMediaPath(candidate: string): boolean {
+    if (isPathInsideRoots(candidate, this.getAllowedMediaRoots())) {
+      return true;
+    }
+
+    try {
+      const videos = this.databaseService.getAllVideos({ includeChildren: true });
+      return videos.some(
+        (v: any) => v.current_path && pathsEqual(String(v.current_path), candidate),
+      );
+    } catch (error) {
+      this.logger.warn(`Media path allowlist DB check failed: ${(error as Error).message}`);
+      return false;
+    }
   }
 
   /**
@@ -567,12 +621,21 @@ export class LibraryController {
       const imagePath = Buffer.from(encodedPath, 'base64').toString('utf-8');
       this.logger.log(`[Image] Decoded path: ${imagePath}`);
 
+      // SECURITY (A1): containment — only serve files inside a known library
+      // root (or tracked in the DB). Reject anything else with 403 so a LAN
+      // client cannot read arbitrary files off disk.
+      if (!this.isAllowedMediaPath(imagePath)) {
+        this.logger.warn(`[Image] Rejected out-of-root path: ${imagePath}`);
+        throw new HttpException('Access denied', HttpStatus.FORBIDDEN);
+      }
+
       // Check if file exists
       if (!existsSync(imagePath)) {
         throw new HttpException('Image file not found', HttpStatus.NOT_FOUND);
       }
 
-      // Determine content type from file extension
+      // Determine content type from file extension. This endpoint serves images
+      // ONLY — no application/octet-stream fallback for arbitrary file types.
       const ext = path.extname(imagePath).toLowerCase();
       const contentTypeMap: Record<string, string> = {
         '.jpg': 'image/jpeg',
@@ -584,7 +647,11 @@ export class LibraryController {
         '.svg': 'image/svg+xml',
         '.ico': 'image/x-icon',
       };
-      const contentType = contentTypeMap[ext] || 'application/octet-stream';
+      const contentType = contentTypeMap[ext];
+      if (!contentType) {
+        this.logger.warn(`[Image] Rejected non-image extension: ${ext || '(none)'}`);
+        throw new HttpException('Unsupported image type', HttpStatus.BAD_REQUEST);
+      }
 
       // Set headers and send file
       res.setHeader('Content-Type', contentType);
@@ -629,6 +696,14 @@ export class LibraryController {
       // Decode the base64-encoded path
       const videoPath = Buffer.from(encodedPath, 'base64').toString('utf-8');
       this.logger.log(`[Stream] Decoded path: ${videoPath}`);
+
+      // SECURITY (A1): containment — only stream files inside a known library
+      // root (or tracked in the DB). Reject anything else with 403 so a LAN
+      // client cannot read arbitrary files off disk.
+      if (!this.isAllowedMediaPath(videoPath)) {
+        this.logger.warn(`[Stream] Rejected out-of-root path: ${videoPath}`);
+        throw new HttpException('Access denied', HttpStatus.FORBIDDEN);
+      }
 
       // Check if file exists
       try {

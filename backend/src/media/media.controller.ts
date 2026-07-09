@@ -3,13 +3,28 @@
 import { Controller, Post, Get, Body, Query, HttpException, HttpStatus } from '@nestjs/common';
 import { MediaOperationsService } from './media-operations.service';
 import { WhisperManager } from './whisper-manager';
+import { LibraryManagerService } from '../database/library-manager.service';
+import { isPathInsideRoots } from '../common/utils/path-security.util';
 
 @Controller('media')
 export class MediaController {
   constructor(
     private readonly mediaOps: MediaOperationsService,
     private readonly whisperManager: WhisperManager,
+    private readonly libraryManager: LibraryManagerService,
   ) {}
+
+  /**
+   * Roots a download is allowed to write into. Every library's clips folder is
+   * a valid destination. Used to validate a client-supplied outputDir (A3) so a
+   * LAN client cannot force a write to an arbitrary location on disk.
+   */
+  private getAllowedDownloadRoots(): string[] {
+    return this.libraryManager
+      .getAllLibraries()
+      .map((lib) => lib.clipsFolderPath)
+      .filter((p): p is string => !!p);
+  }
 
   /**
    * Get video metadata without downloading
@@ -56,6 +71,16 @@ export class MediaController {
   ) {
     if (!body.url) {
       throw new HttpException('URL is required', HttpStatus.BAD_REQUEST);
+    }
+
+    // SECURITY (A3): if the client supplies an explicit outputDir, it must be
+    // contained within a known library clips folder. Reject arbitrary write
+    // destinations. When omitted, the service derives a safe destination.
+    if (body.outputDir && !isPathInsideRoots(body.outputDir, this.getAllowedDownloadRoots())) {
+      throw new HttpException(
+        'outputDir is not inside an allowed library folder',
+        HttpStatus.FORBIDDEN,
+      );
     }
 
     const result = await this.mediaOps.downloadVideo(body.url, body);

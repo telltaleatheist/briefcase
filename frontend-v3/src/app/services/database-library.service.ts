@@ -694,32 +694,30 @@ export class DatabaseLibraryService {
   /**
    * Get transcript for a video
    */
+  // NOTE (D1): a failed request must PROPAGATE, not resolve to null. Swallowing
+  // the error made a transient network failure look like "no transcript exists"
+  // — the owner's known "looks like the data was deleted" footgun. Callers must
+  // distinguish a real error from a genuinely-absent transcript. (The endpoint
+  // itself returns { exists:false } / null for genuinely-absent transcripts.)
   async getTranscript(videoId: string): Promise<DatabaseTranscript | null> {
-    try {
-      const baseUrl = await this.getBaseUrl();
-      return await firstValueFrom(
-        this.http.get<DatabaseTranscript>(`${baseUrl}/videos/${videoId}/transcript`)
-      );
-    } catch (error) {
-      console.error('[DatabaseLibraryService] Error getting transcript:', error);
-      return null;
-    }
+    const baseUrl = await this.getBaseUrl();
+    return await firstValueFrom(
+      this.http.get<DatabaseTranscript>(`${baseUrl}/videos/${videoId}/transcript`)
+    );
   }
 
   /**
    * Get analysis sections for a video
    */
+  // NOTE (D1): propagate on failure instead of returning []. An empty array must
+  // mean "there genuinely are no sections", never "the request failed". Callers
+  // surface the error distinctly (see video-preview.component.ts).
   async getAnalysisSections(videoId: string): Promise<DatabaseAnalysisSection[]> {
-    try {
-      const baseUrl = await this.getBaseUrl();
-      const result = await firstValueFrom(
-        this.http.get<{ sections: DatabaseAnalysisSection[]; count: number }>(`${baseUrl}/videos/${videoId}/sections`)
-      );
-      return result.sections;
-    } catch (error) {
-      console.error('[DatabaseLibraryService] Error getting analysis sections:', error);
-      return [];
-    }
+    const baseUrl = await this.getBaseUrl();
+    const result = await firstValueFrom(
+      this.http.get<{ sections: DatabaseAnalysisSection[]; count: number }>(`${baseUrl}/videos/${videoId}/sections`)
+    );
+    return result.sections;
   }
 
   /**
@@ -803,19 +801,16 @@ export class DatabaseLibraryService {
   /**
    * Get tags for a specific video
    */
+  // NOTE (D1): propagate on failure instead of returning []. An empty array must
+  // mean "no tags", never "the request failed".
   async getVideoTags(videoId: string): Promise<DatabaseTag[]> {
-    try {
-      const baseUrl = await this.getBaseUrl();
-      const result = await firstValueFrom(
-        this.http.get<{ tags: DatabaseTag[]; count: number }>(
-          `${baseUrl}/videos/${videoId}/tags`
-        )
-      );
-      return result.tags;
-    } catch (error) {
-      console.error('[DatabaseLibraryService] Error getting video tags:', error);
-      return [];
-    }
+    const baseUrl = await this.getBaseUrl();
+    const result = await firstValueFrom(
+      this.http.get<{ tags: DatabaseTag[]; count: number }>(
+        `${baseUrl}/videos/${videoId}/tags`
+      )
+    );
+    return result.tags;
   }
 
   /**
@@ -947,19 +942,16 @@ export class DatabaseLibraryService {
   /**
    * Get all children of a parent video
    */
+  // NOTE (D1): propagate on failure instead of returning []. An empty array must
+  // mean "no children", never "the request failed".
   async getChildVideos(parentId: string): Promise<DatabaseVideo[]> {
-    try {
-      const baseUrl = await this.getBaseUrl();
-      const response = await firstValueFrom(
-        this.http.get<{ success: boolean; children: DatabaseVideo[] }>(
-          `${baseUrl}/videos/${parentId}/children`
-        )
-      );
-      return response.children || [];
-    } catch (error) {
-      console.error('[DatabaseLibraryService] Error getting children:', error);
-      return [];
-    }
+    const baseUrl = await this.getBaseUrl();
+    const response = await firstValueFrom(
+      this.http.get<{ success: boolean; children: DatabaseVideo[] }>(
+        `${baseUrl}/videos/${parentId}/children`
+      )
+    );
+    return response.children;
   }
 
   /**

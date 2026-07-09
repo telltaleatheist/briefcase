@@ -51,6 +51,9 @@ let trayService: TrayService;
 let quitConfirmActive = false;
 let quitConfirmTimer: NodeJS.Timeout | undefined;
 let isQuittingForReal = false;
+// A4: guards the async shutdown so it runs exactly once, even though several
+// paths (before-quit, OS signals, uncaughtException) can trigger it.
+let cleanupStarted = false;
 const QUIT_CONFIRM_MS = 5000;
 
 /**
@@ -69,8 +72,10 @@ function setQuitConfirmVisible(visible: boolean): void {
 
 /**
  * Cleanup performed right before the app actually exits.
+ * A4: this is async and MUST be awaited — the backend is a child process that
+ * we have to fully terminate, otherwise it is orphaned when Electron exits.
  */
-function performQuitCleanup(): void {
+async function performQuitCleanup(): Promise<void> {
   log.info('Application is quitting...');
 
   // Set the quitting flag to allow windows to close
@@ -78,15 +83,35 @@ function performQuitCleanup(): void {
     windowService.setQuitting(true);
   }
 
-  // Shutdown backend service
-  if (backendService) {
-    backendService.shutdown();
-  }
-
-  // Destroy tray icon
+  // Destroy tray icon (synchronous)
   if (trayService) {
     trayService.destroy();
   }
+
+  // Shutdown backend service — await so the child process is actually gone
+  // before we exit.
+  if (backendService) {
+    try {
+      await backendService.shutdown();
+    } catch (err) {
+      log.error('Error shutting down backend during quit:', err);
+    }
+  }
+}
+
+/**
+ * A4: single, idempotent graceful-exit path. Prevents Electron from exiting
+ * before the backend child has been terminated. Uses app.exit() (not app.quit)
+ * so it does not re-enter the before-quit handler.
+ */
+async function gracefulExit(code: number): Promise<void> {
+  if (cleanupStarted) {
+    return;
+  }
+  cleanupStarted = true;
+  isQuittingForReal = true;
+  await performQuitCleanup();
+  app.exit(code);
 }
 
 // Configure logging - always log to file
@@ -99,31 +124,18 @@ LogUtil.cleanupOldLogs(7);
 // Handle process signals for graceful shutdown
 process.on('SIGTERM', () => {
   log.info('Received SIGTERM signal, initiating graceful shutdown...');
-  isQuittingForReal = true;
-  if (backendService) {
-    backendService.shutdown();
-  }
-  app.quit();
+  void gracefulExit(0);
 });
 
 process.on('SIGINT', () => {
   log.info('Received SIGINT signal, initiating graceful shutdown...');
-  isQuittingForReal = true;
-  if (backendService) {
-    backendService.shutdown();
-  }
-  app.quit();
+  void gracefulExit(0);
 });
 
 // Handle uncaught exceptions to prevent zombie processes
 process.on('uncaughtException', (error) => {
   log.error('Uncaught exception:', error);
-  isQuittingForReal = true;
-  if (backendService) {
-    backendService.shutdown();
-  }
-  app.quit();
-  process.exit(1);
+  void gracefulExit(1);
 });
 
 // Single instance lock - must be called before app.whenReady()
@@ -229,8 +241,12 @@ app.on('window-all-closed', () => {
 // Real shutdowns (tray "Quit", OS signals) bypass this and exit immediately.
 app.on('before-quit', (event) => {
   // Already confirmed by a signal, the tray menu, or a prior second press → exit.
+  // A4: prevent the default (immediate) quit, run the async cleanup so the
+  // backend child is fully terminated, then hard-exit. gracefulExit is
+  // idempotent, so a re-entrant before-quit is a no-op.
   if (isQuittingForReal || windowService?.shouldForceQuit()) {
-    performQuitCleanup();
+    event.preventDefault();
+    void gracefulExit(0);
     return;
   }
 
@@ -238,9 +254,9 @@ app.on('before-quit', (event) => {
   if (quitConfirmActive) {
     if (quitConfirmTimer) clearTimeout(quitConfirmTimer);
     quitConfirmActive = false;
-    isQuittingForReal = true;
     setQuitConfirmVisible(false);
-    performQuitCleanup();
+    event.preventDefault();
+    void gracefulExit(0);
     return;
   }
 

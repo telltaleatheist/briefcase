@@ -18,37 +18,68 @@ export class BackendService {
   private backendProcess: ChildProcess | null = null;
   private backendStarted: boolean = false;
   private lockFilePath: string;
+  private pidFilePath: string;
   private lockRelease: (() => Promise<void>) | null = null;
   private actualBackendPort: number = 3000;
 
   constructor() {
     this.lockFilePath = path.join(app.getPath('userData'), 'backend.lock');
+    this.pidFilePath = path.join(app.getPath('userData'), 'backend.pid');
   }
-  
+
   /**
-   * Kill any stale backend processes from previous runs
+   * Kill a process and its child tree by PID, platform-appropriately.
+   * The backend runs as the Electron binary with ELECTRON_RUN_AS_NODE=1, so it
+   * has no window title and cannot be matched by image name — we must target
+   * the exact PID we spawned.
    */
-  private async killStaleBackends(): Promise<void> {
-    try {
+  private async killProcessTree(pid: number): Promise<void> {
+    if (!Number.isInteger(pid) || pid <= 0) {
+      return;
+    }
+    if (process.platform === 'win32') {
+      // A6: taskkill tree-kills the PID and all its descendants. POSIX
+      // process.kill(-pid) group semantics do not apply on Windows.
       const { exec } = require('child_process');
       const util = require('util');
       const execPromise = util.promisify(exec);
+      try {
+        await execPromise(`taskkill /pid ${pid} /T /F`);
+      } catch (err) {
+        // Process may already be gone — that's fine.
+      }
+    } else {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch (err) {
+        // Process may already be dead — that's fine.
+      }
+    }
+  }
 
-      if (process.platform === 'win32') {
-        // Windows: Kill node processes running dist/main.js
-        try {
-          await execPromise('taskkill /F /IM node.exe /FI "WINDOWTITLE eq dist/main.js*"');
-        } catch (err) {
-          // Ignore errors - might not find any processes
-        }
-      } else {
-        // Unix-like: Kill node/electron processes running dist/main.js
-        try {
-          await execPromise('pkill -9 -f "node.*dist/main.js" || true');
-          await execPromise('pkill -9 -f "Electron.*dist/main.js" || true');
-        } catch (err) {
-          // Ignore errors - might not find any processes
-        }
+  /**
+   * Kill any stale backend process left over from a previous run.
+   * A5: we track the spawned PID in a pidfile rather than guessing by image
+   * name / window title (which never matched the real Electron-as-node process).
+   */
+  private async killStaleBackends(): Promise<void> {
+    try {
+      if (!fs.existsSync(this.pidFilePath)) {
+        return;
+      }
+
+      const raw = fs.readFileSync(this.pidFilePath, 'utf-8').trim();
+      const pid = parseInt(raw, 10);
+
+      if (Number.isInteger(pid) && pid > 0) {
+        log.info(`Found stale backend pidfile (pid ${pid}); killing it`);
+        await this.killProcessTree(pid);
+      }
+
+      try {
+        fs.unlinkSync(this.pidFilePath);
+      } catch (err) {
+        // Already gone — fine.
       }
 
       log.info('Cleaned up any stale backend processes');
@@ -222,9 +253,14 @@ export class BackendService {
    * Waits for both the HTTP server AND the library database to be initialized
    */
   private async checkBackendRunning(): Promise<{ ready: boolean; httpUp: boolean }> {
+    // A7: 0.0.0.0 is a bind address, not a connect address. Map it to localhost
+    // for the health check (mirrors getBackendUrl / server-config.backendUrl).
+    const configuredHost = ServerConfig.config.nestBackend.host;
+    const connectHost = configuredHost === '0.0.0.0' ? 'localhost' : configuredHost;
+
     return new Promise((resolve) => {
       const req = http.request({
-        hostname: ServerConfig.config.nestBackend.host,
+        hostname: connectHost,
         port: this.actualBackendPort,
         path: '/api',
         method: 'GET',
@@ -356,9 +392,19 @@ export class BackendService {
         stdio: 'pipe',
         cwd: workingDir
       });
-      
+
+      // A5: persist the real spawned PID so a future run (or a crash-orphaned
+      // process) can be found and killed by exact PID.
+      if (this.backendProcess.pid) {
+        try {
+          fs.writeFileSync(this.pidFilePath, String(this.backendProcess.pid));
+        } catch (err) {
+          log.warn(`Could not write backend pidfile: ${err}`);
+        }
+      }
+
       this.setupProcessEventHandlers();
-      
+
       return true;
       
     } catch (error) {
@@ -490,6 +536,16 @@ export class BackendService {
       }
     }
 
+    // Remove the pidfile now that the process is stopped, so the next run
+    // doesn't treat a dead PID as stale.
+    if (fs.existsSync(this.pidFilePath)) {
+      try {
+        fs.unlinkSync(this.pidFilePath);
+      } catch (err) {
+        log.warn(`Error removing backend pidfile: ${err}`);
+      }
+    }
+
     this.backendStarted = false;
   }
   
@@ -504,23 +560,11 @@ export class BackendService {
 
     await this.cleanup();
 
-    // Additional force kill for the specific PID if cleanup didn't fully terminate it
+    // Additional force kill for the specific PID (and its child tree) if
+    // cleanup didn't fully terminate it. A6: use a platform-correct tree kill
+    // instead of POSIX negative-PID group semantics (which throw on Windows).
     if (pid) {
-      // On Windows, kill the process group
-      if (process.platform === 'win32') {
-        try {
-          process.kill(-pid, 'SIGKILL');
-        } catch (err) {
-          // Process may already be dead, which is fine
-        }
-      } else {
-        // On Unix-like systems, try to force kill the specific PID
-        try {
-          process.kill(pid, 'SIGKILL');
-        } catch (err) {
-          // Process may already be dead, which is fine
-        }
-      }
+      await this.killProcessTree(pid);
     }
 
     this.backendProcess = null;
