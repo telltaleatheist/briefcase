@@ -67,7 +67,8 @@
     "!**/node_modules/@ffprobe-installer/**"
   ],
   "asarUnpack": [
-    "utilities/**"
+    "utilities/**",
+    "frontend-v3/dist/frontend-v3/**/*"
   ],
   "mac": {
     "category": "public.app-category.utilities",

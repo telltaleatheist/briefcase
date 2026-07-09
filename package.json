@@ -50,7 +50,7 @@
     "publish:mac:electron-x64": "electron-builder --mac --x64 --publish always",
     "version:bump": "npm version patch --no-git-tag-version",
     "version:bump:minor": "npm version minor --no-git-tag-version",
-    "publish:mac": "npm run clean:mac && npm run download:binaries && npm run install:ffmpeg:x64 && npm run build:all && npm run package:backend:prod && npm run publish:mac:electron-arm64 && npm run publish:mac:electron-x64 && node scripts/publish-app.js --mac",
+    "publish:mac": "npm run version:bump && npm run clean:mac && npm run download:binaries && npm run install:ffmpeg:x64 && npm run build:all && npm run package:backend:prod && npm run publish:mac:electron-arm64 && npm run publish:mac:electron-x64 && node scripts/publish-app.js --mac",
     "publish:app:dry:mac": "node scripts/publish-app.js --mac --dry-run",
     "publish:app:dry:win": "node scripts/publish-app.js --win --dry-run",
     "package:mac-arm64": "npm run clean:mac && npm run download:binaries && npm run build:all && npm run package:backend:prod && electron-builder --mac --arm64 --publish never",
@@ -62,7 +62,7 @@
     "package:mac-x64": "npm run clean:mac && npm run download:binaries && npm run install:ffmpeg:x64 && npm run build:all && npm run package:backend:prod && electron-builder --mac --x64 --publish never",
     "package:mac-x64:fast": "npm run download:binaries && npm run install:ffmpeg:x64 && npm run build:all && npm run package:backend:prod && electron-builder --mac --x64 --publish never",
     "package:win-x64": "npm run clean:win && npm run download:binaries && npm run build:all && npm run package:backend:prod && electron-builder --win --x64 --publish never",
-    "publish:win-x64": "npm run clean:win && npm run download:binaries && npm run build:all && npm run package:backend:prod && electron-builder --win --x64 --publish always && node scripts/publish-app.js --win",
+    "publish:win-x64": "npm run version:bump && npm run clean:win && npm run download:binaries && npm run build:all && npm run package:backend:prod && electron-builder --win --x64 --publish always && node scripts/publish-app.js --win",
     "package:win-x64:fast": "npm run download:binaries && npm run build:all && npm run package:backend:prod && electron-builder --win --x64 --publish never",
     "package:win-arm64": "npm run clean:win && npm run download:binaries && npm run build:all && npm run package:backend:prod && electron-builder --win --arm64 --publish never",
     "package:win-arm64:fast": "npm run download:binaries && npm run build:all && npm run package:backend:prod && electron-builder --win --arm64 --publish never",
@@ -199,7 +199,8 @@
       "!**/node_modules/@ffprobe-installer/**"
     ],
     "asarUnpack": [
-      "utilities/**"
+      "utilities/**",
+      "frontend-v3/dist/frontend-v3/**/*"
     ],
     "mac": {
       "category": "public.app-category.utilities",

@@ -76,6 +76,19 @@ export class EnvironmentUtil {
         // Packaged paths (inside app bundle)
         path.join(process.resourcesPath, 'frontend-v3', 'dist', 'frontend-v3', 'browser'),
         path.join(process.resourcesPath, 'frontend-v3', 'dist', 'frontend-v3'),
+
+        // Unpacked asar paths MUST come before the in-asar paths below.
+        // The backend runs as a plain Node process (ELECTRON_RUN_AS_NODE=1) with
+        // no asar filesystem support, so it cannot read files inside app.asar
+        // directly — Electron extracts them to a $TMPDIR scratch file, which the
+        // macOS temp reaper purges after ~3 days, breaking all served routes
+        // (404 on /editor, /library, etc.). Pointing FRONTEND_PATH at the
+        // unpacked copy keeps it on real, permanent disk. Requires the frontend
+        // to be listed in electron-builder "asarUnpack".
+        path.join(process.resourcesPath, 'app.asar.unpacked', 'frontend-v3', 'dist', 'frontend-v3', 'browser'),
+        path.join(process.resourcesPath, 'app.asar.unpacked', 'frontend-v3', 'dist', 'frontend-v3'),
+
+        // In-asar fallbacks (only safe for the asar-aware main process).
         path.join(process.resourcesPath, 'app.asar', 'frontend-v3', 'dist', 'frontend-v3', 'browser'),
         path.join(process.resourcesPath, 'app.asar', 'frontend-v3', 'dist', 'frontend-v3'),
         path.join(process.resourcesPath, 'app.asar.unpacked', 'frontend-v3'),
