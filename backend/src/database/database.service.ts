@@ -3362,11 +3362,38 @@ export class DatabaseService {
   }
 
   /**
+   * Rebuild a single video's tags_fts mirror from its remaining tags rows.
+   *
+   * tags_fts is a hand-maintained FTS5 table keyed only on (video_id, tag_name)
+   * — it has no tag id or source column, so a partial tag delete (one tag, or
+   * only AI tags) cannot be mirrored by a targeted `DELETE ... WHERE`. Instead we
+   * clear this video's mirror rows and re-insert one per surviving tag. Must be
+   * called inside a transaction alongside the tags-table delete so search can
+   * never observe a torn state. Caller holds the connection.
+   */
+  private rebuildTagsFtsForVideo(db: Database.Database, videoId: string): void {
+    db.prepare('DELETE FROM tags_fts WHERE video_id = ?').run(videoId);
+    const remaining = db
+      .prepare('SELECT tag_name FROM tags WHERE video_id = ?')
+      .all(videoId) as Array<{ tag_name: string }>;
+    const insert = db.prepare('INSERT INTO tags_fts (video_id, tag_name) VALUES (?, ?)');
+    for (const row of remaining) {
+      insert.run(videoId, row.tag_name);
+    }
+  }
+
+  /**
    * Delete only AI-generated tags for a video (preserves user-created tags)
    */
   deleteAITagsForVideo(videoId: string) {
     const db = this.ensureInitialized();
-    db.prepare('DELETE FROM tags WHERE video_id = ? AND source = ?').run(videoId, 'ai');
+    const txn = db.transaction((id: string) => {
+      db.prepare('DELETE FROM tags WHERE video_id = ? AND source = ?').run(id, 'ai');
+      // Partial delete → rebuild the FTS mirror from the surviving (user) tags so
+      // deleted AI tags don't linger as orphaned search hits.
+      this.rebuildTagsFtsForVideo(db, id);
+    });
+    txn(videoId);
     this.saveDatabase();
     this.logger.log(`Deleted AI-generated tags for video ${videoId}`);
   }
@@ -3376,7 +3403,17 @@ export class DatabaseService {
    */
   deleteTag(tagId: string) {
     const db = this.ensureInitialized();
-    db.prepare('DELETE FROM tags WHERE id = ?').run(tagId);
+    const txn = db.transaction((id: string) => {
+      // Capture the owning video BEFORE deleting so we know whose mirror to rebuild.
+      const row = db
+        .prepare('SELECT video_id FROM tags WHERE id = ?')
+        .get(id) as { video_id: string } | undefined;
+      db.prepare('DELETE FROM tags WHERE id = ?').run(id);
+      if (row) {
+        this.rebuildTagsFtsForVideo(db, row.video_id);
+      }
+    });
+    txn(tagId);
     this.saveDatabase();
     this.logger.log(`Deleted tag ${tagId}`);
   }
