@@ -3,6 +3,13 @@ import { Injectable, Logger } from '@nestjs/common';
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import { LlamaManager } from '../bridges';
+import {
+  AITaskKind,
+  temperatureForTask,
+  estimateNumCtx,
+  stripThinkTags,
+} from './model-utils';
+import { negotiateOllamaThink } from './ollama-capabilities';
 
 export interface AIProviderConfig {
   provider: 'local' | 'ollama' | 'claude' | 'openai';
@@ -109,18 +116,21 @@ export class AIProviderService {
   async generateText(
     prompt: string,
     config: AIProviderConfig,
+    task?: AITaskKind,
   ): Promise<AIResponse> {
-    this.logger.log(`Generating text with provider: ${config.provider}, model: ${config.model}`);
+    this.logger.log(`Generating text with provider: ${config.provider}, model: ${config.model}, task: ${task ?? 'unspecified'}`);
+
+    const temperature = temperatureForTask(task);
 
     switch (config.provider) {
       case 'local':
-        return this.generateWithLocal(prompt);
+        return this.generateWithLocal(prompt, temperature);
       case 'claude':
-        return this.generateWithClaude(prompt, config);
+        return this.generateWithClaude(prompt, config, temperature);
       case 'openai':
-        return this.generateWithOpenAI(prompt, config);
+        return this.generateWithOpenAI(prompt, config, temperature);
       case 'ollama':
-        return this.generateWithOllama(prompt, config);
+        return this.generateWithOllama(prompt, config, temperature);
       default:
         throw new Error(`Unsupported AI provider: ${config.provider}`);
     }
@@ -132,6 +142,7 @@ export class AIProviderService {
   private async generateWithClaude(
     prompt: string,
     config: AIProviderConfig,
+    temperature: number,
   ): Promise<AIResponse> {
     if (!config.apiKey) {
       throw new Error('Claude API key is required');
@@ -148,6 +159,7 @@ export class AIProviderService {
       const message = await this.anthropic.messages.create({
         model: config.model,
         max_tokens: 4096,
+        temperature,
         messages: [
           {
             role: 'user',
@@ -157,7 +169,7 @@ export class AIProviderService {
       });
 
       const textContent = message.content.find((block) => block.type === 'text');
-      const text = textContent && 'text' in textContent ? textContent.text : '';
+      const text = stripThinkTags(textContent && 'text' in textContent ? textContent.text : '');
 
       const inputTokens = message.usage.input_tokens;
       const outputTokens = message.usage.output_tokens;
@@ -188,6 +200,7 @@ export class AIProviderService {
   private async generateWithOpenAI(
     prompt: string,
     config: AIProviderConfig,
+    temperature: number,
   ): Promise<AIResponse> {
     if (!config.apiKey) {
       throw new Error('OpenAI API key is required');
@@ -210,9 +223,10 @@ export class AIProviderService {
           },
         ],
         max_tokens: 4096,
+        temperature,
       });
 
-      const text = completion.choices[0]?.message?.content || '';
+      const text = stripThinkTags(completion.choices[0]?.message?.content || '');
 
       const inputTokens = completion.usage?.prompt_tokens || 0;
       const outputTokens = completion.usage?.completion_tokens || 0;
@@ -244,23 +258,30 @@ export class AIProviderService {
   private async generateWithOllama(
     prompt: string,
     config: AIProviderConfig,
+    temperature: number,
   ): Promise<AIResponse> {
     const ollamaEndpoint = config.ollamaEndpoint || 'http://localhost:11434';
 
-    // Dynamically calculate num_ctx based on prompt size
-    // Rough estimate: 1 token ≈ 4 characters for English text
-    // Add buffer for output (4096 tokens) and round up to nearest 4K
-    const estimatedInputTokens = Math.ceil(prompt.length / 4);
-    const outputBuffer = 4096;
-    const rawContextNeeded = estimatedInputTokens + outputBuffer;
-    // Round up to nearest 4K and cap at 131072 (128K - most models' max)
-    const numCtx = Math.min(
-      Math.ceil(rawContextNeeded / 4096) * 4096,
-      131072,
-    );
+    // Negotiate thinking: analysis WANTS thinking-capable models (qwen3-class)
+    // to reason. Capable models get { think: true } and their chain-of-thought
+    // lands in the separate `thinking` response field (verified empirically);
+    // non-thinking models get no think field. A failed probe throws — no
+    // silent guessing.
+    const { fields: thinkFields, thinking } = await negotiateOllamaThink(ollamaEndpoint, config.model);
+
+    // num_predict must cover the generation that shares the context window with
+    // the prompt. Thinking burns tokens on reasoning we discard, so budget
+    // generously when active; otherwise these outputs are small JSON/text.
+    const numPredict = thinking ? 8192 : 2048;
+
+    // Bucketed, model-size-capped num_ctx: the old 131072 cap would allocate a
+    // full 128K KV cache and spill any real model to CPU. Bucketing avoids the
+    // full-model reload Ollama does on every num_ctx change.
+    const numCtx = estimateNumCtx(prompt.length, config.model, numPredict);
 
     this.logger.debug(
-      `Ollama context: prompt ~${estimatedInputTokens} tokens, requesting num_ctx=${numCtx}`,
+      `Ollama request: model=${config.model}, num_ctx=${numCtx}, num_predict=${numPredict}, ` +
+      `temperature=${temperature}, thinking=${thinking}`,
     );
 
     try {
@@ -273,8 +294,14 @@ export class AIProviderService {
           model: config.model,
           prompt: prompt,
           stream: false,
+          // Per-call keep_alive keeps the model resident across the whole job
+          // without needing an out-of-band ping timer.
+          keep_alive: '5m',
+          ...thinkFields,
           options: {
             num_ctx: numCtx,
+            num_predict: numPredict,
+            temperature,
           },
         }),
       });
@@ -285,21 +312,21 @@ export class AIProviderService {
 
       const data = await response.json();
 
-      // Ollama returns token counts in the response
-      // Fields: prompt_eval_count (input tokens), eval_count (output tokens)
+      // Read ONLY the `response` field — never concatenate `thinking`. Defensively
+      // strip any inline <think>…</think> for models whose template inlines it.
+      const text = stripThinkTags(typeof data.response === 'string' ? data.response : '');
+
+      // Ollama returns token counts: prompt_eval_count (input), eval_count (output)
       const inputTokens = data.prompt_eval_count || 0;
       const outputTokens = data.eval_count || 0;
       const tokensUsed = inputTokens + outputTokens;
 
-      // Debug: log raw Ollama response fields for token tracking
-      console.log(`[Ollama Response] prompt_eval_count=${data.prompt_eval_count}, eval_count=${data.eval_count}`);
-      console.log(`[Ollama Tokens] ${inputTokens} input + ${outputTokens} output = ${tokensUsed} total`);
       this.logger.log(
         `Ollama tokens: ${inputTokens} input + ${outputTokens} output = ${tokensUsed} total (local, $0.00)`,
       );
 
       return {
-        text: data.response,
+        text,
         tokensUsed,
         inputTokens,
         outputTokens,
@@ -316,26 +343,26 @@ export class AIProviderService {
   /**
    * Generate text using bundled local AI (Cogito 8B via llama.cpp)
    */
-  private async generateWithLocal(prompt: string): Promise<AIResponse> {
+  private async generateWithLocal(prompt: string, temperature: number): Promise<AIResponse> {
     if (!this.llamaManager.isAvailable()) {
       throw new Error('Local AI model not available. Please reinstall the application.');
     }
 
     try {
-      const result = await this.llamaManager.generateText(prompt);
+      const result = await this.llamaManager.generateText(prompt, { temperature });
 
       this.logger.log(
         `Local AI tokens: ${result.inputTokens} input + ${result.outputTokens} output = ${result.totalTokens} total (local, $0.00)`,
       );
 
       return {
-        text: result.text,
+        text: stripThinkTags(result.text),
         tokensUsed: result.totalTokens,
         inputTokens: result.inputTokens,
         outputTokens: result.outputTokens,
         estimatedCost: 0, // Local model is free
         provider: 'local',
-        model: 'cogito-8b',
+        model: result.model,
       };
     } catch (error) {
       this.logger.error(`Local AI error: ${(error as Error).message}`);

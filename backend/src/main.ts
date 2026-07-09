@@ -51,10 +51,12 @@ async function bootstrap() {
     // Allow any localhost port for development
     const port = environment.port || process.env.PORT || 3000;
 
+    // CORS policy is driven by environment (loopback-permissive by default,
+    // restricted + non-credentialed in LAN mode). See config/environment.ts.
     app.enableCors({
-      origin: true,  // Accept all origins for local network access
+      origin: environment.cors.origins,
       methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
-      credentials: true,
+      credentials: environment.cors.credentials,
       allowedHeaders: 'Content-Type, Accept, Authorization, Range',
       exposedHeaders: 'Content-Range, Accept-Ranges, Content-Length'
     });
@@ -83,16 +85,23 @@ async function bootstrap() {
     // filesystem paths or Node fs error codes leak to clients.
     app.useGlobalFilters(new AllExceptionsFilter());
 
-    // Port was already declared above for CORS configuration
-    await app.listen(port);
+    // Port was already declared above for CORS configuration.
+    // SECURITY (A2): bind to loopback by default; only bind all interfaces when
+    // LAN mode is explicitly opted in (BRIEFCASE_LAN=1). host resolves in
+    // config/environment.ts.
+    const host = environment.host;
+    await app.listen(port, host);
     log.info(`=== APPLICATION STARTED ===`);
-    log.info(`Server running on port ${port}`);
+    log.info(`Server running on ${host}:${port}${environment.lanMode ? ' (LAN mode — no auth)' : ' (loopback only)'}`);
     log.info(`API endpoint: http://localhost:${port}/${environment.apiPrefix}`);
     log.info('Note: Library initialization happens automatically via onModuleInit');
   } catch (error) {
     log.error('=== BOOTSTRAP ERROR ===');
     log.error('Error during application startup:', error);
     console.error(error);  // Additional console logging
+    // A9: exit non-zero so the Electron parent's health check fails fast and
+    // its retry/error path triggers, rather than hanging on a dead process.
+    process.exit(1);
   }
 }
 

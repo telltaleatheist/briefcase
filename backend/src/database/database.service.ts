@@ -968,8 +968,12 @@ export class DatabaseService {
     if (hasCreatedAt && (!hasUploadDate || !hasDownloadDate)) {
       this.logger.log('Running migration: Renaming created_at to upload_date and adding download_date');
       try {
-        // SQLite doesn't support column renaming directly, so we need to recreate the table
-        db.exec(`
+        // SQLite doesn't support column renaming directly, so we need to recreate the table.
+        // This is DESTRUCTIVE (it DROPs the videos table partway through), so it MUST be
+        // atomic: run it inside a transaction. If any statement fails, better-sqlite3 rolls
+        // the whole thing back, leaving the original videos table fully intact.
+        const rebuildVideosTable = db.transaction(() => {
+          db.exec(`
           -- Create new table with updated schema
           CREATE TABLE videos_new (
             id TEXT PRIMARY KEY,
@@ -1012,11 +1016,18 @@ export class DatabaseService {
           -- Rename new table to videos
           ALTER TABLE videos_new RENAME TO videos;
         `);
+        });
+        rebuildVideosTable();
 
         this.saveDatabase();
         this.logger.log('Migration complete: Renamed created_at to upload_date and added download_date');
       } catch (migrationError: any) {
-        this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+        // A failure here means the videos table may have been dropped/half-rebuilt.
+        // The transaction has already rolled back, so the DB is intact — but we must
+        // NOT swallow this and continue running against a schema we couldn't migrate.
+        // Fail loudly so startup aborts and the problem is visible.
+        this.logger.error(`Destructive videos-table migration failed and was rolled back: ${migrationError?.message || 'Unknown error'}`);
+        throw migrationError;
       }
     }
 
@@ -2913,7 +2924,20 @@ export class DatabaseService {
     // Delete associated thumbnail
     this.thumbnailService.deleteThumbnail(id);
 
-    db.prepare('DELETE FROM videos WHERE id = ?').run(id);
+    // Deleting the video row cascades to transcripts/analyses/tags/sections via
+    // FK ON DELETE CASCADE, but the FTS5 mirror tables are hand-maintained (no
+    // triggers) so their rows would be left orphaned. Delete every FTS row this
+    // video fed, then the video row, all in one transaction so we can never end
+    // up with a half-cleaned index.
+    const deleteVideoTxn = db.transaction((videoId: string) => {
+      db.prepare('DELETE FROM videos_fts WHERE video_id = ?').run(videoId);
+      db.prepare('DELETE FROM transcripts_fts WHERE video_id = ?').run(videoId);
+      db.prepare('DELETE FROM transcripts_soundex_fts WHERE video_id = ?').run(videoId);
+      db.prepare('DELETE FROM analyses_fts WHERE video_id = ?').run(videoId);
+      db.prepare('DELETE FROM tags_fts WHERE video_id = ?').run(videoId);
+      db.prepare('DELETE FROM videos WHERE id = ?').run(videoId);
+    });
+    deleteVideoTxn(id);
 
     this.saveDatabase();
 
@@ -2944,8 +2968,25 @@ export class DatabaseService {
     const videoIds = unlinkedVideos.map(v => v.id);
     this.thumbnailService.deleteThumbnails(videoIds);
 
-    // Delete all unlinked videos (CASCADE will handle related records)
-    db.prepare('DELETE FROM videos WHERE is_linked = 0').run();
+    // Delete all unlinked videos (CASCADE will handle related base-table records)
+    // plus their hand-maintained FTS5 mirror rows, in one transaction so the
+    // index can never drift from the videos table.
+    const pruneTxn = db.transaction((ids: string[]) => {
+      const ftsDeletes = [
+        db.prepare('DELETE FROM videos_fts WHERE video_id = ?'),
+        db.prepare('DELETE FROM transcripts_fts WHERE video_id = ?'),
+        db.prepare('DELETE FROM transcripts_soundex_fts WHERE video_id = ?'),
+        db.prepare('DELETE FROM analyses_fts WHERE video_id = ?'),
+        db.prepare('DELETE FROM tags_fts WHERE video_id = ?'),
+      ];
+      for (const id of ids) {
+        for (const stmt of ftsDeletes) {
+          stmt.run(id);
+        }
+      }
+      db.prepare('DELETE FROM videos WHERE is_linked = 0').run();
+    });
+    pruneTxn(videoIds);
 
     this.saveDatabase();
 
@@ -3264,10 +3305,17 @@ export class DatabaseService {
    */
   deleteAnalysis(videoId: string) {
     const db = this.ensureInitialized();
-    // Delete only AI-generated sections (preserve user-created custom markers)
-    this.deleteAIAnalysisSections(videoId);
-    // Then delete the analysis record
-    db.prepare('DELETE FROM analyses WHERE video_id = ?').run(videoId);
+    const txn = db.transaction((id: string) => {
+      // Delete only AI-generated sections (preserve user-created custom markers)
+      this.deleteAIAnalysisSections(id);
+      // Then delete the analysis record
+      db.prepare('DELETE FROM analyses WHERE video_id = ?').run(id);
+      // Remove the hand-maintained FTS mirror row (no trigger keeps it in sync)
+      db.prepare('DELETE FROM analyses_fts WHERE video_id = ?').run(id);
+      // Clear the denormalized flag so the videos table stays consistent
+      db.prepare('UPDATE videos SET has_analysis = 0 WHERE id = ?').run(id);
+    });
+    txn(videoId);
     this.logger.log(`Deleted AI analysis for video ${videoId}`);
   }
 
@@ -3304,8 +3352,34 @@ export class DatabaseService {
    */
   deleteTagsForVideo(videoId: string) {
     const db = this.ensureInitialized();
-    db.prepare('DELETE FROM tags WHERE video_id = ?').run(videoId);
+    const txn = db.transaction((id: string) => {
+      db.prepare('DELETE FROM tags WHERE video_id = ?').run(id);
+      // This removes ALL of the video's tags, so its whole tags_fts mirror goes too
+      db.prepare('DELETE FROM tags_fts WHERE video_id = ?').run(id);
+    });
+    txn(videoId);
     this.logger.log(`Deleted tags for video ${videoId}`);
+  }
+
+  /**
+   * Rebuild a single video's tags_fts mirror from its remaining tags rows.
+   *
+   * tags_fts is a hand-maintained FTS5 table keyed only on (video_id, tag_name)
+   * — it has no tag id or source column, so a partial tag delete (one tag, or
+   * only AI tags) cannot be mirrored by a targeted `DELETE ... WHERE`. Instead we
+   * clear this video's mirror rows and re-insert one per surviving tag. Must be
+   * called inside a transaction alongside the tags-table delete so search can
+   * never observe a torn state. Caller holds the connection.
+   */
+  private rebuildTagsFtsForVideo(db: Database.Database, videoId: string): void {
+    db.prepare('DELETE FROM tags_fts WHERE video_id = ?').run(videoId);
+    const remaining = db
+      .prepare('SELECT tag_name FROM tags WHERE video_id = ?')
+      .all(videoId) as Array<{ tag_name: string }>;
+    const insert = db.prepare('INSERT INTO tags_fts (video_id, tag_name) VALUES (?, ?)');
+    for (const row of remaining) {
+      insert.run(videoId, row.tag_name);
+    }
   }
 
   /**
@@ -3313,7 +3387,13 @@ export class DatabaseService {
    */
   deleteAITagsForVideo(videoId: string) {
     const db = this.ensureInitialized();
-    db.prepare('DELETE FROM tags WHERE video_id = ? AND source = ?').run(videoId, 'ai');
+    const txn = db.transaction((id: string) => {
+      db.prepare('DELETE FROM tags WHERE video_id = ? AND source = ?').run(id, 'ai');
+      // Partial delete → rebuild the FTS mirror from the surviving (user) tags so
+      // deleted AI tags don't linger as orphaned search hits.
+      this.rebuildTagsFtsForVideo(db, id);
+    });
+    txn(videoId);
     this.saveDatabase();
     this.logger.log(`Deleted AI-generated tags for video ${videoId}`);
   }
@@ -3323,7 +3403,17 @@ export class DatabaseService {
    */
   deleteTag(tagId: string) {
     const db = this.ensureInitialized();
-    db.prepare('DELETE FROM tags WHERE id = ?').run(tagId);
+    const txn = db.transaction((id: string) => {
+      // Capture the owning video BEFORE deleting so we know whose mirror to rebuild.
+      const row = db
+        .prepare('SELECT video_id FROM tags WHERE id = ?')
+        .get(id) as { video_id: string } | undefined;
+      db.prepare('DELETE FROM tags WHERE id = ?').run(id);
+      if (row) {
+        this.rebuildTagsFtsForVideo(db, row.video_id);
+      }
+    });
+    txn(tagId);
     this.saveDatabase();
     this.logger.log(`Deleted tag ${tagId}`);
   }
@@ -3333,7 +3423,15 @@ export class DatabaseService {
    */
   deleteTranscript(videoId: string) {
     const db = this.ensureInitialized();
-    db.prepare('DELETE FROM transcripts WHERE video_id = ?').run(videoId);
+    const txn = db.transaction((id: string) => {
+      db.prepare('DELETE FROM transcripts WHERE video_id = ?').run(id);
+      // Remove the hand-maintained FTS mirror rows this transcript fed
+      db.prepare('DELETE FROM transcripts_fts WHERE video_id = ?').run(id);
+      db.prepare('DELETE FROM transcripts_soundex_fts WHERE video_id = ?').run(id);
+      // Clear the denormalized flag so the videos table stays consistent
+      db.prepare('UPDATE videos SET has_transcript = 0 WHERE id = ?').run(id);
+    });
+    txn(videoId);
     this.logger.log(`Deleted transcript for video ${videoId}`);
   }
 

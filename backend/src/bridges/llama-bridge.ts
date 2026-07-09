@@ -36,6 +36,13 @@ export interface LlamaGenerateResult {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
+  /** The actual local model that served the request (derived from the loaded file). */
+  model: string;
+}
+
+export interface LlamaGenerateOptions {
+  /** Sampling temperature. JSON tasks want ~0.15; free text a little higher. */
+  temperature?: number;
 }
 
 export class LlamaBridge extends EventEmitter {
@@ -354,7 +361,7 @@ export class LlamaBridge extends EventEmitter {
   /**
    * Generate text using the server's OpenAI-compatible API
    */
-  async generateText(prompt: string): Promise<LlamaGenerateResult> {
+  async generateText(prompt: string, options?: LlamaGenerateOptions): Promise<LlamaGenerateResult> {
     // Ensure server is running
     if (!this.isServerReady()) {
       await this.startServer();
@@ -362,6 +369,14 @@ export class LlamaBridge extends EventEmitter {
 
     this.resetIdleTimer();
     this.emitProgress('generating', 50, 'Generating response...');
+
+    // Report the model actually loaded, not a hardcoded name. The OpenAI-compat
+    // `model` field is informational (llama-server serves whatever -m loaded).
+    const modelName = this.currentModelPath
+      ? path.basename(this.currentModelPath).replace(/\.gguf$/i, '')
+      : 'local-model';
+    // Per-task temperature (default low: this path is used for JSON extraction).
+    const temperature = options?.temperature ?? 0.2;
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.REQUEST_TIMEOUT_MS);
@@ -371,10 +386,10 @@ export class LlamaBridge extends EventEmitter {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'cogito-8b',
+          model: modelName,
           messages: [{ role: 'user', content: prompt }],
           max_tokens: 4096,
-          temperature: 0.7,
+          temperature,
         }),
         signal: controller.signal,
       });
@@ -398,6 +413,7 @@ export class LlamaBridge extends EventEmitter {
         inputTokens,
         outputTokens,
         totalTokens: inputTokens + outputTokens,
+        model: modelName,
       };
     } catch (error: any) {
       clearTimeout(timeout);

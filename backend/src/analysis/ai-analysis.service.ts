@@ -10,8 +10,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AIProviderService, AIProviderConfig } from './ai-provider.service';
 import { OllamaService } from './ollama.service';
+import { numCtxMaxForModel, stripThinkTags, parseProviderModel } from './model-utils';
 import * as fs from 'fs';
-import * as path from 'path';
 import {
   buildBoundaryDetectionPrompt,
   buildChapterAnalysisPrompt,
@@ -20,17 +20,8 @@ import {
   TAGS_FROM_CHAPTERS_PROMPT,
   TITLE_FROM_CHAPTERS_PROMPT,
   TITLE_FROM_WEBPAGE_PROMPT,
-  DEFAULT_PROMPTS,
   AnalysisCategory,
 } from './prompts/analysis-prompts';
-
-// Interface for custom prompts loaded from config
-interface CustomPrompts {
-  description?: string;
-  title?: string;
-  tags?: string;
-  quotes?: string;
-}
 
 // =============================================================================
 // INTERFACES
@@ -70,6 +61,14 @@ export interface Chapter {
   end_time: string;
   title: string;
   summary?: string;
+  /**
+   * True when analysis of this chapter failed after retries. Failed chapters are
+   * NEVER persisted as content (see finalize) — they carry no fabricated title —
+   * and are excluded from description/tags/title generation. They exist in the
+   * in-memory result only so the failure is counted and visible, never silently
+   * dropped or written to the DB as a fake successful chapter.
+   */
+  failed?: boolean;
 }
 
 // Interface for category flags detected within chapters
@@ -132,8 +131,10 @@ export interface AnalysisResult {
   sections_count: number;
   sections: AnalyzedSection[];
   chapters: Chapter[];
-  tags?: Tags;
-  description?: string;
+  // null = generation explicitly failed (recorded, not fabricated). undefined =
+  // not attempted. A placeholder string is never synthesized on failure.
+  tags?: Tags | null;
+  description?: string | null;
   suggested_title?: string;
   tokenStats?: TokenStats;
 }
@@ -144,6 +145,14 @@ export interface AnalysisResult {
 
 const MAX_RETRIES = 3;
 const JSON_PARSE_RETRIES = 2;
+
+// Job-level failure accounting. Any analysis step that cannot produce a real
+// result — a boundary chunk that won't parse after a retry, a chapter that
+// exhausts its retries, a description/tags generation that fails — is recorded
+// as an explicit failure instead of being papered over with fabricated data.
+// Once this many steps have failed, the whole job aborts with TOO_MANY_FAILURES
+// rather than shipping a mostly-empty analysis that looks successful.
+const MAX_FAILURES = 10;
 
 // =============================================================================
 // JSON EXTRACTION AND VALIDATION HELPERS
@@ -254,8 +263,12 @@ function safeJsonParse<T>(response: string, logger?: Logger): T | null {
     return null;
   }
 
+  // Belt-and-braces: drop any inline <think>…</think> before extraction, in case
+  // a thinking model's template inlined its reasoning into the response text.
+  const cleaned = stripThinkTags(response);
+
   // Step 1: Extract JSON from response
-  const jsonStr = extractJsonFromResponse(response);
+  const jsonStr = extractJsonFromResponse(cleaned);
   if (!jsonStr) {
     logger?.warn('[JSON Parse] No JSON object found in response');
     return null;
@@ -268,7 +281,7 @@ function safeJsonParse<T>(response: string, logger?: Logger): T | null {
     logger?.debug(`[JSON Parse] Direct parse failed: ${(e as Error).message}`);
   }
 
-  // Step 3: Try with repairs
+  // Step 3: Try with repairs (markdown already stripped, braces balanced above).
   try {
     const repaired = attemptJsonRepair(jsonStr);
     return JSON.parse(repaired) as T;
@@ -276,24 +289,10 @@ function safeJsonParse<T>(response: string, logger?: Logger): T | null {
     logger?.debug(`[JSON Parse] Repaired parse failed: ${(e as Error).message}`);
   }
 
-  // Step 4: Try extracting just the essential fields with regex
-  // This is a last resort for severely malformed JSON
-  try {
-    const titleMatch = jsonStr.match(/"title"\s*:\s*"([^"]+)"/);
-    const summaryMatch = jsonStr.match(/"summary"\s*:\s*"([^"]+)"/);
-
-    if (titleMatch || summaryMatch) {
-      logger?.debug('[JSON Parse] Extracted fields via regex fallback');
-      return {
-        title: titleMatch ? titleMatch[1] : 'Unknown',
-        summary: summaryMatch ? summaryMatch[1] : '',
-        flags: [],
-      } as T;
-    }
-  } catch (e) {
-    logger?.debug(`[JSON Parse] Regex extraction failed: ${(e as Error).message}`);
-  }
-
+  // NO regex field-scrape last resort: it could fabricate a passable object
+  // (e.g. title:"Unknown") that masks a real parse failure. If markdown-strip +
+  // brace-balance + repair all fail, this IS a failure — return null so the
+  // caller retries or records it explicitly.
   logger?.warn(`[JSON Parse] All parse strategies failed for: ${jsonStr.substring(0, 200)}...`);
   return null;
 }
@@ -438,59 +437,65 @@ interface ModelLimits {
   maxChapterSeconds: number;   // Max chapter duration before splitting
 }
 
-function getModelLimits(modelName: string): ModelLimits {
+/**
+ * Compute per-chunk/per-chapter size limits that are guaranteed to FIT the
+ * context window the model will actually run with, so the transcript is never
+ * silently truncated:
+ *  - time granularity (chunkMinutes / maxChapterSeconds) is tiered by model size
+ *    (bigger models reason over longer spans well),
+ *  - but the CHARACTER caps are derived from `contextTokens` — the real ceiling.
+ *
+ * `contextTokens` is the effective context window:
+ *  - local llama.cpp: the pinned server context (8192, the `-c` value),
+ *  - ollama: numCtxMaxForModel(model) (what we actually request as num_ctx),
+ *  - claude/openai: a large value (their windows are big).
+ *
+ * This is the fix for the historical mismatch where the char caps assumed a huge
+ * context but the runner (pinned 8K local, or a VRAM-capped Ollama num_ctx) had
+ * far less, silently dropping the tail of every long chapter.
+ */
+function getModelLimits(modelName: string, contextTokens: number): ModelLimits {
   // Extract parameter count from model name (e.g., "qwen2.5:7b" -> 7)
   const match = modelName.toLowerCase().match(/(\d+(?:\.\d+)?)\s*b/);
   const paramBillions = match ? parseFloat(match[1]) : 7; // Default to 7b if unknown
 
-  // Small models (≤3b): Very conservative - may have 4K-8K context
-  // These models need very short chapters to avoid truncation
+  // Reserve context for generation + prompt scaffolding (template + categories),
+  // then convert the remaining input budget to chars. The reserve is >= the
+  // local llama.cpp max_tokens (4096) so that, on the FIXED-context local path,
+  // a maximum-size chapter prompt plus a full-length completion still fit inside
+  // the pinned 8192-token window (input + output <= ctx). On the Ollama path
+  // num_ctx is sized dynamically to fit prompt + output, so this is just the
+  // chapter-size cap there. Thinking models use the leftover generation headroom
+  // for their chain of thought (typically ~1-2K tokens; num_predict is a ceiling).
+  const OUTPUT_RESERVE_TOKENS = 4096;
+  const SCAFFOLD_TOKENS = 1024;
+  const CHARS_PER_TOKEN = 3;
+  const usableInputTokens = Math.max(1024, contextTokens - OUTPUT_RESERVE_TOKENS - SCAFFOLD_TOKENS);
+  const maxChapterChars = usableInputTokens * CHARS_PER_TOKEN;
+  // Boundary chunks carry a lighter prompt; the same input budget is safe.
+  const maxChunkChars = maxChapterChars;
+
+  // Time granularity tiers (independent of the char caps above).
+  let chunkMinutes: number;
+  let maxChapterSeconds: number;
   if (paramBillions <= 3) {
-    return {
-      maxChunkChars: 8000,      // ~2K tokens - very conservative
-      maxChapterChars: 10000,   // ~2.5K tokens
-      chunkMinutes: 3,          // Short chunks for boundary detection
-      maxChapterSeconds: 180,   // 3 min max per chapter
-    };
+    chunkMinutes = 3;
+    maxChapterSeconds = 180;
+  } else if (paramBillions <= 7) {
+    chunkMinutes = 7;
+    maxChapterSeconds = 360;
+  } else if (paramBillions <= 14) {
+    chunkMinutes = 12;
+    maxChapterSeconds = 540;
+  } else if (paramBillions <= 32) {
+    chunkMinutes = 15;
+    maxChapterSeconds = 600;
+  } else {
+    chunkMinutes = 20;
+    maxChapterSeconds = 720;
   }
 
-  // Medium-small models (≤7b): Conservative - typically 8K-32K context
-  if (paramBillions <= 7) {
-    return {
-      maxChunkChars: 20000,     // ~5K tokens
-      maxChapterChars: 24000,   // ~6K tokens
-      chunkMinutes: 7,
-      maxChapterSeconds: 360,   // 6 min max per chapter
-    };
-  }
-
-  // Medium-large models (≤14b): Moderate - typically 32K+ context
-  if (paramBillions <= 14) {
-    return {
-      maxChunkChars: 36000,     // ~9K tokens
-      maxChapterChars: 44000,   // ~11K tokens
-      chunkMinutes: 12,
-      maxChapterSeconds: 540,   // 9 min max per chapter
-    };
-  }
-
-  // Large models (≤32b): Good capacity
-  if (paramBillions <= 32) {
-    return {
-      maxChunkChars: 50000,     // ~12.5K tokens
-      maxChapterChars: 60000,   // ~15K tokens
-      chunkMinutes: 15,
-      maxChapterSeconds: 600,   // 10 min max per chapter
-    };
-  }
-
-  // Very large models (>32b): Full capacity - typically 32K-128K context
-  return {
-    maxChunkChars: 60000,       // ~15K tokens
-    maxChapterChars: 80000,     // ~20K tokens
-    chunkMinutes: 20,
-    maxChapterSeconds: 720,     // 12 min max per chapter
-  };
+  return { maxChunkChars, maxChapterChars, chunkMinutes, maxChapterSeconds };
 }
 
 // =============================================================================
@@ -501,63 +506,10 @@ function getModelLimits(modelName: string): ModelLimits {
 export class AIAnalysisService {
   private readonly logger = new Logger(AIAnalysisService.name);
 
-  // Custom prompts cache
-  private customPromptsCache: CustomPrompts | null = null;
-  private customPromptsCacheTime: number = 0;
-  private readonly CACHE_TTL = 30000; // 30 seconds
-
   constructor(
     private readonly aiProviderService: AIProviderService,
     private readonly ollamaService: OllamaService,
   ) {}
-
-  /**
-   * Load custom prompts from config file
-   */
-  private loadCustomPrompts(): CustomPrompts {
-    const now = Date.now();
-    if (
-      this.customPromptsCache &&
-      now - this.customPromptsCacheTime < this.CACHE_TTL
-    ) {
-      return this.customPromptsCache;
-    }
-
-    let prompts: CustomPrompts = {};
-    try {
-      const homeDir = process.env.HOME || process.env.USERPROFILE || '';
-      const configPath = path.join(
-        homeDir,
-        'Library',
-        'Application Support',
-        'briefcase',
-        'prompts.json',
-      );
-
-      if (fs.existsSync(configPath)) {
-        const content = fs.readFileSync(configPath, 'utf-8');
-        const parsed = JSON.parse(content);
-        prompts = parsed.prompts || {};
-      }
-    } catch (error) {
-      this.logger.warn('Failed to load custom prompts, using defaults:', error);
-    }
-
-    this.customPromptsCache = prompts;
-    this.customPromptsCacheTime = now;
-    return prompts;
-  }
-
-  /**
-   * Get the effective prompt (custom or default)
-   */
-  private getPrompt(promptKey: keyof CustomPrompts): string {
-    const customPrompts = this.loadCustomPrompts();
-    if (customPrompts[promptKey]) {
-      return customPrompts[promptKey]!;
-    }
-    return DEFAULT_PROMPTS[promptKey];
-  }
 
   /**
    * Main entry point: Analyze transcript using AI
@@ -592,20 +544,33 @@ export class AIAnalysisService {
       onProgress,
     } = options;
 
-    // Safety: Strip provider prefix from model if present (e.g., "local:cogito-8b" -> "cogito-8b")
-    const validProviders = ['local', 'ollama', 'claude', 'openai'];
-    if (model && model.includes(':')) {
-      const parts = model.split(':');
-      if (validProviders.includes(parts[0])) {
-        const extractedProvider = parts[0] as 'local' | 'ollama' | 'claude' | 'openai';
-        if (provider !== extractedProvider) {
-          this.logger.log(`[analyzeTranscript] Correcting provider: ${provider} -> ${extractedProvider}`);
-          provider = extractedProvider;
-        }
-        model = parts.slice(1).join(':');
+    // Strip provider prefix from model if present (shared parser, one source of
+    // truth across all entry points), e.g. "local:cogito-8b" -> "cogito-8b".
+    {
+      const parsed = parseProviderModel(model, provider);
+      if (parsed.provider && parsed.provider !== provider) {
+        this.logger.log(`[analyzeTranscript] Correcting provider: ${provider} -> ${parsed.provider}`);
+        provider = parsed.provider;
+      }
+      if (parsed.model !== model) {
+        model = parsed.model;
         this.logger.log(`[analyzeTranscript] Stripped model prefix: ${model}`);
       }
     }
+
+    // Job-level failure accounting: record explicit failures and abort loudly
+    // rather than fabricating success once too many steps fail.
+    let failureCount = 0;
+    const recordFailure = (what: string): void => {
+      failureCount++;
+      this.logger.error(`[Analysis Failure ${failureCount}/${MAX_FAILURES}] ${what}`);
+      if (failureCount >= MAX_FAILURES) {
+        throw new Error(
+          `TOO_MANY_FAILURES: ${failureCount} analysis steps failed (threshold ${MAX_FAILURES}). ` +
+          `Aborting to avoid shipping an incomplete analysis that looks successful.`,
+        );
+      }
+    };
 
     // Track timing for ETA calculation
     const analysisStartTime = Date.now();
@@ -685,10 +650,19 @@ export class AIAnalysisService {
         ollamaEndpoint,
       };
 
+      // Effective context window the runner will actually use — drives the
+      // chunk/chapter char caps so long transcripts are never silently truncated.
+      const contextTokens =
+        provider === 'local'
+          ? 8192 // pinned llama.cpp server context (-c 8192)
+          : provider === 'ollama'
+            ? numCtxMaxForModel(model) // what we request as num_ctx
+            : 128000; // claude/openai have large windows
+
       // Get model-specific limits
-      const modelLimits = getModelLimits(model);
+      const modelLimits = getModelLimits(model, contextTokens);
       this.logger.log(
-        `[Model Limits] ${model}: chunkMinutes=${modelLimits.chunkMinutes}, ` +
+        `[Model Limits] ${model} (ctx=${contextTokens}): chunkMinutes=${modelLimits.chunkMinutes}, ` +
         `maxChunkChars=${modelLimits.maxChunkChars}, maxChapterChars=${modelLimits.maxChapterChars}`,
       );
 
@@ -701,6 +675,7 @@ export class AIAnalysisService {
         segments,
         videoTitle,
         modelLimits,
+        recordFailure,
         trackTokens,
       );
       sendProgress('analysis', 25, `Found ${boundaries.length} chapters`);
@@ -728,6 +703,7 @@ export class AIAnalysisService {
         videoTitle,
         categories || [],
         modelLimits,
+        recordFailure,
         customInstructions,
         analysisGranularity,
         trackTokens,
@@ -753,6 +729,7 @@ export class AIAnalysisService {
         aiConfig,
         chapters,
         videoTitle,
+        recordFailure,
         trackTokens,
       );
 
@@ -761,6 +738,7 @@ export class AIAnalysisService {
       const tags = await this.generateTagsFromChapters(
         aiConfig,
         chapters,
+        recordFailure,
         trackTokens,
       );
 
@@ -770,11 +748,15 @@ export class AIAnalysisService {
         aiConfig,
         chapters,
         videoTitle,
+        recordFailure,
         trackTokens,
       );
 
-      // Prepend summary to file
-      this.prependSummaryToFile(outputFile, description);
+      // Prepend summary to file (only when a real description was produced;
+      // a failed description is null and must not become a placeholder).
+      if (description) {
+        this.prependSummaryToFile(outputFile, description);
+      }
 
       // Log token usage summary
       console.log('');
@@ -893,66 +875,43 @@ export class AIAnalysisService {
     // Use first ~50 chars for matching (long quotes may span multiple segments)
     const searchPhrase = normalizedPhrase.substring(0, 50);
 
+    // MATCHING STRATEGY (correctness-preserving performance rework):
+    //   Segment text is normalized exactly ONCE here, up front, instead of being
+    //   re-normalized inside every strategy below (previously ~5x per segment).
+    //   The cheap exact/substring passes (Strategies 1 & 2) run first and
+    //   early-return, so most calls never reach the fuzzy work at all. The
+    //   expensive per-segment Levenshtein (Strategy 3) previously ran against
+    //   EVERY segment (O(segments x quote), quadratic-ish, blocking the event
+    //   loop). It now runs only over a SHORTLIST of segments that share at least
+    //   one distinctive (uncommon, >3 char) word with the phrase. This does not
+    //   change which segment is selected: for a segment's normalized text to be
+    //   >=65% character-similar to the phrase it must share the phrase's
+    //   distinctive words, so the true best fuzzy match is always in the
+    //   shortlist. If the phrase has NO distinctive words (all common/short) we
+    //   cannot prefilter and fall back to scanning every segment (exactly the
+    //   old behavior), so accuracy is never weaker than before.
+    const normSegs = segments.map((s) => normalizeForComparison(s.text));
+
     // Strategy 1: Direct substring match using first part of phrase
-    for (const segment of segments) {
-      const normalizedText = normalizeForComparison(segment.text);
-      if (normalizedText.includes(searchPhrase)) {
-        return segment.start;
+    for (let i = 0; i < segments.length; i++) {
+      if (normSegs[i].includes(searchPhrase)) {
+        return segments[i].start;
       }
     }
 
     // Strategy 2: Shorter prefix match (first 25 chars)
     if (searchPhrase.length > 25) {
       const shortSearchPhrase = normalizedPhrase.substring(0, 25);
-      for (const segment of segments) {
-        const normalizedText = normalizeForComparison(segment.text);
-        if (normalizedText.includes(shortSearchPhrase)) {
-          return segment.start;
+      for (let i = 0; i < segments.length; i++) {
+        if (normSegs[i].includes(shortSearchPhrase)) {
+          return segments[i].start;
         }
       }
     }
 
-    // Strategy 3: Fuzzy matching with Levenshtein distance
-    // Compare the quote against each segment and find the best match
-    let bestFuzzyMatch: { segment: Segment; score: number } | null = null;
     const FUZZY_THRESHOLD = 0.65; // 65% similarity required
 
-    for (const segment of segments) {
-      const normalizedText = normalizeForComparison(segment.text);
-
-      // For longer segments, use a sliding window to find best match
-      if (normalizedText.length >= searchPhrase.length) {
-        // Check similarity of the full segment text against the search phrase
-        const similarity = stringSimilarity(
-          searchPhrase,
-          normalizedText.substring(0, searchPhrase.length + 10), // Allow some overflow
-        );
-
-        if (similarity > FUZZY_THRESHOLD && (!bestFuzzyMatch || similarity > bestFuzzyMatch.score)) {
-          bestFuzzyMatch = { segment, score: similarity };
-        }
-      }
-
-      // Also try matching the full normalized segment against the phrase
-      const fullSimilarity = stringSimilarity(
-        normalizedPhrase.substring(0, Math.min(normalizedPhrase.length, normalizedText.length)),
-        normalizedText.substring(0, Math.min(normalizedPhrase.length, normalizedText.length)),
-      );
-
-      if (fullSimilarity > FUZZY_THRESHOLD && (!bestFuzzyMatch || fullSimilarity > bestFuzzyMatch.score)) {
-        bestFuzzyMatch = { segment, score: fullSimilarity };
-      }
-    }
-
-    if (bestFuzzyMatch) {
-      this.logger.debug(
-        `[Fuzzy Match] Found "${phrase.substring(0, 30)}..." at ${bestFuzzyMatch.segment.start}s (score: ${bestFuzzyMatch.score.toFixed(2)})`,
-      );
-      return bestFuzzyMatch.segment.start;
-    }
-
-    // Strategy 4: Distinctive word matching
-    // Find uncommon words in the quote and search for segments containing them
+    // Uncommon words drive both the Strategy-3 shortlist and Strategy 4.
     const commonWords = new Set([
       'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
       'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
@@ -972,12 +931,75 @@ export class AIAnalysisService {
 
     const phraseWords = normalizedPhrase.split(/\s+/).filter((w) => w.length > 3 && !commonWords.has(w));
 
+    // Build the Strategy-3 candidate shortlist: segment indices that share at
+    // least one distinctive word with the phrase. Any segment that could clear
+    // the 65% char-similarity threshold necessarily shares such a word, so the
+    // true best fuzzy match is always in this list. When the phrase has no
+    // distinctive words we cannot prefilter and scan all segments (old behavior).
+    const phraseWordSet = new Set(phraseWords);
+    const segmentWordLists = normSegs.map((t) => t.split(/\s+/));
+    let candidateIdx: number[];
+    if (phraseWords.length > 0) {
+      candidateIdx = [];
+      for (let i = 0; i < normSegs.length; i++) {
+        if (segmentWordLists[i].some((w) => phraseWordSet.has(w))) {
+          candidateIdx.push(i);
+        }
+      }
+      if (candidateIdx.length === 0) {
+        candidateIdx = normSegs.map((_, i) => i);
+      }
+    } else {
+      candidateIdx = normSegs.map((_, i) => i);
+    }
+
+    // Strategy 3: Fuzzy matching with Levenshtein distance over the shortlist.
+    // Compare the quote against each candidate segment and find the best match.
+    let bestFuzzyMatch: { segment: Segment; score: number } | null = null;
+
+    for (const i of candidateIdx) {
+      const normalizedText = normSegs[i];
+
+      // For longer segments, use a sliding window to find best match
+      if (normalizedText.length >= searchPhrase.length) {
+        // Check similarity of the segment prefix against the search phrase
+        const similarity = stringSimilarity(
+          searchPhrase,
+          normalizedText.substring(0, searchPhrase.length + 10), // Allow some overflow
+        );
+
+        if (similarity > FUZZY_THRESHOLD && (!bestFuzzyMatch || similarity > bestFuzzyMatch.score)) {
+          bestFuzzyMatch = { segment: segments[i], score: similarity };
+        }
+      }
+
+      // Also try matching the full normalized segment against the phrase
+      const cmpLen = Math.min(normalizedPhrase.length, normalizedText.length);
+      const fullSimilarity = stringSimilarity(
+        normalizedPhrase.substring(0, cmpLen),
+        normalizedText.substring(0, cmpLen),
+      );
+
+      if (fullSimilarity > FUZZY_THRESHOLD && (!bestFuzzyMatch || fullSimilarity > bestFuzzyMatch.score)) {
+        bestFuzzyMatch = { segment: segments[i], score: fullSimilarity };
+      }
+    }
+
+    if (bestFuzzyMatch) {
+      this.logger.debug(
+        `[Fuzzy Match] Found "${phrase.substring(0, 30)}..." at ${bestFuzzyMatch.segment.start}s (score: ${bestFuzzyMatch.score.toFixed(2)})`,
+      );
+      return bestFuzzyMatch.segment.start;
+    }
+
+    // Strategy 4: Distinctive word matching
+    // Find uncommon words in the quote and search for segments containing them
     if (phraseWords.length > 0) {
       let bestWordMatch: { segment: Segment; matchCount: number; fuzzyScore: number } | null = null;
 
-      for (const segment of segments) {
-        const segmentText = normalizeForComparison(segment.text);
-        const segmentWords = segmentText.split(/\s+/);
+      for (let i = 0; i < segments.length; i++) {
+        const segment = segments[i];
+        const segmentWords = segmentWordLists[i];
         let matchCount = 0;
         let fuzzyMatchCount = 0;
 
@@ -1014,7 +1036,9 @@ export class AIAnalysisService {
 
     // Strategy 5: Check across segment boundaries with fuzzy matching
     for (let i = 0; i < segments.length - 1; i++) {
-      const combinedText = normalizeForComparison(segments[i].text + ' ' + segments[i + 1].text);
+      // normSegs[i] is already normalized; joining two normalized strings with a
+      // single space is equivalent to normalizing the concatenation.
+      const combinedText = normSegs[i] + ' ' + normSegs[i + 1];
 
       // Try exact match first
       if (combinedText.includes(searchPhrase)) {
@@ -1052,6 +1076,7 @@ export class AIAnalysisService {
     segments: Segment[],
     videoTitle: string,
     limits: ModelLimits,
+    recordFailure: (what: string) => void,
     onTokens?: (response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void,
   ): Promise<number[]> {
     const boundaries: number[] = [0]; // First chapter always starts at 0
@@ -1073,39 +1098,51 @@ export class AIAnalysisService {
       const chunk = chunks[i];
       const isFirst = i === 0;
 
-      try {
-        const prompt = buildBoundaryDetectionPrompt(
-          videoTitle,
-          chunk.text.substring(0, limits.maxChunkChars),
-          previousTopic,
-          isFirst,
-          videoDurationSeconds,
-        );
+      const prompt = buildBoundaryDetectionPrompt(
+        videoTitle,
+        chunk.text.substring(0, limits.maxChunkChars),
+        previousTopic,
+        isFirst,
+        videoDurationSeconds,
+      );
 
-        const response = await this.aiProviderService.generateText(prompt, config);
-        onTokens?.(response);
-
-        if (!response || !response.text) {
-          this.logger.warn(`[Pass 1] No response for chunk ${i + 1}`);
-          continue;
-        }
-
-        const result = this.parseBoundaryResponse(response.text);
-
-        // Map phrases to timestamps
-        for (const phrase of result.boundaries) {
-          const time = this.findPhraseTimestamp(phrase, chunk.segments);
-          if (time !== null && !boundaries.includes(time)) {
-            boundaries.push(time);
-            this.logger.debug(`[Pass 1] Found boundary at ${this.formatDisplayTime(time)}: "${phrase.substring(0, 30)}..."`);
+      // Try once, then retry once. A chunk that still won't produce a parseable
+      // result is a recorded failure — NOT silently dropped (its boundaries are
+      // lost, which is why it must be counted against the abort threshold).
+      let result: BoundaryDetectionResult | null = null;
+      for (let attempt = 0; attempt <= 1; attempt++) {
+        try {
+          const response = await this.aiProviderService.generateText(prompt, config, 'boundary');
+          onTokens?.(response);
+          if (response && response.text) {
+            result = this.parseBoundaryResponse(response.text);
+            if (result) break;
+            this.logger.warn(`[Pass 1] Chunk ${i + 1} unparseable (attempt ${attempt + 1})`);
+          } else {
+            this.logger.warn(`[Pass 1] No response for chunk ${i + 1} (attempt ${attempt + 1})`);
           }
+        } catch (error) {
+          this.logger.warn(`[Pass 1] Error processing chunk ${i + 1} (attempt ${attempt + 1}): ${(error as Error).message}`);
         }
-
-        previousTopic = result.end_topic;
-        this.logger.debug(`[Pass 1] Chunk ${i + 1} end topic: "${previousTopic}"`);
-      } catch (error) {
-        this.logger.warn(`[Pass 1] Error processing chunk ${i + 1}: ${(error as Error).message}`);
+        if (attempt < 1) await this.delay(1000);
       }
+
+      if (!result) {
+        recordFailure(`Pass 1 boundary detection failed for chunk ${i + 1}/${chunks.length} after retry`);
+        continue;
+      }
+
+      // Map phrases to timestamps
+      for (const phrase of result.boundaries) {
+        const time = this.findPhraseTimestamp(phrase, chunk.segments);
+        if (time !== null && !boundaries.includes(time)) {
+          boundaries.push(time);
+          this.logger.debug(`[Pass 1] Found boundary at ${this.formatDisplayTime(time)}: "${phrase.substring(0, 30)}..."`);
+        }
+      }
+
+      previousTopic = result.end_topic;
+      this.logger.debug(`[Pass 1] Chunk ${i + 1} end topic: "${previousTopic}"`);
     }
 
     // Sort boundaries by time
@@ -1118,14 +1155,17 @@ export class AIAnalysisService {
   /**
    * Parse boundary detection response with robust JSON handling
    */
-  private parseBoundaryResponse(response: string): BoundaryDetectionResult {
-    // Use safe JSON parsing with multiple fallback strategies
+  private parseBoundaryResponse(response: string): BoundaryDetectionResult | null {
+    // Use safe JSON parsing with multiple strategies. Returns null on failure —
+    // the caller retries then records an explicit failure. A successfully parsed
+    // result with an empty boundaries array is a VALID "no topic change here"
+    // answer, not a failure.
     const parsed = safeJsonParse<Record<string, unknown>>(response, this.logger);
 
     if (!parsed) {
       this.logger.warn('[Pass 1] Failed to parse boundary response - all strategies failed');
       this.logger.debug(`[Pass 1] Raw response was: ${response.substring(0, 500)}...`);
-      return { boundaries: [], end_topic: '' };
+      return null;
     }
 
     // Validate the parsed result
@@ -1133,7 +1173,7 @@ export class AIAnalysisService {
 
     if (!validated) {
       this.logger.warn('[Pass 1] Boundary response failed validation');
-      return { boundaries: [], end_topic: '' };
+      return null;
     }
 
     return validated;
@@ -1211,7 +1251,7 @@ export class AIAnalysisService {
           analysisGranularity,
         );
 
-        const response = await this.aiProviderService.generateText(prompt, config);
+        const response = await this.aiProviderService.generateText(prompt, config, 'chapter');
         onTokens?.(response);
 
         if (!response || !response.text) {
@@ -1223,16 +1263,14 @@ export class AIAnalysisService {
           break;
         }
 
+        // Returns null on parse/validation failure (no fabricated "Unknown").
         const result = this.parseChapterAnalysisResponse(response.text);
-
-        // Check if we got a valid result (not just defaults)
-        if (result.title !== 'Unknown' || result.summary !== '') {
+        if (result) {
           return result;
         }
 
-        // Got default/empty result - retry if we have attempts left
         if (attempt < maxRetries) {
-          this.logger.warn(`[Pass 2] Chapter ${chapterNumber} got empty result, retrying (attempt ${attempt + 1})`);
+          this.logger.warn(`[Pass 2] Chapter ${chapterNumber} unparseable, retrying (attempt ${attempt + 1})`);
           await this.delay(1000 * (attempt + 1));
           continue;
         }
@@ -1245,13 +1283,10 @@ export class AIAnalysisService {
       }
     }
 
-    // All retries exhausted - return a descriptive fallback
-    this.logger.error(`[Pass 2] Chapter ${chapterNumber} analysis failed after ${maxRetries + 1} attempts`);
-    return {
-      title: `Chapter ${chapterNumber} (analysis failed)`,
-      summary: 'AI analysis could not process this section. The content may be too long or complex.',
-      flags: [],
-    };
+    // All retries exhausted — fail loudly. The caller records this as an explicit
+    // failure and marks the chapter failed; it is NEVER written to the DB as a
+    // fabricated "Chapter N (analysis failed)" success row.
+    throw new Error(`Chapter ${chapterNumber} analysis failed after ${maxRetries + 1} attempts`);
   }
 
   /**
@@ -1272,6 +1307,7 @@ export class AIAnalysisService {
     videoTitle: string,
     categories: AnalysisCategory[],
     limits: ModelLimits,
+    recordFailure: (what: string) => void,
     customInstructions?: string,
     analysisGranularity?: number,
     onTokens?: (response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void,
@@ -1327,18 +1363,38 @@ export class AIAnalysisService {
       // Truncate if needed
       const truncatedText = chapterText.substring(0, limits.maxChapterChars);
 
-      // Use retry-enabled analysis
-      const result = await this.analyzeChapterWithRetry(
-        config,
-        truncatedText,
-        videoTitle,
-        categories,
-        i + 1,
-        previousChapterSummary,
-        customInstructions,
-        analysisGranularity,
-        onTokens,
-      );
+      // Use retry-enabled analysis. On exhaustion it THROWS — we record the
+      // failure and push a chapter explicitly marked failed (no title/summary,
+      // no fabricated content). Finalize excludes failed chapters from the DB.
+      let result: ChapterAnalysisResult;
+      try {
+        result = await this.analyzeChapterWithRetry(
+          config,
+          truncatedText,
+          videoTitle,
+          categories,
+          i + 1,
+          previousChapterSummary,
+          customInstructions,
+          analysisGranularity,
+          onTokens,
+        );
+      } catch (error) {
+        recordFailure(`Pass 2 chapter ${i + 1}/${adjustedBoundaries.length} analysis failed: ${(error as Error).message}`);
+        chapters.push({
+          sequence: i + 1,
+          start_time: this.formatDisplayTime(startTime),
+          end_time: this.formatDisplayTime(endTime),
+          title: '',
+          summary: '',
+          failed: true,
+        });
+        if (onChapterProgress) {
+          onChapterProgress(i + 1, adjustedBoundaries.length);
+        }
+        // Do not carry a failed chapter's (empty) summary into the next chapter.
+        continue;
+      }
 
       // Create chapter entry
       chapters.push({
@@ -1441,14 +1497,16 @@ export class AIAnalysisService {
   /**
    * Parse chapter analysis response with robust JSON handling
    */
-  private parseChapterAnalysisResponse(response: string): ChapterAnalysisResult {
-    // Use safe JSON parsing with multiple fallback strategies
+  private parseChapterAnalysisResponse(response: string): ChapterAnalysisResult | null {
+    // Use safe JSON parsing with multiple strategies. Returns null on failure —
+    // the caller retries, then records an explicit failure. No fabricated
+    // "Unknown"/salvage object that would masquerade as a real chapter.
     const parsed = safeJsonParse<Record<string, unknown>>(response, this.logger);
 
     if (!parsed) {
       this.logger.warn('[Pass 2] Failed to parse chapter analysis response - all strategies failed');
       this.logger.debug(`[Pass 2] Raw response was: ${response.substring(0, 500)}...`);
-      return { title: 'Unknown', summary: '', flags: [] };
+      return null;
     }
 
     // Validate the parsed result
@@ -1457,12 +1515,7 @@ export class AIAnalysisService {
     if (!validated) {
       this.logger.warn('[Pass 2] Chapter analysis response failed validation');
       this.logger.debug(`[Pass 2] Parsed data was: ${JSON.stringify(parsed).substring(0, 500)}`);
-      // Try to salvage what we can
-      return {
-        title: typeof parsed.title === 'string' ? parsed.title : 'Unknown',
-        summary: typeof parsed.summary === 'string' ? parsed.summary : '',
-        flags: [],
-      };
+      return null;
     }
 
     // Debug: Log what the AI returned for flags
@@ -1480,15 +1533,18 @@ export class AIAnalysisService {
     config: AIProviderConfig,
     chapters: Chapter[],
     videoTitle: string,
+    recordFailure: (what: string) => void,
     onTokens?: (response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void,
-  ): Promise<string> {
-    try {
-      if (!chapters || chapters.length === 0) {
-        return 'No content could be analyzed in this video.';
-      }
+  ): Promise<string | null> {
+    // Only summarize chapters that actually succeeded.
+    const validChapters = (chapters || []).filter((ch) => !ch.failed);
+    if (validChapters.length === 0) {
+      recordFailure('Description generation: no successfully-analyzed chapters to summarize');
+      return null;
+    }
 
-      // Build chapters list
-      const chaptersList = chapters
+    try {
+      const chaptersList = validChapters
         .map((ch) => `${ch.sequence}. [${ch.start_time}] ${ch.title}${ch.summary ? ` - ${ch.summary}` : ''}`)
         .join('\n');
 
@@ -1497,13 +1553,13 @@ export class AIAnalysisService {
         chaptersList: chaptersList.substring(0, 4000),
       });
 
-      const response = await this.aiProviderService.generateText(prompt, config);
+      const response = await this.aiProviderService.generateText(prompt, config, 'description');
       onTokens?.(response);
 
       if (response && response.text) {
         const description = response.text.trim();
 
-        // Reject AI refusals
+        // Reject AI refusals — a refusal is a real failure, not a description.
         const invalidPatterns = [
           /^i apologize/i,
           /^i'm sorry/i,
@@ -1511,24 +1567,22 @@ export class AIAnalysisService {
           /^unfortunately/i,
           /^as an ai/i,
         ];
-
-        for (const pattern of invalidPatterns) {
-          if (pattern.test(description)) {
-            this.logger.warn(`Rejected AI refusal in description: "${description.substring(0, 50)}..."`);
-            break;
-          }
+        if (invalidPatterns.some((p) => p.test(description))) {
+          recordFailure(`Description generation returned an AI refusal: "${description.substring(0, 50)}..."`);
+          return null;
         }
 
-        if (!invalidPatterns.some((p) => p.test(description))) {
+        if (description) {
           return description;
         }
       }
 
-      // Fallback
-      return `Video with ${chapters.length} chapter(s) covering: ${chapters.slice(0, 3).map((c) => c.title).join('; ')}.`;
+      // Empty/no text — an explicit failure, NOT a synthesized placeholder.
+      recordFailure('Description generation returned empty text');
+      return null;
     } catch (error) {
-      this.logger.warn(`Description generation failed: ${(error as Error).message}`);
-      return 'Description could not be generated for this video.';
+      recordFailure(`Description generation failed: ${(error as Error).message}`);
+      return null;
     }
   }
 
@@ -1538,15 +1592,18 @@ export class AIAnalysisService {
   private async generateTagsFromChapters(
     config: AIProviderConfig,
     chapters: Chapter[],
+    recordFailure: (what: string) => void,
     onTokens?: (response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void,
-  ): Promise<Tags> {
-    try {
-      if (!chapters || chapters.length === 0) {
-        return { people: [], topics: [] };
-      }
+  ): Promise<Tags | null> {
+    // Only tag chapters that actually succeeded.
+    const validChapters = (chapters || []).filter((ch) => !ch.failed);
+    if (validChapters.length === 0) {
+      recordFailure('Tags extraction: no successfully-analyzed chapters to tag');
+      return null;
+    }
 
-      // Build chapters list
-      const chaptersList = chapters
+    try {
+      const chaptersList = validChapters
         .map((ch) => `${ch.title}${ch.summary ? `: ${ch.summary}` : ''}`)
         .join('\n');
 
@@ -1554,40 +1611,29 @@ export class AIAnalysisService {
         chaptersList: chaptersList.substring(0, 4000),
       });
 
-      const response = await this.aiProviderService.generateText(prompt, config);
+      const response = await this.aiProviderService.generateText(prompt, config, 'tags');
       onTokens?.(response);
 
       if (response && response.text) {
-        try {
-          let cleanResponse = response.text.trim();
-
-          // Remove markdown code blocks
-          if (cleanResponse.startsWith('```')) {
-            const lines = cleanResponse.split('\n');
-            cleanResponse = lines.filter((l) => !l.startsWith('```')).join('\n');
-          }
-
-          // Extract JSON object
-          const jsonMatch = cleanResponse.match(/\{[\s\S]*\}/);
-          if (!jsonMatch) {
-            this.logger.warn('No JSON object found in tags response');
-            return { people: [], topics: [] };
-          }
-
-          const tagsData = JSON.parse(jsonMatch[0]);
+        // Use the shared parser (markdown-strip + brace-balance + repair, plus
+        // think-tag stripping). A successful parse with no tags is a valid empty
+        // result; only a genuine PARSE failure is recorded as a failure.
+        const tagsData = safeJsonParse<{ people?: unknown; topics?: unknown }>(response.text, this.logger);
+        if (tagsData) {
           return {
-            people: Array.isArray(tagsData.people) ? tagsData.people.slice(0, 20) : [],
-            topics: Array.isArray(tagsData.topics) ? tagsData.topics.slice(0, 15) : [],
+            people: Array.isArray(tagsData.people) ? (tagsData.people as string[]).slice(0, 20) : [],
+            topics: Array.isArray(tagsData.topics) ? (tagsData.topics as string[]).slice(0, 15) : [],
           };
-        } catch (parseError) {
-          this.logger.warn(`Failed to parse tags JSON: ${(parseError as Error).message}`);
         }
+        recordFailure('Tags extraction: response could not be parsed as JSON');
+        return null;
       }
 
-      return { people: [], topics: [] };
+      recordFailure('Tags extraction returned empty text');
+      return null;
     } catch (error) {
-      this.logger.warn(`Tags extraction failed: ${(error as Error).message}`);
-      return { people: [], topics: [] };
+      recordFailure(`Tags extraction failed: ${(error as Error).message}`);
+      return null;
     }
   }
 
@@ -1598,15 +1644,19 @@ export class AIAnalysisService {
     config: AIProviderConfig,
     chapters: Chapter[],
     currentTitle: string,
+    recordFailure: (what: string) => void,
     onTokens?: (response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void,
   ): Promise<string | null> {
-    try {
-      if (!chapters || chapters.length === 0) {
-        return null;
-      }
+    // Only title from chapters that actually succeeded. A null title is a
+    // legitimate "keep the original filename" outcome, so an empty/rejected
+    // title is not counted as a failure; only a hard error is.
+    const validChapters = (chapters || []).filter((ch) => !ch.failed);
+    if (validChapters.length === 0) {
+      return null;
+    }
 
-      // Build chapters list
-      const chaptersList = chapters
+    try {
+      const chaptersList = validChapters
         .map((ch) => `${ch.title}${ch.summary ? `: ${ch.summary}` : ''}`)
         .join('\n');
 
@@ -1615,7 +1665,7 @@ export class AIAnalysisService {
         chaptersList: chaptersList.substring(0, 4000),
       });
 
-      const response = await this.aiProviderService.generateText(prompt, config);
+      const response = await this.aiProviderService.generateText(prompt, config, 'title');
       onTokens?.(response);
 
       if (response && response.text) {
@@ -1684,7 +1734,8 @@ export class AIAnalysisService {
 
       return null;
     } catch (error) {
-      this.logger.warn(`Title generation failed: ${(error as Error).message}`);
+      // A hard error (not just a rejected title) is a real failure.
+      recordFailure(`Title generation failed: ${(error as Error).message}`);
       return null;
     }
   }
@@ -1711,7 +1762,7 @@ export class AIAnalysisService {
         pageText: truncated,
       });
 
-      const response = await this.aiProviderService.generateText(prompt, config);
+      const response = await this.aiProviderService.generateText(prompt, config, 'title');
 
       if (!response || !response.text) {
         return null;

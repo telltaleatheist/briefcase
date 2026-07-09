@@ -256,8 +256,11 @@ export class WhisperBridge extends EventEmitter {
       // Emit event so frontend knows GPU failed
       this.emit('gpu-fallback', { processId, reason: result.error });
 
-      // Retry with CPU
-      const cpuResult = await this._runTranscription(audioPath, outputDir, processId + '-cpu', false, options);
+      // Retry with CPU under the SAME processId so an in-flight cancel
+      // (whisper-manager abort()/isRunning() key on the original id) still
+      // reaches this attempt. The first attempt has already closed and been
+      // removed from activeProcesses, so there is no key collision.
+      const cpuResult = await this._runTranscription(audioPath, outputDir, processId, false, options);
       return cpuResult;
     }
 

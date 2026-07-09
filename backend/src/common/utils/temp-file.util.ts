@@ -209,6 +209,59 @@ export async function copyFromTemp(
 }
 
 /**
+ * Atomically replace `destPath` with the contents of `sourceTempPath`.
+ *
+ * This is the SAFE replacement for the destructive `unlink(dest) + copy(temp, dest)`
+ * pattern. It works as follows:
+ *   1. Copy `sourceTempPath` into a sibling temp file that lives in `destPath`'s OWN
+ *      directory. Placing it beside the destination guarantees the two paths are on
+ *      the same volume, so the following rename is a true atomic same-volume rename
+ *      (a cross-device rename from the OS temp dir would throw EXDEV).
+ *   2. `renameSync` the sibling over `destPath`. On every mainstream filesystem this
+ *      atomically swaps the file contents; the original is only removed once the
+ *      replacement is fully in place.
+ *
+ * The original `destPath` is NEVER unlinked ahead of the replacement, so a crash or
+ * error mid-operation can never destroy the original without a complete replacement
+ * already existing. On any failure the partial sibling temp is cleaned up and the
+ * error is thrown (no silent fallback).
+ *
+ * `sourceTempPath` is deleted on success (best-effort cleanup of a temp file).
+ */
+export function atomicReplaceFile(sourceTempPath: string, destPath: string): void {
+  const destDir = path.dirname(destPath);
+  const siblingTemp = path.join(
+    destDir,
+    `.briefcase-swap-${Date.now()}-${Math.random().toString(36).slice(2, 8)}${path.extname(destPath)}`,
+  );
+
+  // Step 1: copy the new contents next to the destination (same volume).
+  try {
+    fs.copyFileSync(sourceTempPath, siblingTemp);
+  } catch (err) {
+    // Nothing (or only a partial sibling) was written; original untouched.
+    try { fs.rmSync(siblingTemp, { force: true }); } catch { /* ignore */ }
+    throw err;
+  }
+
+  // Step 2: atomically move the sibling over the original.
+  try {
+    fs.renameSync(siblingTemp, destPath);
+  } catch (err) {
+    // Rename failed => the original is still fully intact. Clean up the sibling.
+    try { fs.rmSync(siblingTemp, { force: true }); } catch { /* ignore */ }
+    throw err;
+  }
+
+  // Step 3: the replacement succeeded; remove the now-redundant source temp.
+  try {
+    fs.rmSync(sourceTempPath, { force: true });
+  } catch {
+    logger.warn(`atomicReplaceFile: could not delete source temp ${sourceTempPath}`);
+  }
+}
+
+/**
  * Clean up temp files for a given source file
  */
 export function cleanupTempFiles(sourceFileName: string): void {

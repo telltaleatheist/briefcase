@@ -8,7 +8,9 @@ import { DownloaderService } from '../downloader/downloader.service';
 import { FileScannerService } from '../database/file-scanner.service';
 import { DatabaseService } from '../database/database.service';
 import { AIAnalysisService } from '../analysis/ai-analysis.service';
+import { parseProviderModel } from '../analysis/model-utils';
 import { ApiKeysService } from '../config/api-keys.service';
+import { SharedConfigService } from '../config/shared-config.service';
 import { FfmpegService } from '../ffmpeg/ffmpeg.service';
 import { ThumbnailService } from '../database/thumbnail.service';
 import { WebArchiveService } from '../web-archive/web-archive.service';
@@ -41,6 +43,7 @@ export class MediaOperationsService {
     private readonly ffmpegService: FfmpegService,
     private readonly thumbnailService: ThumbnailService,
     private readonly webArchiveService: WebArchiveService,
+    private readonly configService: SharedConfigService,
   ) {}
 
   /**
@@ -181,10 +184,25 @@ export class MediaOperationsService {
           // Update download date
           this.databaseService.updateVideoDownloadDate(videoId, new Date().toISOString());
 
-          // Delete the duplicate file
-          if (fs.existsSync(videoPath)) {
-            fs.unlinkSync(videoPath);
-            this.logger.log(`[${jobId || 'standalone'}] Deleted duplicate file: ${videoPath}`);
+          // Only delete the freshly-downloaded duplicate once we've CONFIRMED the
+          // existing library copy is still on disk. Otherwise we'd destroy the only
+          // remaining copy of the file. If the existing copy is missing, adopt the
+          // new download by relinking the record to it.
+          const existingPath = existingVideo.current_path as string | undefined;
+          const existingOnDisk = !!existingPath && fs.existsSync(existingPath);
+          const sameFile = !!existingPath && path.resolve(existingPath) === path.resolve(videoPath);
+
+          if (existingOnDisk) {
+            if (fs.existsSync(videoPath) && !sameFile) {
+              fs.unlinkSync(videoPath);
+              this.logger.log(`[${jobId || 'standalone'}] Deleted duplicate file: ${videoPath}`);
+            }
+          } else if (fs.existsSync(videoPath)) {
+            // Existing library file is gone — keep the new download and relink.
+            this.logger.warn(
+              `[${jobId || 'standalone'}] Existing library file missing (${existingPath}); relinking record ${videoId} to new download: ${videoPath}`,
+            );
+            this.databaseService.updateVideoPath(videoId, videoPath);
           }
         }
       }
@@ -474,7 +492,7 @@ export class MediaOperationsService {
 
       // Read transcript files
       const transcriptSrt = fs.readFileSync(transcriptFile, 'utf8');
-      const transcriptTxtFile = transcriptFile.replace('.srt', '.txt');
+      const transcriptTxtFile = transcriptFile.replace(/\.srt$/i, '.txt');
       const transcriptText = fs.existsSync(transcriptTxtFile)
         ? fs.readFileSync(transcriptTxtFile, 'utf8')
         : transcriptSrt;
@@ -570,24 +588,13 @@ export class MediaOperationsService {
       const tmpDir = os.tmpdir();
       const analysisOutputPath = path.join(tmpDir, `${jobId || 'analysis'}_analysis.txt`);
 
-      // Extract provider from model name prefix if not explicitly set
-      // Model format: "provider:model" (e.g., "openai:gpt-4o", "ollama:qwen2.5:7b", "claude:claude-3-5-sonnet-latest")
-      let cleanModelName = options.aiModel;
-      let provider: 'ollama' | 'openai' | 'claude' | 'local' | undefined = options.aiProvider as 'ollama' | 'openai' | 'claude' | 'local' | undefined;
-
-      // Check if model name has a provider prefix
-      const knownProviders = ['ollama', 'openai', 'claude', 'local'];
-      const colonIndex = cleanModelName.indexOf(':');
-      if (colonIndex > 0) {
-        const possibleProvider = cleanModelName.substring(0, colonIndex);
-        if (knownProviders.includes(possibleProvider)) {
-          // Extract provider from model name if not explicitly set or if it matches
-          if (!options.aiProvider || possibleProvider === options.aiProvider) {
-            provider = possibleProvider as 'ollama' | 'openai' | 'claude' | 'local';
-            cleanModelName = cleanModelName.substring(colonIndex + 1);
-            this.logger.log(`[${jobId || 'standalone'}] Extracted provider '${provider}' from model name: ${options.aiModel} -> ${cleanModelName}`);
-          }
-        }
+      // Extract provider from model name prefix if present (shared parser).
+      // Model format: "provider:model" (e.g. "openai:gpt-4o", "ollama:qwen2.5:7b").
+      const parsedModel = parseProviderModel(options.aiModel, options.aiProvider);
+      const cleanModelName = parsedModel.model;
+      const provider = parsedModel.provider;
+      if (cleanModelName !== options.aiModel) {
+        this.logger.log(`[${jobId || 'standalone'}] Stripped provider prefix: ${options.aiModel} -> ${cleanModelName}`);
       }
 
       // Require explicit provider - no fallbacks
@@ -857,22 +864,10 @@ export class MediaOperationsService {
 
       this.eventService.emitTaskProgress(jobId || '', 'analyze', 10, 'Loading page text...');
 
-      // Resolve provider from model name prefix when possible
-      let cleanModelName = options.aiModel;
-      let provider: 'ollama' | 'openai' | 'claude' | 'local' | undefined =
-        options.aiProvider as 'ollama' | 'openai' | 'claude' | 'local' | undefined;
-
-      const knownProviders = ['ollama', 'openai', 'claude', 'local'];
-      const colonIndex = cleanModelName.indexOf(':');
-      if (colonIndex > 0) {
-        const possibleProvider = cleanModelName.substring(0, colonIndex);
-        if (knownProviders.includes(possibleProvider)) {
-          if (!options.aiProvider || possibleProvider === options.aiProvider) {
-            provider = possibleProvider as 'ollama' | 'openai' | 'claude' | 'local';
-            cleanModelName = cleanModelName.substring(colonIndex + 1);
-          }
-        }
-      }
+      // Resolve provider from model name prefix when possible (shared parser).
+      const parsedModel = parseProviderModel(options.aiModel, options.aiProvider);
+      const cleanModelName = parsedModel.model;
+      const provider = parsedModel.provider;
 
       if (!provider) {
         throw new Error('AI provider is required for analysis.');
@@ -1120,29 +1115,25 @@ export class MediaOperationsService {
    * Throws error if categories not configured - forces proper initialization via Settings
    */
   private loadCategories(): any[] {
-    const userDataPath = process.env.APPDATA ||
-                      (process.platform === 'darwin' ?
-                      path.join(process.env.HOME || '', 'Library', 'Application Support') :
-                      path.join(process.env.HOME || '', '.config'));
-
-    const categoriesPath = path.join(userDataPath, 'briefcase', 'analysis-categories.json');
+    // Analysis without categories is broken by definition — a missing/empty file
+    // is a hard error, NO FALLBACKS.
+    const categoriesPath = path.join(this.configService.getConfigDir(), 'analysis-categories.json');
 
     if (!fs.existsSync(categoriesPath)) {
-      // Categories file doesn't exist - return empty array, analysis will still run but skip flagging
-      this.logger.log('Analysis categories file not found - analysis will run without category flagging');
-      return [];
+      throw new Error(
+        `Analysis categories file not found at ${categoriesPath}. Analysis cannot run without categories.`,
+      );
     }
 
-    const data = fs.readFileSync(categoriesPath, 'utf8');
-    const parsed = JSON.parse(data);
+    const parsed = JSON.parse(fs.readFileSync(categoriesPath, 'utf8'));
 
     // Handle both formats: array directly or { categories: [...] }
     const categories = Array.isArray(parsed) ? parsed : parsed.categories;
 
     if (!categories || categories.length === 0) {
-      // No categories configured - return empty array, analysis will still run but skip flagging
-      this.logger.log('No analysis categories configured - analysis will run without category flagging');
-      return [];
+      throw new Error(
+        `No analysis categories configured in ${categoriesPath}. Configure categories before analyzing.`,
+      );
     }
 
     return categories;

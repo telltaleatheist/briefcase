@@ -5,14 +5,18 @@ import * as fs from 'fs';
 import { app } from 'electron';
 import log from 'electron-log';
 
+// SECURITY (A2): default to loopback. The Electron side only ever CONNECTS to
+// the backend (health checks, window/tray URLs), and 127.0.0.1 reaches the
+// backend whether it bound loopback-only or all interfaces. LAN exposure is
+// opt-in on the backend via BRIEFCASE_LAN=1; this default never needs 0.0.0.0.
 export const DEFAULT_SERVER_CONFIG = {
   nestBackend: {
     port: 3000,
-    host: '0.0.0.0'  // Bind to all interfaces for remote access
+    host: '127.0.0.1'
   },
   electronServer: {
     port: 3001,
-    host: '0.0.0.0'  // Bind to all interfaces for remote access
+    host: '127.0.0.1'
   }
 };
 

@@ -2,7 +2,6 @@ import { Module, forwardRef } from '@nestjs/common';
 import { AnalysisController } from './analysis.controller';
 import { AnalysisService } from './analysis.service';
 import { SimpleTranscribeController } from './simple-transcribe.controller';
-import { SimpleAnalyzeController } from './simple-analyze.controller';
 import { OllamaService } from './ollama.service';
 import { AIProviderService } from './ai-provider.service';
 import { AIAnalysisService } from './ai-analysis.service';
@@ -32,7 +31,6 @@ import { ApiKeysModule } from '../config/config.module';
   controllers: [
     AnalysisController,
     SimpleTranscribeController,
-    SimpleAnalyzeController,
   ],
   providers: [AnalysisService, OllamaService, AIProviderService, AIAnalysisService, LlamaManager],
   exports: [AnalysisService, OllamaService, AIProviderService, AIAnalysisService, LlamaManager],

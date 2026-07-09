@@ -116,10 +116,13 @@ export class WhisperService {
       };
       this.ffmpeg.on('progress', extractProgressHandler);
 
-      audioFile = await this.extractAudio(videoFile, outputDir, jobId || 'standalone', silenceOffset, videoDurationSeconds);
-
-      // Remove the progress handler after extraction
-      this.ffmpeg.off('progress', extractProgressHandler);
+      // try/finally so a failed extraction never leaks the listener on the
+      // singleton FfmpegBridge (stale-jobId events + MaxListenersExceeded).
+      try {
+        audioFile = await this.extractAudio(videoFile, outputDir, jobId || 'standalone', silenceOffset, videoDurationSeconds);
+      } finally {
+        this.ffmpeg.off('progress', extractProgressHandler);
+      }
 
       this.eventService.emitTaskProgress(jobId || '', 'transcribe', 12, 'Audio extracted, starting transcription...');
       this.logger.log(`Audio extracted to: ${audioFile}`);
