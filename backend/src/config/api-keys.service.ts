@@ -61,30 +61,48 @@ export class ApiKeysService {
    * Load configuration from file
    */
   private loadConfig(): void {
-    try {
-      if (fs.existsSync(this.configPath)) {
-        const data = fs.readFileSync(this.configPath, 'utf-8');
-        this.config = JSON.parse(data);
-        this.logger.log('API keys configuration loaded');
-      } else {
-        this.logger.log('No existing API keys config found, starting fresh');
-        this.config = {};
-      }
-    } catch (error) {
-      this.logger.error(`Failed to load API keys config: ${(error as Error).message}`);
+    if (!fs.existsSync(this.configPath)) {
+      this.logger.log('No existing API keys config found, starting fresh');
       this.config = {};
+      return;
+    }
+
+    const data = fs.readFileSync(this.configPath, 'utf-8');
+    try {
+      this.config = JSON.parse(data);
+      this.logger.log('API keys configuration loaded');
+    } catch (error) {
+      // The file exists but is corrupt. Returning an empty config here would let
+      // the next saveConfig() overwrite the (possibly recoverable) real keys with
+      // {} — permanently destroying them. Instead, preserve the corrupt file under
+      // a timestamped name and fail loudly so the problem is visible.
+      const corruptPath = `${this.configPath}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+      try {
+        fs.renameSync(this.configPath, corruptPath);
+        this.logger.error(`API keys config is corrupt; backed it up to ${corruptPath}`);
+      } catch (backupError) {
+        this.logger.error(`API keys config is corrupt and could not be backed up: ${(backupError as Error).message}`);
+      }
+      throw new Error(`Failed to parse API keys config at ${this.configPath}: ${(error as Error).message}`);
     }
   }
 
   /**
    * Save configuration to file
+   *
+   * Writes to a sibling temp file then renames it over the target, so a crash or
+   * partial write can never leave a truncated/half-written config in place.
    */
   private saveConfig(): void {
+    const tmpPath = `${this.configPath}.tmp-${process.pid}`;
     try {
-      fs.writeFileSync(this.configPath, JSON.stringify(this.config, null, 2), 'utf-8');
+      fs.writeFileSync(tmpPath, JSON.stringify(this.config, null, 2), 'utf-8');
+      fs.renameSync(tmpPath, this.configPath);
       this.logger.log('API keys configuration saved');
     } catch (error) {
+      try { fs.rmSync(tmpPath, { force: true }); } catch { /* ignore */ }
       this.logger.error(`Failed to save API keys config: ${(error as Error).message}`);
+      throw error;
     }
   }
 

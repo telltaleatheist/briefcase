@@ -19,6 +19,7 @@ import { v4 as uuidv4 } from 'uuid';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { atomicReplaceFile } from '../common/utils/temp-file.util';
 
 // Active task tracking
 export interface ActiveTask {
@@ -31,6 +32,9 @@ export interface ActiveTask {
   message: string;
   startedAt: Date;
   lastProgressAt: Date;  // Track when we last received progress update
+  abandoned?: boolean;   // Set when the watchdog force-fails a stuck task so the
+                         // original executeTask promise won't double-finalize if it
+                         // eventually settles.
 }
 
 @Injectable()
@@ -101,20 +105,25 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
   private checkForStuckTasks() {
     const now = new Date();
 
-    // Check AI pool
+    // Check AI pool. The AI pool has exactly ONE slot, so a hung AI task wedges
+    // ALL analysis forever unless we actively reclaim the slot. On hard timeout,
+    // fail the task and free the slot instead of only logging.
     if (this.aiPool) {
-      const runningMs = now.getTime() - this.aiPool.startedAt.getTime();
-      const lastProgressMs = now.getTime() - this.aiPool.lastProgressAt.getTime();
+      const active = this.aiPool;
+      const runningMs = now.getTime() - active.startedAt.getTime();
+      const lastProgressMs = now.getTime() - active.lastProgressAt.getTime();
 
       if (runningMs > this.AI_TASK_TIMEOUT_MS) {
-        this.logger.warn(
-          `⚠️ AI task ${this.aiPool.taskId} has been running for ${Math.round(runningMs / 60000)} minutes ` +
-          `(last progress: ${Math.round(lastProgressMs / 1000)}s ago at ${this.aiPool.progress}%)`
+        this.logger.error(
+          `⏱️ AI task ${active.taskId} exceeded the ${Math.round(this.AI_TASK_TIMEOUT_MS / 60000)}-minute timeout ` +
+          `(running ${Math.round(runningMs / 60000)}m, last progress ${Math.round(lastProgressMs / 1000)}s ago at ${active.progress}%). ` +
+          `Failing it and freeing the AI slot.`
         );
+        this.failStuckTask(active, 'ai', `AI task timed out after ${Math.round(runningMs / 60000)} minutes without completing`);
       } else if (lastProgressMs > 5 * 60 * 1000) {  // 5 minutes without progress
         this.logger.warn(
-          `⚠️ AI task ${this.aiPool.taskId} hasn't reported progress in ${Math.round(lastProgressMs / 60000)} minutes ` +
-          `(stuck at ${this.aiPool.progress}%)`
+          `⚠️ AI task ${active.taskId} hasn't reported progress in ${Math.round(lastProgressMs / 60000)} minutes ` +
+          `(stuck at ${active.progress}%)`
         );
       }
     }
@@ -125,12 +134,92 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       const lastProgressMs = now.getTime() - task.lastProgressAt.getTime();
 
       if (runningMs > this.MAIN_TASK_TIMEOUT_MS) {
-        this.logger.warn(
-          `⚠️ Main task ${taskId} (${task.type}) has been running for ${Math.round(runningMs / 60000)} minutes ` +
-          `(last progress: ${Math.round(lastProgressMs / 1000)}s ago at ${task.progress}%)`
+        this.logger.error(
+          `⏱️ Main task ${taskId} (${task.type}) exceeded the ${Math.round(this.MAIN_TASK_TIMEOUT_MS / 60000)}-minute timeout ` +
+          `(running ${Math.round(runningMs / 60000)}m, last progress ${Math.round(lastProgressMs / 1000)}s ago at ${task.progress}%). ` +
+          `Failing it and freeing the slot.`
         );
+        this.failStuckTask(task, 'main', `Task timed out after ${Math.round(runningMs / 60000)} minutes without completing`);
       }
     }
+  }
+
+  /**
+   * Force-fail a task the watchdog has determined is stuck. Mirrors the failure
+   * path in executeTask: mark the job failed, free the pool slot, emit task.failed
+   * on both buses, schedule removal, and kick the queue so waiting work proceeds.
+   *
+   * The underlying subprocess is not force-killed here (this layer holds no kill
+   * handle — cancellation in this codebase is cooperative), but freeing the slot
+   * is what unblocks the queue. `abandoned` guards executeTask from double-emitting
+   * if its promise ever settles later.
+   */
+  private failStuckTask(active: ActiveTask, pool: 'main' | 'ai', reason: string): void {
+    active.abandoned = true;
+
+    const job = this.jobQueue.get(active.jobId);
+    if (job && job.status !== 'completed' && job.status !== 'failed' && job.status !== 'cancelled') {
+      job.status = 'failed';
+      job.error = reason;
+      job.completedAt = new Date();
+    }
+
+    // Free the pool slot (identity-checked so we never clobber a different task).
+    if (pool === 'main') {
+      if (this.mainPool.get(active.taskId) === active) {
+        this.mainPool.delete(active.taskId);
+      }
+    } else if (this.aiPool === active) {
+      this.aiPool = null;
+    }
+
+    this.emitTaskFailed({
+      taskId: active.taskId,
+      jobId: active.jobId,
+      videoId: job?.videoId,
+      type: active.type,
+      message: reason,
+    });
+
+    // Remove the failed job from the queue after a delay (matches executeTask).
+    setTimeout(() => {
+      this.jobQueue.delete(active.jobId);
+      this.logger.log(`Removed timed-out job ${active.jobId} from queue`);
+    }, 5000);
+
+    // Dispatch the next waiting task into the freed slot.
+    this.processQueue();
+  }
+
+  /**
+   * Emit a task.failed event on BOTH event buses:
+   *  - MediaEventService (Socket.IO) for live frontend updates.
+   *  - EventEmitter2 for in-process listeners (e.g. SavedLinksService, which
+   *    listens on EventEmitter2 and would otherwise never learn a task failed).
+   */
+  private emitTaskFailed(payload: {
+    taskId: string;
+    jobId: string;
+    videoId?: string;
+    type: string;
+    message: string;
+    canRetry?: boolean;
+  }): void {
+    const event = {
+      taskId: payload.taskId,
+      jobId: payload.jobId,
+      videoId: payload.videoId,
+      type: payload.type,
+      error: {
+        code: 'TASK_FAILED',
+        message: payload.message,
+      },
+      canRetry: payload.canRetry ?? false,
+      timestamp: new Date().toISOString(),
+    };
+
+    this.eventService.emit('task.failed', event);
+    this.eventEmitter.emit('task.failed', event);
   }
 
   /**
@@ -606,6 +695,13 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       // Execute the task
       const result = await this.executeTaskLogic(job, task, taskId);
 
+      // If the watchdog force-failed this task while we were awaiting, it has
+      // already finalized the job and freed the slot. Don't double-finalize.
+      if (activeTask.abandoned) {
+        this.logger.warn(`Task ${taskId} completed after being abandoned by the watchdog; ignoring late result`);
+        return;
+      }
+
       // Check if job was cancelled during execution
       if (this.isJobCancelled(job.id)) {
         this.logger.log(`Job ${job.id} was cancelled during ${task.type} execution`);
@@ -672,38 +768,43 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         setTimeout(() => this.jobQueue.delete(job.id), 5000);
       }
     } catch (error) {
-      // Task failed
-      job.status = 'failed';
-      job.error = error instanceof Error ? error.message : 'Unknown error';
-      job.completedAt = new Date();
-
-      this.logger.error(`Task ${taskId} failed: ${job.error}`);
-
-      // Emit task failed event
-      this.eventService.emit('task.failed', {
-        taskId,
-        jobId: job.id,
-        videoId: job.videoId,
-        type: task.type,
-        error: {
-          code: 'TASK_FAILED',
-          message: job.error,
-        },
-        canRetry: false,
-        timestamp: new Date().toISOString(),
-      });
-
-      // Remove failed job from queue after a delay (like completed jobs)
-      // This ensures the UI can show the failure state before removal
-      setTimeout(() => {
-        this.jobQueue.delete(job.id);
-        this.logger.log(`Removed failed job ${job.id} from queue`);
-      }, 5000);
-    } finally {
-      // Remove from pool
-      if (pool === 'main') {
-        this.mainPool.delete(taskId);
+      // If the watchdog already force-failed and finalized this task, don't emit
+      // a second failure or clobber state — just fall through to the finally.
+      if (activeTask.abandoned) {
+        this.logger.warn(`Task ${taskId} threw after being abandoned by the watchdog; suppressing duplicate failure`);
       } else {
+        // Task failed
+        job.status = 'failed';
+        job.error = error instanceof Error ? error.message : 'Unknown error';
+        job.completedAt = new Date();
+
+        this.logger.error(`Task ${taskId} failed: ${job.error}`);
+
+        // Emit task failed event on both buses (Socket.IO + EventEmitter2)
+        this.emitTaskFailed({
+          taskId,
+          jobId: job.id,
+          videoId: job.videoId,
+          type: task.type,
+          message: job.error,
+        });
+
+        // Remove failed job from queue after a delay (like completed jobs)
+        // This ensures the UI can show the failure state before removal
+        setTimeout(() => {
+          this.jobQueue.delete(job.id);
+          this.logger.log(`Removed failed job ${job.id} from queue`);
+        }, 5000);
+      }
+    } finally {
+      // Remove from pool, but only if THIS task still owns the slot. The watchdog
+      // may have already reclaimed it and started a different task there; clearing
+      // unconditionally would clobber that newer task's slot tracking.
+      if (pool === 'main') {
+        if (this.mainPool.get(taskId) === activeTask) {
+          this.mainPool.delete(taskId);
+        }
+      } else if (this.aiPool === activeTask) {
         this.aiPool = null;
       }
 
@@ -1045,12 +1146,13 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         return { success: false, error: extractionResult.error || 'Strip bars failed' };
       }
 
-      // Replace original file
+      // Replace original file atomically. NEVER unlink the original before the
+      // replacement is safely in place — a crash between unlink and copy would
+      // destroy irreplaceable media. atomicReplaceFile copies the temp into a
+      // sibling in the destination dir, then renames over the original.
       this.eventService.emitTaskProgress(taskId, 'strip-black-bars', 85, 'Replacing original...');
       this.updateTaskProgress(taskId, 85, 'Replacing original...');
-      fs.unlinkSync(videoPath);
-      fs.copyFileSync(tempPath, videoPath);
-      try { fs.unlinkSync(tempPath); } catch (_) {}
+      atomicReplaceFile(tempPath, videoPath);
 
       // Update file size and hash in database
       this.eventService.emitTaskProgress(taskId, 'strip-black-bars', 90, 'Updating metadata...');
@@ -1059,12 +1161,10 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         const stats = fs.statSync(videoPath);
         const newHash = await this.fileScannerService.quickHashFile(videoPath, stats.size);
         const newDuration = extractionResult.duration || 0;
-        const db = (this.databaseService as any)['db'];
-        if (db) {
-          db.prepare(
-            `UPDATE videos SET duration_seconds = ?, file_size_bytes = ?, file_hash = ?, last_processed_date = ? WHERE id = ?`
-          ).run(newDuration, stats.size, newHash, new Date().toISOString(), videoId);
-        }
+        const db = this.databaseService.getDatabase();
+        db.prepare(
+          `UPDATE videos SET duration_seconds = ?, file_size_bytes = ?, file_hash = ?, last_processed_date = ? WHERE id = ?`
+        ).run(newDuration, stats.size, newHash, new Date().toISOString(), videoId);
       } catch (err) {
         this.logger.warn(`[STRIP-BARS] Failed to update metadata: ${(err as Error).message}`);
       }
@@ -1356,44 +1456,47 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       this.eventService.emitTaskProgress(taskId, 'export-clip', 85, 'Replacing original file...');
       this.updateTaskProgress(taskId, 85, 'Replacing original file...');
 
-      // Delete original and copy temp
-      fs.unlinkSync(opts.videoPath);
-      fs.copyFileSync(tempPath, opts.videoPath);
-      try { fs.unlinkSync(tempPath); } catch (_) {}
+      // Replace the original atomically. NEVER unlink the original before the
+      // replacement is in place — a crash mid-swap would destroy the source video.
+      atomicReplaceFile(tempPath, opts.videoPath);
       this.logger.log(`[EXPORT-CLIP] [OVERWRITE] Original replaced`);
 
       this.logger.log(`[EXPORT-CLIP] [OVERWRITE] Clearing metadata...`);
       this.eventService.emitTaskProgress(taskId, 'export-clip', 90, 'Clearing metadata...');
       this.updateTaskProgress(taskId, 90, 'Clearing metadata...');
 
-      // Clear all metadata
-      this.databaseService.deleteTranscript(opts.videoId);
-      this.databaseService.deleteAnalysisSections(opts.videoId);
-      this.databaseService.deleteCustomMarkers(opts.videoId);
-      this.databaseService.deleteAnalysis(opts.videoId);
-
-      // Recalculate file hash
+      // Recalculate file hash from the new contents BEFORE the DB transaction
+      // (hashing is async and cannot run inside a better-sqlite3 transaction).
       let newFileHash: string | null = null;
       try {
         const stats = fs.statSync(opts.videoPath);
         newFileHash = await this.fileScannerService.quickHashFile(opts.videoPath, stats.size);
       } catch (_) {}
 
-      // Update video record
+      // Clear all stale metadata AND update the video record in ONE transaction so
+      // we can never leave the row half-cleared (e.g. transcript deleted but the
+      // record still flagged has_transcript, or vice-versa).
       const newDuration = extractionResult.duration || 0;
-      const db = (this.databaseService as any)['db'];
-      if (db) {
-        const nowIso = new Date().toISOString();
-        const updateFields = newFileHash
-          ? `duration_seconds = ?, file_size_bytes = ?, file_hash = ?, has_transcript = 0, has_analysis = 0, last_processed_date = ?, upload_date = ?, download_date = ?, added_at = ?, source_url = ?, ai_description = ?, suggested_title = ?`
-          : `duration_seconds = ?, file_size_bytes = ?, has_transcript = 0, has_analysis = 0, last_processed_date = ?, upload_date = ?, download_date = ?, added_at = ?, source_url = ?, ai_description = ?, suggested_title = ?`;
+      const db = this.databaseService.getDatabase();
+      const nowIso = new Date().toISOString();
+      const updateFields = newFileHash
+        ? `duration_seconds = ?, file_size_bytes = ?, file_hash = ?, has_transcript = 0, has_analysis = 0, last_processed_date = ?, upload_date = ?, download_date = ?, added_at = ?, source_url = ?, ai_description = ?, suggested_title = ?`
+        : `duration_seconds = ?, file_size_bytes = ?, has_transcript = 0, has_analysis = 0, last_processed_date = ?, upload_date = ?, download_date = ?, added_at = ?, source_url = ?, ai_description = ?, suggested_title = ?`;
 
-        const params = newFileHash
-          ? [newDuration, extractionResult.fileSize || 0, newFileHash, nowIso, originalMetadata.uploadDate, originalMetadata.downloadDate, originalMetadata.addedAt, originalMetadata.sourceUrl, originalMetadata.aiDescription, originalMetadata.suggestedTitle, opts.videoId]
-          : [newDuration, extractionResult.fileSize || 0, nowIso, originalMetadata.uploadDate, originalMetadata.downloadDate, originalMetadata.addedAt, originalMetadata.sourceUrl, originalMetadata.aiDescription, originalMetadata.suggestedTitle, opts.videoId];
+      const params = newFileHash
+        ? [newDuration, extractionResult.fileSize || 0, newFileHash, nowIso, originalMetadata.uploadDate, originalMetadata.downloadDate, originalMetadata.addedAt, originalMetadata.sourceUrl, originalMetadata.aiDescription, originalMetadata.suggestedTitle, opts.videoId]
+        : [newDuration, extractionResult.fileSize || 0, nowIso, originalMetadata.uploadDate, originalMetadata.downloadDate, originalMetadata.addedAt, originalMetadata.sourceUrl, originalMetadata.aiDescription, originalMetadata.suggestedTitle, opts.videoId];
 
+      const clearAndUpdate = db.transaction(() => {
+        // These helpers each open their own prepared statements against the same
+        // connection and participate in this transaction.
+        this.databaseService.deleteTranscript(opts.videoId);
+        this.databaseService.deleteAnalysisSections(opts.videoId);
+        this.databaseService.deleteCustomMarkers(opts.videoId);
+        this.databaseService.deleteAnalysis(opts.videoId);
         db.prepare(`UPDATE videos SET ${updateFields} WHERE id = ?`).run(...params);
-      }
+      });
+      clearAndUpdate();
 
       // Regenerate the thumbnail from the new file contents. Without this,
       // the library keeps showing the pre-overwrite thumbnail forever.

@@ -236,33 +236,47 @@ export class LibraryManagerService implements OnModuleInit {
    * Load library configuration from disk
    */
   private loadConfig(): LibraryManagerConfig {
-    if (fs.existsSync(this.configFilePath)) {
-      try {
-        const data = fs.readFileSync(this.configFilePath, 'utf8');
-        return JSON.parse(data);
-      } catch (error: any) {
-        this.logger.error(`Error loading library config: ${error?.message || 'Unknown error'}`);
-      }
+    if (!fs.existsSync(this.configFilePath)) {
+      // First run: no config yet. This is the ONLY legitimate empty-config case.
+      return {
+        activeLibraryId: null,
+        libraries: [],
+      };
     }
 
-    // Default: empty configuration
-    return {
-      activeLibraryId: null,
-      libraries: [],
-    };
+    const data = fs.readFileSync(this.configFilePath, 'utf8');
+    try {
+      return JSON.parse(data);
+    } catch (error: any) {
+      // The config exists but is corrupt. Returning an empty config here would
+      // orphan every registered library, and the next saveConfig() would persist
+      // that empty list — permanently losing the user's library registrations.
+      // Preserve the corrupt file and fail loudly instead.
+      const corruptPath = `${this.configFilePath}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+      try {
+        fs.renameSync(this.configFilePath, corruptPath);
+        this.logger.error(`Library config is corrupt; backed it up to ${corruptPath}`);
+      } catch (backupError: any) {
+        this.logger.error(`Library config is corrupt and could not be backed up: ${backupError?.message || 'Unknown error'}`);
+      }
+      throw new Error(`Failed to parse library config at ${this.configFilePath}: ${error?.message || 'Unknown error'}`);
+    }
   }
 
   /**
    * Save library configuration to disk
+   *
+   * Writes to a sibling temp file then renames it over the target, so a crash or
+   * partial write can never leave a truncated/half-written config in place (which
+   * loadConfig would then reject, stranding the user's libraries).
    */
   private saveConfig() {
+    const tmpPath = `${this.configFilePath}.tmp-${process.pid}`;
     try {
-      fs.writeFileSync(
-        this.configFilePath,
-        JSON.stringify(this.config, null, 2),
-        'utf8',
-      );
+      fs.writeFileSync(tmpPath, JSON.stringify(this.config, null, 2), 'utf8');
+      fs.renameSync(tmpPath, this.configFilePath);
     } catch (error: any) {
+      try { fs.rmSync(tmpPath, { force: true }); } catch { /* ignore */ }
       this.logger.error(`Error saving library config: ${error?.message || 'Unknown error'}`);
       throw error;
     }
@@ -658,6 +672,31 @@ export class LibraryManagerService implements OnModuleInit {
   }
 
   /**
+   * Whether two files are byte-identical for transfer purposes: same size AND
+   * same content hash (matching DatabaseService.hashFile's first-1MB SHA-256,
+   * the identity notion this app already uses for dedup). Returns false if
+   * either file is missing or unreadable — callers must treat "not identical"
+   * as "do the copy / don't delete the source".
+   */
+  private async filesAreIdentical(a: string, b: string): Promise<boolean> {
+    try {
+      if (!fs.existsSync(a) || !fs.existsSync(b)) {
+        return false;
+      }
+      if (fs.statSync(a).size !== fs.statSync(b).size) {
+        return false;
+      }
+      const [hashA, hashB] = await Promise.all([
+        this.databaseService.hashFile(a),
+        this.databaseService.hashFile(b),
+      ]);
+      return hashA === hashB;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Transfer videos between libraries (move or copy)
    */
   async transferVideos(
@@ -763,8 +802,17 @@ export class LibraryManagerService implements OnModuleInit {
             fs.mkdirSync(targetDir, { recursive: true });
           }
 
-          // Copy the video file (only if not already there)
-          if (!fs.existsSync(targetVideoPath) || isReplacing) {
+          // Copy the video file. Skip the copy ONLY when a byte-identical file is
+          // already at the target (verified by size + content hash). A stale or
+          // partially-written file sitting at the target path must NOT be trusted
+          // as "already copied" — otherwise a later move would delete the source
+          // and leave only the bad target.
+          const targetExists = fs.existsSync(targetVideoPath);
+          if (
+            isReplacing ||
+            !targetExists ||
+            !(await this.filesAreIdentical(sourceVideoPath, targetVideoPath))
+          ) {
             fs.copyFileSync(sourceVideoPath, targetVideoPath);
           }
 
@@ -852,6 +900,19 @@ export class LibraryManagerService implements OnModuleInit {
 
           // If moving (not copying), delete from source
           if (action === 'move') {
+            // Never delete the source until we have CONFIRMED the target copy is
+            // byte-identical. This is the last line of defense against losing the
+            // only good copy of a file.
+            const copyVerified = await this.filesAreIdentical(
+              sourceVideoPath,
+              targetVideoPath,
+            );
+            if (!copyVerified) {
+              throw new Error(
+                `Refusing to delete source ${sourceVideoPath}: target copy ${targetVideoPath} is missing or does not match the source`,
+              );
+            }
+
             // Switch back to source database
             await this.databaseService.initializeDatabase(
               sourceLibrary.databasePath,
@@ -860,7 +921,7 @@ export class LibraryManagerService implements OnModuleInit {
             // Delete the video and associated data
             this.databaseService.deleteVideo(videoId);
 
-            // Delete the video file from source
+            // Delete the video file from source (copy is verified present in target)
             if (fs.existsSync(sourceVideoPath)) {
               fs.unlinkSync(sourceVideoPath);
             }

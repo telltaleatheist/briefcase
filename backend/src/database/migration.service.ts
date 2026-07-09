@@ -21,22 +21,41 @@ export class MigrationService {
   private readonly libraryPath: string;
   private readonly analysesDir: string;
   private readonly transcriptsDir: string;
+  private readonly migrationMarkerPath: string;
 
   constructor(private readonly databaseService: DatabaseService) {
-    const appDataPath = path.join(
-      os.homedir(),
-      'Library',
-      'Application Support',
-      'briefcase',
-    );
+    const appDataPath = this.getAppDataPath();
 
     this.libraryPath = path.join(appDataPath, 'library.json');
     this.analysesDir = path.join(appDataPath, 'analyses');
     this.transcriptsDir = path.join(appDataPath, 'transcripts');
+    // Explicit marker recording that the one-time library.json migration ran to
+    // completion. Presence of DB rows is NOT a reliable signal (a partial import
+    // leaves rows but is not "done"), so we key completeness off this file.
+    this.migrationMarkerPath = path.join(appDataPath, '.library-json-migrated');
   }
 
   /**
-   * Check if migration is needed (library.json exists and database is empty)
+   * Cross-platform app data directory (matches LibraryManagerService.getAppDataPath
+   * and SharedConfigService.getConfigDir):
+   *   macOS:   ~/Library/Application Support/briefcase
+   *   Windows: %APPDATA%/briefcase
+   *   Linux:   ~/.config/briefcase
+   */
+  private getAppDataPath(): string {
+    const homeDir = os.homedir();
+    if (process.platform === 'darwin') {
+      return path.join(homeDir, 'Library', 'Application Support', 'briefcase');
+    } else if (process.platform === 'win32') {
+      return path.join(process.env.APPDATA || path.join(homeDir, 'AppData', 'Roaming'), 'briefcase');
+    } else {
+      return path.join(process.env.XDG_CONFIG_HOME || path.join(homeDir, '.config'), 'briefcase');
+    }
+  }
+
+  /**
+   * Check if migration is needed (library.json exists and it has never been
+   * migrated to completion before).
    */
   async shouldMigrate(): Promise<boolean> {
     // Check if library.json exists
@@ -45,14 +64,16 @@ export class MigrationService {
       return false;
     }
 
-    // Check if database already has videos
-    const stats = this.databaseService.getStats();
-    if (stats.totalVideos > 0) {
-      this.logger.log('Database already has videos - migration already done');
+    // Check the explicit completion marker. We deliberately do NOT infer
+    // "already migrated" from the database being non-empty: a migration that
+    // failed partway leaves some rows but is not complete, and inferring done-ness
+    // from that would permanently skip the rest of the import.
+    if (fsSync.existsSync(this.migrationMarkerPath)) {
+      this.logger.log('Migration marker present - migration already completed');
       return false;
     }
 
-    this.logger.log('Migration needed: library.json exists and database is empty');
+    this.logger.log('Migration needed: library.json exists and has not been migrated yet');
     return true;
   }
 
@@ -94,6 +115,24 @@ export class MigrationService {
       }
 
       result.duration = Date.now() - startTime;
+
+      // Record completion explicitly so shouldMigrate() never re-runs this import.
+      // Only written after the whole loop finished without throwing.
+      await fs.writeFile(
+        this.migrationMarkerPath,
+        JSON.stringify(
+          {
+            completedAt: new Date().toISOString(),
+            videosImported: result.videosImported,
+            transcriptsImported: result.transcriptsImported,
+            analysesImported: result.analysesImported,
+            errors: result.errors.length,
+          },
+          null,
+          2,
+        ),
+        'utf-8',
+      );
 
       this.logger.log(
         `Migration complete in ${(result.duration / 1000).toFixed(1)}s:\n` +
