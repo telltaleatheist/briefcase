@@ -12,6 +12,7 @@ import {
   type LlamaProgress,
   type LlamaServerStatus,
   type LlamaGenerateResult,
+  type LlamaGenerateOptions,
 } from './llama-bridge';
 import { getRuntimePaths, getLlamaLibraryPath } from './runtime-paths';
 import { detectGpuVram, type DetectedGpu } from './gpu-info';
@@ -229,7 +230,7 @@ export class LlamaManager extends EventEmitter implements OnModuleDestroy {
   /**
    * Generate text using the local AI
    */
-  async generateText(prompt: string): Promise<LlamaGenerateResult> {
+  async generateText(prompt: string, options?: LlamaGenerateOptions): Promise<LlamaGenerateResult> {
     if (!this.isAvailable()) {
       throw new Error('Local AI model not available');
     }
@@ -238,7 +239,7 @@ export class LlamaManager extends EventEmitter implements OnModuleDestroy {
     this.logger.log(`Prompt length: ${prompt.length} characters`);
 
     try {
-      const result = await this.llama.generateText(prompt);
+      const result = await this.llama.generateText(prompt, options);
 
       this.logger.log(
         `Generation complete: ${result.inputTokens} input + ${result.outputTokens} output = ${result.totalTokens} tokens`

@@ -9,13 +9,15 @@ import {
 import { DatabaseService } from '../database/database.service';
 import { MediaEventService } from '../media/media-event.service';
 import { AIAnalysisService } from './ai-analysis.service';
+import { SharedConfigService } from '../config/shared-config.service';
+import { parseProviderModel } from './model-utils';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 
 interface AnalyzeRequest {
   videoId: string;
   aiModel?: string;
-  aiProvider?: 'ollama' | 'claude' | 'openai';
+  aiProvider?: 'local' | 'ollama' | 'claude' | 'openai';
   customInstructions?: string;
   claudeApiKey?: string;
   openaiApiKey?: string;
@@ -36,42 +38,32 @@ export class SimpleAnalyzeController {
     private databaseService: DatabaseService,
     private mediaEventService: MediaEventService,
     private aiAnalysis: AIAnalysisService,
+    private configService: SharedConfigService,
   ) {}
 
   /**
-   * Load analysis categories from config file
-   * Throws error if categories are not configured - NO FALLBACKS
+   * Load analysis categories from config file.
+   * Analysis without categories is broken by definition, so a missing/empty/
+   * unreadable file is a hard error — NO FALLBACKS.
    */
   private loadCategories(): any[] {
-    try {
-      const userDataPath = process.env.APPDATA ||
-                        (process.platform === 'darwin' ?
-                        path.join(process.env.HOME || '', 'Library', 'Application Support') :
-                        path.join(process.env.HOME || '', '.config'));
+    const categoriesPath = path.join(this.configService.getConfigDir(), 'analysis-categories.json');
 
-      const categoriesPath = path.join(userDataPath, 'briefcase', 'analysis-categories.json');
-
-      const fsSync = require('fs');
-      if (!fsSync.existsSync(categoriesPath)) {
-        // Categories file doesn't exist - return empty array, analysis will still run but skip flagging
-        this.logger.log('Analysis categories file not found - analysis will run without category flagging');
-        return [];
-      }
-
-      const data = fsSync.readFileSync(categoriesPath, 'utf8');
-      const parsed = JSON.parse(data);
-
-      if (!parsed.categories || parsed.categories.length === 0) {
-        // No categories configured - return empty array, analysis will still run but skip flagging
-        this.logger.log('No analysis categories configured - analysis will run without category flagging');
-        return [];
-      }
-
-      return parsed.categories;
-    } catch (error) {
-      this.logger.warn(`Failed to load categories: ${(error as Error).message} - continuing without category flagging`);
-      return []; // Return empty array instead of throwing
+    const fsSync = require('fs');
+    if (!fsSync.existsSync(categoriesPath)) {
+      throw new Error(
+        `Analysis categories file not found at ${categoriesPath}. Analysis cannot run without categories.`,
+      );
     }
+
+    const parsed = JSON.parse(fsSync.readFileSync(categoriesPath, 'utf8'));
+    if (!parsed.categories || parsed.categories.length === 0) {
+      throw new Error(
+        `No analysis categories configured in ${categoriesPath}. Configure categories before analyzing.`,
+      );
+    }
+
+    return parsed.categories;
   }
 
   /**
@@ -82,8 +74,8 @@ export class SimpleAnalyzeController {
     try {
       const {
         videoId,
-        aiModel = 'qwen2.5:7b',
-        aiProvider = 'ollama',
+        aiModel,
+        aiProvider,
         customInstructions,
         claudeApiKey,
         openaiApiKey,
@@ -94,6 +86,12 @@ export class SimpleAnalyzeController {
 
       if (!videoId) {
         throw new HttpException('Missing videoId', HttpStatus.BAD_REQUEST);
+      }
+
+      // Require an explicit model — NO silent qwen2.5:7b/ollama default that would
+      // analyze with a model the user never chose.
+      if (!aiModel) {
+        throw new HttpException('Missing aiModel — a model must be explicitly selected', HttpStatus.BAD_REQUEST);
       }
 
       // Get video from database
@@ -128,15 +126,18 @@ export class SimpleAnalyzeController {
         this.databaseService.updateVideoSuggestedTitle(videoId, null);
       }
 
-      // Strip provider prefix from model name if present (e.g., "ollama:cogito:14b" -> "cogito:14b")
-      let cleanModelName = aiModel;
-      if (aiModel.includes(':')) {
-        const parts = aiModel.split(':');
-        // If first part matches provider, strip it
-        if (aiProvider && parts[0] === aiProvider) {
-          cleanModelName = parts.slice(1).join(':');
-          this.logger.log(`Stripped model name: ${aiModel} -> ${cleanModelName}`);
-        }
+      // Strip provider prefix from model name if present (shared parser).
+      const parsed = parseProviderModel(aiModel, aiProvider);
+      const cleanModelName = parsed.model;
+      const resolvedProvider = parsed.provider;
+      if (!resolvedProvider) {
+        throw new HttpException(
+          'Missing aiProvider — a provider must be specified or encoded in the model prefix',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      if (cleanModelName !== aiModel) {
+        this.logger.log(`Stripped model name: ${aiModel} -> ${cleanModelName}`);
       }
 
       // Run analysis asynchronously
@@ -145,7 +146,7 @@ export class SimpleAnalyzeController {
         video.filename || 'Unknown',
         transcript.plain_text,
         cleanModelName,
-        aiProvider,
+        resolvedProvider,
         finalJobId,
         customInstructions,
         claudeApiKey,
@@ -177,7 +178,7 @@ export class SimpleAnalyzeController {
     videoTitle: string,
     transcriptText: string,
     aiModel: string,
-    aiProvider: 'ollama' | 'claude' | 'openai',
+    aiProvider: 'local' | 'ollama' | 'claude' | 'openai',
     jobId: string,
     customInstructions?: string,
     claudeApiKey?: string,

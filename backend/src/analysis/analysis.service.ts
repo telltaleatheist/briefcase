@@ -21,6 +21,7 @@ import { QueueManagerService } from '../queue/queue-manager.service';
 import { ApiKeysService } from '../config/api-keys.service';
 import { Task } from '../common/interfaces/task.interface';
 import { DEFAULT_CATEGORIES } from './prompts/analysis-prompts';
+import { parseProviderModel } from './model-utils';
 import { v4 as uuidv4 } from 'uuid';
 
 export interface AnalysisJob {
@@ -96,35 +97,26 @@ export class AnalysisService implements OnModuleInit {
    * Throws error if categories are not configured - NO FALLBACKS
    */
   private loadCategories(): any[] {
-    try {
-      const userDataPath = process.env.APPDATA ||
-                        (process.platform === 'darwin' ?
-                        path.join(process.env.HOME || '', 'Library', 'Application Support') :
-                        path.join(process.env.HOME || '', '.config'));
+    // Analysis without categories is broken by definition (nothing gets flagged),
+    // so a missing/empty/unreadable categories file is a hard error — NO FALLBACKS.
+    // onModuleInit seeds this file with DEFAULT_CATEGORIES, so absence means the
+    // config dir is genuinely wrong, not a first-run.
+    const categoriesPath = path.join(this.configService.getConfigDir(), 'analysis-categories.json');
 
-      const categoriesPath = path.join(userDataPath, 'briefcase', 'analysis-categories.json');
-
-      const fsSync = require('fs');
-      if (!fsSync.existsSync(categoriesPath)) {
-        // Categories file doesn't exist - return empty array, analysis will still run but skip flagging
-        this.logger.log('Analysis categories file not found - analysis will run without category flagging');
-        return [];
-      }
-
-      const data = fsSync.readFileSync(categoriesPath, 'utf8');
-      const parsed = JSON.parse(data);
-
-      if (!parsed.categories || parsed.categories.length === 0) {
-        // No categories configured - return empty array, analysis will still run but skip flagging
-        this.logger.log('No analysis categories configured - analysis will run without category flagging');
-        return [];
-      }
-
-      return parsed.categories;
-    } catch (error) {
-      this.logger.warn(`Failed to load categories: ${(error as Error).message} - continuing without category flagging`);
-      return []; // Return empty array instead of throwing
+    if (!fsSync.existsSync(categoriesPath)) {
+      throw new Error(
+        `Analysis categories file not found at ${categoriesPath}. Analysis cannot run without categories.`,
+      );
     }
+
+    const parsed = JSON.parse(fsSync.readFileSync(categoriesPath, 'utf8'));
+    if (!parsed.categories || parsed.categories.length === 0) {
+      throw new Error(
+        `No analysis categories configured in ${categoriesPath}. Configure categories before analyzing.`,
+      );
+    }
+
+    return parsed.categories;
   }
 
   constructor(
@@ -693,27 +685,17 @@ export class AnalysisService implements OnModuleInit {
     let modelName = request.aiModel || 'default-model';
     this.logger.log(`[processAnalyzePhase] Original aiModel: ${request.aiModel}, aiProvider: ${request.aiProvider}`);
 
-    // Extract provider from model string if not explicitly set (e.g., "local:cogito-8b" -> provider="local", model="cogito-8b")
-    const validProviders = ['local', 'ollama', 'claude', 'openai'];
-    try {
-      if (modelName && typeof modelName === 'string' && modelName.includes(':')) {
-        const parts = modelName.split(':');
-        const potentialProvider = parts[0];
-
-        // If first part is a valid provider, extract it
-        if (validProviders.includes(potentialProvider)) {
-          if (!request.aiProvider || request.aiProvider !== potentialProvider) {
-            request.aiProvider = potentialProvider as 'local' | 'ollama' | 'claude' | 'openai';
-            this.logger.log(`[processAnalyzePhase] Extracted provider from model string: ${potentialProvider}`);
-          }
-          modelName = parts.slice(1).join(':');
-          this.logger.log(`[processAnalyzePhase] Stripped model name: ${modelName}`);
-        }
+    // Extract provider from model string if prefixed (shared parser).
+    {
+      const parsed = parseProviderModel(modelName, request.aiProvider);
+      if (parsed.provider && parsed.provider !== request.aiProvider) {
+        request.aiProvider = parsed.provider;
+        this.logger.log(`[processAnalyzePhase] Extracted provider from model string: ${parsed.provider}`);
       }
-    } catch (error) {
-      this.logger.error(`[processAnalyzePhase] Error stripping model name: ${(error as Error).message}`, (error as Error).stack);
-      // Use fallback
-      modelName = 'default-model';
+      if (parsed.model !== modelName) {
+        modelName = parsed.model;
+        this.logger.log(`[processAnalyzePhase] Stripped model name: ${modelName}`);
+      }
     }
 
     this.updateJob(jobId, {
@@ -728,11 +710,9 @@ export class AnalysisService implements OnModuleInit {
     // Prepare AI model (preload if not loaded, unload others if different model)
     // Only for Ollama - local, claude, and openai providers handle their own model loading
     if (request.aiProvider === 'ollama') {
-      try {
-        await this.ollama.prepareModel(modelName, request.ollamaEndpoint);
-      } catch (error: any) {
-        this.logger.warn(`Failed to prepare model ${modelName}: ${(error as Error).message}. Continuing anyway...`);
-      }
+      // If the model can't be loaded, analysis WILL fail — fail loudly now
+      // rather than swallowing it and limping into a doomed run. NO FALLBACKS.
+      await this.ollama.prepareModel(modelName, request.ollamaEndpoint);
     }
 
     // Validate that transcript exists before proceeding
@@ -825,8 +805,9 @@ export class AnalysisService implements OnModuleInit {
       timing: { ...job.timing, analysisEnd: new Date() },
     });
 
-    // Keep-alive will maintain the model in memory for the next job in queue
-    this.logger.log(`Analysis complete for job ${jobId}. Model ${modelName} will stay loaded for ${this.ollama['KEEP_ALIVE_DURATION'] / 60000} minutes.`);
+    // Per-call keep_alive ('5m' on every generate) keeps the model resident for
+    // the next job in the queue.
+    this.logger.log(`Analysis complete for job ${jobId}. Model ${modelName} will stay loaded (~5 min keep_alive).`);
   }
 
   /**
@@ -1191,16 +1172,23 @@ export class AnalysisService implements OnModuleInit {
         if (analysisResult.chapters && analysisResult.chapters.length > 0) {
           console.log(`[processFinalizePhase] Chapters data: ${JSON.stringify(analysisResult.chapters)}`);
         }
-        if (analysisResult.chapters && Array.isArray(analysisResult.chapters) && analysisResult.chapters.length > 0) {
-          this.logger.log(`Saving ${analysisResult.chapters.length} chapters for video ${videoId}`);
-          console.log(`[processFinalizePhase] SAVING ${analysisResult.chapters.length} CHAPTERS`);
+        // Never persist chapters that FAILED analysis — they carry no real
+        // title/summary and must not masquerade as successful content.
+        const persistableChapters = (analysisResult.chapters || []).filter((c: any) => !c.failed);
+        const failedChapterCount = (analysisResult.chapters || []).length - persistableChapters.length;
+        if (failedChapterCount > 0) {
+          this.logger.warn(`${failedChapterCount} chapter(s) failed analysis and will not be saved for video ${videoId}`);
+        }
+        if (persistableChapters.length > 0) {
+          this.logger.log(`Saving ${persistableChapters.length} chapters for video ${videoId}`);
+          console.log(`[processFinalizePhase] SAVING ${persistableChapters.length} CHAPTERS`);
 
           try {
             // Delete existing chapters first
             this.databaseService.deleteChapters(videoId);
             console.log(`[processFinalizePhase] Deleted existing chapters for video ${videoId}`);
 
-            for (const chapter of analysisResult.chapters) {
+            for (const chapter of persistableChapters) {
               console.log(`[processFinalizePhase] Processing chapter: ${JSON.stringify(chapter)}`);
 
               // Parse start time to seconds
@@ -1248,9 +1236,9 @@ export class AnalysisService implements OnModuleInit {
             console.error((chapterError as Error).stack);
           }
 
-          this.logger.log(`Successfully saved ${analysisResult.chapters.length} chapters for video ${videoId}`);
+          this.logger.log(`Successfully saved ${persistableChapters.length} chapters for video ${videoId}`);
         } else {
-          this.logger.warn(`No chapters found in analysisResult for video ${videoId}`);
+          this.logger.warn(`No persistable chapters in analysisResult for video ${videoId}`);
         }
 
         // Save suggested title if available (MOVED INSIDE analysis block)
