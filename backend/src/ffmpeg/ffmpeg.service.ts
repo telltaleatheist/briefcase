@@ -902,11 +902,10 @@ export class FfmpegService {
       this.logger.log(`Generated ${samples.length} waveform samples for ${duration}s video`);
       return { samples, duration };
     } catch (error) {
+      // NO SILENT FALLBACK: a fabricated flat waveform is indistinguishable from
+      // real audio data and silently hides extraction failures. Surface the error.
       this.logger.error(`Waveform extraction error: ${error}`);
-      return {
-        samples: new Array(samplesCount).fill(0.3),
-        duration
-      };
+      throw error instanceof Error ? error : new Error(String(error));
     }
   }
 }

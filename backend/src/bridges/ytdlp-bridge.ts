@@ -383,7 +383,9 @@ export class YtDlpBridge extends EventEmitter {
     ];
 
     return new Promise((resolve) => {
-      const proc = spawn(this.binaryPath, args);
+      // stdio 'ignore' discards stdout/stderr at the OS level: we only care about
+      // the exit code, and unread pipes could deadlock the child on a >64KB burst.
+      const proc = spawn(this.binaryPath, args, { stdio: 'ignore' });
 
       proc.on('close', (code) => {
         resolve(code === 0);
@@ -408,6 +410,9 @@ export class YtDlpBridge extends EventEmitter {
       proc.stdout?.on('data', (data) => {
         stdout += data.toString();
       });
+
+      // Drain stderr so a warning burst can't fill the pipe and block the child.
+      proc.stderr?.on('data', () => {});
 
       proc.on('close', (code) => {
         if (code === 0) {
@@ -436,6 +441,9 @@ export class YtDlpBridge extends EventEmitter {
       proc.stdout?.on('data', (data) => {
         stdout += data.toString();
       });
+
+      // Drain stderr so a warning burst can't fill the pipe and block the child.
+      proc.stderr?.on('data', () => {});
 
       proc.on('close', (code) => {
         resolve(code === 0 || stdout.includes('Updated'));

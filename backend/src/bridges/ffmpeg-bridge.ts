@@ -292,36 +292,61 @@ export class FfmpegBridge extends EventEmitter {
     startSeconds: number = 0,
     durationSeconds: number = 10
   ): Promise<{ mean: number; max: number }> {
-    return new Promise((resolve) => {
-      const args = [
-        '-ss', String(startSeconds),
-        '-t', String(durationSeconds),
-        '-i', inputPath,
-        '-af', 'volumedetect',
-        '-f', 'null',
-        '-',
-      ];
+    const processId = `volumedetect-${crypto.randomBytes(6).toString('hex')}`;
+    const args = [
+      '-ss', String(startSeconds),
+      '-t', String(durationSeconds),
+      '-i', inputPath,
+      '-af', 'volumedetect',
+      '-f', 'null',
+      '-',
+    ];
 
+    return new Promise((resolve, reject) => {
       const proc = spawn(this.binaryPath, args);
+
+      // Register so abort()/abortAll() can reach this probe; otherwise it
+      // orphans until it finishes on its own.
+      const processInfo: FfmpegProcessInfo = {
+        id: processId,
+        process: proc,
+        args,
+        startTime: Date.now(),
+        aborted: false,
+      };
+      this.activeProcesses.set(processId, processInfo);
+
       let stderrBuffer = '';
 
       proc.stderr?.on('data', (data: Buffer) => {
         stderrBuffer += data.toString();
       });
 
-      proc.on('close', () => {
+      proc.on('close', (code) => {
+        this.activeProcesses.delete(processId);
+
+        if (processInfo.aborted) {
+          reject(new Error('Volume detection was aborted'));
+          return;
+        }
+
         // Parse: mean_volume: -41.1 dB, max_volume: -15.9 dB
         const meanMatch = stderrBuffer.match(/mean_volume:\s*([-\d.]+)\s*dB/);
         const maxMatch = stderrBuffer.match(/max_volume:\s*([-\d.]+)\s*dB/);
 
-        const mean = meanMatch ? parseFloat(meanMatch[1]) : -100;
-        const max = maxMatch ? parseFloat(maxMatch[1]) : -100;
+        // NO SILENT FALLBACK: a fabricated -100 dB reads as genuinely-silent
+        // audio and triggers a needless full silence scan. Fail loudly instead.
+        if (!meanMatch || !maxMatch) {
+          reject(new Error(`Volume detection produced no volumedetect output (exit ${code}): ${stderrBuffer.slice(-300)}`));
+          return;
+        }
 
-        resolve({ mean, max });
+        resolve({ mean: parseFloat(meanMatch[1]), max: parseFloat(maxMatch[1]) });
       });
 
-      proc.on('error', () => {
-        resolve({ mean: -100, max: -100 });
+      proc.on('error', (err) => {
+        this.activeProcesses.delete(processId);
+        reject(err);
       });
     });
   }
@@ -342,8 +367,9 @@ export class FfmpegBridge extends EventEmitter {
     const threshold = options?.silenceThreshold ?? -45;
     const minDuration = options?.minSilenceDuration ?? 1;
     const maxSearch = options?.maxSearchDuration ?? 600;
+    const processId = `silencedetect-${crypto.randomBytes(6).toString('hex')}`;
 
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const args = [
         '-i', inputPath,
         '-t', String(maxSearch),
@@ -353,13 +379,39 @@ export class FfmpegBridge extends EventEmitter {
       ];
 
       const proc = spawn(this.binaryPath, args);
+
+      // Register so abort()/abortAll() can reach this probe; otherwise it
+      // orphans until it finishes on its own.
+      const processInfo: FfmpegProcessInfo = {
+        id: processId,
+        process: proc,
+        args,
+        startTime: Date.now(),
+        aborted: false,
+      };
+      this.activeProcesses.set(processId, processInfo);
+
       let stderrBuffer = '';
 
       proc.stderr?.on('data', (data: Buffer) => {
         stderrBuffer += data.toString();
       });
 
-      proc.on('close', () => {
+      proc.on('close', (code) => {
+        this.activeProcesses.delete(processId);
+
+        if (processInfo.aborted) {
+          reject(new Error('Silence detection was aborted'));
+          return;
+        }
+
+        // NO SILENT FALLBACK: a real ffmpeg failure must not be reported as
+        // "0s of leading silence" (a legitimate success value). Fail loudly.
+        if (code !== 0) {
+          reject(new Error(`Silence detection failed (exit ${code}): ${stderrBuffer.slice(-300)}`));
+          return;
+        }
+
         // Look for silence_end markers in the output
         // Format: [silencedetect @ ...] silence_end: 607.123 | silence_duration: 607.123
         // We want the LAST silence_end with a significant duration
@@ -392,8 +444,9 @@ export class FfmpegBridge extends EventEmitter {
       });
 
       proc.on('error', (err) => {
+        this.activeProcesses.delete(processId);
         this.logger.warn(`Silence detection failed: ${err.message}`);
-        resolve(0);
+        reject(err);
       });
     });
   }

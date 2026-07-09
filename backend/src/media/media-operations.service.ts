@@ -184,10 +184,25 @@ export class MediaOperationsService {
           // Update download date
           this.databaseService.updateVideoDownloadDate(videoId, new Date().toISOString());
 
-          // Delete the duplicate file
-          if (fs.existsSync(videoPath)) {
-            fs.unlinkSync(videoPath);
-            this.logger.log(`[${jobId || 'standalone'}] Deleted duplicate file: ${videoPath}`);
+          // Only delete the freshly-downloaded duplicate once we've CONFIRMED the
+          // existing library copy is still on disk. Otherwise we'd destroy the only
+          // remaining copy of the file. If the existing copy is missing, adopt the
+          // new download by relinking the record to it.
+          const existingPath = existingVideo.current_path as string | undefined;
+          const existingOnDisk = !!existingPath && fs.existsSync(existingPath);
+          const sameFile = !!existingPath && path.resolve(existingPath) === path.resolve(videoPath);
+
+          if (existingOnDisk) {
+            if (fs.existsSync(videoPath) && !sameFile) {
+              fs.unlinkSync(videoPath);
+              this.logger.log(`[${jobId || 'standalone'}] Deleted duplicate file: ${videoPath}`);
+            }
+          } else if (fs.existsSync(videoPath)) {
+            // Existing library file is gone — keep the new download and relink.
+            this.logger.warn(
+              `[${jobId || 'standalone'}] Existing library file missing (${existingPath}); relinking record ${videoId} to new download: ${videoPath}`,
+            );
+            this.databaseService.updateVideoPath(videoId, videoPath);
           }
         }
       }
@@ -477,7 +492,7 @@ export class MediaOperationsService {
 
       // Read transcript files
       const transcriptSrt = fs.readFileSync(transcriptFile, 'utf8');
-      const transcriptTxtFile = transcriptFile.replace('.srt', '.txt');
+      const transcriptTxtFile = transcriptFile.replace(/\.srt$/i, '.txt');
       const transcriptText = fs.existsSync(transcriptTxtFile)
         ? fs.readFileSync(transcriptTxtFile, 'utf8')
         : transcriptSrt;

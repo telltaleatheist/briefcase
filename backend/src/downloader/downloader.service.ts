@@ -693,7 +693,7 @@ export class DownloaderService implements OnModuleInit {
             });
 
             const output = await livestreamManager.runLivestream();
-            outputFile = await this.determineOutputFile(output, downloadFolder, downloadStartTime);
+            outputFile = await this.determineOutputFile(output, downloadFolder, downloadStartTime, outputTemplate);
           } catch (livestreamError) {
             const errMsg = livestreamError instanceof Error ? livestreamError.message : String(livestreamError);
             this.logger.warn(`Livestream download failed, falling back to regular download: ${errMsg}`);
@@ -756,7 +756,7 @@ export class DownloaderService implements OnModuleInit {
 
               // Try this client method
               const output = await newYtDlpManager.runWithRetry(2, 1000);
-              outputFile = await this.determineOutputFile(output, downloadFolder, downloadStartTime);
+              outputFile = await this.determineOutputFile(output, downloadFolder, downloadStartTime, outputTemplate);
 
               if (outputFile && fs.existsSync(outputFile)) {
                 this.logger.log(`✓ Success with ${clientType} client!`);
@@ -785,7 +785,7 @@ export class DownloaderService implements OnModuleInit {
           // Non-YouTube download - use standard method with m3u8 fallback
           try {
             const output = await ytDlpManager.runWithRetry(3, 2000);
-            outputFile = await this.determineOutputFile(output, downloadFolder, downloadStartTime);
+            outputFile = await this.determineOutputFile(output, downloadFolder, downloadStartTime, outputTemplate);
           } catch (initialError) {
             const errorMsg = initialError instanceof Error ? initialError.message : String(initialError);
             this.logger.warn(`Initial download failed: ${errorMsg.substring(0, 200)}`);
@@ -849,7 +849,7 @@ export class DownloaderService implements OnModuleInit {
                     });
 
                     const output = await vimeoManager.runWithRetry(2, 1000);
-                    outputFile = await this.determineOutputFile(output, downloadFolder, downloadStartTime);
+                    outputFile = await this.determineOutputFile(output, downloadFolder, downloadStartTime, outputTemplate);
                   }
                 } catch (embedErr) {
                   this.logger.warn(`Vimeo embed fallback failed: ${embedErr instanceof Error ? embedErr.message : String(embedErr)}`);
@@ -901,7 +901,7 @@ export class DownloaderService implements OnModuleInit {
                   });
 
                   const output = await fallbackManager.runWithRetry(2, 1000);
-                  outputFile = await this.determineOutputFile(output, downloadFolder, downloadStartTime);
+                  outputFile = await this.determineOutputFile(output, downloadFolder, downloadStartTime, outputTemplate);
                 }
               } catch (m3u8Err) {
                 this.logger.warn(`m3u8 fallback failed: ${m3u8Err instanceof Error ? m3u8Err.message : String(m3u8Err)}`);
@@ -951,7 +951,7 @@ export class DownloaderService implements OnModuleInit {
                 });
 
                 const output = await cookieManager.run();
-                outputFile = await this.determineOutputFile(output, downloadFolder, downloadStartTime);
+                outputFile = await this.determineOutputFile(output, downloadFolder, downloadStartTime, outputTemplate);
               } catch (cookieErr) {
                 this.logger.warn(`Cookie retry fallback failed: ${cookieErr instanceof Error ? cookieErr.message : String(cookieErr)}`);
               }
@@ -1000,7 +1000,7 @@ export class DownloaderService implements OnModuleInit {
                 });
 
                 const output = await genericManager.run();
-                outputFile = await this.determineOutputFile(output, downloadFolder, downloadStartTime);
+                outputFile = await this.determineOutputFile(output, downloadFolder, downloadStartTime, outputTemplate);
               } catch (genericErr) {
                 this.logger.warn(`Generic extractor fallback failed: ${genericErr instanceof Error ? genericErr.message : String(genericErr)}`);
               }
@@ -1114,7 +1114,7 @@ export class DownloaderService implements OnModuleInit {
   /**
    * Determine the output file from yt-dlp output or file system
    */
-  private async determineOutputFile(output: string, downloadFolder: string, downloadStartTime: number): Promise<string | null> {
+  private async determineOutputFile(output: string, downloadFolder: string, downloadStartTime: number, outputTemplate?: string): Promise<string | null> {
     // Try to extract from output first
     let outputFile: string | null = null;
 
@@ -1166,6 +1166,23 @@ export class DownloaderService implements OnModuleInit {
         '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'
       ];
 
+      // Scope the filesystem inference to THIS job's output template so concurrent
+      // downloads sharing a folder can't grab each other's newest file. We take the
+      // literal prefix of the template basename up to the first yt-dlp field (%(...)s);
+      // for a display-name template (e.g. "Title - 2026-07-09.%(ext)s") this is a
+      // strong, job-specific anchor. RESIDUAL RISK: a purely title/date-field template
+      // (e.g. "%(upload_date...)s%(title)s.%(ext)s") yields no literal prefix, so we
+      // fall back to newest-in-folder for that shape only (logged below).
+      let namePrefix: string | null = null;
+      if (outputTemplate) {
+        const templateBase = path.basename(outputTemplate);
+        const literal = templateBase.split('%(')[0].replace(/[\s.\-_]+$/, '');
+        if (literal.length >= 3) namePrefix = literal;
+      }
+      if (!namePrefix) {
+        this.logger.warn(`determineOutputFile: no literal prefix from template "${outputTemplate ?? '(none)'}"; falling back to newest-in-folder (concurrent downloads in the same folder may be misattributed)`);
+      }
+
       const mostRecentFile = files
         .filter(file => {
           // Filter out hidden files, system files, and macOS metadata files
@@ -1174,6 +1191,9 @@ export class DownloaderService implements OnModuleInit {
           // Filter for valid media extensions
           const ext = path.extname(file).toLowerCase();
           if (!validExtensions.includes(ext)) return false;
+
+          // Scope to this job's output name when we have a reliable prefix.
+          if (namePrefix && !file.startsWith(namePrefix)) return false;
 
           // CRITICAL: Only consider files created AFTER download started
           const filePath = path.join(downloadFolder, file);
@@ -1419,6 +1439,7 @@ export class DownloaderService implements OnModuleInit {
           if (res.statusCode !== 200) {
             file.close();
             try { fs.unlinkSync(dest); } catch {}
+            res.resume(); // drain the undelivered body so the socket can be reused/freed
             this.logger.warn(`Reddit direct download: ${fileUrl} returned ${res.statusCode}`);
             resolve(false);
             return;
