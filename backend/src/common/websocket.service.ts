@@ -2,7 +2,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Server } from 'socket.io';
 import { WebSocketEvent, WebSocketEventMap } from './websocket.types';
-import { SavedLink } from '../saved-links/saved-links.service';
 
 /**
  * WebSocketService provides a clean, type-safe API for emitting WebSocket events.
@@ -142,34 +141,11 @@ export class WebSocketService {
   }
 
   /**
-   * Saved Links Events
-   */
-  emitSavedLinkAdded(link: SavedLink): void {
-    this.logger.log(`Emitted saved-link-added event for: ${link.url}`);
-    this.emit(WebSocketEvent.SAVED_LINK_ADDED, { link });
-  }
-
-  /**
    * Library/Video Events
    */
   emitVideoAdded(payload: WebSocketEventMap[WebSocketEvent.VIDEO_ADDED]): void {
     this.logger.log(`Emitted video-added event for: ${payload.filename} (${payload.videoId})`);
     this.emit(WebSocketEvent.VIDEO_ADDED, payload);
-  }
-
-  emitSavedLinkUpdated(link: SavedLink): void {
-    this.logger.log(`Emitted saved-link-updated event for: ${link.id}`);
-    this.emit(WebSocketEvent.SAVED_LINK_UPDATED, { link });
-  }
-
-  emitSavedLinkDeleted(id: string): void {
-    this.logger.log(`Emitted saved-link-deleted event for: ${id}`);
-    this.emit(WebSocketEvent.SAVED_LINK_DELETED, { id });
-  }
-
-  emitSavedLinksCount(count: number): void {
-    this.logger.log(`Emitted saved-links-count event: ${count}`);
-    this.emit(WebSocketEvent.SAVED_LINKS_COUNT, { count });
   }
 
   /**

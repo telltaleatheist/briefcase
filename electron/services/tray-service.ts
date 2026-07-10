@@ -12,7 +12,6 @@ import { WindowService } from './window-service';
 export class TrayService {
   private tray: Tray | null = null;
   private windowService: WindowService;
-  private savedLinksCount: number = 0;
   private backendPort: number = 3000;
 
   constructor(windowService: WindowService) {
@@ -70,10 +69,6 @@ export class TrayService {
   private updateTrayMenu(): void {
     if (!this.tray) return;
 
-    const savedLinksLabel = this.savedLinksCount > 0
-      ? `Saved Links (${this.savedLinksCount})`
-      : 'Saved Links';
-
     const contextMenu = Menu.buildFromTemplate([
       {
         label: 'Open Briefcase',
@@ -82,11 +77,6 @@ export class TrayService {
       {
         label: 'Open Web Interface',
         click: () => this.openWebInterface()
-      },
-      { type: 'separator' },
-      {
-        label: savedLinksLabel,
-        click: () => this.openSavedLinks()
       },
       { type: 'separator' },
       {
@@ -158,18 +148,9 @@ export class TrayService {
    * Open the web interface in the default browser
    */
   private openWebInterface(): void {
-    const url = `http://localhost:${this.backendPort}/saved`;
+    const url = `http://localhost:${this.backendPort}/`;
     log.info(`Opening web interface: ${url}`);
     shell.openExternal(url);
-  }
-
-  /**
-   * Open the Saved Links view in the main window
-   */
-  private openSavedLinks(): void {
-    this.showWindow();
-    // TODO: Navigate to /saved-links route once we implement the frontend
-    // For now, just open the main window
   }
 
   /**
@@ -182,21 +163,6 @@ export class TrayService {
     this.windowService.setQuitting(true);
     this.windowService.requestForceQuit();
     app.quit();
-  }
-
-  /**
-   * Update the saved links count badge
-   */
-  setSavedLinksCount(count: number): void {
-    this.savedLinksCount = count;
-    this.updateTrayMenu();
-
-    // On macOS, we can also update the dock badge
-    if (process.platform === 'darwin' && count > 0) {
-      app.dock?.setBadge(count.toString());
-    } else if (process.platform === 'darwin') {
-      app.dock?.setBadge('');
-    }
   }
 
   /**

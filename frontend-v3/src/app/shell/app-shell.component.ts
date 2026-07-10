@@ -21,7 +21,6 @@ const SECTION_TITLES: Record<ShellSection, string> = {
   queue: 'Queue',
   collections: 'Collections',
   settings: 'Settings',
-  saved: 'Saved for Later',
   archives: 'Web Archives',
   other: '',
 };
@@ -57,7 +56,7 @@ export class AppShellComponent {
 
   /** Sections hosted by the persistent workspace (LibraryPageComponent). */
   private static readonly WORKSPACE_SECTIONS: ShellSection[] = [
-    'library', 'queue', 'collections', 'saved', 'archives'
+    'library', 'queue', 'collections', 'archives'
   ];
 
   constructor() {

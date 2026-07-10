@@ -22,6 +22,15 @@
     <ui-badge [value]="queueCount()" tone="accent" />
   </button>
 
+  <button
+    type="button"
+    class="nav-item"
+    [class.active]="activeSection() === 'archives'"
+    (click)="selectSection.emit('archives')">
+    <span class="glyph">🌐</span>
+    <span class="label">Archives</span>
+  </button>
+
   <div class="nav-section">Collections</div>
 
   @for (collection of collections(); track collection.id) {
@@ -46,30 +55,6 @@
   </button>
 
   <div class="flex-spacer"></div>
-
-  <!-- Temporary: destinations slated for deletion in phase 5 -->
-  <button type="button" class="nav-item more-toggle" (click)="toggleMore()">
-    <span class="glyph">{{ moreOpen() ? '▾' : '▸' }}</span>
-    <span class="label">More</span>
-  </button>
-  @if (moreOpen()) {
-    <button
-      type="button"
-      class="nav-item sub"
-      [class.active]="activeSection() === 'saved'"
-      (click)="selectSection.emit('saved')">
-      <span class="glyph">💾</span>
-      <span class="label">Saved</span>
-    </button>
-    <button
-      type="button"
-      class="nav-item sub"
-      [class.active]="activeSection() === 'archives'"
-      (click)="selectSection.emit('archives')">
-      <span class="glyph">🌐</span>
-      <span class="label">Archives</span>
-    </button>
-  }
 
   <button
     type="button"

@@ -193,7 +193,7 @@ export class QueueTabComponent {
         break;
       case 'view-analysis':
       case 'openInEditor':
-        // For completed items, open in RippleCut (video editor)
+        // For completed items, open in the video editor (Scout)
         const completedIds = videos
           .filter((v: VideoItem) => v.id.startsWith('completed-'))
           .map((v: VideoItem) => v.id.replace('completed-', ''));

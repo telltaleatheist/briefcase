@@ -7,19 +7,14 @@ import { firstValueFrom } from 'rxjs';
 import { LibrarySearchFiltersComponent, LibraryFilters } from '../../components/library-search-filters/library-search-filters.component';
 import { CascadeComponent } from '../../components/cascade/cascade.component';
 import { LibraryManagerModalComponent } from '../../components/library-manager-modal/library-manager-modal.component';
-import { UrlInputComponent, UrlEntry } from '../../components/url-input/url-input.component';
 import { QueueItemConfigModalComponent } from '../../components/queue-item-config-modal/queue-item-config-modal.component';
 import { AiSetupWizardComponent } from '../../components/ai-setup-wizard/ai-setup-wizard.component';
 import { VideoPreviewModalComponent, PreviewItem } from '../../components/video-preview-modal/video-preview-modal.component';
 import { VideoConfigDialogComponent } from '../../components/video-config-dialog/video-config-dialog.component';
-import { ManagerTabComponent } from '../../components/manager-tab/manager-tab.component';
 import { TabsTabComponent } from '../../components/tabs-tab/tabs-tab.component';
 import { NewTabDialogComponent } from '../../components/new-tab-dialog/new-tab-dialog.component';
 import { QueueTabComponent } from '../../components/queue-tab/queue-tab.component';
-import { SaveForLaterTabComponent } from '../../components/save-for-later-tab/save-for-later-tab.component';
 import { ArchivesTabComponent } from '../../components/archives-tab/archives-tab.component';
-import { SettingsPageComponent } from '../settings/settings-page.component';
-import { LibraryShortcutsDialogComponent } from '../../components/library-shortcuts-dialog/library-shortcuts-dialog.component';
 import { VideoWeek, VideoItem, ChildrenConfig, VideoChild, ItemProgress } from '../../models/video.model';
 import { Library, NewLibrary, OpenLibrary } from '../../models/library.model';
 import { QueueItemTask } from '../../models/queue.model';
@@ -79,18 +74,14 @@ export interface ProcessingTask {
     LibrarySearchFiltersComponent,
     CascadeComponent,
     LibraryManagerModalComponent,
-    UrlInputComponent,
     QueueItemConfigModalComponent,
     AiSetupWizardComponent,
     VideoPreviewModalComponent,
     VideoConfigDialogComponent,
-    ManagerTabComponent,
     TabsTabComponent,
     NewTabDialogComponent,
     QueueTabComponent,
-    SaveForLaterTabComponent,
     ArchivesTabComponent,
-    SettingsPageComponent,
     ExportIndicatorComponent,
     TrimOpenerModalComponent,
     UiSegmentedControlComponent
@@ -125,7 +116,6 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   }
 
   @ViewChild(CascadeComponent) private cascadeComponent?: CascadeComponent;
-  @ViewChild(UrlInputComponent) private urlInputComponent?: UrlInputComponent;
   @ViewChild(TabsTabComponent) private tabsTabComponent?: TabsTabComponent;
 
   // File input for import button
@@ -370,7 +360,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   currentFilters: LibraryFilters | null = null;
 
   // Tab State — set by the route.data subscription (URL is the source of truth)
-  activeTab = signal<'library' | 'queue' | 'tabs' | 'manager' | 'saved' | 'archives' | 'settings'>('library');
+  activeTab = signal<'library' | 'queue' | 'tabs' | 'archives'>('library');
 
   // Default task settings (loaded from localStorage)
   private defaultTaskSettings: QueueItemTask[] = [];
@@ -726,8 +716,6 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     // Map tabs to tour IDs
     if (tab === 'queue') {
       tourId = 'queue';
-    } else if (tab === 'settings') {
-      tourId = 'settings';
     } else if (tab === 'library') {
       tourId = 'library';
     }
@@ -1396,41 +1384,6 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     });
   }
 
-  // Handle URLs added from input - uses QueueService as single source of truth
-  onUrlsAdded(entries: UrlEntry[]) {
-    let addedNew = false;
-
-    for (const entry of entries) {
-      if (entry.loading) {
-        // New URL - add via QueueService with default tasks
-        const tasks: QueueTask[] = this.defaultTaskSettings.map(t =>
-          createQueueTask(t.type, t.config || {})
-        );
-
-        this.queueService.addJob({
-          url: entry.url,
-          title: entry.title,
-          titleResolved: false, // Title is still being fetched
-          tasks
-        });
-        addedNew = true;
-      } else {
-        // Metadata update - update via QueueService
-        this.queueService.updateJobByUrl(entry.url, {
-          title: entry.title,
-          duration: entry.duration,
-          thumbnail: entry.thumbnail,
-          titleResolved: true
-        });
-      }
-    }
-
-    // Switch to Queue tab to show newly added items
-    if (addedNew) {
-      this.setActiveTab('queue');
-    }
-  }
-
   // Open config modal for selected items
   openConfigModal(itemIds: string[]) {
     if (itemIds.length === 0) return;
@@ -1932,10 +1885,6 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         break;
       }
 
-      case 'openInRipplecut':
-        this.openInRipplecut(videosToProcess[0]);
-        break;
-
       case 'reveal':
         // Reveal file in Finder/Explorer
         if (videosToProcess[0]?.filePath) {
@@ -2077,55 +2026,6 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         }
       });
     }
-  }
-
-  openInRipplecut(video?: VideoItem) {
-    // If no video passed, get first selected video
-    if (!video) {
-      const selectedItemIds = this.selectedVideoIds();
-
-      if (selectedItemIds.size === 0) {
-        this.notificationService.warning('No Selection', 'Please select a video first');
-        return;
-      }
-
-      if (selectedItemIds.size !== 1) {
-        this.notificationService.warning('Multiple Selection', 'Please select exactly one video to open in RippleCut');
-        return;
-      }
-
-      // Get the video from selected ID
-      const allVideos: VideoItem[] = [];
-      this.filteredWeeks().forEach(week => {
-        allVideos.push(...week.videos);
-      });
-      this.videoWeeks().forEach(week => {
-        week.videos.forEach(v => {
-          if (!allVideos.find(existing => existing.id === v.id)) {
-            allVideos.push(v);
-          }
-        });
-      });
-
-      const itemId = Array.from(selectedItemIds)[0];
-      const parts = itemId.split('|');
-      const videoId = parts.length > 1 ? parts[1] : itemId;
-      video = allVideos.find(v => v.id === videoId) || allVideos.find(v => v.id === itemId);
-    }
-
-    if (!video) {
-      this.notificationService.error('Video Not Found', 'Could not find selected video');
-      return;
-    }
-
-    // Navigate to RippleCut route with query params
-    this.router.navigate(['/ripplecut'], {
-      queryParams: {
-        videoId: video.id,
-        videoPath: video.filePath,
-        videoTitle: video.name
-      }
-    });
   }
 
   viewMore() {
@@ -2407,13 +2307,6 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     // Clear selection (Angular will handle this reactively)
     if (this.cascadeComponent) {
       this.cascadeComponent.clearSelection();
-    }
-  }
-
-  onPasteUrls() {
-    // Focus the URL input
-    if (this.urlInputComponent) {
-      this.urlInputComponent.focus();
     }
   }
 
@@ -2980,15 +2873,12 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
    * pushes the route, and the route.data subscription applies the section.
    * Existing call-sites keep working unchanged.
    */
-  setActiveTab(tab: 'library' | 'queue' | 'tabs' | 'manager' | 'saved' | 'archives' | 'settings') {
+  setActiveTab(tab: 'library' | 'queue' | 'tabs' | 'archives') {
     const urls: Record<string, string> = {
       library: '/library',
       queue: '/queue',
       tabs: '/collections',
-      manager: '/manager',
-      saved: '/saved',
       archives: '/archives',
-      settings: '/settings',
     };
     this.router.navigate([urls[tab]]);
   }
@@ -2996,7 +2886,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   /**
    * Apply a section to the view (called by the route.data subscription).
    */
-  private applySection(tab: 'library' | 'queue' | 'tabs' | 'manager' | 'saved' | 'archives' | 'settings') {
+  private applySection(tab: 'library' | 'queue' | 'tabs' | 'archives') {
     this.activeTab.set(tab);
     if (tab === 'queue') {
       // Always refresh from backend so newly-submitted jobs (e.g. export-clip)
@@ -3218,7 +3108,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Open RippleCut (video editor) to view analysis for a completed item
+   * Open the video editor (Scout) to view analysis for a completed item
    */
   onViewAnalysis(itemId: string) {
     // Find the item in the completed queue

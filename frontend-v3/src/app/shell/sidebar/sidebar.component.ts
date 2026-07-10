@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, input, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
 import { VideoTab } from '../../services/tabs.service';
 import { ShellSection } from '../../core/stores/navigation.store';
 import { UiBadgeComponent } from '../../ui';
@@ -25,15 +25,8 @@ export class SidebarComponent {
   queueCount = input(0);
   currentLibraryName = input('');
 
-  selectSection = output<'library' | 'queue' | 'collections' | 'settings' | 'saved' | 'archives'>();
+  selectSection = output<'library' | 'queue' | 'collections' | 'settings' | 'archives'>();
   selectCollection = output<string>();
   newCollection = output<void>();
   openLibrarySwitcher = output<void>();
-
-  /** Temporary "More" disclosure for Saved/Archives (deleted/folded in later phases). */
-  moreOpen = signal(false);
-
-  toggleMore(): void {
-    this.moreOpen.update(v => !v);
-  }
 }

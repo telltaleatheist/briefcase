@@ -194,8 +194,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
   /**
    * Emit a task.failed event on BOTH event buses:
    *  - MediaEventService (Socket.IO) for live frontend updates.
-   *  - EventEmitter2 for in-process listeners (e.g. SavedLinksService, which
-   *    listens on EventEmitter2 and would otherwise never learn a task failed).
+   *  - EventEmitter2 for in-process listeners.
    */
   private emitTaskFailed(payload: {
     taskId: string;
@@ -755,7 +754,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
 
         this.logger.log(`Job ${job.id} completed successfully`);
 
-        // Emit job completed event for saved-links and other listeners (via EventEmitter2)
+        // Emit job completed event for in-process listeners (via EventEmitter2)
         const eventData = {
           jobId: job.id,
           status: 'completed',

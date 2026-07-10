@@ -1248,11 +1248,11 @@ export class LibraryController {
       }
 
       // Generate clip filename
-      // For marker exports from RippleCut, use description (marker name) as the title
+      // For marker exports from the video editor, use description (marker name) as the title
       // Otherwise use title if provided
       const originalFilename = path.basename(body.videoPath);
 
-      // Log what we received from RippleCut
+      // Log what we received from the editor
       this.logger.log(`Extract-clip request: title="${body.title}", description="${body.description}", category="${body.category}"`);
 
       const clipFilename = this.clipExtractor.generateClipFilename(

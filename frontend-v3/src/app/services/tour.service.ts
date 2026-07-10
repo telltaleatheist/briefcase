@@ -52,13 +52,13 @@ export class TourService {
         {
           element: '.tabs-section',
           title: 'Navigation Tabs',
-          description: 'Switch between Library, Queue, Tabs, Manager, Saved for Later, and Settings. Each tab provides different functionality.',
+          description: 'Use the sidebar to move between Library, Queue, Archives, Collections, and Settings.',
           side: 'bottom',
         },
         {
           element: '.header-actions',
           title: 'Action Buttons',
-          description: 'Download videos from URLs, import local files, open RippleCut (video editor), or view details about selected videos.',
+          description: 'Download videos from URLs, import local files, open the video editor, or view details about selected videos.',
           side: 'bottom',
         },
         {
@@ -89,7 +89,7 @@ export class TourService {
         },
         {
           title: 'Right-Click Context Menu',
-          description: 'Right-click any video to access: Open in RippleCut (analyze & edit), Run Analysis (AI processing), Add to Tab (organize), and more. This is where most actions live!',
+          description: 'Right-click any video to access: Open in Editor (analyze & edit), Run Analysis (AI processing), Add to Collection (organize), and more. This is where most actions live!',
           side: 'bottom',
         },
       ],
@@ -156,7 +156,7 @@ export class TourService {
     // Video Player tour
     this.tours.set('video-player', {
       id: 'video-player',
-      name: 'RippleCut Tour',
+      name: 'Scout Tour',
       steps: [
         {
           element: '.video-player-area',
@@ -184,8 +184,8 @@ export class TourService {
         },
         {
           element: '.editor-header',
-          title: 'RippleCut Controls',
-          description: 'Access quick actions like fullscreen mode, close RippleCut, and see the current video title.',
+          title: 'Editor Controls',
+          description: 'Access quick actions like fullscreen mode, close the editor, and see the current video title.',
           side: 'bottom',
         },
       ],
@@ -387,38 +387,6 @@ export class TourService {
       ],
     });
 
-    // Saved for Later tab tour
-    this.tours.set('saved', {
-      id: 'saved',
-      name: 'Saved for Later Tour',
-      steps: [
-        {
-          element: '.url-input-container',
-          title: 'Save URLs',
-          description: 'Paste any video URL here to save it for later. Works with YouTube, Vimeo, Twitter, and many other sites.',
-          side: 'bottom',
-        },
-        {
-          element: '.download-checkbox',
-          title: 'Auto-Download Option',
-          description: 'Check this to immediately download the video when you add it. Leave unchecked to just save the link.',
-          side: 'bottom',
-        },
-        {
-          element: '.selected-actions',
-          title: 'Batch Actions',
-          description: 'Select multiple saved links and add them all to your library and tabs at once.',
-          side: 'bottom',
-        },
-        {
-          element: '.links-container',
-          title: 'Saved Links List',
-          description: 'Your saved links appear here. Each shows the title and thumbnail. Right-click for options like download, open in browser, or delete.',
-          side: 'top',
-        },
-      ],
-    });
-
     // Video Info Page tour
     this.tours.set('video-info', {
       id: 'video-info',
@@ -463,7 +431,7 @@ export class TourService {
         },
         {
           title: 'Open & Edit',
-          description: '▶️ Open - Preview the video. 🎬 Open in RippleCut - Full video editor with timeline and AI analysis. ℹ️ View More - Detailed info page.',
+          description: '▶️ Open - Preview the video. 🎬 Open in Editor - Full video editor (Scout) with timeline and AI analysis. ℹ️ View More - Detailed info page.',
           side: 'bottom',
         },
         {
@@ -568,11 +536,11 @@ export class TourService {
     // Advanced Video Player tour
     this.tours.set('video-player-advanced', {
       id: 'video-player-advanced',
-      name: 'Advanced RippleCut Tour',
+      name: 'Advanced Editor Tour',
       steps: [
         {
           element: '.tool-buttons',
-          title: 'RippleCut Tools',
+          title: 'Editor Tools',
           description: 'Cursor Tool (A): Click to seek. Range Tool (R): Click and drag to select a portion of the timeline.',
           side: 'bottom',
         },

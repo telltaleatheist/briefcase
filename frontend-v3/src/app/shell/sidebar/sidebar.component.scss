@@ -63,10 +63,7 @@
     font-variant-numeric: tabular-nums;
   }
 
-  &.sub { padding-left: 24px; }
-
-  &.new-collection,
-  &.more-toggle {
+  &.new-collection {
     color: var(--text-tertiary);
   }
 }

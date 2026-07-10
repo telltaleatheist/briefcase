@@ -46,13 +46,6 @@ export const routes: Routes = [
         data: { section: 'tabs', reuseKey: 'workspace' },
         title: 'Collections | Briefcase'
       },
-      // Temporary destinations (later phases fold/delete these)
-      {
-        path: 'saved',
-        loadComponent: workspace,
-        data: { section: 'saved', reuseKey: 'workspace' },
-        title: 'Saved | Briefcase'
-      },
       {
         path: 'archives',
         loadComponent: workspace,
@@ -101,11 +94,6 @@ export const routes: Routes = [
         path: 'editor',
         loadComponent: () => import('./components/video-player/video-player.component').then(m => m.VideoPlayerComponent),
         title: 'Video Player | Briefcase'
-      },
-      {
-        path: 'ripplecut',
-        loadComponent: () => import('./pages/ripplecut/ripplecut-page.component').then(m => m.RipplecutPageComponent),
-        title: 'RippleCut | Briefcase'
       },
       {
         path: 'video/:id',

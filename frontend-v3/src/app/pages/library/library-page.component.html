@@ -15,12 +15,6 @@
       />
     </div>
 
-    <!-- Manager Tab: Full height container -->
-    @if (activeTab() === 'manager') {
-      <div class="manager-tab-container">
-        <app-manager-tab [onLibraryRefresh]="loadLibrary.bind(this)" />
-      </div>
-    } @else {
       <!-- Main Container with Drag & Drop (disabled for tabs tab to allow internal drag/drop) -->
       <div
         class="main-container"
@@ -93,14 +87,8 @@
           [onPreviewRequested]="onPreviewRequested.bind(this)"
         />
 
-        <!-- Saved Tab: Save for Later links -->
-        <app-save-for-later-tab *ngIf="activeTab() === 'saved'" />
-
         <!-- Archives Tab: Web page archives -->
         <app-archives-tab *ngIf="activeTab() === 'archives'" />
-
-        <!-- Settings Tab: App settings -->
-        <app-settings-page *ngIf="activeTab() === 'settings'" [embedded]="true" />
 
         <!-- Empty State - Library -->
         <div class="empty-state" *ngIf="activeTab() === 'library' && filteredWeeks().length === 0">
@@ -117,7 +105,6 @@
         </div>
       </div>
     </div>
-    }
   </div>
 </div>
 

@@ -10,83 +10,7 @@
 }
 
 // Left Nav Rail
-.nav-rail {
-  width: 72px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 12px 8px;
-  background: var(--bg-secondary);
-  border-right: 1px solid var(--border-color);
-  flex-shrink: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-}
 
-.nav-rail-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  padding: 8px 4px;
-  border-radius: 8px;
-  background: transparent;
-  border: none;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all 0.2s ease;
-  position: relative;
-
-  &:hover {
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
-  }
-
-  &.active {
-    background: rgba(255, 107, 53, 0.12);
-    color: var(--primary-orange);
-
-    &::before {
-      content: '';
-      position: absolute;
-      left: -8px;
-      top: 6px;
-      bottom: 6px;
-      width: 3px;
-      background: var(--primary-orange);
-      border-radius: 0 3px 3px 0;
-    }
-  }
-
-  .nav-icon {
-    font-size: 20px;
-    line-height: 1;
-  }
-
-  .nav-label {
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    white-space: nowrap;
-  }
-
-  .nav-badge {
-    position: absolute;
-    top: 2px;
-    right: 2px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 16px;
-    height: 16px;
-    padding: 0 4px;
-    background: var(--primary-orange);
-    color: white;
-    font-size: 9px;
-    font-weight: 700;
-    border-radius: 8px;
-  }
-}
 
 .nav-spacer {
   flex: 1;
@@ -104,23 +28,6 @@
 }
 
 // Manager Tab Container
-.manager-tab-container {
-  flex: 1 1 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  min-height: 0;
-  height: 0; // Force flex to calculate height
-
-  app-manager-tab {
-    flex: 1 1 0;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    min-height: 0;
-    height: 0; // Force flex to calculate height
-  }
-}
 
 // Manager Toolbar
 .manager-toolbar {
@@ -265,7 +172,6 @@
 
   // Allow embedded components to fill available space and scroll
   > app-settings-page,
-  > app-save-for-later-tab,
   > app-tabs-tab,
   > app-queue-tab {
     flex: 1;
@@ -320,123 +226,6 @@
 }
 
 
-.page-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 16px;
-  flex-shrink: 0;
-
-  // Transitional Phase-1 bar: actions only (title/subtitle moved to the shell
-  // toolbar); Phase 2 moves the actions there too and this block disappears.
-  &.slim {
-    justify-content: flex-end;
-    padding: 10px 16px 0;
-  }
-
-  &.mini {
-    .page-title {
-      font-size: 20px;
-      margin: 0;
-    }
-
-    .header-content {
-      flex-direction: row;
-      align-items: center;
-      gap: 16px;
-    }
-  }
-
-  .header-content {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-
-    .page-title {
-      margin: 0 0 8px 0;
-      font-size: 32px;
-      font-weight: 700;
-      color: var(--text-primary);
-    }
-
-    .page-subtitle {
-      margin: 0;
-      font-size: 16px;
-      color: var(--text-secondary);
-    }
-
-    .queue-status-indicator {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-top: 4px;
-
-      .status-label {
-        font-size: 14px;
-        font-weight: 500;
-        color: var(--text-secondary);
-      }
-
-      .status-badge {
-        display: inline-flex;
-        align-items: center;
-        padding: 4px 12px;
-        border-radius: 12px;
-        font-size: 13px;
-        font-weight: 600;
-        transition: all 0.2s ease;
-
-        &.staging {
-          background: rgba(33, 150, 243, 0.15);
-          color: #2196f3;
-        }
-
-        &.processing {
-          background: rgba(76, 175, 80, 0.15);
-          color: #4caf50;
-          animation: pulse-green 2s ease-in-out infinite;
-        }
-
-        &.pending {
-          background: rgba(255, 152, 0, 0.15);
-          color: #ff9800;
-        }
-      }
-    }
-
-    .expand-btn {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 16px;
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-color);
-      border-radius: 6px;
-      color: var(--text-primary);
-      cursor: pointer;
-      transition: all 0.2s ease;
-      font-size: 14px;
-      font-weight: 500;
-
-      &:hover {
-        background: var(--bg-tertiary);
-        border-color: var(--primary-orange);
-      }
-
-      .selected-count {
-        color: var(--text-secondary);
-        font-size: 12px;
-      }
-    }
-  }
-
-  .header-actions {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-}
 
 .filters-section {
   flex-shrink: 0;
@@ -623,68 +412,13 @@
     overflow-x: hidden;
   }
 
-  .nav-rail {
-    width: 48px;
-    padding: 8px 4px;
-  }
 
-  .nav-rail-item {
-    .nav-label {
-      display: none;
-    }
-
-    .nav-icon {
-      font-size: 18px;
-    }
-  }
 
   .page-content {
     padding: 8px;
     gap: 8px;
   }
 
-  .page-header {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 8px;
-
-    .header-content {
-      .page-title {
-        font-size: 20px;
-        margin: 0;
-      }
-
-      // Redundant on a phone (also shown in the top library switcher); reclaim
-      // the vertical space for actual content.
-      .page-subtitle {
-        display: none;
-      }
-    }
-
-    // Compact wrapping row of content-sized buttons instead of a full-width
-    // vertical stack that buried the library behind a wall of giant buttons.
-    .header-actions {
-      width: 100%;
-      flex-direction: row;
-      flex-wrap: wrap;
-      gap: 8px;
-
-      .btn {
-        flex: 0 1 auto;
-        width: auto;
-        min-width: 0;
-        justify-content: center;
-        padding: 9px 12px;
-        font-size: 13px;
-      }
-    }
-
-    // Import relies on the native (Electron) file picker, which doesn't exist
-    // in a phone browser — hide it there.
-    &.is-web .header-actions .btn.action-import {
-      display: none;
-    }
-  }
 
   .library-section {
     padding: 8px;
@@ -714,13 +448,6 @@
   }
 
   // Shrink to icon-forward buttons; keep Download readable as the primary action.
-  .page-header .header-actions .btn {
-    padding: 8px 10px;
-
-    .btn-icon {
-      font-size: 15px;
-    }
-  }
 }
 
 // Short viewports — landscape phones (wide but ~390px tall) and small windows.
@@ -728,53 +455,13 @@
 // header chrome would eat the entire height and push the list off-screen.
 // Compact everything vertical so the library list gets the available space.
 @media (max-height: 500px) {
-  .nav-rail {
-    width: 56px;
-    padding: 6px 4px;
-  }
 
-  .nav-rail-item {
-    padding: 6px 2px;
-
-    // Icon-only keeps each item short so all of them fit the limited height.
-    .nav-label {
-      display: none;
-    }
-
-    .nav-icon {
-      font-size: 18px;
-    }
-  }
 
   .page-content {
     padding: 8px 12px;
     gap: 6px;
   }
 
-  .page-header {
-    gap: 8px;
-
-    // Match the base selector depth (.header-content .page-title) so this wins.
-    .header-content {
-      .page-title {
-        font-size: 18px;
-        margin: 0;
-      }
-
-      .page-subtitle {
-        display: none;
-      }
-    }
-
-    .header-actions {
-      gap: 6px;
-
-      .btn {
-        padding: 7px 10px;
-        font-size: 13px;
-      }
-    }
-  }
 
   // Redundant with the page title; drop it so the list gets the vertical space.
   // Scoped under .library-page to outrank the later base `.library-toolbar` rule.

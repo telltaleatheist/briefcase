@@ -177,7 +177,7 @@ export class WindowService {
       minHeight: 600,
       autoHideMenuBar: true,
       icon: iconPath,
-      title: videoData.videoTitle || 'RippleCut',
+      title: videoData.videoTitle || 'Scout',
       webPreferences: {
         nodeIntegration: true,
         contextIsolation: true,
@@ -593,7 +593,7 @@ export class WindowService {
       minHeight: 600,
       autoHideMenuBar: true,
       icon: iconPath,
-      title: tabData.videoTitle || 'RippleCut',
+      title: tabData.videoTitle || 'Scout',
       webPreferences: {
         nodeIntegration: true,
         contextIsolation: true,
