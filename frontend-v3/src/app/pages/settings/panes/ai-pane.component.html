@@ -1,0 +1,200 @@
+<h2 class="pane-title">AI Analysis</h2>
+<p class="pane-lede">
+  Optional. Transcription works without any of this — configure a provider only
+  if you want AI-powered video analysis.
+</p>
+
+<div class="pane-section">
+  <p class="section-label">Providers</p>
+
+  @for (provider of providers(); track provider.key) {
+    <div class="row-card">
+      <div class="row-main">
+        <div class="row-name">{{ provider.name }}</div>
+        <div class="row-desc">{{ provider.description }}</div>
+      </div>
+      <span class="pill" [class.ok]="provider.ready" [class.off]="!provider.ready">
+        {{ provider.ready ? 'Connected' : 'Not configured' }}
+      </span>
+    </div>
+  }
+
+  <div class="actions-row">
+    <ui-button variant="primary" (pressed)="openWizard()">
+      {{ aiConfigured() ? 'Guided setup…' : 'Set up AI…' }}
+    </ui-button>
+  </div>
+  <p class="hint">The guided setup walks through local models, Ollama, and API keys step by step.</p>
+</div>
+
+<div class="pane-section">
+  <p class="section-label">Default model</p>
+  <label class="field-label" for="default-model">Used automatically when analyzing videos</label>
+  <select
+    id="default-model"
+    class="select"
+    [value]="defaultModel() ?? ''"
+    [disabled]="availableModels().length === 0"
+    (change)="saveDefaultModel($event)">
+    <option value="" disabled>
+      {{ availableModels().length === 0 ? 'No models available' : 'Select a model…' }}
+    </option>
+    @for (model of availableModels(); track model.value) {
+      <option [value]="model.value">{{ model.label }}</option>
+    }
+  </select>
+  @if (savedFlash()) {
+    <span class="save-flash">✓ Saved</span>
+  }
+  @if (availableModels().length === 0) {
+    <div class="warn">⚠️ No AI models available. Configure a provider above first.</div>
+  }
+</div>
+
+<div class="pane-section">
+  <p class="section-label">Analysis categories</p>
+  <p class="hint" style="margin: 0 0 10px;">
+    The categories AI uses to classify video content.
+  </p>
+
+  @for (category of categories(); track category.id) {
+    @if (editingCategoryId() === category.id) {
+      <div class="row-card">
+        <div class="row-main category-form">
+          <div class="form-line">
+            <input
+              type="text"
+              class="text-input"
+              [ngModel]="formName()"
+              (ngModelChange)="formName.set($event)"
+              placeholder="Category name" />
+            <input
+              type="color"
+              class="color-input"
+              [ngModel]="formColor()"
+              (ngModelChange)="formColor.set($event)"
+              aria-label="Category color" />
+          </div>
+          <textarea
+            class="text-input"
+            rows="2"
+            [ngModel]="formDescription()"
+            (ngModelChange)="formDescription.set($event)"
+            placeholder="Description for AI…"></textarea>
+          <div class="actions-row">
+            <ui-button variant="primary" size="sm" (pressed)="submitCategoryForm()">Save</ui-button>
+            <ui-button variant="ghost" size="sm" (pressed)="cancelCategoryForm()">Cancel</ui-button>
+          </div>
+        </div>
+      </div>
+    } @else {
+      <div class="row-card" [class.category-disabled]="!category.enabled">
+        <span class="category-swatch" [style.background]="category.color"></span>
+        <div class="row-main">
+          <div class="row-name">{{ category.name }}</div>
+          <div class="row-desc">{{ category.description }}</div>
+        </div>
+        <div class="row-actions">
+          <ui-button
+            variant="ghost"
+            size="sm"
+            [title]="category.enabled ? 'Disable' : 'Enable'"
+            (pressed)="toggleCategory(category)">
+            {{ category.enabled ? '✓' : '○' }}
+          </ui-button>
+          <ui-button variant="ghost" size="sm" (pressed)="startEditCategory(category)">Edit</ui-button>
+          <ui-button variant="ghost" size="sm" (pressed)="deleteCategory(category)">Delete</ui-button>
+        </div>
+      </div>
+    }
+  }
+
+  @if (addingCategory()) {
+    <div class="row-card">
+      <div class="row-main category-form">
+        <div class="form-line">
+          <input
+            type="text"
+            class="text-input"
+            [ngModel]="formName()"
+            (ngModelChange)="formName.set($event)"
+            placeholder="Category name (e.g., propaganda)" />
+          <input
+            type="color"
+            class="color-input"
+            [ngModel]="formColor()"
+            (ngModelChange)="formColor.set($event)"
+            aria-label="Category color" />
+        </div>
+        <textarea
+          class="text-input"
+          rows="2"
+          [ngModel]="formDescription()"
+          (ngModelChange)="formDescription.set($event)"
+          placeholder="Description for AI to understand what to look for…"></textarea>
+        <div class="actions-row">
+          <ui-button variant="primary" size="sm" (pressed)="submitCategoryForm()">Add Category</ui-button>
+          <ui-button variant="ghost" size="sm" (pressed)="cancelCategoryForm()">Cancel</ui-button>
+        </div>
+      </div>
+    </div>
+  }
+
+  <div class="actions-row">
+    <ui-button variant="secondary" [disabled]="addingCategory()" (pressed)="startAddCategory()">＋ Add Category</ui-button>
+    <ui-button variant="ghost" (pressed)="resetCategories()">↺ Reset to Defaults</ui-button>
+  </div>
+</div>
+
+<div class="pane-section">
+  <p class="section-label">Analysis prompts</p>
+  <p class="hint" style="margin: 0 0 10px;">
+    Customize the prompts AI uses to analyze videos, generate titles, and extract tags.
+  </p>
+
+  @if (prompts(); as promptValues) {
+    @for (key of promptKeys; track key) {
+      <div class="row-card prompt-card">
+        <div class="row-main">
+          <button type="button" class="prompt-toggle" (click)="togglePrompt(key)">
+            <span class="expand-icon" [class.open]="expandedPrompt() === key">▸</span>
+            <span class="row-name">
+              {{ promptLabel(key) }}
+              @if (hasCustomPrompts()[key]) {
+                <span class="pill accent">Custom</span>
+              }
+            </span>
+          </button>
+          <div class="row-desc">{{ promptDescription(key) }}</div>
+
+          @if (expandedPrompt() === key) {
+            <textarea
+              class="text-input prompt-editor"
+              rows="10"
+              [value]="promptValues[key]"
+              (blur)="savePrompt(key, $any($event.target).value)"
+              placeholder="Enter custom prompt…"></textarea>
+            <div class="actions-row">
+              @if (hasCustomPrompts()[key]) {
+                <ui-button variant="ghost" size="sm" (pressed)="resetPrompt(key)">Reset to Default</ui-button>
+              }
+              @if (savedFlash()) {
+                <span class="save-flash">✓ Saved</span>
+              }
+            </div>
+          }
+        </div>
+      </div>
+    }
+
+    <div class="actions-row">
+      <ui-button variant="ghost" (pressed)="resetAllPrompts()">↺ Reset All Prompts to Defaults</ui-button>
+    </div>
+  }
+</div>
+
+@if (wizardOpen()) {
+  <app-ai-setup-wizard
+    (closed)="onWizardDone()"
+    (completed)="onWizardDone()" />
+}

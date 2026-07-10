@@ -1,0 +1,119 @@
+<h2 class="pane-title">Libraries</h2>
+<p class="pane-lede">
+  Manage your media libraries — each is a folder with its own database.
+  Switching takes effect the next time you open the Library.
+</p>
+
+<div class="pane-section">
+  <p class="section-label">Your libraries</p>
+
+  @for (library of libraries(); track library.id) {
+    <div class="row-card">
+      @if (editingId() === library.id) {
+        <div class="row-main edit-form">
+          <input
+            type="text"
+            class="text-input"
+            [ngModel]="editName()"
+            (ngModelChange)="editName.set($event)"
+            placeholder="Library name" />
+          <div class="path-row">
+            <input
+              type="text"
+              class="text-input"
+              [ngModel]="editPath()"
+              (ngModelChange)="editPath.set($event)"
+              placeholder="Library folder path" />
+            @if (isElectron) {
+              <ui-button variant="secondary" size="sm" (pressed)="browseEditPath()">Browse…</ui-button>
+            }
+          </div>
+          <div class="actions-row">
+            <ui-button variant="primary" size="sm" [disabled]="!editValid()" (pressed)="saveEdit()">Save</ui-button>
+            <ui-button variant="ghost" size="sm" (pressed)="cancelEdit()">Cancel</ui-button>
+          </div>
+        </div>
+      } @else {
+        <div class="row-main">
+          <div class="row-name">
+            {{ library.name }}
+            @if (isCurrent(library)) {
+              <span class="pill accent">Active</span>
+            }
+          </div>
+          <div class="row-desc">{{ library.path }}</div>
+        </div>
+        <div class="row-actions">
+          @if (!isCurrent(library)) {
+            <ui-button variant="secondary" size="sm" [disabled]="busy()" (pressed)="switchTo(library)">Switch</ui-button>
+          }
+          <ui-button variant="ghost" size="sm" (pressed)="startEdit(library)">Edit</ui-button>
+          <ui-button variant="ghost" size="sm" (pressed)="remove(library)">Remove</ui-button>
+        </div>
+      }
+    </div>
+  } @empty {
+    <p class="hint">No libraries yet — create one below.</p>
+  }
+</div>
+
+<div class="pane-section">
+  <p class="section-label">Add a library</p>
+
+  @if (createOpen()) {
+    <div class="row-card">
+      <div class="row-main edit-form">
+        <input
+          type="text"
+          class="text-input"
+          [ngModel]="newName()"
+          (ngModelChange)="newName.set($event)"
+          placeholder="Library name" />
+        <div class="path-row">
+          <input
+            type="text"
+            class="text-input"
+            [ngModel]="newPath()"
+            (ngModelChange)="newPath.set($event)"
+            placeholder="Folder for the new library" />
+          @if (isElectron) {
+            <ui-button variant="secondary" size="sm" (pressed)="browseNewPath()">Browse…</ui-button>
+          }
+        </div>
+        <div class="actions-row">
+          <ui-button variant="primary" size="sm" [disabled]="!createValid() || busy()" (pressed)="create()">Create Library</ui-button>
+          <ui-button variant="ghost" size="sm" (pressed)="toggleCreate()">Cancel</ui-button>
+        </div>
+      </div>
+    </div>
+  } @else {
+    <div class="actions-row">
+      <ui-button variant="primary" (pressed)="toggleCreate()">＋ New Library</ui-button>
+    </div>
+  }
+
+  <div class="open-existing">
+    <label class="field-label" for="open-path">Or open an existing library folder</label>
+    <div class="path-row">
+      <input
+        id="open-path"
+        type="text"
+        class="text-input"
+        [ngModel]="openPath()"
+        (ngModelChange)="openPath.set($event)"
+        placeholder="Path to a folder containing a library database" />
+      @if (isElectron) {
+        <ui-button variant="secondary" size="sm" (pressed)="browseOpenPath()">Browse…</ui-button>
+      }
+      <ui-button variant="secondary" size="sm" [disabled]="!openPath().trim() || busy()" (pressed)="openExisting()">Open</ui-button>
+    </div>
+  </div>
+</div>
+
+<div class="pane-section">
+  <p class="section-label">Maintenance</p>
+  <p class="hint" style="margin: 0 0 10px;">
+    Scan the active library for orphaned files, missing entries, and duplicates.
+  </p>
+  <app-manager-tab [onLibraryRefresh]="noopRefresh" />
+</div>

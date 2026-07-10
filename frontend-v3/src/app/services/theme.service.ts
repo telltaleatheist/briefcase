@@ -40,6 +40,12 @@ export class ThemeService {
     this.saveTheme(newTheme);
   }
 
+  /** Explicitly choose a theme (persisted) — used by Settings → General. */
+  selectTheme(theme: Theme): void {
+    this.setTheme(theme);
+    this.saveTheme(theme);
+  }
+
   setTheme(theme: Theme): void {
     this.currentTheme.set(theme);
     // Set on both html and body to ensure CSS variables work everywhere

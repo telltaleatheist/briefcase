@@ -60,7 +60,9 @@
         "src/app/shell/**/*.ts",
         "src/app/ui/**/*.ts",
         "src/app/core/stores/**/*.ts",
-        "src/app/core/*.ts"
+        "src/app/core/*.ts",
+        "src/app/pages/settings/panes/**/*.ts",
+        "src/app/pages/settings/settings-layout.component.ts"
       ],
       "rules": {
         "@angular-eslint/prefer-on-push-component-change-detection": "error",
@@ -112,7 +114,9 @@
       "files": [
         "src/app/shell/**/*.html",
         "src/app/ui/**/*.html",
-        "src/app/core/stores/**/*.html"
+        "src/app/core/stores/**/*.html",
+        "src/app/pages/settings/panes/**/*.html",
+        "src/app/pages/settings/settings-layout.component.html"
       ],
       "rules": {
         "@angular-eslint/template/prefer-control-flow": "error",

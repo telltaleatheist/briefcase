@@ -47,20 +47,12 @@
 
   <div class="flex-spacer"></div>
 
-  <!-- Temporary: destinations slated for later phases (settings-fold / deletion) -->
+  <!-- Temporary: destinations slated for deletion in phase 5 -->
   <button type="button" class="nav-item more-toggle" (click)="toggleMore()">
     <span class="glyph">{{ moreOpen() ? '▾' : '▸' }}</span>
     <span class="label">More</span>
   </button>
   @if (moreOpen()) {
-    <button
-      type="button"
-      class="nav-item sub"
-      [class.active]="activeSection() === 'manager'"
-      (click)="selectSection.emit('manager')">
-      <span class="glyph">🔧</span>
-      <span class="label">Manager</span>
-    </button>
     <button
       type="button"
       class="nav-item sub"
@@ -76,14 +68,6 @@
       (click)="selectSection.emit('archives')">
       <span class="glyph">🌐</span>
       <span class="label">Archives</span>
-    </button>
-    <button
-      type="button"
-      class="nav-item sub"
-      (click)="openComponentManager.emit()"
-      title="Download or re-download tools and models">
-      <span class="glyph">🧩</span>
-      <span class="label">Models &amp; Tools</span>
     </button>
   }
 

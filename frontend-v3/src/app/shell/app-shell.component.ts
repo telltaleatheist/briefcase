@@ -1,7 +1,6 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
 import { Router, RouterOutlet } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { SetupWizardComponent } from '../components/setup-wizard/setup-wizard.component';
 import { NavigationStore, ShellSection } from '../core/stores/navigation.store';
 import { SelectionStore } from '../core/stores/selection.store';
 import { WorkspaceActionsService, WorkspaceAction, AddDownloadsPayload } from '../core/stores/workspace-actions.service';
@@ -22,7 +21,6 @@ const SECTION_TITLES: Record<ShellSection, string> = {
   queue: 'Queue',
   collections: 'Collections',
   settings: 'Settings',
-  manager: 'Library Manager',
   saved: 'Saved for Later',
   archives: 'Web Archives',
   other: '',
@@ -39,7 +37,7 @@ const SECTION_TITLES: Record<ShellSection, string> = {
 @Component({
   selector: 'app-shell',
   standalone: true,
-  imports: [RouterOutlet, SidebarComponent, ToolbarComponent, ToolbarActionsComponent, InspectorPanelComponent, SetupWizardComponent],
+  imports: [RouterOutlet, SidebarComponent, ToolbarComponent, ToolbarActionsComponent, InspectorPanelComponent],
   templateUrl: './app-shell.component.html',
   styleUrls: ['./app-shell.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush
@@ -59,7 +57,7 @@ export class AppShellComponent {
 
   /** Sections hosted by the persistent workspace (LibraryPageComponent). */
   private static readonly WORKSPACE_SECTIONS: ShellSection[] = [
-    'library', 'queue', 'collections', 'manager', 'saved', 'archives'
+    'library', 'queue', 'collections', 'saved', 'archives'
   ];
 
   constructor() {
@@ -94,20 +92,11 @@ export class AppShellComponent {
     this.nav.goTo('collections');
   }
 
-  /** Manage-components wizard (Models & Tools) — relocated from the old nav rail. */
-  componentManagerOpen = signal(false);
-
   onOpenLibrarySwitcher(): void {
-    // The Library Manager modal lives inside the workspace (library-page),
-    // which watches libraryManagerRequested. Make sure the workspace is
-    // routed in before requesting.
-    const section = this.nav.activeSection();
-    const workspaceLoaded = ['library', 'queue', 'collections', 'manager', 'saved', 'archives'].includes(section);
-    if (workspaceLoaded) {
-      this.libraryService.requestLibraryManager();
-    } else {
-      this.router.navigate(['/library']).then(() => this.libraryService.requestLibraryManager());
-    }
+    // Libraries now live in Settings → Libraries (the modal remains only for
+    // the first-run "no libraries" flow inside the workspace).
+    this.nav.closeDrawer();
+    this.router.navigate(['/settings/libraries']);
   }
 
   onToggleTheme(): void {

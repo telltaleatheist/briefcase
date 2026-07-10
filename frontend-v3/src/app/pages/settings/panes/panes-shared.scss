@@ -1,0 +1,206 @@
+// Shared styling for Settings panes (Creamsicle tokens only).
+// Each pane lists this file first in styleUrls.
+
+:host {
+  display: block;
+  max-width: 720px;
+}
+
+.pane-title {
+  margin: 0 0 4px;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.pane-lede {
+  margin: 0 0 20px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  max-width: 62ch;
+}
+
+.pane-section {
+  margin-bottom: 22px;
+}
+
+.section-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin: 0 0 10px;
+}
+
+.field-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 5px;
+}
+
+.select,
+.text-input,
+textarea.text-input {
+  width: 100%;
+  border: 1px solid var(--border-color);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  border-radius: 7px;
+  padding: 7px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+
+  &:focus {
+    border-color: var(--primary-orange);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+  }
+}
+
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-primary);
+  padding: 5px 0;
+  cursor: pointer;
+
+  input {
+    accent-color: var(--primary-orange);
+  }
+
+  .check-hint {
+    color: var(--text-tertiary);
+    font-size: 12px;
+  }
+}
+
+.radio-row {
+  display: flex;
+  gap: 16px;
+
+  label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    cursor: pointer;
+
+    input {
+      accent-color: var(--primary-orange);
+    }
+  }
+}
+
+.hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-top: 6px;
+}
+
+.warn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--warning);
+  margin-top: 8px;
+}
+
+.save-flash {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--success);
+  margin-left: 10px;
+}
+
+.row-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-card);
+  padding: 12px 14px;
+  margin-bottom: 8px;
+
+  .row-main {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .row-name {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .row-desc {
+    font-size: 12px;
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .row-meta {
+    flex: none;
+    font-size: 12px;
+    color: var(--text-tertiary);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .row-actions {
+    flex: none;
+    display: flex;
+    gap: 6px;
+  }
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+
+  &.ok {
+    color: var(--success);
+    background: rgba(34, 197, 94, 0.12);
+  }
+
+  &.off {
+    color: var(--text-tertiary);
+    background: var(--bg-input);
+  }
+
+  &.accent {
+    color: var(--dark-orange);
+    background: rgba(255, 107, 53, 0.12);
+  }
+}
+
+[data-theme='dark'] .pill.accent {
+  color: var(--accent-orange);
+}
+
+.actions-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}

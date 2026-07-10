@@ -25,13 +25,12 @@ export class SidebarComponent {
   queueCount = input(0);
   currentLibraryName = input('');
 
-  selectSection = output<'library' | 'queue' | 'collections' | 'settings' | 'manager' | 'saved' | 'archives'>();
+  selectSection = output<'library' | 'queue' | 'collections' | 'settings' | 'saved' | 'archives'>();
   selectCollection = output<string>();
   newCollection = output<void>();
   openLibrarySwitcher = output<void>();
-  openComponentManager = output<void>();
 
-  /** Temporary "More" disclosure for Manager/Saved/Archives (die/fold in later phases). */
+  /** Temporary "More" disclosure for Saved/Archives (deleted/folded in later phases). */
   moreOpen = signal(false);
 
   toggleMore(): void {

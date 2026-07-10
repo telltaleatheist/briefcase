@@ -1,0 +1,18 @@
+<div class="settings-layout">
+  <nav class="pane-nav" aria-label="Settings sections">
+    @for (pane of panes; track pane.path) {
+      <a
+        class="pane-link"
+        [routerLink]="pane.path"
+        routerLinkActive="active"
+        [ariaCurrentWhenActive]="'page'">
+        <span class="glyph">{{ pane.glyph }}</span>
+        <span class="label">{{ pane.label }}</span>
+      </a>
+    }
+  </nav>
+
+  <div class="pane-content">
+    <router-outlet />
+  </div>
+</div>

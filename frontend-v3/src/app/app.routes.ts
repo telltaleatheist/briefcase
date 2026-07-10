@@ -48,12 +48,6 @@ export const routes: Routes = [
       },
       // Temporary destinations (later phases fold/delete these)
       {
-        path: 'manager',
-        loadComponent: workspace,
-        data: { section: 'manager', reuseKey: 'workspace' },
-        title: 'Library Manager | Briefcase'
-      },
-      {
         path: 'saved',
         loadComponent: workspace,
         data: { section: 'saved', reuseKey: 'workspace' },
@@ -67,8 +61,41 @@ export const routes: Routes = [
       },
       {
         path: 'settings',
-        loadComponent: () => import('./pages/settings/settings-page.component').then(m => m.SettingsPageComponent),
-        title: 'Settings | Briefcase'
+        loadComponent: () => import('./pages/settings/settings-layout.component').then(m => m.SettingsLayoutComponent),
+        title: 'Settings | Briefcase',
+        children: [
+          { path: '', pathMatch: 'full', redirectTo: 'general' },
+          {
+            path: 'general',
+            loadComponent: () => import('./pages/settings/panes/general-pane.component').then(m => m.GeneralPaneComponent),
+            title: 'General Settings | Briefcase'
+          },
+          {
+            path: 'libraries',
+            loadComponent: () => import('./pages/settings/panes/libraries-pane.component').then(m => m.LibrariesPaneComponent),
+            title: 'Libraries | Briefcase'
+          },
+          {
+            path: 'downloads',
+            loadComponent: () => import('./pages/settings/panes/downloads-pane.component').then(m => m.DownloadsPaneComponent),
+            title: 'Download Settings | Briefcase'
+          },
+          {
+            path: 'transcription',
+            loadComponent: () => import('./pages/settings/panes/transcription-pane.component').then(m => m.TranscriptionPaneComponent),
+            title: 'Transcription Settings | Briefcase'
+          },
+          {
+            path: 'ai',
+            loadComponent: () => import('./pages/settings/panes/ai-pane.component').then(m => m.AiPaneComponent),
+            title: 'AI Settings | Briefcase'
+          },
+          {
+            path: 'components',
+            loadComponent: () => import('./pages/settings/panes/components-pane.component').then(m => m.ComponentsPaneComponent),
+            title: 'Components | Briefcase'
+          },
+        ]
       },
       {
         path: 'editor',

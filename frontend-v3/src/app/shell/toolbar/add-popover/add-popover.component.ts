@@ -1,27 +1,17 @@
-import { ChangeDetectionStrategy, Component, computed, input, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { AddDownloadsPayload } from '../../../core/stores/workspace-actions.service';
+import { AddDefaultsService, DownloadQuality, QUALITY_OPTIONS } from '../../../core/stores/add-defaults.service';
 import { VideoJobSettings } from '../../../models/video-processing.model';
-
-type DownloadQuality = NonNullable<VideoJobSettings['downloadQuality']>;
-
-interface AddDefaults {
-  quality: DownloadQuality;
-  trim: boolean;
-  transcribe: boolean;
-  analyze: boolean;
-}
-
-const STORAGE_KEY = 'briefcase-add-defaults';
-const FALLBACK_DEFAULTS: AddDefaults = { quality: 'best', trim: false, transcribe: true, analyze: false };
 
 /**
  * One-shot Add popover content (lives in a CDK connected overlay anchored to
  * the toolbar's "+ Add" button).
  *
  * Paste URLs → pick quality → tick pipeline steps → Add to Queue. Choices are
- * remembered (localStorage) so the daily loop is paste → Enter. The legacy
- * full config dialog stays reachable via "Advanced…".
+ * remembered through AddDefaultsService (shared with Settings → Downloads) so
+ * the daily loop is paste → Enter. The legacy full config dialog stays
+ * reachable via "Advanced…".
  */
 @Component({
   selector: 'app-add-popover',
@@ -41,18 +31,15 @@ export class AddPopoverComponent {
   setupAi = output<void>();
   dismissed = output<void>();
 
-  urlText = signal('');
-  quality = signal<DownloadQuality>(FALLBACK_DEFAULTS.quality);
-  trim = signal(FALLBACK_DEFAULTS.trim);
-  transcribe = signal(FALLBACK_DEFAULTS.transcribe);
-  analyze = signal(FALLBACK_DEFAULTS.analyze);
+  private addDefaults = inject(AddDefaultsService);
 
-  readonly qualityOptions: { value: DownloadQuality; label: string }[] = [
-    { value: 'best', label: 'Best available' },
-    { value: '1080', label: '1080p' },
-    { value: '720', label: '720p — faster' },
-    { value: '480', label: '480p — fastest' },
-  ];
+  urlText = signal('');
+  quality = signal<DownloadQuality>(this.addDefaults.defaults().quality);
+  trim = signal(this.addDefaults.defaults().trim);
+  transcribe = signal(this.addDefaults.defaults().transcribe);
+  analyze = signal(this.addDefaults.defaults().analyze);
+
+  readonly qualityOptions = QUALITY_OPTIONS;
 
   urls = computed(() =>
     this.urlText()
@@ -62,15 +49,16 @@ export class AddPopoverComponent {
   );
   canSubmit = computed(() => this.urls().length > 0);
 
-  constructor() {
-    this.restoreDefaults();
-  }
-
   onSubmit(): void {
     const urls = this.urls();
     if (urls.length === 0) return;
 
-    this.persistDefaults();
+    this.addDefaults.update({
+      quality: this.quality(),
+      trim: this.trim(),
+      transcribe: this.transcribe(),
+      analyze: this.analyze(),
+    });
 
     const settings: VideoJobSettings = {
       fixAspectRatio: false,
@@ -97,33 +85,4 @@ export class AddPopoverComponent {
     }
   }
 
-  private restoreDefaults(): void {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-      const saved = JSON.parse(raw) as Partial<AddDefaults>;
-      if (saved.quality && this.qualityOptions.some(o => o.value === saved.quality)) {
-        this.quality.set(saved.quality);
-      }
-      if (typeof saved.trim === 'boolean') this.trim.set(saved.trim);
-      if (typeof saved.transcribe === 'boolean') this.transcribe.set(saved.transcribe);
-      if (typeof saved.analyze === 'boolean') this.analyze.set(saved.analyze);
-    } catch (error) {
-      console.warn('[AddPopover] Failed to restore add defaults', error);
-    }
-  }
-
-  private persistDefaults(): void {
-    try {
-      const defaults: AddDefaults = {
-        quality: this.quality(),
-        trim: this.trim(),
-        transcribe: this.transcribe(),
-        analyze: this.analyze()
-      };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(defaults));
-    } catch (error) {
-      console.warn('[AddPopover] Failed to persist add defaults', error);
-    }
-  }
 }

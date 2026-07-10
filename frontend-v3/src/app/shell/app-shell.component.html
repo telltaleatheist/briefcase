@@ -39,8 +39,7 @@
       (selectSection)="onSelectSection($event)"
       (selectCollection)="onSelectCollection($event)"
       (newCollection)="onNewCollection()"
-      (openLibrarySwitcher)="onOpenLibrarySwitcher()"
-      (openComponentManager)="componentManagerOpen.set(true)" />
+      (openLibrarySwitcher)="onOpenLibrarySwitcher()" />
 
     @if (nav.drawerOpen()) {
       <div class="drawer-backdrop" (click)="nav.closeDrawer()" aria-hidden="true"></div>
@@ -58,11 +57,3 @@
       [collections]="collections()" />
   }
 </div>
-
-<!-- Manage components (download / re-download tools & models) — was on the old nav rail -->
-@if (componentManagerOpen()) {
-  <app-setup-wizard
-    mode="config"
-    (closed)="componentManagerOpen.set(false)"
-    (completed)="componentManagerOpen.set(false)" />
-}

@@ -1,0 +1,77 @@
+.category-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  flex: none;
+}
+
+.category-disabled {
+  opacity: 0.55;
+}
+
+.category-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.form-line {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+
+  .text-input {
+    flex: 1;
+  }
+}
+
+.color-input {
+  width: 36px;
+  height: 32px;
+  padding: 2px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-input);
+  cursor: pointer;
+}
+
+.prompt-card .row-main {
+  width: 100%;
+}
+
+.prompt-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+
+  &:focus-visible {
+    outline: 2px solid var(--primary-orange);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
+.expand-icon {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  transition: transform 150ms ease;
+
+  &.open {
+    transform: rotate(90deg);
+  }
+}
+
+.prompt-editor {
+  margin-top: 10px;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+}

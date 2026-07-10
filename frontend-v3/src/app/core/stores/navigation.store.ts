@@ -4,13 +4,12 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { filter, map, startWith } from 'rxjs/operators';
 import { NavigationService } from '../../services/navigation.service';
 
-/** Primary shell destinations. 'more' groups the temporary Manager/Saved/Archives routes. */
+/** Primary shell destinations. Saved/Archives are temporary (phase-5 deletions). */
 export type ShellSection =
   | 'library'
   | 'queue'
   | 'collections'
   | 'settings'
-  | 'manager'
   | 'saved'
   | 'archives'
   | 'other';
@@ -21,7 +20,6 @@ const SECTION_URLS: Record<string, ShellSection> = {
   queue: 'queue',
   collections: 'collections',
   settings: 'settings',
-  manager: 'manager',
   saved: 'saved',
   archives: 'archives',
 };
