@@ -66,6 +66,10 @@ export class WindowService {
       minWidth: 1200,
       minHeight: 600,
       autoHideMenuBar: true,
+      // macOS: unified title bar — traffic lights overlay the app's own
+      // toolbar (which sets -webkit-app-region: drag and reserves space via
+      // the --traffic-light-inset CSS token).
+      ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const } : {}),
       icon: iconPath,
       webPreferences: {
         nodeIntegration: true,

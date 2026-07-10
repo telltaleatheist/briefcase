@@ -1,0 +1,106 @@
+:host {
+  display: block;
+}
+
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 120ms ease, opacity 120ms ease;
+
+  &:hover:not(:disabled) {
+    background: var(--bg-input);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--primary-orange);
+    outline-offset: 1px;
+  }
+
+  &.primary {
+    border-color: transparent;
+    background: var(--gradient-primary);
+    color: var(--text-inverse);
+    font-weight: 600;
+
+    &:hover:not(:disabled) {
+      background: var(--gradient-primary);
+      filter: brightness(1.05);
+    }
+  }
+}
+
+.btn-icon {
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.chevron {
+  font-size: 9px;
+  opacity: 0.8;
+}
+
+.divider {
+  width: 1px;
+  height: 22px;
+  background: var(--border-color);
+  margin: 0 4px;
+}
+
+.setup-ai-hint {
+  border: 0;
+  background: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--primary-orange);
+  white-space: nowrap;
+  cursor: pointer;
+
+  &:hover {
+    text-decoration: underline;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--primary-orange);
+    outline-offset: 1px;
+  }
+}
+
+.count-badge {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--primary-orange);
+  color: var(--text-inverse);
+  font-size: 10.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Collapse to icon-only labels on narrow widths; the popover handles mobile add */
+@media (max-width: 900px) {
+  .action-btn:not(.primary) {
+    padding: 7px 9px;
+  }
+}

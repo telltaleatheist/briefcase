@@ -1,4 +1,5 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, Renderer2, inject, signal } from '@angular/core';
+import { DOCUMENT } from '@angular/common';
 import { RouterOutlet } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { ThemeService } from './services/theme.service';
@@ -51,6 +52,8 @@ import { ComponentService } from './services/component.service';
 export class AppComponent implements OnInit {
   themeService = inject(ThemeService);
   private libraryService = inject(LibraryService);
+  private renderer = inject(Renderer2);
+  private document = inject(DOCUMENT);
   // Inject QueueService to ensure it initializes eagerly and restores queue
   private queueService = inject(QueueService);
   private componentService = inject(ComponentService);
@@ -74,6 +77,13 @@ export class AppComponent implements OnInit {
 
   async ngOnInit() {
     this.themeService.initializeTheme();
+
+    // macOS Electron uses titleBarStyle: 'hiddenInset' — flag the body so the
+    // shell toolbar reserves traffic-light space (--traffic-light-inset) and
+    // becomes the window drag region.
+    if (this.isElectron && navigator.platform.toUpperCase().includes('MAC')) {
+      this.renderer.addClass(this.document.body, 'is-electron-mac');
+    }
 
     // Check if onboarding is needed
     await this.checkOnboarding();

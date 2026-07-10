@@ -16,7 +16,9 @@
   --traffic-light-inset: 0px;
 }
 
-// Phase 2 hook: set from ElectronService platform detection.
+// Set from AppComponent platform detection (Electron on macOS). The window
+// uses titleBarStyle: 'hiddenInset', so the toolbar reserves room for the
+// traffic lights and acts as the drag region.
 body.is-electron-mac {
-  // --traffic-light-inset: 78px;  // enabled when hiddenInset lands
+  --traffic-light-inset: 78px;
 }

@@ -1,0 +1,84 @@
+<div class="toolbar-actions">
+  <button
+    type="button"
+    class="action-btn primary"
+    cdkOverlayOrigin
+    #addTrigger="cdkOverlayOrigin"
+    (click)="toggleAdd()"
+    [attr.aria-expanded]="addOpen()"
+    title="Add media — paste URLs or import files">
+    <span class="btn-icon">＋</span> Add <span class="chevron">▾</span>
+  </button>
+
+  <span class="divider" aria-hidden="true"></span>
+
+  <button
+    type="button"
+    class="action-btn"
+    [disabled]="!hasSelection()"
+    (click)="transcribe.emit()"
+    [title]="hasSelection() ? 'Transcribe selected (no AI required)' : 'Select items to transcribe'">
+    <span class="btn-icon">≋</span> Transcribe
+  </button>
+
+  <button
+    type="button"
+    class="action-btn"
+    [disabled]="!hasSelection() || !aiReady()"
+    (click)="analyze.emit()"
+    [title]="!aiReady() ? 'Set up an AI provider to analyze' : hasSelection() ? 'Analyze selected with AI' : 'Select items to analyze'">
+    <span class="btn-icon">✦</span> Analyze
+  </button>
+
+  @if (!aiReady() && hasSelection()) {
+    <button type="button" class="setup-ai-hint" (click)="setupAi.emit()">Set up AI…</button>
+  }
+
+  <button
+    type="button"
+    class="action-btn"
+    [disabled]="!hasSelection()"
+    (click)="openEditor.emit()"
+    [title]="hasSelection() ? 'Open selected in Scout' : 'Select items to open in Scout'">
+    <span class="btn-icon">▶</span> Scout
+  </button>
+
+  <button
+    type="button"
+    class="action-btn"
+    [disabled]="!singleSelection()"
+    (click)="viewInfo.emit()"
+    [title]="singleSelection() ? 'View details' : 'Select exactly one item'">
+    <span class="btn-icon">ⓘ</span> Info
+  </button>
+
+  <button
+    type="button"
+    class="action-btn"
+    [disabled]="!hasSelection()"
+    (click)="addToQueue.emit()"
+    [title]="hasSelection() ? 'Add selected to the processing queue' : 'Select items to queue'">
+    <span class="btn-icon">⏳</span> Queue
+    @if (selectionCount() > 0) {
+      <span class="count-badge">{{ selectionCount() }}</span>
+    }
+  </button>
+</div>
+
+<ng-template
+  cdkConnectedOverlay
+  [cdkConnectedOverlayOrigin]="addTrigger"
+  [cdkConnectedOverlayOpen]="addOpen()"
+  [cdkConnectedOverlayHasBackdrop]="true"
+  cdkConnectedOverlayBackdropClass="cdk-overlay-transparent-backdrop"
+  [cdkConnectedOverlayOffsetY]="8"
+  (backdropClick)="closeAdd()"
+  (detach)="closeAdd()">
+  <app-add-popover
+    [aiReady]="aiReady()"
+    (submitAdd)="onSubmitAdd($event)"
+    (importFiles)="onImportFiles()"
+    (openAdvanced)="onOpenAdvanced()"
+    (setupAi)="onSetupAi()"
+    (dismissed)="closeAdd()" />
+</ng-template>

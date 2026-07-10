@@ -1,0 +1,62 @@
+<div class="add-popover" role="dialog" aria-label="Add media">
+  <label class="field-label" for="add-popover-urls">Paste URL(s) — one per line</label>
+  <textarea
+    id="add-popover-urls"
+    [ngModel]="urlText()"
+    (ngModelChange)="urlText.set($event)"
+    (keydown.enter)="onTextareaEnter($event)"
+    placeholder="https://youtube.com/watch?v=…"
+    rows="3"
+    autocomplete="off"
+    spellcheck="false"></textarea>
+
+  <div class="quality-row">
+    <label class="field-label inline" for="add-popover-quality">Quality</label>
+    <select
+      id="add-popover-quality"
+      [ngModel]="quality()"
+      (ngModelChange)="quality.set($event)">
+      @for (option of qualityOptions; track option.value) {
+        <option [value]="option.value">{{ option.label }}</option>
+      }
+    </select>
+  </div>
+
+  <div class="pipeline-opts">
+    <label>
+      <input type="checkbox" [ngModel]="trim()" (ngModelChange)="trim.set($event)" />
+      Trim
+    </label>
+    <label>
+      <input type="checkbox" [ngModel]="transcribe()" (ngModelChange)="transcribe.set($event)" />
+      Transcribe
+    </label>
+    <label [class.disabled]="!aiReady()">
+      <input
+        type="checkbox"
+        [ngModel]="analyze()"
+        (ngModelChange)="analyze.set($event)"
+        [disabled]="!aiReady()" />
+      Analyze
+    </label>
+    @if (!aiReady()) {
+      <button type="button" class="setup-ai-link" (click)="setupAi.emit()">Set up AI…</button>
+    }
+  </div>
+
+  @if (trim()) {
+    <p class="hint trim-note">Trimmer opens after the item is queued.</p>
+  }
+  <p class="hint">Remembered from last time — change anytime.</p>
+
+  <div class="actions">
+    <button type="button" class="submit-btn" [disabled]="!canSubmit()" (click)="onSubmit()">
+      Add to Queue
+    </button>
+    <button type="button" class="link-btn" (click)="importFiles.emit()">Import files…</button>
+    <span class="actions-spacer"></span>
+    <button type="button" class="link-btn subtle" (click)="openAdvanced.emit()" title="Full download options (aspect ratio, audio, models)">
+      Advanced…
+    </button>
+  </div>
+</div>

@@ -10,6 +10,18 @@
   padding: 0 14px 0 calc(14px + var(--traffic-light-inset));
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
+  // macOS hiddenInset: the toolbar is the window drag region…
+  -webkit-app-region: drag;
+  -webkit-user-select: none;
+
+  // …but everything interactive inside it must stay clickable.
+  button,
+  input,
+  select,
+  .actions-slot,
+  app-notification-bell {
+    -webkit-app-region: no-drag;
+  }
 }
 
 .title {

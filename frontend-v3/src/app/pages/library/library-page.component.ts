@@ -40,6 +40,9 @@ import { QueueJob, QueueTask, createQueueJob, createQueueTask } from '../../mode
 import { ExportIndicatorComponent } from '../../components/export-indicator/export-indicator.component';
 import { TrimOpenerModalComponent } from '../../components/trim-opener-modal/trim-opener-modal.component';
 import { getApiBase } from '../../core/runtime-url';
+import { WorkspaceActionsService } from '../../core/stores/workspace-actions.service';
+import { SelectionStore } from '../../core/stores/selection.store';
+import { UiSegmentedControlComponent } from '../../ui';
 
 // Local queue item for the processing section
 export interface ProcessingQueueItem {
@@ -87,7 +90,8 @@ export interface ProcessingTask {
     ArchivesTabComponent,
     SettingsPageComponent,
     ExportIndicatorComponent,
-    TrimOpenerModalComponent
+    TrimOpenerModalComponent,
+    UiSegmentedControlComponent
   ],
   templateUrl: './library-page.component.html',
   styleUrls: ['./library-page.component.scss'],
@@ -109,6 +113,8 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   private filterService = inject(LibraryFilterService);
   private webArchiveService = inject(WebArchiveService);
   private cdr = inject(ChangeDetectorRef);
+  private workspaceActions = inject(WorkspaceActionsService);
+  private selectionStore = inject(SelectionStore);
 
   /** True when running in a plain browser (LAN web client) rather than Electron. */
   get isWeb(): boolean {
@@ -202,7 +208,53 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   });
 
   // Library tab now shows ONLY library videos (no queue items - they're on Queue tab)
-  combinedWeeks = computed(() => this.filteredWeeks());
+  /**
+   * Library type filter (toolbar segmented control): Archives folded into the
+   * Library as a type, per the redesign. Layered on top of search/filters.
+   */
+  typeFilter = signal<'all' | 'video' | 'doc' | 'web'>('all');
+
+  readonly typeFilterOptions = [
+    { value: 'all', label: 'All' },
+    { value: 'video', label: 'Videos' },
+    { value: 'doc', label: 'Documents' },
+    { value: 'web', label: 'Web Archives' },
+  ];
+
+  combinedWeeks = computed(() => {
+    const weeks = this.filteredWeeks();
+    const filter = this.typeFilter();
+    if (filter === 'all') return weeks;
+
+    return weeks
+      .map(week => ({
+        ...week,
+        videos: week.videos.filter(v => this.matchesTypeFilter(v, filter))
+      }))
+      .filter(week => week.videos.length > 0);
+  });
+
+  onTypeFilterChange(value: string): void {
+    this.typeFilter.set(value as 'all' | 'video' | 'doc' | 'web');
+  }
+
+  private matchesTypeFilter(video: VideoItem, filter: 'video' | 'doc' | 'web'): boolean {
+    const mediaType = video.mediaType?.toLowerCase() || '';
+    const isWeb = mediaType === 'webpage' || mediaType === 'text/html' || video.tags?.includes('webpage');
+    const isDoc =
+      mediaType.startsWith('image/') ||
+      mediaType === 'application/pdf' ||
+      mediaType.startsWith('text/') && !isWeb;
+
+    switch (filter) {
+      case 'web':
+        return !!isWeb;
+      case 'doc':
+        return !isWeb && isDoc;
+      case 'video':
+        return !isWeb && !isDoc;
+    }
+  }
 
   // Total video count for library toolbar
   totalVideoCount = computed(() => {
@@ -382,6 +434,42 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       } else if (section === 'queue') {
         // Re-entering /queue (e.g. from a popout callback) still refreshes.
         this.applySection('queue');
+      }
+    });
+
+    // Shell toolbar → workspace action channel (Phase 2). The toolbar owns
+    // the buttons; this component owns the handlers/modals they trigger.
+    this.workspaceActions.actions$.pipe(takeUntilDestroyed()).subscribe(action => {
+      switch (action.type) {
+        case 'import':
+          this.openImportDialog();
+          break;
+        case 'openDownloadDialog':
+          this.openDownloadDialog();
+          break;
+        case 'submitDownloads':
+          if (this.requireLibrary()) {
+            this.onDownloadSubmit(action.payload.items, action.payload.trimAfter);
+          }
+          break;
+        case 'openEditor':
+          this.openInEditor();
+          break;
+        case 'viewInfo':
+          this.viewMore();
+          break;
+        case 'transcribeSelection':
+          this.transcribeSelected();
+          break;
+        case 'analyzeSelection':
+          this.analyzeSelected();
+          break;
+        case 'addSelectionToQueue':
+          this.onAddSelectedToQueue();
+          break;
+        case 'openAiSetup':
+          this.aiWizardOpen.set(true);
+          break;
       }
     });
   }
@@ -1478,6 +1566,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
 
   ngOnDestroy() {
     this.websocketService.disconnect();
+    this.selectionStore.clear();
 
     if (this.navigateToQueueHandler) {
       window.removeEventListener('electron-navigate-to-queue', this.navigateToQueueHandler);
@@ -1726,6 +1815,11 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   onSelectionChanged(event: { count: number; ids: Set<string> }) {
     this.selectedCount.set(event.count);
     this.selectedVideoIds.set(event.ids);
+
+    // Mirror into the shared SelectionStore so the shell toolbar (and, in
+    // Phase 3, the inspector) can react. Read-only projection — this
+    // component stays the selection owner.
+    this.selectionStore.set(event.ids);
 
     // If preview modal is open and a single item is selected, update the preview
     if (this.previewModalOpen() && event.count === 1) {
@@ -2320,6 +2414,98 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     }
   }
 
+  /**
+   * Resolve the current selection ("weekLabel|videoId" item ids) to library
+   * VideoItems, skipping queue/staging rows. Shared by the shell-toolbar
+   * actions (transcribe/analyze).
+   */
+  private getSelectedLibraryVideos(): VideoItem[] {
+    const allVideos: VideoItem[] = [];
+    this.filteredWeeks().forEach(week => allVideos.push(...week.videos));
+    this.videoWeeks().forEach(week => {
+      week.videos.forEach(v => {
+        if (!allVideos.find(existing => existing.id === v.id)) {
+          allVideos.push(v);
+        }
+      });
+    });
+
+    const videos: VideoItem[] = [];
+    const seen = new Set<string>();
+    for (const itemId of this.selectedVideoIds()) {
+      const parts = itemId.split('|');
+      const videoId = parts.length > 1 ? parts[1] : itemId;
+      if (videoId.startsWith('queue-') || videoId.startsWith('staging-') || seen.has(videoId)) {
+        continue;
+      }
+      const video = allVideos.find(v => v.id === videoId) || allVideos.find(v => v.id === itemId);
+      if (video) {
+        seen.add(videoId);
+        videos.push(video);
+      }
+    }
+    return videos;
+  }
+
+  /**
+   * One-click transcribe for the current selection (shell toolbar).
+   * Transcription is first-class and never gated on AI setup: jobs are queued
+   * immediately with a single transcribe task, skipping items that already
+   * have a transcript.
+   */
+  transcribeSelected() {
+    const selected = this.getSelectedLibraryVideos();
+    if (selected.length === 0) {
+      this.notificationService.warning('No Selection', 'Please select at least one video');
+      return;
+    }
+
+    const videos = selected.filter(v => v.hasTranscript !== true);
+    if (videos.length === 0) {
+      this.notificationService.info('Already Transcribed', 'All selected videos already have transcripts');
+      return;
+    }
+    if (videos.length < selected.length) {
+      this.notificationService.info(
+        'Some Skipped',
+        `${selected.length - videos.length} already-transcribed video(s) were skipped`
+      );
+    }
+
+    videos.forEach(video => {
+      this.queueService.addJob({
+        title: video.name,
+        videoId: video.id,
+        duration: video.duration,
+        thumbnail: video.thumbnailUrl,
+        tasks: [createQueueTask('transcribe', { model: 'base', language: 'en' })],
+        titleResolved: true
+      });
+    });
+
+    this.notificationService.success(
+      'Transcription Queued',
+      `Added ${videos.length} ${videos.length === 1 ? 'video' : 'videos'} to the queue`
+    );
+    this.setActiveTab('queue');
+    if (this.cascadeComponent) {
+      this.cascadeComponent.clearSelection();
+    }
+  }
+
+  /**
+   * Analyze the current selection (shell toolbar). Reuses the existing
+   * analyzeVideos flow: AI-setup gate → config modal → queue.
+   */
+  analyzeSelected() {
+    const selected = this.getSelectedLibraryVideos();
+    if (selected.length === 0) {
+      this.notificationService.warning('No Selection', 'Please select at least one video');
+      return;
+    }
+    this.analyzeVideos(selected);
+  }
+
   // Configure selected queue items
   onConfigureSelected() {
     const selectedIds = Array.from(this.selectedVideoIds());
@@ -2550,7 +2736,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
    * Handle download dialog submission - add to staging instantly, then fetch video info asynchronously
    * Now uses QueueService as single source of truth
    */
-  async onDownloadSubmit(items: { url: string; name: string; settings: VideoJobSettings }[]) {
+  async onDownloadSubmit(items: { url: string; name: string; settings: VideoJobSettings }[], trimAfter = false) {
     this.downloadDialogOpen.set(false);
 
     const addedJobs: QueueJob[] = [];
@@ -2579,6 +2765,24 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
 
     // Switch to Queue tab immediately
     this.setActiveTab('queue');
+
+    // Trim-after-download (Add popover): open the trim opener for a single
+    // add; for batches point at the per-item trim buttons in the queue.
+    if (trimAfter && addedJobs.length > 0) {
+      if (addedJobs.length === 1) {
+        const job = addedJobs[0];
+        this.trimModalJobId.set(job.id);
+        this.trimModalVideoTitle.set(job.title);
+        this.trimModalInitialTime.set(job.trimStartTime || 0);
+        this.trimModalInitialEndTime.set(job.trimEndTime || 0);
+        this.trimModalOpen.set(true);
+      } else {
+        this.notificationService.info(
+          'Set Trim Per Item',
+          'Use each queue item\'s trim button to set its opener/ending trim'
+        );
+      }
+    }
 
     // Now fetch video info asynchronously in the background for each item
     for (let i = 0; i < items.length; i++) {
@@ -2628,8 +2832,15 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   private convertSettingsToQueueTasks(settings: VideoJobSettings): QueueTask[] {
     const tasks: QueueTask[] = [];
 
-    // Always add download-import task first for URL downloads
-    tasks.push(createQueueTask('download-import', {}));
+    // Always add download-import task first for URL downloads.
+    // downloadQuality rides task.options → queue-manager spreads it into
+    // DownloadOptions.quality → yt-dlp height cap. 'best'/absent keeps the
+    // per-site default format selection.
+    const downloadOptions: Record<string, any> =
+      settings.downloadQuality && settings.downloadQuality !== 'best'
+        ? { quality: settings.downloadQuality }
+        : {};
+    tasks.push(createQueueTask('download-import', downloadOptions));
 
     if (settings.fixAspectRatio) {
       tasks.push(createQueueTask('fix-aspect-ratio', {

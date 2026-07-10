@@ -4,50 +4,9 @@
 
   <!-- Page Content -->
   <div class="page-content">
-    <!-- Transitional actions bar: these move into the shell toolbar in Phase 2 -->
-    <div class="page-header slim" [class.is-web]="isWeb">
-      <div class="header-actions">
-        <button
-          class="btn btn-primary"
-          (click)="openDownloadDialog()"
-          title="Download videos from URLs">
-          <span class="btn-icon">⬇️</span>
-          <span>Download</span>
-        </button>
-        <button
-          class="btn btn-primary action-import"
-          (click)="openImportDialog()"
-          title="Import media files from your computer">
-          <span class="btn-icon">📁</span>
-          <span>Import</span>
-        </button>
-        <button
-          class="btn btn-primary"
-          [disabled]="selectedCount() !== 1"
-          (click)="openInEditor()"
-          [title]="selectedCount() === 1 ? 'Open in Video Editor' : 'Select exactly one video'">
-          <span class="btn-icon">🎬</span>
-          <span>Video Editor</span>
-        </button>
-        <button
-          class="btn btn-secondary"
-          [disabled]="selectedCount() !== 1"
-          (click)="viewMore()"
-          [title]="selectedCount() === 1 ? 'View video details' : 'Select exactly one video'">
-          <span class="btn-icon">ℹ️</span>
-          <span>View More</span>
-        </button>
-        <!-- Add to queue button for library items -->
-        <button
-          class="btn btn-secondary"
-          *ngIf="selectedCount() > 0"
-          (click)="onAddSelectedToQueue()">
-          <span class="btn-icon">➕</span>
-          <span>Add to Queue</span>
-          <span class="badge">{{ selectedCount() }}</span>
-        </button>
-      </div>
-    </div>
+    <!-- Actions live in the shell toolbar (Phase 2): + Add popover,
+         Transcribe / Analyze / Scout / Info / Queue, dispatched over
+         WorkspaceActionsService to this component's handlers. -->
 
     <!-- Search and Filters (Library Tab Only) -->
     <div class="filters-section" *ngIf="activeTab() === 'library'">
@@ -88,6 +47,11 @@
                 {{ totalVideoCount() }} videos
               </p>
             </div>
+            <ui-segmented-control
+              class="type-filter"
+              [options]="typeFilterOptions"
+              [value]="typeFilter()"
+              (valueChange)="onTypeFilterChange($event)" />
           </div>
           <app-cascade
             [weeks]="combinedWeeks()"

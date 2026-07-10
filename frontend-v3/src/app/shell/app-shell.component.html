@@ -9,7 +9,24 @@
       (toggleTheme)="onToggleTheme()"
       (toggleInspector)="nav.toggleInspector()"
       (startTour)="onStartTour()"
-      (downloadLogs)="onDownloadLogs()" />
+      (downloadLogs)="onDownloadLogs()">
+      @if (onWorkspace()) {
+        <app-toolbar-actions
+          [hasSelection]="selection.hasSelection()"
+          [singleSelection]="selection.count() === 1"
+          [selectionCount]="selection.count()"
+          [aiReady]="aiReady()"
+          (submitAdd)="onSubmitAdd($event)"
+          (importFiles)="dispatchToWorkspace({ type: 'import' })"
+          (openAdvanced)="dispatchToWorkspace({ type: 'openDownloadDialog' })"
+          (setupAi)="dispatchToWorkspace({ type: 'openAiSetup' })"
+          (transcribe)="dispatchToWorkspace({ type: 'transcribeSelection' })"
+          (analyze)="dispatchToWorkspace({ type: 'analyzeSelection' })"
+          (openEditor)="dispatchToWorkspace({ type: 'openEditor' })"
+          (viewInfo)="dispatchToWorkspace({ type: 'viewInfo' })"
+          (addToQueue)="dispatchToWorkspace({ type: 'addSelectionToQueue' })" />
+      }
+    </app-toolbar>
 
     <app-sidebar
       class="region-sidebar"

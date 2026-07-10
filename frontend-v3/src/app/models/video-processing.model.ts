@@ -34,6 +34,12 @@ export interface VideoJobSettings {
   analysisQuality?: 'fast' | 'thorough'; // fast = single-pass (cheaper), thorough = multi-pass (better)
   outputFormat?: 'mp4' | 'webm' | 'mov' | 'avi';
   outputQuality?: 'low' | 'medium' | 'high' | 'ultra';
+  /**
+   * Max download resolution passed to yt-dlp as a height cap
+   * (bestvideo[height<=N]+bestaudio per-site). 'best' (or absent) omits the
+   * cap and keeps the site default behavior.
+   */
+  downloadQuality?: '480' | '720' | '1080' | 'best';
 }
 
 export interface VideoTask {
