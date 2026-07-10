@@ -21,7 +21,7 @@ import { QueueManagerService } from '../queue/queue-manager.service';
 import { ApiKeysService } from '../config/api-keys.service';
 import { Task } from '../common/interfaces/task.interface';
 import { DEFAULT_CATEGORIES } from './prompts/analysis-prompts';
-import { parseProviderModel } from './model-utils';
+import { parseProviderModel, numCtxMaxForModel } from './model-utils';
 import { v4 as uuidv4 } from 'uuid';
 
 export interface AnalysisJob {
@@ -712,7 +712,13 @@ export class AnalysisService implements OnModuleInit {
     if (request.aiProvider === 'ollama') {
       // If the model can't be loaded, analysis WILL fail — fail loudly now
       // rather than swallowing it and limping into a doomed run. NO FALLBACKS.
-      await this.ollama.prepareModel(modelName, request.ollamaEndpoint);
+      // Warm at the same num_ctx ceiling generation caps at, so the preload
+      // doesn't load the model at Ollama's 128K default (a ~50GB KV spike).
+      await this.ollama.prepareModel(
+        modelName,
+        request.ollamaEndpoint,
+        numCtxMaxForModel(modelName),
+      );
     }
 
     // Validate that transcript exists before proceeding

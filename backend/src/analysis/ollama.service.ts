@@ -210,10 +210,16 @@ Current model status: Not installed
    * Preload (warm) a model so the first real request doesn't pay load time.
    * The per-call keep_alive of 5m keeps it resident afterwards — there is NO
    * in-process idle timer (Ollama's own keep_alive is the single source of truth).
+   *
+   * Pass `numCtx` (the ceiling generation will use, via numCtxMaxForModel) so the
+   * warm-up loads the runner at that bounded size. Without it Ollama warms at the
+   * model's DEFAULT context (e.g. 128K), allocating a huge KV cache (~50GB for a
+   * 32B) that the first real request then has to reload away — the exact spike
+   * this warm-up is meant to avoid.
    */
-  async preloadModel(modelName: string, endpoint?: string): Promise<void> {
+  async preloadModel(modelName: string, endpoint?: string, numCtx?: number): Promise<void> {
     const url = endpoint || this.defaultEndpoint;
-    this.logger.log(`[Keep-Alive] Preloading model: ${modelName} at ${url}`);
+    this.logger.log(`[Keep-Alive] Preloading model: ${modelName} at ${url}${numCtx ? ` (num_ctx=${numCtx})` : ''}`);
     await axios.post(
       `${url}/api/generate`,
       {
@@ -221,7 +227,7 @@ Current model status: Not installed
         prompt: 'Ready.',
         stream: false,
         keep_alive: '5m',
-        options: { num_predict: 1 },
+        options: { num_predict: 1, ...(numCtx ? { num_ctx: numCtx } : {}) },
       },
       { timeout: 300000 }, // 5 minute timeout for large models
     );
@@ -271,7 +277,7 @@ Current model status: Not installed
    * target. Uses Ollama's live /api/ps rather than an in-process map; per-call
    * keep_alive on every subsequent generate keeps the target resident.
    */
-  async prepareModel(modelName: string, endpoint?: string): Promise<void> {
+  async prepareModel(modelName: string, endpoint?: string, numCtx?: number): Promise<void> {
     const url = endpoint || this.defaultEndpoint;
     const normalized = (name: string) => (name.includes(':') ? name : `${name}:latest`);
     const target = normalized(modelName);
@@ -283,8 +289,9 @@ Current model status: Not installed
       await Promise.all(others.map((m) => this.unloadModel(m, endpoint)));
     }
 
-    // Warm the target (cheap if already loaded — keep_alive just refreshes it).
-    await this.preloadModel(modelName, endpoint);
+    // Warm the target at the bounded num_ctx ceiling (cheap if already loaded —
+    // keep_alive just refreshes it).
+    await this.preloadModel(modelName, endpoint, numCtx);
   }
 
   /**
