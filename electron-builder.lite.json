@@ -85,6 +85,7 @@
     ],
     "hardenedRuntime": true,
     "gatekeeperAssess": false,
+    "notarize": false,
     "entitlements": "assets/entitlements.mac.plist",
     "entitlementsInherit": "assets/entitlements.mac.plist",
     "artifactName": "${productName}-Lite-${version}-${arch}.${ext}",
