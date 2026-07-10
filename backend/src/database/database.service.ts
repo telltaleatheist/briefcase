@@ -40,6 +40,7 @@ export interface VideoRecordWithFlags extends VideoRecord {
   has_transcript: number;
   has_analysis: number;
   has_children: number;
+  has_connections: number;
 }
 
 export interface TranscriptRecord {
@@ -1237,6 +1238,28 @@ export class DatabaseService {
           this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
         }
       }
+    }
+
+    // Migration 19: Backfill undirected connections (media_relationships) from
+    // parent/child pairs (video_relationships). Idempotent — the NOT EXISTS
+    // guard checks both directions, so this is safe to run on every startup.
+    try {
+      const result = db.prepare(`
+        INSERT INTO media_relationships (id, primary_media_id, related_media_id, relationship_type, created_at)
+        SELECT lower(hex(randomblob(16))), vr.parent_id, vr.child_id, 'connected', vr.created_at
+        FROM video_relationships vr
+        WHERE NOT EXISTS (
+          SELECT 1 FROM media_relationships mr
+          WHERE (mr.primary_media_id = vr.parent_id AND mr.related_media_id = vr.child_id)
+             OR (mr.primary_media_id = vr.child_id AND mr.related_media_id = vr.parent_id)
+        )
+      `).run();
+      if (result.changes > 0) {
+        this.saveDatabase();
+        this.logger.log(`Migration: backfilled ${result.changes} connections from parent/child relationships`);
+      }
+    } catch (migrationError: any) {
+      this.logger.error(`Connections backfill migration failed: ${migrationError?.message || 'Unknown error'}`);
     }
 
     // Migration: Recreate video_tab_items to allow nullable video_id and add new columns
@@ -2873,7 +2896,8 @@ export class DatabaseService {
     const stmt = db.prepare(`
       SELECT
         v.*,
-        CASE WHEN EXISTS (SELECT 1 FROM videos WHERE parent_id = v.id) THEN 1 ELSE 0 END as has_children
+        CASE WHEN EXISTS (SELECT 1 FROM videos WHERE parent_id = v.id) THEN 1 ELSE 0 END as has_children,
+        CASE WHEN EXISTS (SELECT 1 FROM media_relationships mr WHERE mr.primary_media_id = v.id OR mr.related_media_id = v.id) THEN 1 ELSE 0 END as has_connections
       FROM videos v
       WHERE v.id = ?
     `);
@@ -3071,6 +3095,7 @@ export class DatabaseService {
       SELECT
         v.*,
         CASE WHEN EXISTS (SELECT 1 FROM videos WHERE parent_id = v.id) THEN 1 ELSE 0 END as has_children,
+        CASE WHEN EXISTS (SELECT 1 FROM media_relationships mr WHERE mr.primary_media_id = v.id OR mr.related_media_id = v.id) THEN 1 ELSE 0 END as has_connections,
         wa.domain as wa_domain,
         wa.favicon_path as wa_favicon_path,
         wa.original_url as wa_original_url,
@@ -3144,6 +3169,7 @@ export class DatabaseService {
           has_transcript: 0,
           has_analysis: 0,
           has_children: 0,
+          has_connections: 0,
           isParent: false,
           isChild: true,
           parent_id: parent.id
@@ -4490,8 +4516,26 @@ export class DatabaseService {
     relationshipType: string;
   }) {
     const db = this.ensureInitialized();
-    const now = new Date().toISOString();
 
+    if (relationship.primaryMediaId === relationship.relatedMediaId) {
+      throw new Error('An item cannot be connected to itself');
+    }
+
+    // Connections are undirected: enforce symmetric uniqueness (a↔b equals b↔a).
+    const existing = db.prepare(
+      `SELECT id FROM media_relationships
+       WHERE (primary_media_id = ? AND related_media_id = ?)
+          OR (primary_media_id = ? AND related_media_id = ?)`
+    ).get(
+      relationship.primaryMediaId, relationship.relatedMediaId,
+      relationship.relatedMediaId, relationship.primaryMediaId,
+    );
+    if (existing) {
+      this.logger.log(`Media relationship already exists between ${relationship.primaryMediaId} and ${relationship.relatedMediaId}`);
+      return;
+    }
+
+    const now = new Date().toISOString();
     db.prepare(
       `INSERT INTO media_relationships (
         id, primary_media_id, related_media_id, relationship_type, created_at
@@ -4504,6 +4548,19 @@ export class DatabaseService {
       now,
     );
 
+    this.saveDatabase();
+  }
+
+  /**
+   * Delete the connection between two items regardless of direction.
+   */
+  deleteConnectionBetween(mediaIdA: string, mediaIdB: string) {
+    const db = this.ensureInitialized();
+    db.prepare(
+      `DELETE FROM media_relationships
+       WHERE (primary_media_id = ? AND related_media_id = ?)
+          OR (primary_media_id = ? AND related_media_id = ?)`
+    ).run(mediaIdA, mediaIdB, mediaIdB, mediaIdA);
     this.saveDatabase();
   }
 
@@ -4577,6 +4634,12 @@ export class DatabaseService {
 
     // If parentId is null, remove all parent relationships for this child
     if (parentId === null) {
+      // Mirror the removal into the connections model (dual-write transition)
+      const parents = this.getParentVideos(childId);
+      for (const p of parents) {
+        this.deleteConnectionBetween(p.id, childId);
+      }
+
       db.prepare(
         'DELETE FROM video_relationships WHERE child_id = ?'
       ).run(childId);
@@ -4623,6 +4686,15 @@ export class DatabaseService {
       childId,
       new Date().toISOString()
     );
+
+    // Dual-write into the connections model (transition: connections are the
+    // UI's source of truth; parent/child stays for legacy flows)
+    this.insertMediaRelationship({
+      id: uuidv4(),
+      primaryMediaId: parentId,
+      relatedMediaId: childId,
+      relationshipType: 'connected',
+    });
 
     this.saveDatabase();
     this.logger.log(`Linked video ${childId} as child of ${parentId}`);
@@ -4693,6 +4765,13 @@ export class DatabaseService {
    */
   removeAllChildren(parentId: string) {
     const db = this.ensureInitialized();
+
+    // Mirror the removal into the connections model (dual-write transition)
+    const children = this.getChildVideos(parentId);
+    for (const c of children) {
+      this.deleteConnectionBetween(parentId, c.id);
+    }
+
     db.prepare('DELETE FROM video_relationships WHERE parent_id = ?').run(parentId);
 
     // Also clear deprecated parent_id column for backwards compatibility
@@ -4709,6 +4788,10 @@ export class DatabaseService {
    */
   removeParentChildRelationship(parentId: string, childId: string) {
     const db = this.ensureInitialized();
+
+    // Mirror the removal into the connections model (dual-write transition)
+    this.deleteConnectionBetween(parentId, childId);
+
     db.prepare('DELETE FROM video_relationships WHERE parent_id = ? AND child_id = ?').run(parentId, childId);
 
     // Also clear deprecated parent_id column if this was the only relationship

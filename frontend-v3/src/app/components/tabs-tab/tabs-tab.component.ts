@@ -179,8 +179,28 @@ export class TabsTabComponent {
       case 'renameTab':
         this.openRenameDialog(weekLabel);
         break;
+      case 'openAllInScout':
+        this.openAllInScout(weekLabel);
+        break;
       default:
         console.warn('Unknown tab header action:', action);
+    }
+  }
+
+  /**
+   * Open every video in this tab in Scout, in display order — the
+   * run-of-show flow (each video becomes an editor tab).
+   */
+  openAllInScout(tabName: string) {
+    const week = this.tabWeeks().find(w => w.weekLabel === tabName);
+    const videos = week?.videos ?? [];
+    if (videos.length === 0) {
+      this.notificationService.info('Empty Tab', 'This tab has no videos to open');
+      return;
+    }
+    const callback = this.onVideoAction();
+    if (callback) {
+      callback({ action: 'openInEditor', videos });
     }
   }
 

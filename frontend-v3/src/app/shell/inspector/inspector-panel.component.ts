@@ -1,5 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, signal, viewChild } from '@angular/core';
+import { Router } from '@angular/router';
 import { CdkOverlayOrigin, OverlayModule } from '@angular/cdk/overlay';
+import { ConnectionsStore } from '../../core/stores/connections.store';
 import { InspectorStore } from '../../core/stores/inspector.store';
 import { SelectionStore } from '../../core/stores/selection.store';
 import { WorkspaceAction, WorkspaceActionsService } from '../../core/stores/workspace-actions.service';
@@ -8,16 +10,14 @@ import { VideoTab } from '../../services/tabs.service';
 import { UiButtonComponent } from '../../ui';
 
 /**
- * Right inspector panel — details, pipeline status, and actions for the
- * current selection.
+ * Right inspector panel — details, pipeline status, connections, and actions
+ * for the current selection.
  *
- * Dumb projection over InspectorStore/SelectionStore; every action dispatches
- * through the WorkspaceActions channel to the persistent workspace host,
- * which owns the real handlers. The transcript preview is fetched lazily by
- * the store (only while this panel is open).
- *
- * The mockup's "Connected" section is Phase 6 (connections data model) and is
- * intentionally absent here.
+ * Dumb projection over InspectorStore/SelectionStore/ConnectionsStore; every
+ * workspace action dispatches through the WorkspaceActions channel to the
+ * persistent workspace host, which owns the real handlers. Transcript preview
+ * and connections are fetched lazily by their stores (only while this panel
+ * is open).
  */
 @Component({
   selector: 'app-inspector-panel',
@@ -30,7 +30,9 @@ import { UiButtonComponent } from '../../ui';
 export class InspectorPanelComponent {
   store = inject(InspectorStore);
   selection = inject(SelectionStore);
+  connectionsStore = inject(ConnectionsStore);
   private actions = inject(WorkspaceActionsService);
+  private router = inject(Router);
 
   /** Whether an AI provider is configured (Analyze affordances). */
   aiReady = input(false);
@@ -76,6 +78,33 @@ export class InspectorPanelComponent {
     const item = this.item();
     return preview && item && preview.videoId === item.id ? preview.text : null;
   });
+
+  /** Exactly two items selected — the "Connect these two" case. */
+  isPair = computed(() => this.store.selectedItems().length === 2);
+
+  kindIconFor(kind: string): string {
+    switch (kind) {
+      case 'web': return '🌐';
+      case 'doc': return '📄';
+      default: return '🎞';
+    }
+  }
+
+  kindLabelFor(kind: string): string {
+    switch (kind) {
+      case 'web': return 'Web Archive';
+      case 'doc': return 'Document';
+      default: return 'Video';
+    }
+  }
+
+  /**
+   * Jump to a connected item. Navigates to its full-info view — the same
+   * behavior as cascade's existing relationship rows.
+   */
+  openConnected(videoId: string): void {
+    this.router.navigate(['/video', videoId]);
+  }
 
   dispatch(action: WorkspaceAction): void {
     this.actions.dispatch(action);

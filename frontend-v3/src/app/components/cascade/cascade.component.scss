@@ -475,6 +475,13 @@ cdk-virtual-scroll-viewport.library-content {
   white-space: nowrap;
 }
 
+// Small marker on items that participate in connections
+.connection-indicator {
+  flex: none;
+  font-size: 10px;
+  opacity: 0.55;
+}
+
 // Title loading spinner (shown when fetching video info)
 .title-spinner {
   flex-shrink: 0;

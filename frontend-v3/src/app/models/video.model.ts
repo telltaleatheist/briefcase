@@ -28,6 +28,9 @@ export interface VideoItem {
   width?: number;
   height?: number;
   fps?: number;
+  // Connections (flat, undirected links between items)
+  hasConnections?: boolean; // Item participates in at least one connection
+
   // Parent-child relationships
   parentIds?: string[]; // Array of parent video IDs (many-to-many)
   childIds?: string[]; // Array of child video IDs (many-to-many)

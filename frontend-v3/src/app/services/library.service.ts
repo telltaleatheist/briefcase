@@ -309,6 +309,7 @@ export class LibraryService {
       webPageTitle: video.wa_page_title || undefined,
       hasTranscript: video.has_transcript === 1 || video.has_transcript === true,
       hasAnalysis: video.has_analysis === 1 || video.has_analysis === true,
+      hasConnections: video.has_connections === 1 || video.has_connections === true,
       // Searchable fields
       aiDescription: video.ai_description,
       sourceUrl: video.wa_original_url || video.source_url,

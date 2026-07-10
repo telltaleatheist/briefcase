@@ -313,8 +313,13 @@ export class CascadeComponent {
     // Check if this is a header context menu
     const header = this.contextMenuHeader();
     if (header) {
-      // Header-specific actions
+      // Header-specific actions only exist for tab headers (tabs mode);
+      // library week headers have no actions.
+      if (!this.tabsMode) {
+        return [];
+      }
       return [
+        { label: 'Open All in Scout', icon: '▶️', action: 'openAllInScout' },
         { label: 'Rename Tab', icon: '✏️', action: 'renameTab' },
         { label: 'Delete Tab', icon: '🗑️', action: 'deleteTab' }
       ];

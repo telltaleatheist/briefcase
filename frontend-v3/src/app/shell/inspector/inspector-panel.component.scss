@@ -133,6 +133,70 @@
   }
 }
 
+// ── Connected section ───────────────────────────────────────────────────────
+.connected-item {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.connected-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover { border-color: var(--primary-orange); }
+  &:focus-visible { outline: 2px solid var(--primary-orange); outline-offset: 1px; }
+
+  .ci-icon { flex: none; font-size: 14px; }
+  .ci-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ci-kind {
+    flex: none;
+    font-size: 10.5px;
+    color: var(--text-tertiary);
+  }
+}
+
+.connected-remove {
+  flex: none;
+  width: 26px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+
+  &:hover:not(:disabled) { color: var(--error); border-color: var(--error); }
+  &:focus-visible { outline: 2px solid var(--primary-orange); outline-offset: 1px; }
+  &:disabled { opacity: 0.4; cursor: default; }
+}
+
+.connected-empty {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
 // ── Multi selection ─────────────────────────────────────────────────────────
 .multi-count {
   font-size: 13px;

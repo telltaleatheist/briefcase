@@ -63,6 +63,33 @@
       }
     </div>
 
+    <div class="section-label">Connected</div>
+    @if (connectionsStore.connectionsLoading()) {
+      <div class="connected-empty">Loading…</div>
+    } @else {
+      @for (conn of connectionsStore.connections(); track conn.relationshipId) {
+        <div class="connected-item">
+          <button
+            class="connected-open"
+            type="button"
+            [title]="'Open ' + conn.title"
+            (click)="openConnected(conn.videoId)">
+            <span class="ci-icon" aria-hidden="true">{{ kindIconFor(conn.kind) }}</span>
+            <span class="ci-title">{{ conn.title }}</span>
+            <span class="ci-kind">{{ kindLabelFor(conn.kind) }}</span>
+          </button>
+          <button
+            class="connected-remove"
+            type="button"
+            title="Disconnect"
+            [disabled]="connectionsStore.mutating()"
+            (click)="connectionsStore.disconnect(conn.relationshipId)">✕</button>
+        </div>
+      } @empty {
+        <div class="connected-empty">No connections. Select this and one other item to connect them.</div>
+      }
+    }
+
     @if (single.hasTranscript) {
       <div class="section-label">Transcript</div>
       @if (store.transcriptLoading()) {
@@ -113,6 +140,17 @@
       }
       @if (store.anyVideos()) {
         <ui-button [block]="true" (pressed)="dispatch({ type: 'openEditor' })">▶ Open in Scout (tabs)</ui-button>
+      }
+      @if (isPair()) {
+        @if (connectionsStore.pairConnection(); as edge) {
+          <ui-button [block]="true" (pressed)="connectionsStore.disconnect(edge.relationshipId)">
+            🔗 Disconnect these two
+          </ui-button>
+        } @else {
+          <ui-button [block]="true" (pressed)="connectionsStore.connectPair()">
+            🔗 Connect these two
+          </ui-button>
+        }
       }
       <ui-button
         [block]="true"

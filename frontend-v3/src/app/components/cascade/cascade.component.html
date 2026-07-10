@@ -112,6 +112,9 @@
                   }
                 }
                 <span class="title-text">{{ getDisplayTitle(item.video.name) || item.video.name }}</span>
+                @if (item.video.hasConnections && !item.video.isGhost) {
+                  <span class="connection-indicator" title="Has connections" aria-label="Has connections">🔗</span>
+                }
               </div>
 
               <!-- Ghost relationship indicator for parents (BELOW title) -->
