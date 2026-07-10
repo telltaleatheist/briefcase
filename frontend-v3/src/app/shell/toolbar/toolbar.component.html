@@ -1,0 +1,28 @@
+<header class="toolbar">
+  <button type="button" class="icon-btn hamburger" (click)="toggleDrawer.emit()" title="Menu" aria-label="Toggle navigation">
+    ☰
+  </button>
+
+  <h1 class="title">{{ title() }}</h1>
+
+  <!-- Phase 2 slot: contextual actions (+ Add, Trim, Transcribe, Analyze, Scout) -->
+  <div class="actions-slot">
+    <ng-content />
+  </div>
+
+  <div class="spacer"></div>
+
+  <app-notification-bell />
+
+  @if (hasTour()) {
+    <button type="button" class="icon-btn" (click)="startTour.emit()" title="Start tutorial" aria-label="Start tutorial">❓</button>
+  }
+
+  <button type="button" class="icon-btn" (click)="downloadLogs.emit()" title="Download logs" aria-label="Download logs">📋</button>
+
+  <button type="button" class="icon-btn" (click)="toggleTheme.emit()" [title]="isDarkTheme() ? 'Switch to light mode' : 'Switch to dark mode'" aria-label="Toggle theme">
+    {{ isDarkTheme() ? '☀️' : '🌙' }}
+  </button>
+
+  <button type="button" class="icon-btn" (click)="toggleInspector.emit()" title="Toggle inspector" aria-label="Toggle inspector">◧</button>
+</header>

@@ -8,6 +8,7 @@
 @use 'styles/themes';
 @use 'styles/reset';
 @use 'styles/utilities';
+@use 'styles/layout-tokens';
 
 // Import timeline editor theme
 @import '../projects/ngx-video-timeline-editor/src/lib/styles/timeline-theme';

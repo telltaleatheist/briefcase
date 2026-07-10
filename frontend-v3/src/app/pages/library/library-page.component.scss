@@ -328,6 +328,13 @@
   gap: 16px;
   flex-shrink: 0;
 
+  // Transitional Phase-1 bar: actions only (title/subtitle moved to the shell
+  // toolbar); Phase 2 moves the actions there too and this block disappears.
+  &.slim {
+    justify-content: flex-end;
+    padding: 10px 16px 0;
+  }
+
   &.mini {
     .page-title {
       font-size: 20px;

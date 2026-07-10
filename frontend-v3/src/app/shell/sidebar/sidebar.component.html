@@ -1,0 +1,98 @@
+<nav class="sidebar" aria-label="Places">
+  <app-library-switcher
+    [libraryName]="currentLibraryName()"
+    (manage)="openLibrarySwitcher.emit()" />
+
+  <button
+    type="button"
+    class="nav-item"
+    [class.active]="activeSection() === 'library'"
+    (click)="selectSection.emit('library')">
+    <span class="glyph">🎞</span>
+    <span class="label">Library</span>
+  </button>
+
+  <button
+    type="button"
+    class="nav-item"
+    [class.active]="activeSection() === 'queue'"
+    (click)="selectSection.emit('queue')">
+    <span class="glyph">⚡</span>
+    <span class="label">Queue</span>
+    <ui-badge [value]="queueCount()" tone="accent" />
+  </button>
+
+  <div class="nav-section">Collections</div>
+
+  @for (collection of collections(); track collection.id) {
+    <button
+      type="button"
+      class="nav-item collection"
+      [class.active]="activeSection() === 'collections' && activeCollectionId() === collection.id"
+      (click)="selectCollection.emit(collection.id)">
+      <span class="glyph">⬩</span>
+      <span class="label">{{ collection.name }}</span>
+      @if (collection.video_count) {
+        <span class="count">{{ collection.video_count }}</span>
+      }
+    </button>
+  } @empty {
+    <div class="empty-hint">No collections yet</div>
+  }
+
+  <button type="button" class="nav-item new-collection" (click)="newCollection.emit()">
+    <span class="glyph">＋</span>
+    <span class="label">New Collection</span>
+  </button>
+
+  <div class="flex-spacer"></div>
+
+  <!-- Temporary: destinations slated for later phases (settings-fold / deletion) -->
+  <button type="button" class="nav-item more-toggle" (click)="toggleMore()">
+    <span class="glyph">{{ moreOpen() ? '▾' : '▸' }}</span>
+    <span class="label">More</span>
+  </button>
+  @if (moreOpen()) {
+    <button
+      type="button"
+      class="nav-item sub"
+      [class.active]="activeSection() === 'manager'"
+      (click)="selectSection.emit('manager')">
+      <span class="glyph">🔧</span>
+      <span class="label">Manager</span>
+    </button>
+    <button
+      type="button"
+      class="nav-item sub"
+      [class.active]="activeSection() === 'saved'"
+      (click)="selectSection.emit('saved')">
+      <span class="glyph">💾</span>
+      <span class="label">Saved</span>
+    </button>
+    <button
+      type="button"
+      class="nav-item sub"
+      [class.active]="activeSection() === 'archives'"
+      (click)="selectSection.emit('archives')">
+      <span class="glyph">🌐</span>
+      <span class="label">Archives</span>
+    </button>
+    <button
+      type="button"
+      class="nav-item sub"
+      (click)="openComponentManager.emit()"
+      title="Download or re-download tools and models">
+      <span class="glyph">🧩</span>
+      <span class="label">Models &amp; Tools</span>
+    </button>
+  }
+
+  <button
+    type="button"
+    class="nav-item settings"
+    [class.active]="activeSection() === 'settings'"
+    (click)="selectSection.emit('settings')">
+    <span class="glyph">⚙️</span>
+    <span class="label">Settings</span>
+  </button>
+</nav>

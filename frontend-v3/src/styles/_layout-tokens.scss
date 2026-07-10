@@ -1,0 +1,22 @@
+// ============================================================================
+// CREAMSICLE DESIGN SYSTEM - SHELL LAYOUT TOKENS
+// ============================================================================
+// Dimensions for the app shell regions (sidebar / toolbar / inspector).
+// Consumed by shell components; keep all shell sizing here, never hardcoded.
+
+:root {
+  --sidebar-width: 220px;
+  --sidebar-collapsed-width: 64px;
+  --toolbar-height: 52px;
+  --inspector-width: 300px;
+
+  // Left inset reserved for macOS traffic lights when the Electron window
+  // switches to titleBarStyle: 'hiddenInset' (Phase 2). Default 0 keeps the
+  // framed-window layout unchanged.
+  --traffic-light-inset: 0px;
+}
+
+// Phase 2 hook: set from ElectronService platform detection.
+body.is-electron-mac {
+  // --traffic-light-inset: 78px;  // enabled when hiddenInset lands
+}

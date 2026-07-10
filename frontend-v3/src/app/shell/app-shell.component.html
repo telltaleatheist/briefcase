@@ -1,0 +1,48 @@
+<div class="shell" [class.chrome-hidden]="!nav.chromeVisible()">
+  @if (nav.chromeVisible()) {
+    <app-toolbar
+      class="region-toolbar"
+      [title]="sectionTitle()"
+      [hasTour]="hasTour()"
+      [isDarkTheme]="isDarkTheme()"
+      (toggleDrawer)="nav.toggleDrawer()"
+      (toggleTheme)="onToggleTheme()"
+      (toggleInspector)="nav.toggleInspector()"
+      (startTour)="onStartTour()"
+      (downloadLogs)="onDownloadLogs()" />
+
+    <app-sidebar
+      class="region-sidebar"
+      [class.drawer-open]="nav.drawerOpen()"
+      [activeSection]="nav.activeSection()"
+      [activeCollectionId]="nav.activeCollectionId()"
+      [collections]="collections()"
+      [queueCount]="queueCount()"
+      [currentLibraryName]="currentLibraryName()"
+      (selectSection)="onSelectSection($event)"
+      (selectCollection)="onSelectCollection($event)"
+      (newCollection)="onNewCollection()"
+      (openLibrarySwitcher)="onOpenLibrarySwitcher()"
+      (openComponentManager)="componentManagerOpen.set(true)" />
+
+    @if (nav.drawerOpen()) {
+      <div class="drawer-backdrop" (click)="nav.closeDrawer()" aria-hidden="true"></div>
+    }
+  }
+
+  <main class="region-main">
+    <router-outlet />
+  </main>
+
+  @if (nav.chromeVisible() && nav.inspectorOpen()) {
+    <app-inspector-panel class="region-inspector" />
+  }
+</div>
+
+<!-- Manage components (download / re-download tools & models) — was on the old nav rail -->
+@if (componentManagerOpen()) {
+  <app-setup-wizard
+    mode="config"
+    (closed)="componentManagerOpen.set(false)"
+    (completed)="componentManagerOpen.set(false)" />
+}

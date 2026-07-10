@@ -1,9 +1,7 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
-import { NavigationComponent } from './core/navigation/navigation.component';
 import { ThemeService } from './services/theme.service';
-import { NavigationService } from './services/navigation.service';
 import { QueueService } from './services/queue.service';
 import { LibraryService } from './services/library.service';
 import { OnboardingComponent } from './components/onboarding/onboarding.component';
@@ -15,19 +13,15 @@ import { ComponentService } from './services/component.service';
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, NavigationComponent, OnboardingComponent, QuitConfirmComponent, DownloadDockComponent, SetupWizardComponent],
+  imports: [RouterOutlet, OnboardingComponent, QuitConfirmComponent, DownloadDockComponent, SetupWizardComponent],
   template: `
     <!-- Show onboarding if needed -->
     @if (showOnboarding()) {
       <app-onboarding (completed)="onOnboardingComplete()" />
     } @else {
+      <!-- The shell (sidebar/toolbar/content/inspector) is the '' route -->
       <div class="app-container" [attr.data-theme]="themeService.currentTheme()">
-        @if (navService.navVisible()) {
-          <app-navigation />
-        }
-        <main class="main-content" [class.nav-hidden]="!navService.navVisible()">
-          <router-outlet />
-        </main>
+        <router-outlet />
       </div>
 
       <!-- Auto-opened on launch when required download-on-demand components are missing -->
@@ -46,32 +40,16 @@ import { ComponentService } from './services/component.service';
   `,
   styles: [`
     .app-container {
-      display: flex;
-      flex-direction: column;
       height: 100vh;
       overflow: hidden;
       background: var(--bg-primary);
       color: var(--text-primary);
       transition: background-color 0.3s ease, color 0.3s ease;
     }
-
-    .main-content {
-      flex: 1;
-      margin-top: 60px;
-      height: calc(100vh - 60px);
-      overflow: hidden;
-      transition: margin-top 0.3s ease, height 0.3s ease;
-    }
-
-    .main-content.nav-hidden {
-      margin-top: 0;
-      height: 100vh;
-    }
   `]
 })
 export class AppComponent implements OnInit {
   themeService = inject(ThemeService);
-  navService = inject(NavigationService);
   private libraryService = inject(LibraryService);
   // Inject QueueService to ensure it initializes eagerly and restores queue
   private queueService = inject(QueueService);

@@ -1,0 +1,98 @@
+:host {
+  display: block;
+  height: 100%;
+}
+
+.shell {
+  display: grid;
+  grid-template-rows: var(--toolbar-height) 1fr;
+  grid-template-columns: var(--sidebar-width) 1fr auto;
+  height: 100%;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+
+  // Editor full-bleed: only the main region remains.
+  &.chrome-hidden {
+    grid-template-rows: 1fr;
+    grid-template-columns: 1fr;
+  }
+}
+
+.region-toolbar {
+  grid-row: 1;
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.region-sidebar {
+  grid-row: 2;
+  grid-column: 1;
+  min-height: 0;
+}
+
+.region-main {
+  grid-row: 2;
+  grid-column: 2;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chrome-hidden .region-main {
+  grid-row: 1;
+  grid-column: 1;
+}
+
+.region-inspector {
+  grid-row: 2;
+  grid-column: 3;
+  min-height: 0;
+}
+
+.drawer-backdrop { display: none; }
+
+// ── Mobile / LAN browser: sidebar becomes an off-canvas drawer ──────────────
+@media (max-width: 768px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+
+  .region-sidebar {
+    position: fixed;
+    top: var(--toolbar-height);
+    bottom: 0;
+    left: 0;
+    z-index: 1030; // $z-fixed
+    width: var(--sidebar-width);
+    transform: translateX(-100%);
+    transition: transform 200ms ease;
+    box-shadow: 4px 0 24px var(--shadow-color);
+
+    &.drawer-open {
+      transform: translateX(0);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .region-sidebar { transition: none; }
+  }
+
+  .region-main {
+    grid-column: 1;
+  }
+
+  .region-inspector {
+    display: none; // inspector is desktop-only until Phase 3 designs mobile
+  }
+
+  .drawer-backdrop {
+    display: block;
+    position: fixed;
+    top: var(--toolbar-height);
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 1020; // below the drawer
+    background: var(--bg-overlay);
+  }
+}

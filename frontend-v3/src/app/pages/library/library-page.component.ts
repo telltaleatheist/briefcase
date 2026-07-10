@@ -1,7 +1,8 @@
 import { Component, OnInit, OnDestroy, signal, inject, ChangeDetectionStrategy, ChangeDetectorRef, computed, ViewChild, effect, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom } from 'rxjs';
 import { LibrarySearchFiltersComponent, LibraryFilters } from '../../components/library-search-filters/library-search-filters.component';
 import { CascadeComponent } from '../../components/cascade/cascade.component';
@@ -18,7 +19,6 @@ import { QueueTabComponent } from '../../components/queue-tab/queue-tab.componen
 import { SaveForLaterTabComponent } from '../../components/save-for-later-tab/save-for-later-tab.component';
 import { ArchivesTabComponent } from '../../components/archives-tab/archives-tab.component';
 import { SettingsPageComponent } from '../settings/settings-page.component';
-import { SetupWizardComponent } from '../../components/setup-wizard/setup-wizard.component';
 import { LibraryShortcutsDialogComponent } from '../../components/library-shortcuts-dialog/library-shortcuts-dialog.component';
 import { VideoWeek, VideoItem, ChildrenConfig, VideoChild, ItemProgress } from '../../models/video.model';
 import { Library, NewLibrary, OpenLibrary } from '../../models/library.model';
@@ -86,7 +86,6 @@ export interface ProcessingTask {
     SaveForLaterTabComponent,
     ArchivesTabComponent,
     SettingsPageComponent,
-    SetupWizardComponent,
     ExportIndicatorComponent,
     TrimOpenerModalComponent
   ],
@@ -97,6 +96,7 @@ export interface ProcessingTask {
 export class LibraryPageComponent implements OnInit, OnDestroy {
   private libraryService = inject(LibraryService);
   private router = inject(Router);
+  private route = inject(ActivatedRoute);
   private http = inject(HttpClient);
   private websocketService = inject(WebsocketService);
   private aiSetupService = inject(AiSetupService);
@@ -327,11 +327,8 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   // Filters
   currentFilters: LibraryFilters | null = null;
 
-  // Tab State
+  // Tab State — set by the route.data subscription (URL is the source of truth)
   activeTab = signal<'library' | 'queue' | 'tabs' | 'manager' | 'saved' | 'archives' | 'settings'>('library');
-
-  // Manage-components wizard (download / re-download tools & models)
-  componentManagerOpen = signal(false);
 
   // Default task settings (loaded from localStorage)
   private defaultTaskSettings: QueueItemTask[] = [];
@@ -373,6 +370,20 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       const ids = this.tabsService.tabbedVideoIds();
       this.tabbedVideoIds.set(ids);
     }, { allowSignalWrites: true });
+
+    // The URL is the source of truth for which workspace section shows.
+    // WorkspaceReuseStrategy keeps this component alive across
+    // /library ↔ /queue ↔ /collections ↔ … navigations, so this fires on
+    // every section change without re-running ngOnInit.
+    this.route.data.pipe(takeUntilDestroyed()).subscribe(data => {
+      const section = data['section'] as Parameters<LibraryPageComponent['applySection']>[0] | undefined;
+      if (section && section !== this.activeTab()) {
+        this.applySection(section);
+      } else if (section === 'queue') {
+        // Re-entering /queue (e.g. from a popout callback) still refreshes.
+        this.applySection('queue');
+      }
+    });
   }
 
   async ngOnInit() {
@@ -385,11 +396,17 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     this.websocketService.connect();
 
     // Listen for navigate-to-queue events (from popout editor or same-window editor).
-    // setActiveTab('queue') already calls refreshFromBackend, so don't call it
-    // twice — two parallel refreshes could both hit Pass 3 in restoreFromBackend
-    // and create duplicate frontend jobs for a single backend export-clip job.
+    // Route navigation triggers applySection('queue') → refreshFromBackend, so
+    // don't call it twice — two parallel refreshes could both hit Pass 3 in
+    // restoreFromBackend and create duplicate frontend jobs for a single backend
+    // export-clip job. If we're ALREADY on /queue the navigation no-ops, so
+    // refresh directly in that case only.
     this.navigateToQueueHandler = () => {
-      this.setActiveTab('queue');
+      if (this.activeTab() === 'queue') {
+        this.queueService.refreshFromBackend();
+      } else {
+        this.setActiveTab('queue');
+      }
     };
     window.addEventListener('electron-navigate-to-queue', this.navigateToQueueHandler);
     window.addEventListener('navigate-to-queue', this.navigateToQueueHandler);
@@ -2736,9 +2753,27 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Switch between Library, Queue, Tabs, Manager, Saved, and Settings tabs
+   * Navigate to a workspace section. The URL is the source of truth: this
+   * pushes the route, and the route.data subscription applies the section.
+   * Existing call-sites keep working unchanged.
    */
   setActiveTab(tab: 'library' | 'queue' | 'tabs' | 'manager' | 'saved' | 'archives' | 'settings') {
+    const urls: Record<string, string> = {
+      library: '/library',
+      queue: '/queue',
+      tabs: '/collections',
+      manager: '/manager',
+      saved: '/saved',
+      archives: '/archives',
+      settings: '/settings',
+    };
+    this.router.navigate([urls[tab]]);
+  }
+
+  /**
+   * Apply a section to the view (called by the route.data subscription).
+   */
+  private applySection(tab: 'library' | 'queue' | 'tabs' | 'manager' | 'saved' | 'archives' | 'settings') {
     this.activeTab.set(tab);
     if (tab === 'queue') {
       // Always refresh from backend so newly-submitted jobs (e.g. export-clip)
@@ -2755,11 +2790,6 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     if (!this.isWeb) {
       this.tourService.tryAutoStartTour(tab, 800);
     }
-  }
-
-  // Open the manage-components wizard to download or re-download tools & models
-  openComponentManager() {
-    this.componentManagerOpen.set(true);
   }
 
   // ========================================

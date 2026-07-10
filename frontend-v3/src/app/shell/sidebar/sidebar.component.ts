@@ -1,0 +1,40 @@
+import { ChangeDetectionStrategy, Component, input, output, signal } from '@angular/core';
+import { VideoTab } from '../../services/tabs.service';
+import { ShellSection } from '../../core/stores/navigation.store';
+import { UiBadgeComponent } from '../../ui';
+import { LibrarySwitcherComponent } from './library-switcher.component';
+
+/**
+ * Shell sidebar — places only, no actions.
+ *
+ * Dumb presentational component: everything comes in via inputs and leaves
+ * via outputs; the shell wires it to the stores/services.
+ */
+@Component({
+  selector: 'app-sidebar',
+  standalone: true,
+  imports: [UiBadgeComponent, LibrarySwitcherComponent],
+  templateUrl: './sidebar.component.html',
+  styleUrls: ['./sidebar.component.scss'],
+  changeDetection: ChangeDetectionStrategy.OnPush
+})
+export class SidebarComponent {
+  activeSection = input.required<ShellSection>();
+  activeCollectionId = input<string | null>(null);
+  collections = input<VideoTab[]>([]);
+  queueCount = input(0);
+  currentLibraryName = input('');
+
+  selectSection = output<'library' | 'queue' | 'collections' | 'settings' | 'manager' | 'saved' | 'archives'>();
+  selectCollection = output<string>();
+  newCollection = output<void>();
+  openLibrarySwitcher = output<void>();
+  openComponentManager = output<void>();
+
+  /** Temporary "More" disclosure for Manager/Saved/Archives (die/fold in later phases). */
+  moreOpen = signal(false);
+
+  toggleMore(): void {
+    this.moreOpen.update(v => !v);
+  }
+}

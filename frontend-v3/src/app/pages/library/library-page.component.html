@@ -1,110 +1,11 @@
 <div class="library-page">
-  <!-- Left Nav Rail -->
-  <div class="nav-rail">
-    <button
-      class="nav-rail-item"
-      [class.active]="activeTab() === 'library'"
-      (click)="setActiveTab('library')"
-      title="Library">
-      <span class="nav-icon">📚</span>
-      <span class="nav-label">Library</span>
-    </button>
-    <button
-      class="nav-rail-item"
-      [class.active]="activeTab() === 'queue'"
-      (click)="setActiveTab('queue')"
-      title="Queue">
-      <span class="nav-icon">⚡</span>
-      <span class="nav-label">Queue</span>
-      @if (queueStats.total > 0) {
-        <span class="nav-badge">{{ queueStats.total }}</span>
-      }
-    </button>
-    <button
-      class="nav-rail-item"
-      [class.active]="activeTab() === 'tabs'"
-      (click)="setActiveTab('tabs')"
-      title="Tabs">
-      <span class="nav-icon">📑</span>
-      <span class="nav-label">Tabs</span>
-    </button>
-    <button
-      class="nav-rail-item"
-      [class.active]="activeTab() === 'manager'"
-      (click)="setActiveTab('manager')"
-      title="Manager">
-      <span class="nav-icon">🔧</span>
-      <span class="nav-label">Manager</span>
-    </button>
-    <button
-      class="nav-rail-item"
-      [class.active]="activeTab() === 'saved'"
-      (click)="setActiveTab('saved')"
-      title="Saved">
-      <span class="nav-icon">💾</span>
-      <span class="nav-label">Saved</span>
-    </button>
-    <button
-      class="nav-rail-item"
-      [class.active]="activeTab() === 'archives'"
-      (click)="setActiveTab('archives')"
-      title="Archives">
-      <span class="nav-icon">🌐</span>
-      <span class="nav-label">Archives</span>
-    </button>
-    <div class="nav-spacer"></div>
-    <button
-      class="nav-rail-item"
-      (click)="openComponentManager()"
-      title="Download or re-download tools and models">
-      <span class="nav-icon">🧩</span>
-      <span class="nav-label">Models & Tools</span>
-    </button>
-    <button
-      class="nav-rail-item"
-      [class.active]="activeTab() === 'settings'"
-      (click)="setActiveTab('settings')"
-      title="Settings">
-      <span class="nav-icon">⚙️</span>
-      <span class="nav-label">Settings</span>
-    </button>
-  </div>
-
-  <!-- Manage components (download / re-download tools & models) -->
-  @if (componentManagerOpen()) {
-    <app-setup-wizard
-      mode="config"
-      (closed)="componentManagerOpen.set(false)"
-      (completed)="componentManagerOpen.set(false)" />
-  }
+  <!-- Nav rail removed: the shell sidebar owns navigation; the URL drives
+       activeTab via the route.data subscription (see component constructor). -->
 
   <!-- Page Content -->
   <div class="page-content">
-    <!-- Page Header -->
-    <div class="page-header" [class.is-web]="isWeb">
-      <div class="header-content">
-        <h1 class="page-title">
-          @if (activeTab() === 'queue') {
-            Processing Queue
-          } @else if (activeTab() === 'tabs') {
-            Tabs
-          } @else if (activeTab() === 'manager') {
-            Library Manager
-          } @else if (activeTab() === 'saved') {
-            Saved for Later
-          } @else if (activeTab() === 'archives') {
-            Web Archives
-          } @else if (activeTab() === 'settings') {
-            Settings
-          } @else {
-            Media Library
-          }
-        </h1>
-        <p class="page-subtitle">
-          <span *ngIf="currentLibrary()">{{ currentLibrary()?.name }}</span>
-          <span *ngIf="!currentLibrary()">No library selected</span>
-        </p>
-      </div>
+    <!-- Transitional actions bar: these move into the shell toolbar in Phase 2 -->
+    <div class="page-header slim" [class.is-web]="isWeb">
       <div class="header-actions">
         <button
           class="btn btn-primary"
