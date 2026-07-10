@@ -5,6 +5,7 @@
   "asar": true,
   "compression": "normal",
   "afterPack": "./scripts/afterPack.js",
+  "afterSign": "./scripts/notarize.js",
   "directories": {
     "output": "dist-electron",
     "buildResources": "assets"

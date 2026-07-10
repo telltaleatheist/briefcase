@@ -21,6 +21,9 @@ backend-prod-temp/
 .env.local
 .env.*.local
 
+# macOS signing / notarization credentials (secrets — never commit)
+scripts/sign-env.sh
+
 # Binaries
 bin/*
 
