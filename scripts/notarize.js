@@ -26,9 +26,28 @@
  * Escape hatch: set SKIP_NOTARIZE=1 to force-skip even when credentials exist.
  */
 
+const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { notarize } = require('@electron/notarize');
+
+/**
+ * Populate process.env from scripts/sign-env.sh so a plain `npm run package:mac`
+ * notarizes without the caller having to `source` it first. Parses simple
+ * `export KEY="value"` / `KEY=value` lines; existing env vars always win (so a
+ * manual source, or real CI env vars, override the file). Missing file is fine.
+ */
+function loadCredentialsFile() {
+  const envFile = path.join(__dirname, 'sign-env.sh');
+  if (!fs.existsSync(envFile)) return;
+  for (const line of fs.readFileSync(envFile, 'utf8').split('\n')) {
+    const m = line.match(/^\s*(?:export\s+)?([A-Z0-9_]+)\s*=\s*(.+?)\s*$/);
+    if (!m) continue;
+    const key = m[1];
+    const val = m[2].replace(/^["']|["']$/g, '');
+    if (process.env[key] === undefined) process.env[key] = val;
+  }
+}
 
 module.exports = async function notarizeHook(context) {
   const { electronPlatformName, appOutDir } = context;
@@ -41,6 +60,9 @@ module.exports = async function notarizeHook(context) {
     console.log('[notarize] SKIP_NOTARIZE set — skipping notarization.');
     return;
   }
+
+  // Auto-load credentials from scripts/sign-env.sh so no manual `source` is needed.
+  loadCredentialsFile();
 
   const hasApiKey = Boolean(
     process.env.APPLE_API_KEY &&
