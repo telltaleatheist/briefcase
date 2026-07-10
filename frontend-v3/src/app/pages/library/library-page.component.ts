@@ -41,6 +41,8 @@ import { ExportIndicatorComponent } from '../../components/export-indicator/expo
 import { TrimOpenerModalComponent } from '../../components/trim-opener-modal/trim-opener-modal.component';
 import { getApiBase } from '../../core/runtime-url';
 import { WorkspaceActionsService } from '../../core/stores/workspace-actions.service';
+import { InspectorStore } from '../../core/stores/inspector.store';
+import { classifyItemKind } from '../../core/item-kind';
 import { SelectionStore } from '../../core/stores/selection.store';
 import { UiSegmentedControlComponent } from '../../ui';
 
@@ -114,6 +116,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   private webArchiveService = inject(WebArchiveService);
   private cdr = inject(ChangeDetectorRef);
   private workspaceActions = inject(WorkspaceActionsService);
+  private inspectorStore = inject(InspectorStore);
   private selectionStore = inject(SelectionStore);
 
   /** True when running in a plain browser (LAN web client) rather than Electron. */
@@ -239,21 +242,8 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   }
 
   private matchesTypeFilter(video: VideoItem, filter: 'video' | 'doc' | 'web'): boolean {
-    const mediaType = video.mediaType?.toLowerCase() || '';
-    const isWeb = mediaType === 'webpage' || mediaType === 'text/html' || video.tags?.includes('webpage');
-    const isDoc =
-      mediaType.startsWith('image/') ||
-      mediaType === 'application/pdf' ||
-      mediaType.startsWith('text/') && !isWeb;
-
-    switch (filter) {
-      case 'web':
-        return !!isWeb;
-      case 'doc':
-        return !isWeb && isDoc;
-      case 'video':
-        return !isWeb && !isDoc;
-    }
+    // Shared taxonomy with the inspector (core/item-kind.ts).
+    return classifyItemKind(video) === filter;
   }
 
   // Total video count for library toolbar
@@ -470,7 +460,19 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         case 'openAiSetup':
           this.aiWizardOpen.set(true);
           break;
+        case 'addSelectionToTab':
+          this.addVideosToTab(action.tabId, this.getSelectedLibraryVideos().map(v => v.id));
+          break;
+        case 'createTabWithSelection':
+          this.openNewTabDialog(this.getSelectedLibraryVideos().map(v => v.id));
+          break;
       }
+    });
+
+    // Feed the inspector a flattened, deduped snapshot of the library items
+    // so the shell's inspector panel can resolve the selection (Phase 3).
+    effect(() => {
+      this.inspectorStore.setLibraryItems(this.allLibraryItems());
     });
   }
 
@@ -1567,6 +1569,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   ngOnDestroy() {
     this.websocketService.disconnect();
     this.selectionStore.clear();
+    this.inspectorStore.reset();
 
     if (this.navigateToQueueHandler) {
       window.removeEventListener('electron-navigate-to-queue', this.navigateToQueueHandler);
@@ -2419,7 +2422,11 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
    * VideoItems, skipping queue/staging rows. Shared by the shell-toolbar
    * actions (transcribe/analyze).
    */
-  private getSelectedLibraryVideos(): VideoItem[] {
+  /**
+   * Flattened, deduped library items (filtered + unfiltered weeks).
+   * Shared by selection resolution and the shell inspector's item lookup.
+   */
+  allLibraryItems = computed<VideoItem[]>(() => {
     const allVideos: VideoItem[] = [];
     this.filteredWeeks().forEach(week => allVideos.push(...week.videos));
     this.videoWeeks().forEach(week => {
@@ -2429,6 +2436,11 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         }
       });
     });
+    return allVideos;
+  });
+
+  private getSelectedLibraryVideos(): VideoItem[] {
+    const allVideos = this.allLibraryItems();
 
     const videos: VideoItem[] = [];
     const seen = new Set<string>();

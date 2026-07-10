@@ -17,6 +17,7 @@ import { ChangeDetectionStrategy, Component, input, output } from '@angular/core
       [class.secondary]="variant() === 'secondary'"
       [class.ghost]="variant() === 'ghost'"
       [class.sm]="size() === 'sm'"
+      [class.block]="block()"
       [disabled]="disabled()"
       [attr.title]="title() || null"
       [type]="type()"
@@ -62,12 +63,18 @@ import { ChangeDetectionStrategy, Component, input, output } from '@angular/core
       }
 
       &.sm { padding: 5px 9px; font-size: 12px; }
+
+      &.block { width: 100%; justify-content: center; }
     }
+
+    :host:has(.block) { display: flex; width: 100%; }
   `]
 })
 export class UiButtonComponent {
   variant = input<'primary' | 'secondary' | 'ghost'>('secondary');
   size = input<'md' | 'sm'>('md');
+  /** Full-width button (stacked action lists, e.g. the inspector). */
+  block = input(false);
   disabled = input(false);
   title = input('');
   type = input<'button' | 'submit'>('button');

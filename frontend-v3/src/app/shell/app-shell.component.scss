@@ -49,6 +49,19 @@
   min-height: 0;
 }
 
+// ── Mid-size viewports: inspector overlays instead of squeezing content ─────
+@media (max-width: 1100px) {
+  .region-inspector {
+    position: fixed;
+    top: var(--toolbar-height);
+    bottom: 0;
+    right: 0;
+    z-index: 1030; // $z-fixed
+    width: min(var(--inspector-width), 90vw);
+    box-shadow: -4px 0 24px var(--shadow-color);
+  }
+}
+
 .drawer-backdrop { display: none; }
 
 // ── Mobile / LAN browser: sidebar becomes an off-canvas drawer ──────────────
@@ -81,9 +94,7 @@
     grid-column: 1;
   }
 
-  .region-inspector {
-    display: none; // inspector is desktop-only until Phase 3 designs mobile
-  }
+  // Inspector already overlays via the 1100px rule above; nothing extra here.
 
   .drawer-backdrop {
     display: block;

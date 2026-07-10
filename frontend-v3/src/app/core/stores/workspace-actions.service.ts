@@ -22,7 +22,10 @@ export type WorkspaceAction =
   | { type: 'transcribeSelection' }
   | { type: 'analyzeSelection' }
   | { type: 'addSelectionToQueue' }
-  | { type: 'openAiSetup' };
+  | { type: 'openAiSetup' }
+  // Inspector: add the current selection to a collection ("tab")
+  | { type: 'addSelectionToTab'; tabId: string }
+  | { type: 'createTabWithSelection' };
 
 /**
  * Shell → workspace action channel.

@@ -52,7 +52,10 @@
   </main>
 
   @if (nav.chromeVisible() && nav.inspectorOpen()) {
-    <app-inspector-panel class="region-inspector" />
+    <app-inspector-panel
+      class="region-inspector"
+      [aiReady]="aiReady()"
+      [collections]="collections()" />
   }
 </div>
 

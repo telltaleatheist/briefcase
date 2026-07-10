@@ -27,6 +27,7 @@ const SECTION_URLS: Record<string, ShellSection> = {
 };
 
 const SIDEBAR_COLLAPSED_KEY = 'briefcase-sidebar-collapsed';
+const INSPECTOR_OPEN_KEY = 'briefcase-inspector-open';
 
 /**
  * Signal store for shell navigation state.
@@ -69,8 +70,8 @@ export class NavigationStore {
   /** Mobile off-canvas drawer. */
   drawerOpen = signal(false);
 
-  /** Right inspector panel (reserved region; Phase 3 fills it). */
-  inspectorOpen = signal(false);
+  /** Right inspector panel (persisted; manual toggle only — never auto-opens). */
+  inspectorOpen = signal(localStorage.getItem(INSPECTOR_OPEN_KEY) === 'true');
 
   /**
    * Editor full-bleed: VideoPlayerComponent hides the chrome via
@@ -93,6 +94,7 @@ export class NavigationStore {
 
   toggleInspector(): void {
     this.inspectorOpen.update(v => !v);
+    localStorage.setItem(INSPECTOR_OPEN_KEY, String(this.inspectorOpen()));
   }
 
   /** Navigate to a primary section; closes the mobile drawer. */

@@ -1,0 +1,152 @@
+<aside class="inspector" aria-label="Inspector">
+  @if (selection.count() === 0) {
+    <div class="empty">Select an item to see details,<br />status, and actions.</div>
+
+  } @else {
+    @if (item(); as single) {
+    <!-- ── Single selection ─────────────────────────────────────────── -->
+    <div class="thumb" [class.icon]="kindIcon()">
+      @if (kindIcon(); as icon) {
+        <span class="type-icon" aria-hidden="true">{{ icon }}</span>
+      } @else if (single.thumbnailUrl) {
+        <img [src]="single.thumbnailUrl" alt="" />
+      } @else {
+        <span class="type-icon" aria-hidden="true">🎞</span>
+      }
+    </div>
+
+    <h4 class="title">{{ single.name }}</h4>
+    @if (single.sourceUrl) {
+      <div class="source" [title]="single.sourceUrl">{{ single.sourceUrl }}</div>
+    }
+
+    <dl class="kv">
+      <dt>Added</dt><dd>{{ addedDate() }}</dd>
+      @if (single.duration) {
+        <dt>Duration</dt><dd>{{ single.duration }}</dd>
+      }
+      @if (resolution(); as res) {
+        <dt>Video</dt><dd>{{ res }}</dd>
+      }
+      <dt>Size</dt><dd>{{ size() }}</dd>
+    </dl>
+
+    <div class="section-label">Pipeline</div>
+    <div class="pipe-row">
+      <span class="state done" aria-hidden="true">✓</span>
+      <span>{{ single.sourceUrl ? 'Downloaded' : 'Imported' }}</span>
+    </div>
+    @if (kind() === 'video') {
+      <div class="pipe-row">
+        @if (single.hasTranscript) {
+          <span class="state done" aria-hidden="true">✓</span>
+          <span>Transcribed</span>
+        } @else {
+          <span class="state pending" aria-hidden="true">—</span>
+          <span>Transcribed</span>
+          <button class="run" type="button" (click)="dispatch({ type: 'transcribeSelection' })">Run</button>
+        }
+      </div>
+    }
+    <div class="pipe-row">
+      @if (single.hasAnalysis) {
+        <span class="state done" aria-hidden="true">✓</span>
+        <span>Analyzed</span>
+      } @else {
+        <span class="state pending" aria-hidden="true">—</span>
+        <span>Analyzed</span>
+        @if (aiReady()) {
+          <button class="run" type="button" (click)="dispatch({ type: 'analyzeSelection' })">Run</button>
+        } @else {
+          <button class="run" type="button" (click)="dispatch({ type: 'openAiSetup' })">Set up AI…</button>
+        }
+      }
+    </div>
+
+    @if (single.hasTranscript) {
+      <div class="section-label">Transcript</div>
+      @if (store.transcriptLoading()) {
+        <div class="transcript-preview muted">Loading transcript…</div>
+      } @else {
+        @if (preview(); as text) {
+          <div class="transcript-preview">{{ text }}</div>
+        } @else {
+          <div class="transcript-preview muted">No preview available.</div>
+        }
+      }
+    }
+
+    <div class="actions">
+      @if (kind() === 'video') {
+        <ui-button variant="primary" [block]="true" (pressed)="dispatch({ type: 'openEditor' })">▶ Open in Scout</ui-button>
+      }
+      <ui-button [block]="true" (pressed)="dispatch({ type: 'viewInfo' })">Show Full Info</ui-button>
+      <ui-button
+        [block]="true"
+        cdkOverlayOrigin
+        (pressed)="collectionsMenuOpen.set(!collectionsMenuOpen())">
+        Add to Collection…
+      </ui-button>
+    </div>
+
+    } @else {
+    <!-- ── Multi selection ──────────────────────────────────────────── -->
+    <div class="multi-count">{{ store.selectedItems().length }} items selected</div>
+    <div class="multi-sub">
+      {{ store.withoutTranscript() }} without a transcript · {{ store.notAnalyzed() }} not analyzed
+    </div>
+
+    <div class="actions">
+      @if (store.withoutTranscript() > 0) {
+        <ui-button variant="primary" [block]="true" (pressed)="dispatch({ type: 'transcribeSelection' })">
+          ≋ Transcribe {{ store.withoutTranscript() }}
+        </ui-button>
+      }
+      @if (store.notAnalyzed() > 0) {
+        @if (aiReady()) {
+          <ui-button [block]="true" (pressed)="dispatch({ type: 'analyzeSelection' })">
+            ✦ Analyze {{ store.notAnalyzed() }}
+          </ui-button>
+        } @else {
+          <ui-button [block]="true" (pressed)="dispatch({ type: 'openAiSetup' })">✦ Analyze — set up AI first</ui-button>
+        }
+      }
+      @if (store.anyVideos()) {
+        <ui-button [block]="true" (pressed)="dispatch({ type: 'openEditor' })">▶ Open in Scout (tabs)</ui-button>
+      }
+      <ui-button
+        [block]="true"
+        cdkOverlayOrigin
+        (pressed)="collectionsMenuOpen.set(!collectionsMenuOpen())">
+        Add to Collection…
+      </ui-button>
+    </div>
+    }
+  }
+</aside>
+
+<!-- ── Add-to-Collection menu (shared by single & multi) ─────────────── -->
+@if (collectionsTrigger(); as trigger) {
+<ng-template
+  cdkConnectedOverlay
+  [cdkConnectedOverlayOrigin]="trigger"
+  [cdkConnectedOverlayOpen]="collectionsMenuOpen()"
+  [cdkConnectedOverlayHasBackdrop]="true"
+  cdkConnectedOverlayBackdropClass="cdk-overlay-transparent-backdrop"
+  [cdkConnectedOverlayOffsetY]="6"
+  (backdropClick)="collectionsMenuOpen.set(false)"
+  (detach)="collectionsMenuOpen.set(false)">
+  <div class="collections-menu" role="menu">
+    @for (tab of collections(); track tab.id) {
+      <button class="menu-item" type="button" role="menuitem" (click)="addToCollection(tab.id)">
+        ⬩ {{ tab.name }}
+      </button>
+    } @empty {
+      <div class="menu-empty">No collections yet</div>
+    }
+    <button class="menu-item new" type="button" role="menuitem" (click)="addToNewCollection()">
+      ＋ New Collection…
+    </button>
+  </div>
+</ng-template>
+}
