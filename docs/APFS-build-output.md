@@ -1,4 +1,4 @@
-# macOS build output must live on APFS (not exFAT)
+# macOS build output must land on APFS (not exFAT)
 
 ## Why
 
@@ -14,33 +14,48 @@ the binaries, finds the sealed xattrs missing, and rejects the submission with:
 "The signature of the binary is invalid."   (status: Invalid)
 ```
 
-Confirmed directly: writing an xattr to a file on exFAT creates a `._companion`;
+Confirmed directly: writing an xattr to a file on exFAT creates a `._` companion;
 on APFS it's stored inline with no companion.
 
 ## The fix
 
-Only the packaged `.app`/DMG assembly needs native-FS fidelity — the **source
-can stay on Callisto**. We make electron-builder's output directory
-(`dist-electron`) a **symlink to an APFS location** under `$HOME`. exFAT holds
-symlinks fine, so every path/script/config is unchanged; the bytes just land on
-APFS where the signature stays intact through notarization.
+Only the packaged `.app`/DMG **assembly** needs native-FS fidelity — the source
+can stay on Callisto. So the mac package/publish scripts redirect only
+electron-builder's **output** to an APFS location under `$HOME`:
 
-Nothing else changes — same Developer ID cert, same entitlements, same
-`afterSign` notarize step.
-
-## Setup (one-time per machine / fresh clone)
-
-```bash
-npm run setup:build-output
+```
+electron-builder --mac --arm64 ... -c.directories.output=$HOME/Projects/Briefcase-builds
 ```
 
-This creates `~/Projects/Briefcase-builds/dist-electron` (APFS) and points
-`dist-electron` at it. It's idempotent and safe to re-run. `dist-electron` is
-git-ignored (both as a directory and as a symlink), so this never gets committed.
+`dist-electron/` stays a normal directory on Callisto and still holds the build
+**inputs** (`electron/main.js`, `shared/`, `utilities/`, …) — electron-builder
+reads those in place. Only the assembled app and DMGs land on APFS, where the
+code signature stays intact through notarization.
 
-After that, build normally:
+> Note: an earlier attempt symlinked `dist-electron` itself to APFS. That breaks,
+> because electron-builder's asar packer doesn't traverse the top-level symlink
+> to collect the app's input files ("entry file main.js does not exist"). In this
+> repo `dist-electron` holds both inputs and output, so only the *output* may be
+> redirected — hence `-c.directories.output`, not a symlink.
+
+Nothing else changes — same Developer ID cert, entitlements, and notarize step.
+
+## Where artifacts land
+
+```
+~/Projects/Briefcase-builds/
+  ├── mac-arm64/Briefcase.app
+  ├── mac/Briefcase.app            (x64)
+  └── Briefcase-<version>*.dmg
+```
+
+(Consistent with the sibling `~/Projects/BookForge-builds/`.)
+
+## Build commands
 
 ```bash
-npm run package:mac:signed     # Developer ID + Apple notarization
-npm run package:mac            # unsigned / no notarization
+npm run package:mac:signed     # Developer ID signed + Apple notarized
+npm run package:mac            # unsigned / no notarization (fast local)
 ```
+
+Both automatically point their output at APFS; no per-machine setup needed.
