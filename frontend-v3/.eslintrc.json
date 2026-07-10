@@ -1,0 +1,129 @@
+{
+  "root": true,
+  "ignorePatterns": [
+    "projects/**/*",
+    "dist/**/*",
+    ".angular/**/*"
+  ],
+  "overrides": [
+    {
+      "files": [
+        "*.ts"
+      ],
+      "extends": [
+        "eslint:recommended",
+        "plugin:@typescript-eslint/recommended",
+        "plugin:@angular-eslint/recommended",
+        "plugin:@angular-eslint/template/process-inline-templates"
+      ],
+      "rules": {
+        "@angular-eslint/directive-selector": [
+          "error",
+          {
+            "type": "attribute",
+            "prefix": "app",
+            "style": "camelCase"
+          }
+        ],
+        "@angular-eslint/component-selector": [
+          "error",
+          {
+            "type": "element",
+            "prefix": [
+              "app",
+              "ui"
+            ],
+            "style": "kebab-case"
+          }
+        ],
+        "@angular-eslint/no-host-metadata-property": "off",
+        "@angular-eslint/prefer-on-push-component-change-detection": "warn",
+        "@angular-eslint/prefer-standalone": "warn",
+        "@angular-eslint/prefer-output-readonly": "warn",
+        "@angular-eslint/use-injectable-provided-in": "warn",
+        "@typescript-eslint/no-explicit-any": "warn",
+        "@typescript-eslint/no-unused-vars": "warn",
+        "@typescript-eslint/no-empty-function": "warn",
+        "@typescript-eslint/no-non-null-assertion": "warn",
+        "@typescript-eslint/ban-types": "warn",
+        "no-case-declarations": "warn",
+        "no-useless-escape": "warn",
+        "no-prototype-builtins": "warn",
+        "prefer-const": "warn",
+        "@angular-eslint/no-output-native": "warn",
+        "@angular-eslint/no-empty-lifecycle-method": "warn",
+        "no-constant-condition": "warn"
+      }
+    },
+    {
+      "files": [
+        "src/app/shell/**/*.ts",
+        "src/app/ui/**/*.ts",
+        "src/app/core/stores/**/*.ts",
+        "src/app/core/*.ts"
+      ],
+      "rules": {
+        "@angular-eslint/prefer-on-push-component-change-detection": "error",
+        "@angular-eslint/prefer-standalone": "error",
+        "@angular-eslint/prefer-output-readonly": "error",
+        "@typescript-eslint/no-explicit-any": "error",
+        "@typescript-eslint/no-unused-vars": "error",
+        "no-restricted-syntax": [
+          "error",
+          {
+            "selector": "PropertyDefinition > Decorator[expression.callee.name='Input'], PropertyDefinition > Decorator[expression.callee.name='Output']",
+            "message": "Use signal I/O (input()/output()/model()) instead of @Input()/@Output() decorators \u2014 migration rule 4."
+          },
+          {
+            "selector": "MethodDefinition > Decorator[expression.callee.name='HostListener'], PropertyDefinition > Decorator[expression.callee.name='HostBinding']",
+            "message": "Use the component 'host' metadata instead of @HostListener/@HostBinding \u2014 migration rule 10."
+          },
+          {
+            "selector": "CallExpression[callee.name='setTimeout'], CallExpression[callee.name='setInterval'], CallExpression[callee.object.name='window'][callee.property.name=/^(setTimeout|setInterval)$/]",
+            "message": "No timer-based view coordination \u2014 use effect()/afterNextRender()/signals \u2014 migration rule 9."
+          },
+          {
+            "selector": "MemberExpression[object.name='document'][property.name=/^(querySelector|querySelectorAll|getElementById|getElementsByClassName|getElementsByTagName)$/]",
+            "message": "No global DOM queries \u2014 use viewChild() signal queries or Renderer2 \u2014 migration rule 3."
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "*.html"
+      ],
+      "extends": [
+        "plugin:@angular-eslint/template/recommended",
+        "plugin:@angular-eslint/template/accessibility"
+      ],
+      "rules": {
+        "@angular-eslint/template/prefer-control-flow": "warn",
+        "@angular-eslint/template/use-track-by-function": "warn",
+        "@angular-eslint/template/interactive-supports-focus": "warn",
+        "@angular-eslint/template/click-events-have-key-events": "warn",
+        "@angular-eslint/template/label-has-associated-control": "warn",
+        "@angular-eslint/template/no-autofocus": "warn",
+        "@angular-eslint/template/elements-content": "warn",
+        "@angular-eslint/template/alt-text": "warn"
+      }
+    },
+    {
+      "files": [
+        "src/app/shell/**/*.html",
+        "src/app/ui/**/*.html",
+        "src/app/core/stores/**/*.html"
+      ],
+      "rules": {
+        "@angular-eslint/template/prefer-control-flow": "error",
+        "@angular-eslint/template/use-track-by-function": "error",
+        "@angular-eslint/template/interactive-supports-focus": "error",
+        "@angular-eslint/template/click-events-have-key-events": "error",
+        "@angular-eslint/template/label-has-associated-control": "error",
+        "@angular-eslint/template/no-autofocus": "error",
+        "@angular-eslint/template/elements-content": "error",
+        "@angular-eslint/template/alt-text": "error"
+      }
+    }
+  ]
+}
