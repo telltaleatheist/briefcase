@@ -1,4 +1,7 @@
-<div class="shell" [class.chrome-hidden]="!nav.chromeVisible()">
+<div
+  class="shell"
+  [class.chrome-hidden]="!nav.chromeVisible()"
+  [style.--inspector-live-width.px]="nav.inspectorWidth()">
   @if (nav.chromeVisible()) {
     <app-toolbar
       class="region-toolbar"
@@ -7,7 +10,6 @@
       [isDarkTheme]="isDarkTheme()"
       (toggleDrawer)="nav.toggleDrawer()"
       (toggleTheme)="onToggleTheme()"
-      (toggleInspector)="nav.toggleInspector()"
       (startTour)="onStartTour()"
       (downloadLogs)="onDownloadLogs()">
       @if (onWorkspace()) {
@@ -50,10 +52,16 @@
     <router-outlet />
   </main>
 
-  @if (nav.chromeVisible() && nav.inspectorOpen()) {
-    <app-inspector-panel
-      class="region-inspector"
-      [aiReady]="aiReady()"
-      [collections]="collections()" />
+  @if (nav.chromeVisible()) {
+    <div class="region-inspector">
+      <div
+        class="inspector-resize-handle"
+        appInspectorResize
+        [currentWidth]="nav.inspectorWidth()"
+        (widthChange)="nav.setInspectorWidth($event)"
+        (resetWidth)="nav.resetInspectorWidth()"
+        title="Drag to resize · double-click to reset"></div>
+      <app-inspector-panel [aiReady]="aiReady()" [collections]="collections()" />
+    </div>
   }
 </div>

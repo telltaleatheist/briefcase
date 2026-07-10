@@ -214,46 +214,9 @@
                 </button>
               }
 
-              <!-- Quick Action Buttons (always visible for library items) -->
-              @if (showQuickActions && !item.video.isGhost && !isStagingItem(item.video) && !isProcessingItem(item.video) && !isQueueItem(item.video)) {
-                <div class="quick-actions">
-                  @if (item.video.mediaType === 'webpage') {
-                    <!-- Webpage items only show a single Open button -->
-                    <button
-                      class="action-btn open-btn"
-                      (click)="onQuickAction(item.video, 'open', $event)"
-                      title="Open in default browser">
-                      Open
-                    </button>
-                  } @else {
-                    <button
-                      class="action-btn open-btn"
-                      (click)="onQuickAction(item.video, 'open', $event)"
-                      title="Open video file">
-                      Open
-                    </button>
-                    <button
-                      class="action-btn analysis-btn"
-                      (click)="onQuickAction(item.video, 'openInEditor', $event)"
-                      title="View analysis, transcript & more">
-                      View Analysis
-                    </button>
-                    <button
-                      class="action-btn transcript-btn"
-                      (click)="onQuickAction(item.video, 'viewTranscript', $event)"
-                      title="View transcript">
-                      Transcript
-                    </button>
-                    <button
-                      class="action-btn process-btn"
-                      (click)="onQuickAction(item.video, 'process', $event)"
-                      title="Run AI analysis">
-                      Process
-                    </button>
-                  }
-                </div>
-              }
-
+              <!-- Per-row quick-action buttons removed (Phase 7a): the toolbar,
+                   inspector, double-click, and context menu cover open /
+                   analysis / transcript / process. -->
               @if (showEditButton && !item.video.isGhost) {
                 <button
                   class="edit-btn"

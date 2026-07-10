@@ -91,14 +91,49 @@
     }
 
     @if (single.hasTranscript) {
-      <div class="section-label">Transcript</div>
+      <div class="section-label transcript-header">
+        <span>Transcript</span>
+        @if (transcript()) {
+          <span class="transcript-tools">
+            @if (hasTimestamps()) {
+              <button
+                type="button"
+                class="tool-btn"
+                [class.active]="showTimestamps()"
+                (click)="showTimestamps.set(!showTimestamps())"
+                [title]="showTimestamps() ? 'Hide timestamps' : 'Show timestamps'">
+                🕐
+              </button>
+            }
+            <button
+              type="button"
+              class="tool-btn"
+              [class.confirm]="copied()"
+              (click)="copyTranscript()"
+              title="Copy transcript to clipboard">
+              {{ copied() ? '✓ Copied' : '⧉ Copy' }}
+            </button>
+          </span>
+        }
+      </div>
       @if (store.transcriptLoading()) {
-        <div class="transcript-preview muted">Loading transcript…</div>
+        <div class="transcript-body muted">Loading transcript…</div>
       } @else {
-        @if (preview(); as text) {
-          <div class="transcript-preview">{{ text }}</div>
+        @if (transcript(); as t) {
+          <div class="transcript-body">
+            @if (showTimestamps() && t.segments) {
+              @for (seg of t.segments; track $index) {
+                <div class="cue">
+                  <span class="cue-time">{{ seg.start }}</span>
+                  <span class="cue-text">{{ seg.text }}</span>
+                </div>
+              }
+            } @else {
+              <p class="flowing">{{ t.plainText }}</p>
+            }
+          </div>
         } @else {
-          <div class="transcript-preview muted">No preview available.</div>
+          <div class="transcript-body muted">No transcript available.</div>
         }
       }
     }

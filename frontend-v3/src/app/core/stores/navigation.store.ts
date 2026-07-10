@@ -23,7 +23,19 @@ const SECTION_URLS: Record<string, ShellSection> = {
 };
 
 const SIDEBAR_COLLAPSED_KEY = 'briefcase-sidebar-collapsed';
-const INSPECTOR_OPEN_KEY = 'briefcase-inspector-open';
+const INSPECTOR_WIDTH_KEY = 'briefcase-inspector-width';
+
+/** Inspector resize bounds (px). The upper bound is also clamped to 40vw at drag time. */
+export const INSPECTOR_MIN_WIDTH = 240;
+export const INSPECTOR_MAX_WIDTH = 800;
+export const INSPECTOR_DEFAULT_WIDTH = 300; // keep in sync with --inspector-width token
+
+function readStoredInspectorWidth(): number {
+  const stored = Number(localStorage.getItem(INSPECTOR_WIDTH_KEY));
+  return Number.isFinite(stored) && stored >= INSPECTOR_MIN_WIDTH && stored <= INSPECTOR_MAX_WIDTH
+    ? stored
+    : INSPECTOR_DEFAULT_WIDTH;
+}
 
 /**
  * Signal store for shell navigation state.
@@ -66,8 +78,11 @@ export class NavigationStore {
   /** Mobile off-canvas drawer. */
   drawerOpen = signal(false);
 
-  /** Right inspector panel (persisted; manual toggle only — never auto-opens). */
-  inspectorOpen = signal(localStorage.getItem(INSPECTOR_OPEN_KEY) === 'true');
+  /**
+   * Right inspector panel width in px (persisted). The inspector itself is
+   * permanent on desktop — only its width is user-adjustable.
+   */
+  inspectorWidth = signal(readStoredInspectorWidth());
 
   /**
    * Editor full-bleed: VideoPlayerComponent hides the chrome via
@@ -88,9 +103,16 @@ export class NavigationStore {
     this.drawerOpen.set(false);
   }
 
-  toggleInspector(): void {
-    this.inspectorOpen.update(v => !v);
-    localStorage.setItem(INSPECTOR_OPEN_KEY, String(this.inspectorOpen()));
+  /** Set the inspector width (already viewport-clamped by the resize handle). */
+  setInspectorWidth(px: number): void {
+    const width = Math.round(Math.min(INSPECTOR_MAX_WIDTH, Math.max(INSPECTOR_MIN_WIDTH, px)));
+    this.inspectorWidth.set(width);
+    localStorage.setItem(INSPECTOR_WIDTH_KEY, String(width));
+  }
+
+  resetInspectorWidth(): void {
+    this.inspectorWidth.set(INSPECTOR_DEFAULT_WIDTH);
+    localStorage.removeItem(INSPECTOR_WIDTH_KEY);
   }
 
   /** Navigate to a primary section; closes the mobile drawer. */

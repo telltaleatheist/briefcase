@@ -15,6 +15,7 @@ import { SidebarComponent } from './sidebar/sidebar.component';
 import { ToolbarComponent } from './toolbar/toolbar.component';
 import { ToolbarActionsComponent } from './toolbar/toolbar-actions.component';
 import { InspectorPanelComponent } from './inspector/inspector-panel.component';
+import { InspectorResizeDirective } from './inspector/inspector-resize.directive';
 
 const SECTION_TITLES: Record<ShellSection, string> = {
   library: 'Library',
@@ -36,7 +37,7 @@ const SECTION_TITLES: Record<ShellSection, string> = {
 @Component({
   selector: 'app-shell',
   standalone: true,
-  imports: [RouterOutlet, SidebarComponent, ToolbarComponent, ToolbarActionsComponent, InspectorPanelComponent],
+  imports: [RouterOutlet, SidebarComponent, ToolbarComponent, ToolbarActionsComponent, InspectorPanelComponent, InspectorResizeDirective],
   templateUrl: './app-shell.component.html',
   styleUrls: ['./app-shell.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush

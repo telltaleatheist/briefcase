@@ -11,6 +11,11 @@
   background: var(--bg-primary);
   color: var(--text-primary);
 
+  // Resizable inspector: --inspector-live-width is set inline by the shell
+  // component (persisted, drag-adjustable); the effective width can be
+  // re-clamped per breakpoint below without fighting the inline style.
+  --inspector-effective-width: var(--inspector-live-width, var(--inspector-width));
+
   // Editor full-bleed: only the main region remains.
   &.chrome-hidden {
     grid-template-rows: 1fr;
@@ -47,18 +52,53 @@
   grid-row: 2;
   grid-column: 3;
   min-height: 0;
+  position: relative;
+  width: var(--inspector-effective-width);
 }
 
-// ── Mid-size viewports: inspector overlays instead of squeezing content ─────
+.inspector-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 7px;
+  z-index: 2;
+  cursor: col-resize;
+  // Invisible hit area; a thin highlight appears on hover/drag.
+  background: linear-gradient(
+    to right,
+    transparent 2px,
+    transparent 3px,
+    var(--border-color) 3px,
+    var(--border-color) 4px,
+    transparent 4px
+  );
+
+  &:hover,
+  &.dragging {
+    background: linear-gradient(
+      to right,
+      transparent 1px,
+      var(--primary-orange) 2px,
+      var(--primary-orange) 5px,
+      transparent 6px
+    );
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--primary-orange);
+  }
+}
+
+// ── Mid-size viewports: keep the inspector in-grid but clamp it narrower so
+// it never overlays or starves the content column (permanent panel now).
 @media (max-width: 1100px) {
-  .region-inspector {
-    position: fixed;
-    top: var(--toolbar-height);
-    bottom: 0;
-    right: 0;
-    z-index: 1030; // $z-fixed
-    width: min(var(--inspector-width), 90vw);
-    box-shadow: -4px 0 24px var(--shadow-color);
+  .shell {
+    --inspector-effective-width: 240px;
+  }
+
+  .inspector-resize-handle {
+    display: none;
   }
 }
 

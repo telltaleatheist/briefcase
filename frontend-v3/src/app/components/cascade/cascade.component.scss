@@ -719,14 +719,9 @@ cdk-virtual-scroll-viewport.library-content {
   opacity: 0.7;
 }
 
-// Quick Action Buttons (compact, don't shrink)
-.quick-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0; // Don't shrink - let filename truncate instead
-}
-
+// Compact row action button (only the staging Trim button remains — the
+// per-row quick actions were removed in Phase 7a in favor of the toolbar,
+// inspector, and context menu).
 .action-btn {
   height: 22px;
   padding: 0 6px;
@@ -750,23 +745,6 @@ cdk-virtual-scroll-viewport.library-content {
 
   &:active {
     box-shadow: 0 1px 3px rgba(255, 107, 53, 0.2);
-  }
-
-  // Open button - primary action
-  &.open-btn {
-    background: var(--primary-orange);
-    border-color: var(--primary-orange);
-  }
-
-  // View Analysis button - slightly different shade
-  &.analysis-btn {
-    background: #e85d2a;
-    border-color: #e85d2a;
-
-    &:hover {
-      background: #d54d1a;
-      border-color: #d54d1a;
-    }
   }
 
   // Trim button - muted outline, monospace
@@ -800,18 +778,6 @@ cdk-virtual-scroll-viewport.library-content {
     }
   }
 
-  // Process button - outline style
-  &.process-btn {
-    background: transparent;
-    border: 1px solid var(--primary-orange);
-    color: var(--primary-orange);
-
-    &:hover {
-      background: rgba(255, 107, 53, 0.12);
-      color: var(--dark-orange);
-      border-color: var(--dark-orange);
-    }
-  }
 }
 
 // Empty State
@@ -1432,16 +1398,8 @@ cdk-virtual-scroll-viewport.library-content {
   }
 }
 
-// Responsive - hide action buttons on narrow screens, show on hover
+// Responsive - hide duration on narrow screens
 @media (max-width: 900px) {
-  .quick-actions {
-    display: none;
-  }
-
-  .video-item:hover .quick-actions {
-    display: flex;
-  }
-
   .video-duration {
     display: none;
   }

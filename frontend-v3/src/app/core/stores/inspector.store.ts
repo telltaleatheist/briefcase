@@ -3,16 +3,23 @@ import { Subscription } from 'rxjs';
 import { VideoItem } from '../../models/video.model';
 import { LibraryService } from '../../services/library.service';
 import { classifyItemKind } from '../item-kind';
-import { NavigationStore } from './navigation.store';
 import { SelectionStore } from './selection.store';
 
-/** Truncated transcript snippet shown in the inspector. */
-export interface TranscriptPreview {
-  videoId: string;
+/** One transcript cue (timestamp only present when the source had them). */
+export interface TranscriptSegment {
+  /** Start time as HH:MM:SS (project convention). */
+  start: string;
   text: string;
 }
 
-const PREVIEW_MAX_CHARS = 420;
+/** Full transcript for the selected item, shown in the inspector. */
+export interface InspectorTranscript {
+  videoId: string;
+  /** Flowing plain text (no timestamps). */
+  plainText: string;
+  /** Timestamped cues — null when the source has no timing data. */
+  segments: TranscriptSegment[] | null;
+}
 
 /**
  * Resolve selected cascade ids to library items.
@@ -39,12 +46,26 @@ function resolveSelection(ids: Set<string>, items: VideoItem[]): VideoItem[] {
   return resolved;
 }
 
-/** Strip SRT cue numbers/timestamps down to plain text. */
-function srtToPlainText(srt: string): string {
-  return srt
-    .split(/\r?\n/)
-    .filter(line => line.trim() !== '' && !/^\d+$/.test(line.trim()) && !line.includes('-->'))
-    .join(' ');
+/** "00:05:32,450" or "00:05:32.450" → "00:05:32" (project HH:MM:SS convention). */
+function srtTimeToHms(time: string): string {
+  return time.trim().split(/[,.]/)[0].padStart(8, '0');
+}
+
+/** Parse SRT cues into timestamped segments. */
+function parseSrtSegments(srt: string): TranscriptSegment[] {
+  const segments: TranscriptSegment[] = [];
+  for (const block of srt.split(/\r?\n\r?\n/)) {
+    const lines = block.split(/\r?\n/).filter(l => l.trim() !== '');
+    if (lines.length === 0) continue;
+    const timingIndex = lines.findIndex(l => l.includes('-->'));
+    if (timingIndex === -1) continue;
+    const start = srtTimeToHms(lines[timingIndex].split('-->')[0]);
+    const text = lines.slice(timingIndex + 1).join(' ').trim();
+    if (text) {
+      segments.push({ start, text });
+    }
+  }
+  return segments;
 }
 
 /**
@@ -59,7 +80,6 @@ function srtToPlainText(srt: string): string {
 export class InspectorStore {
   private libraryService = inject(LibraryService);
   private selectionStore = inject(SelectionStore);
-  private navigationStore = inject(NavigationStore);
 
   /** Flattened library items, kept fresh by the workspace host. */
   private libraryItems = signal<VideoItem[]>([]);
@@ -87,40 +107,45 @@ export class InspectorStore {
   notAnalyzed = computed(() => this.selectedItems().filter(v => !v.hasAnalysis).length);
   anyVideos = computed(() => this.selectedItems().some(v => classifyItemKind(v) === 'video'));
 
-  /** Lazy transcript preview for the single selected item. */
-  transcriptPreview = signal<TranscriptPreview | null>(null);
+  /** Lazy full transcript for the single selected item. */
+  transcript = signal<InspectorTranscript | null>(null);
   transcriptLoading = signal(false);
 
   constructor() {
     effect(onCleanup => {
-      const open = this.navigationStore.inspectorOpen();
       const item = this.singleItem();
 
-      if (!open || !item || !item.hasTranscript) {
+      if (!item || !item.hasTranscript) {
         this.transcriptLoading.set(false);
         return;
       }
-      if (this.transcriptPreview()?.videoId === item.id) {
+      if (this.transcript()?.videoId === item.id) {
         return; // already loaded for this item
       }
 
       this.transcriptLoading.set(true);
       const sub: Subscription = this.libraryService.getVideoTranscript(item.id).subscribe({
         next: response => {
-          const transcript = response?.data;
-          const plain: string =
-            transcript?.plain_text ||
-            transcript?.txt_content ||
-            (transcript?.srt_format || transcript?.srt_content
-              ? srtToPlainText(transcript.srt_format || transcript.srt_content)
-              : '');
-          const text =
-            plain.length > PREVIEW_MAX_CHARS ? `${plain.slice(0, PREVIEW_MAX_CHARS).trimEnd()}…` : plain;
-          this.transcriptPreview.set(text ? { videoId: item.id, text } : null);
+          const data = response?.data;
+          const srt: string = data?.srt_format || data?.srt_content || '';
+          const segments = srt ? parseSrtSegments(srt) : null;
+          const plainText: string =
+            data?.plain_text ||
+            data?.txt_content ||
+            (segments ? segments.map(s => s.text).join(' ') : '');
+          this.transcript.set(
+            plainText
+              ? {
+                  videoId: item.id,
+                  plainText,
+                  segments: segments && segments.length > 0 ? segments : null,
+                }
+              : null
+          );
           this.transcriptLoading.set(false);
         },
         error: () => {
-          this.transcriptPreview.set(null);
+          this.transcript.set(null);
           this.transcriptLoading.set(false);
         },
       });
@@ -137,7 +162,7 @@ export class InspectorStore {
   /** Called by the workspace host on destroy. */
   reset(): void {
     this.libraryItems.set([]);
-    this.transcriptPreview.set(null);
+    this.transcript.set(null);
     this.transcriptLoading.set(false);
   }
 }

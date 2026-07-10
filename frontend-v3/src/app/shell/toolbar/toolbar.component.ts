@@ -24,7 +24,6 @@ export class ToolbarComponent {
 
   toggleDrawer = output<void>();
   toggleTheme = output<void>();
-  toggleInspector = output<void>();
   startTour = output<void>();
   downloadLogs = output<void>();
 }

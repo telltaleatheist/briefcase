@@ -5,7 +5,7 @@
 
 .inspector {
   height: 100%;
-  width: var(--inspector-width);
+  width: 100%; // the shell's .region-inspector owns the (resizable) width
   padding: 16px;
   overflow-y: auto;
   background: var(--bg-secondary);
@@ -118,14 +118,70 @@
   }
 }
 
-.transcript-preview {
-  font-size: 12px;
-  line-height: 1.55;
-  color: var(--text-secondary);
+.transcript-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.transcript-tools {
+  display: flex;
+  gap: 4px;
+
+  .tool-btn {
+    padding: 2px 7px;
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    background: transparent;
+    font-family: inherit;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: normal;
+    text-transform: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+
+    &:hover { border-color: var(--primary-orange); color: var(--primary-orange); }
+    &:focus-visible { outline: 2px solid var(--primary-orange); outline-offset: 1px; }
+    &.active { background: var(--bg-row-selected, rgba(255, 107, 53, 0.14)); color: var(--primary-orange); border-color: var(--primary-orange); }
+    &.confirm { color: var(--success); border-color: var(--success); }
+  }
+}
+
+.transcript-body {
+  max-height: 280px;
+  overflow-y: auto;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--text-primary);
   background: var(--bg-elevated);
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  padding: 10px 12px;
+  padding: 12px 14px;
+  overscroll-behavior: contain;
+
+  .flowing {
+    margin: 0;
+    white-space: pre-line;
+  }
+
+  .cue {
+    display: grid;
+    grid-template-columns: 62px 1fr;
+    gap: 8px;
+    padding: 2px 0;
+
+    .cue-time {
+      color: var(--text-tertiary);
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+      padding-top: 1px;
+    }
+
+    .cue-text {
+      min-width: 0;
+    }
+  }
 
   &.muted {
     color: var(--text-tertiary);

@@ -4,7 +4,6 @@ import { Subscription } from 'rxjs';
 import { VideoItem } from '../../models/video.model';
 import { getApiBase } from '../runtime-url';
 import { ItemKind, classifyItemKind } from '../item-kind';
-import { NavigationStore } from './navigation.store';
 import { InspectorStore } from './inspector.store';
 
 /** A connection edge as shown in the inspector. */
@@ -54,7 +53,6 @@ function toConnectedItem(record: MediaRelationshipDto, selfId: string): Connecte
 @Injectable({ providedIn: 'root' })
 export class ConnectionsStore {
   private http = inject(HttpClient);
-  private navigationStore = inject(NavigationStore);
   private inspectorStore = inject(InspectorStore);
 
   private readonly apiBase = `${getApiBase()}/database`;
@@ -89,11 +87,10 @@ export class ConnectionsStore {
   constructor() {
     effect(onCleanup => {
       this.refreshCounter(); // reload dependency
-      const open = this.navigationStore.inspectorOpen();
       const items = this.inspectorStore.selectedItems();
       const anchor = items.length === 1 || items.length === 2 ? items[0] : null;
 
-      if (!open || !anchor) {
+      if (!anchor) {
         this.connectionsLoading.set(false);
         return;
       }

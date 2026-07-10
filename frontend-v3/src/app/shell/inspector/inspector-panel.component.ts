@@ -1,6 +1,8 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, input, signal, viewChild } from '@angular/core';
 import { Router } from '@angular/router';
 import { CdkOverlayOrigin, OverlayModule } from '@angular/cdk/overlay';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { timer } from 'rxjs';
 import { ConnectionsStore } from '../../core/stores/connections.store';
 import { InspectorStore } from '../../core/stores/inspector.store';
 import { SelectionStore } from '../../core/stores/selection.store';
@@ -72,12 +74,37 @@ export class InspectorPanelComponent {
 
   size = computed(() => formatBytes(this.item()?.size));
 
-  /** Transcript preview belongs to the currently selected item only. */
-  preview = computed(() => {
-    const preview = this.store.transcriptPreview();
+  /** Transcript belongs to the currently selected item only. */
+  transcript = computed(() => {
+    const transcript = this.store.transcript();
     const item = this.item();
-    return preview && item && preview.videoId === item.id ? preview.text : null;
+    return transcript && item && transcript.videoId === item.id ? transcript : null;
   });
+
+  /** Whether timestamped rendering is even possible for this transcript. */
+  hasTimestamps = computed(() => (this.transcript()?.segments?.length ?? 0) > 0);
+
+  /** Timestamps default OFF — clean flowing text. */
+  showTimestamps = signal(false);
+
+  /** Brief "Copied ✓" confirmation state. */
+  copied = signal(false);
+  private destroyRef = inject(DestroyRef);
+
+  copyTranscript(): void {
+    const transcript = this.transcript();
+    if (!transcript) return;
+    const text =
+      this.showTimestamps() && transcript.segments
+        ? transcript.segments.map(s => `[${s.start}] ${s.text}`).join('\n')
+        : transcript.plainText;
+    navigator.clipboard.writeText(text).then(() => {
+      this.copied.set(true);
+      timer(1500)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe(() => this.copied.set(false));
+    });
+  }
 
   /** Exactly two items selected — the "Connect these two" case. */
   isPair = computed(() => this.store.selectedItems().length === 2);
