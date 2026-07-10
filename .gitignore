@@ -4,6 +4,9 @@
 # Output build directories
 **/dist/
 **/dist-electron/
+# dist-electron may be a symlink to an APFS volume (see docs/APFS-build-output.md);
+# the trailing-slash rule above only matches it as a directory, so ignore it as a symlink too.
+/dist-electron
 dist-python/
 backup/
 backend-prod-temp/
