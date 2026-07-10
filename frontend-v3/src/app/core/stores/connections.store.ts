@@ -120,7 +120,8 @@ export class ConnectionsStore {
           },
         });
       onCleanup(() => sub.unsubscribe());
-    });
+      // allowSignalWrites: the loading flag is set synchronously in here.
+    }, { allowSignalWrites: true });
   }
 
   /** Connect the currently selected pair. */

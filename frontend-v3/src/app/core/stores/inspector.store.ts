@@ -125,7 +125,8 @@ export class InspectorStore {
         },
       });
       onCleanup(() => sub.unsubscribe());
-    });
+      // allowSignalWrites: the loading flag is set synchronously in here.
+    }, { allowSignalWrites: true });
   }
 
   /** Called by the workspace host whenever its week data changes. */

@@ -16,6 +16,11 @@
 // Import driver.js styles for product tours
 @import 'driver.js/dist/driver.css';
 
+// CDK overlay structural styles — required for cdkConnectedOverlay
+// positioning (Add popover, inspector collection menu). Without this the
+// overlay container is position:static and panes render in document flow.
+@import '@angular/cdk/overlay-prebuilt.css';
+
 // Additional global styles
 html, body {
   height: 100%;

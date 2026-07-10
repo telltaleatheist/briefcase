@@ -463,7 +463,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     // so the shell's inspector panel can resolve the selection (Phase 3).
     effect(() => {
       this.inspectorStore.setLibraryItems(this.allLibraryItems());
-    });
+    }, { allowSignalWrites: true });
   }
 
   async ngOnInit() {

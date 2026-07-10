@@ -94,7 +94,12 @@
     grid-column: 1;
   }
 
-  // Inspector already overlays via the 1100px rule above; nothing extra here.
+  // Phone-size: hide the inspector entirely (its open state persists from
+  // desktop and would cover half the viewport). Mobile detail viewing goes
+  // through "Show Full Info"; a mobile inspector UX can come later.
+  .region-inspector {
+    display: none;
+  }
 
   .drawer-backdrop {
     display: block;
