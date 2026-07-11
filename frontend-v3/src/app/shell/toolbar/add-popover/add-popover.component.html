@@ -22,11 +22,17 @@
     </select>
   </div>
 
+  <!-- Trim: a download-time option, deliberately distinct from the
+       processing steps below. -->
+  <label class="trim-row" [class.on]="trim()">
+    <input type="checkbox" [ngModel]="trim()" (ngModelChange)="trim.set($event)" />
+    <span class="trim-text">
+      <span class="trim-title">✂︎ Trim after download</span>
+      <span class="trim-sub">Opens the trimmer to set start/end points for each item.</span>
+    </span>
+  </label>
+
   <div class="pipeline-opts">
-    <label>
-      <input type="checkbox" [ngModel]="trim()" (ngModelChange)="trim.set($event)" />
-      Trim
-    </label>
     <label>
       <input type="checkbox" [ngModel]="transcribe()" (ngModelChange)="transcribe.set($event)" />
       Transcribe
@@ -44,9 +50,6 @@
     }
   </div>
 
-  @if (trim()) {
-    <p class="hint trim-note">Trimmer opens after the item is queued.</p>
-  }
   <p class="hint">Remembered from last time — change anytime.</p>
 
   <div class="actions">

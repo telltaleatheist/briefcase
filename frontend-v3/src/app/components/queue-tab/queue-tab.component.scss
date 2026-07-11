@@ -132,6 +132,57 @@
   place-content: center;
 }
 
+.chevron {
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+// Clear ▾ dropdown (CDK overlay) — two-click confirmed destructive options
+.clear-menu {
+  min-width: 240px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px var(--shadow-color);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+
+  .clear-option {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 8px 12px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+
+    &:hover {
+      background: var(--bg-input);
+    }
+
+    &.armed {
+      background: var(--bg-input);
+      color: var(--warning);
+      font-weight: 600;
+    }
+
+    &.danger.armed {
+      color: var(--error);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--primary-orange);
+      outline-offset: -2px;
+    }
+  }
+}
+
 .queue-content {
   flex: 1;
   display: flex;

@@ -213,8 +213,8 @@
               @if (isStagingItem(item.video)) {
                 <button class="action-btn trim-btn" [class.trim-active]="hasTrimTime(item.video)"
                   (click)="onTrimClick(item.video, $event)"
-                  [title]="hasTrimTime(item.video) ? 'Edit trim point: ' + getTrimLabel(item.video) : 'Set trim point'">
-                  {{ hasTrimTime(item.video) ? getTrimLabel(item.video) : 'Trim' }}
+                  [title]="hasTrimTime(item.video) ? 'Edit trim points: ' + getTrimLabel(item.video) : 'Set trim points for this download'">
+                  ✂︎ {{ hasTrimTime(item.video) ? getTrimLabel(item.video) : 'Trim' }}
                 </button>
               }
 

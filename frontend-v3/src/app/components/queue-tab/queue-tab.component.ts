@@ -1,19 +1,25 @@
-import { Component, Input, Output, EventEmitter, inject, signal, computed } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { ChangeDetectionStrategy, Component, Input, Output, EventEmitter, inject, signal, computed } from '@angular/core';
+import { OverlayModule } from '@angular/cdk/overlay';
 import { CascadeComponent } from '../cascade/cascade.component';
 import { VideoWeek, VideoItem, ItemProgress, ChildrenConfig } from '../../models/video.model';
 import { QueueService } from '../../services/queue.service';
 import { QueueJob } from '../../models/queue-job.model';
+import { ErrorSurface } from '../../core/error-surface.service';
+
+/** Which Clear-menu option is awaiting its confirming second click. */
+type ClearOption = 'completed' | 'selected' | 'all';
 
 @Component({
   selector: 'app-queue-tab',
   standalone: true,
-  imports: [CommonModule, CascadeComponent],
+  imports: [OverlayModule, CascadeComponent],
   templateUrl: './queue-tab.component.html',
-  styleUrls: ['./queue-tab.component.scss']
+  styleUrls: ['./queue-tab.component.scss'],
+  changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class QueueTabComponent {
   private queueService = inject(QueueService);
+  private errorSurface = inject(ErrorSurface);
 
   // Keep inputs for backward compatibility during migration
   // These are now optional - if not provided, we use QueueService directly
@@ -42,6 +48,60 @@ export class QueueTabComponent {
   pendingCount = computed(() => this.queueService.pendingJobs().length);
   processingCount = computed(() => this.queueService.processingJobs().length);
   completedCount = computed(() => this.queueService.completedJobs().length);
+
+  // ── Clear ▾ menu (two-click confirmed per option) ──────────────────────────
+  clearMenuOpen = signal(false);
+  armedClear = signal<ClearOption | null>(null);
+
+  anythingClearable = computed(
+    () => this.completedCount() > 0 || this.pendingCount() > 0 || this.processingCount() > 0
+  );
+
+  startTitle = computed(() =>
+    this.selectedStagingIds().size > 0
+      ? `Start the ${this.selectedStagingIds().size} selected pending item(s)`
+      : `Start all ${this.pendingCount()} pending item(s)`
+  );
+
+  toggleClearMenu(): void {
+    this.armedClear.set(null);
+    this.clearMenuOpen.update(open => !open);
+  }
+
+  closeClearMenu(): void {
+    this.clearMenuOpen.set(false);
+    this.armedClear.set(null);
+  }
+
+  /** First click arms the option; the second click executes it. */
+  onClearOption(option: ClearOption): void {
+    if (this.armedClear() !== option) {
+      this.armedClear.set(option);
+      return;
+    }
+    this.closeClearMenu();
+    switch (option) {
+      case 'completed':
+        this.onClearCompleted();
+        break;
+      case 'selected':
+        this.onRemoveSelected();
+        this.selectedStagingIds.set(new Set());
+        break;
+      case 'all':
+        this.onClearAll();
+        break;
+    }
+  }
+
+  /** Start (primary): acts on the selection when there is one, else on all pending. */
+  onStart(): void {
+    if (this.selectedStagingIds().size > 0) {
+      this.onProcessSelected();
+    } else {
+      this.onProcessAll();
+    }
+  }
 
   // Combine staging, processing, and completed queues into a single weeks array for cascade
   // Now uses QueueService directly as source of truth
@@ -312,13 +372,6 @@ export class QueueTabComponent {
     this.processSelected.emit(stagingIds);
   }
 
-  onConfigureSelected() {
-    const stagingIds = Array.from(this.selectedStagingIds()).map(id => {
-      return id.replace(/^.*staging-/, '');
-    });
-    this.configureSelected.emit(stagingIds);
-  }
-
   onRemoveSelected() {
     const stagingIds = Array.from(this.selectedStagingIds()).map(id => {
       return id.replace(/^.*staging-/, '');
@@ -353,14 +406,13 @@ export class QueueTabComponent {
   }
 
   onStopProcessing() {
-    console.log('[QueueTab] Stop Processing requested');
     // Stop all processing IMMEDIATELY - this moves processing jobs to pending
     this.queueService.stopProcessing().subscribe({
       next: () => {
         console.log('[QueueTab] Processing stopped');
       },
       error: (err) => {
-        console.error('[QueueTab] Failed to stop processing:', err);
+        this.errorSurface.surfaceError('Stop processing', err);
       }
     });
   }

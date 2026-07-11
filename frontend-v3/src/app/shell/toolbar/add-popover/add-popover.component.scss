@@ -65,6 +65,52 @@ textarea {
   }
 }
 
+// Designated trim option — download-time configuration, visually distinct
+// from the processing steps below it.
+.trim-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 12px 0 0;
+  padding: 9px 11px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-input);
+  cursor: pointer;
+  transition: border-color 120ms ease;
+
+  &:hover {
+    border-color: var(--primary-orange);
+  }
+
+  &.on {
+    border-color: rgba(255, 107, 53, 0.5);
+  }
+
+  input[type='checkbox'] {
+    accent-color: var(--primary-orange);
+    margin-top: 2px;
+  }
+
+  .trim-text {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+  }
+
+  .trim-title {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .trim-sub {
+    font-size: 11px;
+    color: var(--text-tertiary);
+  }
+}
+
 .pipeline-opts {
   display: flex;
   flex-wrap: wrap;
@@ -115,10 +161,6 @@ textarea {
   margin: 4px 0 0;
   font-size: 11px;
   color: var(--text-tertiary);
-
-  &.trim-note {
-    color: var(--warning);
-  }
 }
 
 .actions {

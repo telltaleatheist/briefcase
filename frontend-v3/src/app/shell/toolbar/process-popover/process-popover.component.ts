@@ -1,4 +1,7 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, input, output, signal } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { getApiBase } from '../../../core/runtime-url';
 import {
   PIPELINE_STEPS,
   PipelinePreset,
@@ -7,6 +10,13 @@ import {
   PipelineStepType,
   sortPipelineSteps,
 } from '../../../core/stores/pipeline-presets.service';
+
+/** An installed whisper model as reported by GET /media/whisper-models. */
+interface WhisperModelOption {
+  id: string;
+  name: string;
+  description?: string;
+}
 
 /**
  * The Process popover: compose a pipeline of job steps (in run order) for the
@@ -24,6 +34,8 @@ import {
 })
 export class ProcessPopoverComponent {
   private presetsService = inject(PipelinePresetsService);
+  private http = inject(HttpClient);
+  private destroyRef = inject(DestroyRef);
 
   selectionCount = input(0);
   /** Selected videos lacking a transcript / analysis (from InspectorStore). */
@@ -124,7 +136,50 @@ export class ProcessPopoverComponent {
   }
 
   toggleExpanded(type: PipelineStepType): void {
+    const opening = !this.isExpanded(type);
     this.expandedSteps.update(state => ({ ...state, [type]: !state[type] }));
+    if (opening && type === 'transcribe' && this.whisperModels() === null && !this.whisperModelsLoading()) {
+      this.loadWhisperModels();
+    }
+  }
+
+  // ── Installed whisper models (lazy: fetched when transcribe options open) ──
+
+  /** null = not fetched yet; [] = fetched, none installed. */
+  whisperModels = signal<WhisperModelOption[] | null>(null);
+  whisperModelsLoading = signal(false);
+  whisperModelsError = signal(false);
+
+  /**
+   * The persisted model value when it isn't among the installed models —
+   * shown as a "(not installed)" option rather than silently dropped.
+   */
+  missingModelValue = computed<string | null>(() => {
+    const models = this.whisperModels();
+    if (models === null) return null;
+    const current = String(this.config('transcribe')['model'] ?? '');
+    if (!current) return null;
+    return models.some(m => m.id === current) ? null : current;
+  });
+
+  loadWhisperModels(): void {
+    this.whisperModelsLoading.set(true);
+    this.whisperModelsError.set(false);
+    this.http
+      .get<{ success: boolean; models: WhisperModelOption[] }>(`${getApiBase()}/media/whisper-models`)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: response => {
+          this.whisperModels.set(response?.models ?? []);
+          this.whisperModelsLoading.set(false);
+        },
+        error: () => {
+          // Surfaced inline in the options panel (with a retry) — a toast for
+          // a popover-local fetch would be noise.
+          this.whisperModelsError.set(true);
+          this.whisperModelsLoading.set(false);
+        },
+      });
   }
 
   setOption(type: PipelineStepType, key: string, value: unknown): void {

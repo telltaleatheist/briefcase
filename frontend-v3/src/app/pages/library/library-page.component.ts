@@ -3092,9 +3092,10 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       }
     }
 
-    // Submit pending jobs to backend via QueueService
-    // QueueService handles state transitions and WebSocket updates
-    this.queueService.submitPendingJobs().subscribe({
+    // Submit exactly the requested jobs to the backend via QueueService —
+    // "Start N" must never sweep along pending items the user parked.
+    // QueueService handles state transitions and WebSocket updates.
+    this.queueService.submitJobs(itemIds).subscribe({
       next: ({ jobIdMap, warnings }) => {
         const count = jobIdMap.size;
         if (count > 0) {

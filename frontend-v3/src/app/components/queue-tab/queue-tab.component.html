@@ -1,5 +1,6 @@
 <div class="queue-tab">
-  <!-- Toolbar -->
+  <!-- Toolbar: three controls — Clear ▾ (destructive menu), Stop (only while
+       processing), Start (primary, contextual: selection or all). -->
   <div class="queue-toolbar">
     <div class="toolbar-section">
       <h2 class="section-title">Processing Queue</h2>
@@ -8,92 +9,88 @@
       </p>
     </div>
     <div class="toolbar-actions">
-      <!-- Clear completed button (when completed items exist) -->
-      @if (completedCount() > 0) {
-        <button class="btn btn-secondary" (click)="onClearCompleted()">
-          <span class="btn-icon">🧹</span>
-          <span>Clear Completed</span>
-        </button>
-      }
+      <button
+        class="btn btn-secondary"
+        cdkOverlayOrigin
+        #clearTrigger="cdkOverlayOrigin"
+        [disabled]="!anythingClearable()"
+        (click)="toggleClearMenu()"
+        [attr.aria-expanded]="clearMenuOpen()"
+        title="Clear queue items">
+        <span class="btn-icon">🗑️</span>
+        <span>Clear</span>
+        <span class="chevron">▾</span>
+      </button>
 
-      <!-- Stop processing button (when processing items exist) -->
       @if (processingCount() > 0) {
         <button class="btn btn-danger" (click)="onStopProcessing()">
           <span class="btn-icon">⏹</span>
-          <span>Stop Processing</span>
+          <span>Stop</span>
         </button>
       }
 
-      <!-- Clear All button - shows when there are pending OR processing items -->
-      @if (pendingCount() > 0 || processingCount() > 0) {
-        <button class="btn btn-secondary" (click)="onClearAll()">
-          <span class="btn-icon">🗑️</span>
-          <span>Clear All</span>
-        </button>
-      }
-
-      <!-- Show buttons when staging items exist -->
       @if (pendingCount() > 0) {
-        <!-- Configure button (only when items selected) -->
-        @if (selectedStagingIds().size > 0) {
-          <button class="btn btn-secondary" (click)="onConfigureSelected()">
-            <span class="btn-icon">⚙️</span>
-            <span>Configure</span>
-            <span class="badge">{{ selectedStagingIds().size }}</span>
-          </button>
-        }
-
-        <!-- Remove button (only when items selected) -->
-        @if (selectedStagingIds().size > 0) {
-          <button class="btn btn-secondary" (click)="onRemoveSelected()">
-            <span class="btn-icon">🗑️</span>
-            <span>Remove Selected</span>
-            <span class="badge">{{ selectedStagingIds().size }}</span>
-          </button>
-        }
-
-        <!-- Process Selected button (only when items selected) -->
-        @if (selectedStagingIds().size > 0) {
-          <button class="btn btn-primary" (click)="onProcessSelected()">
-            <span class="btn-icon">▶</span>
-            <span>Process Selected</span>
-            <span class="badge">{{ selectedStagingIds().size }}</span>
-          </button>
-        }
-
-        <!-- Process All button (always show when staging items exist) -->
-        <button class="btn btn-primary" (click)="onProcessAll()">
-          <span class="btn-icon">▶▶</span>
-          <span>Process All</span>
-          <span class="badge">{{ pendingCount() }}</span>
+        <button class="btn btn-primary" (click)="onStart()" [title]="startTitle()">
+          <span class="btn-icon">▶</span>
+          <span>{{ selectedStagingIds().size > 0 ? 'Start' : 'Start All' }}</span>
+          <span class="badge">{{ selectedStagingIds().size > 0 ? selectedStagingIds().size : pendingCount() }}</span>
         </button>
       }
     </div>
   </div>
 
+  <!-- Clear ▾ menu: each destructive option is two-click confirmed inline. -->
+  <ng-template
+    cdkConnectedOverlay
+    [cdkConnectedOverlayOrigin]="clearTrigger"
+    [cdkConnectedOverlayOpen]="clearMenuOpen()"
+    [cdkConnectedOverlayHasBackdrop]="true"
+    cdkConnectedOverlayBackdropClass="cdk-overlay-transparent-backdrop"
+    [cdkConnectedOverlayOffsetY]="6"
+    (backdropClick)="closeClearMenu()"
+    (detach)="closeClearMenu()">
+    <div class="clear-menu" role="menu" aria-label="Clear queue items">
+      @if (completedCount() > 0) {
+        <button role="menuitem" class="clear-option" [class.armed]="armedClear() === 'completed'" (click)="onClearOption('completed')">
+          {{ armedClear() === 'completed' ? 'Clear ' + completedCount() + ' completed — sure?' : 'Completed (' + completedCount() + ')' }}
+        </button>
+      }
+      @if (selectedStagingIds().size > 0) {
+        <button role="menuitem" class="clear-option" [class.armed]="armedClear() === 'selected'" (click)="onClearOption('selected')">
+          {{ armedClear() === 'selected' ? 'Remove ' + selectedStagingIds().size + ' selected — sure?' : 'Selected (' + selectedStagingIds().size + ')' }}
+        </button>
+      }
+      @if (pendingCount() > 0 || processingCount() > 0) {
+        <button role="menuitem" class="clear-option danger" [class.armed]="armedClear() === 'all'" (click)="onClearOption('all')">
+          {{ armedClear() === 'all' ? 'Clear pending + processing — sure?' : 'All pending & processing' }}
+        </button>
+      }
+    </div>
+  </ng-template>
+
   <!-- Queue Content -->
   <div class="queue-content">
     <!-- Single Cascade showing Staging, Processing, and Completed -->
-    <app-cascade
-      *ngIf="allQueueWeeks().length > 0"
-      [weeks]="allQueueWeeks()"
-      [progressMapper]="progressMapper"
-      [childrenConfig]="childrenConfig"
-      [aiProcessingVideoId]="aiProcessingVideoId"
-      [showStatusIndicator]="true"
-      [showDeleteButton]="true"
-      [deleteMode]="'simple'"
-      (selectionChanged)="onStagingSelectionChanged($event)"
-      (videoAction)="onVideoAction($event)"
-      (configureItem)="configureItem.emit($event)"
-      (previewRequested)="previewRequested.emit($event)"
-    />
-
-    <!-- Empty State -->
-    <div class="empty-state" *ngIf="allQueueWeeks().length === 0">
-      <div class="empty-icon">📋</div>
-      <h3>No items in queue</h3>
-      <p>Add videos using the Download button or select library videos and click "Add to Queue"</p>
-    </div>
+    @if (allQueueWeeks().length > 0) {
+      <app-cascade
+        [weeks]="allQueueWeeks()"
+        [progressMapper]="progressMapper"
+        [childrenConfig]="childrenConfig"
+        [aiProcessingVideoId]="aiProcessingVideoId"
+        [showStatusIndicator]="true"
+        [showDeleteButton]="true"
+        [deleteMode]="'simple'"
+        (selectionChanged)="onStagingSelectionChanged($event)"
+        (videoAction)="onVideoAction($event)"
+        (configureItem)="configureItem.emit($event)"
+        (previewRequested)="previewRequested.emit($event)"
+      />
+    } @else {
+      <div class="empty-state">
+        <div class="empty-icon">📋</div>
+        <h3>No items in queue</h3>
+        <p>Add videos with the ＋ Add button in the toolbar, or select library items and hit ⚡ Process</p>
+      </div>
+    }
   </div>
 </div>

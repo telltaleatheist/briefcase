@@ -134,16 +134,34 @@
                   </label>
                 }
                 @case ('transcribe') {
-                  <label class="opt">
-                    <span>Model</span>
-                    <select [value]="config(def.type)['model']" (change)="onSelectOption(def.type, 'model', $event)">
-                      <option value="tiny">Tiny — fastest</option>
-                      <option value="base">Base — balanced</option>
-                      <option value="small">Small</option>
-                      <option value="medium">Medium</option>
-                      <option value="large">Large — best</option>
-                    </select>
-                  </label>
+                  @if (whisperModelsError()) {
+                    <div class="opt-error">
+                      Couldn't load installed models
+                      <button type="button" class="retry-link" (click)="loadWhisperModels()">Retry</button>
+                    </div>
+                  } @else {
+                    <label class="opt">
+                      <span>Model</span>
+                      <select
+                        [value]="config(def.type)['model']"
+                        [disabled]="whisperModelsLoading()"
+                        (change)="onSelectOption(def.type, 'model', $event)">
+                        @if (whisperModelsLoading()) {
+                          <option [value]="config(def.type)['model']">Loading installed models…</option>
+                        } @else {
+                          @for (model of whisperModels() ?? []; track model.id) {
+                            <option [value]="model.id">{{ model.name }}{{ model.description ? ' — ' + model.description : '' }}</option>
+                          }
+                          @if (missingModelValue(); as missing) {
+                            <option [value]="missing">{{ missing }} (not installed)</option>
+                          }
+                          @if ((whisperModels() ?? []).length === 0 && !missingModelValue()) {
+                            <option value="" disabled>No whisper models installed — see Settings → Components</option>
+                          }
+                        }
+                      </select>
+                    </label>
+                  }
                   <label class="opt">
                     <span>Language</span>
                     <select [value]="config(def.type)['language']" (change)="onSelectOption(def.type, 'language', $event)">
