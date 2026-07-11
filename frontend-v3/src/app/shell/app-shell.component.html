@@ -18,6 +18,8 @@
           [singleSelection]="selection.count() === 1"
           [selectionCount]="selection.count()"
           [aiReady]="aiReady()"
+          [withoutTranscript]="inspector.withoutTranscript()"
+          [notAnalyzed]="inspector.notAnalyzed()"
           (submitAdd)="onSubmitAdd($event)"
           (importFiles)="dispatchToWorkspace({ type: 'import' })"
           (openAdvanced)="dispatchToWorkspace({ type: 'openDownloadDialog' })"
@@ -26,7 +28,7 @@
           (analyze)="dispatchToWorkspace({ type: 'analyzeSelection' })"
           (openEditor)="dispatchToWorkspace({ type: 'openEditor' })"
           (viewInfo)="dispatchToWorkspace({ type: 'viewInfo' })"
-          (addToQueue)="dispatchToWorkspace({ type: 'addSelectionToQueue' })" />
+          (processSteps)="dispatchToWorkspace({ type: 'processSelection', steps: $event })" />
       }
     </app-toolbar>
 

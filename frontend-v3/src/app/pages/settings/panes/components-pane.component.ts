@@ -67,6 +67,38 @@ export class ComponentsPaneComponent {
     this.dl.enqueue(ids);
   }
 
+  /** Id of the component awaiting removal confirmation (two-click remove). */
+  confirmingRemoveId = signal<string | null>(null);
+  removingId = signal<string | null>(null);
+
+  canRemove(component: ComponentStatus): boolean {
+    return component.installed && !component.required && this.removingId() === null;
+  }
+
+  remove(component: ComponentStatus): void {
+    if (!this.canRemove(component)) return;
+    if (this.confirmingRemoveId() !== component.id) {
+      // First click arms the confirmation; the button relabels to "Confirm".
+      this.confirmingRemoveId.set(component.id);
+      return;
+    }
+    this.confirmingRemoveId.set(null);
+    this.removingId.set(component.id);
+    this.componentService.removeComponent(component.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.removingId.set(null);
+          this.reload();
+        },
+        error: () => this.removingId.set(null),
+      });
+  }
+
+  cancelRemove(): void {
+    this.confirmingRemoveId.set(null);
+  }
+
   openWizard(): void {
     this.wizardOpen.set(true);
   }

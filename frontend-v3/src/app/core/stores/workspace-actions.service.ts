@@ -1,6 +1,7 @@
-import { Injectable } from '@angular/core';
+import { Injectable, signal } from '@angular/core';
 import { Observable, Subject } from 'rxjs';
 import { VideoJobSettings } from '../../models/video-processing.model';
+import { PipelineStep } from './pipeline-presets.service';
 
 /** One-shot download request from the shell's Add popover. */
 export interface AddDownloadsPayload {
@@ -21,7 +22,8 @@ export type WorkspaceAction =
   | { type: 'viewInfo' }
   | { type: 'transcribeSelection' }
   | { type: 'analyzeSelection' }
-  | { type: 'addSelectionToQueue' }
+  // Queue the chosen pipeline steps, in order, for every selected video
+  | { type: 'processSelection'; steps: PipelineStep[] }
   | { type: 'openAiSetup' }
   // Inspector: add the current selection to a collection ("tab")
   | { type: 'addSelectionToTab'; tabId: string }
@@ -44,5 +46,16 @@ export class WorkspaceActionsService {
 
   dispatch(action: WorkspaceAction): void {
     this.actionsSubject.next(action);
+  }
+
+  /**
+   * Shell-internal coordination: the inspector's "Process…" button asks the
+   * toolbar to open its Process popover (single popover instance, anchored to
+   * the toolbar's Process button). Counter signal; toolbar reacts to bumps.
+   */
+  readonly processPopoverRequested = signal(0);
+
+  requestProcessPopover(): void {
+    this.processPopoverRequested.update(n => n + 1);
   }
 }

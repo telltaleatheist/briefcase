@@ -319,8 +319,8 @@ export class CascadeComponent {
       }
       return [
         { label: 'Open All in Scout', icon: '▶️', action: 'openAllInScout' },
-        { label: 'Rename Tab', icon: '✏️', action: 'renameTab' },
-        { label: 'Delete Tab', icon: '🗑️', action: 'deleteTab' }
+        { label: 'Rename Collection', icon: '✏️', action: 'renameTab' },
+        { label: 'Delete Collection', icon: '🗑️', action: 'deleteTab' }
       ];
     }
 
@@ -381,7 +381,7 @@ export class CascadeComponent {
         // Add to Tab submenu (same as library items)
         const recentTabs = this.tabsService.recentTabs();
         const tabSubmenu: VideoContextMenuAction[] = [
-          { label: 'New Tab...', icon: '➕', action: 'addToNewTab' }
+          { label: 'New Collection…', icon: '➕', action: 'addToNewTab' }
         ];
 
         if (recentTabs.length > 0) {
@@ -396,7 +396,7 @@ export class CascadeComponent {
         }
 
         actions.push({
-          label: `Add to Tab${countSuffix}`,
+          label: `Add to Collection${countSuffix}`,
           icon: '📑',
           action: 'addToTab',
           submenu: tabSubmenu,
@@ -493,7 +493,7 @@ export class CascadeComponent {
       // Add to Tab submenu (same as library items)
       const webpageRecentTabs = this.tabsService.recentTabs();
       const webpageTabSubmenu: VideoContextMenuAction[] = [
-        { label: 'New Tab...', icon: '➕', action: 'addToNewTab' }
+        { label: 'New Collection…', icon: '➕', action: 'addToNewTab' }
       ];
       if (webpageRecentTabs.length > 0) {
         webpageTabSubmenu.push({ label: '', icon: '', action: '', divider: true });
@@ -506,7 +506,7 @@ export class CascadeComponent {
         });
       }
       actions.push({
-        label: `Add to Tab${countSuffix}`,
+        label: `Add to Collection${countSuffix}`,
         icon: '📑',
         action: 'addToTab',
         submenu: webpageTabSubmenu,
@@ -561,7 +561,7 @@ export class CascadeComponent {
     // Build submenu for "Add to Tab" with recent tabs
     const recentTabs = this.tabsService.recentTabs();
     const tabSubmenu: VideoContextMenuAction[] = [
-      { label: 'New Tab...', icon: '➕', action: 'addToNewTab' }
+      { label: 'New Collection…', icon: '➕', action: 'addToNewTab' }
     ];
 
     if (recentTabs.length > 0) {
@@ -576,7 +576,7 @@ export class CascadeComponent {
     }
 
     actions.push({
-      label: `Add to Tab${countSuffix}`,
+      label: `Add to Collection${countSuffix}`,
       icon: '📑',
       action: 'addToTab',
       submenu: tabSubmenu,

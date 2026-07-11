@@ -133,6 +133,11 @@ export class InspectorPanelComponent {
     this.router.navigate(['/video', videoId]);
   }
 
+  /** Open the toolbar's Process popover for the current selection. */
+  requestProcess(): void {
+    this.actions.requestProcessPopover();
+  }
+
   dispatch(action: WorkspaceAction): void {
     this.actions.dispatch(action);
   }

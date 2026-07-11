@@ -1,42 +1,83 @@
-<!-- Tabs Content -->
+<!-- Collections Content -->
 <div class="tabs-content">
-  <!-- Header with New Tab Button -->
-  <div class="tabs-header">
-    <div class="header-info">
-      <h2 class="tabs-title">Video Tabs</h2>
-      <p class="tabs-subtitle" *ngIf="allTabs().length > 0">
-        {{ allTabs().length }} {{ allTabs().length === 1 ? 'tab' : 'tabs' }}
+  @if (activeCollection(); as active) {
+    <!-- Single-collection header: the run-of-show view -->
+    <div class="tabs-header">
+      <div class="header-info">
+        <button type="button" class="back-link" (click)="backToAll()">← All Collections</button>
+        <h2 class="tabs-title">{{ active.name }}</h2>
+        <p class="tabs-subtitle">
+          {{ activeCollectionCount() }} {{ activeCollectionCount() === 1 ? 'item' : 'items' }} · in run order
+        </p>
+      </div>
+      <div class="header-actions">
+        <button
+          class="btn-open-all"
+          [disabled]="activeCollectionCount() === 0"
+          (click)="openActiveInScout()"
+          title="Open every item in Scout, in order">
+          <span class="btn-icon">▶</span>
+          <span>Open All in Scout</span>
+        </button>
+        <button class="btn-quiet" (click)="renameActive()" title="Rename this collection">Rename</button>
+        <button class="btn-quiet danger" (click)="deleteActive()" title="Delete this collection (items stay in your library)">Delete</button>
+      </div>
+    </div>
+  } @else {
+    <!-- All-collections header -->
+    <div class="tabs-header">
+      <div class="header-info">
+        <h2 class="tabs-title">Collections</h2>
+        @if (allTabs().length > 0) {
+          <p class="tabs-subtitle">
+            {{ allTabs().length }} {{ allTabs().length === 1 ? 'collection' : 'collections' }}
+          </p>
+        }
+      </div>
+      <button class="btn-new-tab" (click)="openNewTabDialog([])">
+        <span class="btn-icon">➕</span>
+        <span>New Collection</span>
+      </button>
+    </div>
+  }
+
+  <!-- Collections Cascade -->
+  @if (tabWeeks().length > 0) {
+    <app-cascade
+      [weeks]="tabWeeks()"
+      [tabsMode]="true"
+      (selectionChanged)="handleSelectionChanged($event)"
+      (videoAction)="handleVideoAction($event)"
+      (headerAction)="handleHeaderAction($event)"
+      (previewRequested)="handlePreviewRequested($event)"
+      (videoMovedToTab)="handleVideoMovedToTab($event)"
+    />
+  }
+
+  <!-- Empty States -->
+  @if (activeCollection() === null && allTabs().length === 0) {
+    <div class="empty-state">
+      <div class="empty-icon">📑</div>
+      <h3 class="empty-title">No collections yet</h3>
+      <p class="empty-description">
+        Collections are working sets — gather the videos for one story, run through them in order, delete the collection when you're done. Click "New Collection" above or right-click any video to get started.
       </p>
     </div>
-    <button class="btn-new-tab" (click)="openNewTabDialog([])">
-      <span class="btn-icon">➕</span>
-      <span>New Tab</span>
-    </button>
-  </div>
-
-  <!-- Tabs Cascade -->
-  <app-cascade
-    *ngIf="tabWeeks().length > 0"
-    [weeks]="tabWeeks()"
-    [tabsMode]="true"
-    (selectionChanged)="handleSelectionChanged($event)"
-    (videoAction)="handleVideoAction($event)"
-    (headerAction)="handleHeaderAction($event)"
-    (previewRequested)="handlePreviewRequested($event)"
-    (videoMovedToTab)="handleVideoMovedToTab($event)"
-  />
-
-  <!-- Empty State -->
-  <div class="empty-state" *ngIf="tabWeeks().length === 0">
-    <div class="empty-icon">📑</div>
-    <h3 class="empty-title">No tabs yet</h3>
-    <p class="empty-description">
-      Create tabs to organize your videos. Click "New Tab" above or right-click any video and select "Add to Tab" to get started.
-    </p>
-  </div>
+  }
+  @if (activeCollection(); as active) {
+    @if (activeCollectionCount() === 0) {
+      <div class="empty-state">
+        <div class="empty-icon">⬩</div>
+        <h3 class="empty-title">"{{ active.name }}" is empty</h3>
+        <p class="empty-description">
+          Add items from the Library — select videos and use "Add to Collection" in the inspector, or right-click and choose this collection.
+        </p>
+      </div>
+    }
+  }
 </div>
 
-<!-- New/Rename Tab Dialog -->
+<!-- New/Rename Collection Dialog -->
 <app-new-tab-dialog
   [show]="newTabDialogOpen()"
   [mode]="tabDialogMode()"

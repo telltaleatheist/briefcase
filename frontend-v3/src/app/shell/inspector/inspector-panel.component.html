@@ -141,6 +141,7 @@
     <div class="actions">
       @if (kind() === 'video') {
         <ui-button variant="primary" [block]="true" (pressed)="dispatch({ type: 'openEditor' })">▶ Open in Scout</ui-button>
+        <ui-button [block]="true" (pressed)="requestProcess()">⚡ Process…</ui-button>
       }
       <ui-button [block]="true" (pressed)="dispatch({ type: 'viewInfo' })">Show Full Info</ui-button>
       <ui-button
@@ -174,6 +175,7 @@
         }
       }
       @if (store.anyVideos()) {
+        <ui-button [block]="true" (pressed)="requestProcess()">⚡ Process…</ui-button>
         <ui-button [block]="true" (pressed)="dispatch({ type: 'openEditor' })">▶ Open in Scout (tabs)</ui-button>
       }
       @if (isPair()) {

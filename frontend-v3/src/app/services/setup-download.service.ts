@@ -3,7 +3,7 @@ import { ComponentService } from './component.service';
 import { WebsocketService } from './websocket.service';
 import { AiSetupService } from './ai-setup.service';
 
-export type ItemStatus = 'queued' | 'downloading' | 'done' | 'failed';
+export type ItemStatus = 'idle' | 'queued' | 'downloading' | 'done' | 'failed';
 
 interface ItemProgress {
   phase: string;
@@ -131,7 +131,9 @@ export class SetupDownloadService {
     if (this.doneIds().has(id)) return 'done';
     if (this.failed()[id]) return 'failed';
     if (this.currentId() === id) return 'downloading';
-    return 'queued';
+    // 'queued' only for ids actually in the queue — an id we were never asked
+    // to download is 'idle' (callers show a Download affordance for it).
+    return this.order().includes(id) ? 'queued' : 'idle';
   }
 
   pctOf(id: string): number {

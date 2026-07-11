@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
 import { Router, RouterOutlet } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { InspectorStore } from '../core/stores/inspector.store';
 import { NavigationStore, ShellSection } from '../core/stores/navigation.store';
 import { SelectionStore } from '../core/stores/selection.store';
 import { WorkspaceActionsService, WorkspaceAction, AddDownloadsPayload } from '../core/stores/workspace-actions.service';
@@ -45,6 +46,7 @@ const SECTION_TITLES: Record<ShellSection, string> = {
 export class AppShellComponent {
   nav = inject(NavigationStore);
   selection = inject(SelectionStore);
+  inspector = inject(InspectorStore);
   private router = inject(Router);
   private libraryService = inject(LibraryService);
   private queueService = inject(QueueService);
@@ -64,6 +66,12 @@ export class AppShellComponent {
     // The sidebar shows collections; the shell owns loading them.
     // (loadTabs also refreshes tabbedVideoIds, which the workspace consumes.)
     this.tabsService.loadTabs().pipe(takeUntilDestroyed()).subscribe();
+
+    // Populate the current-library signal for the sidebar switcher. The
+    // workspace also does this, but when the app loads directly on /settings
+    // (or any non-workspace route) nothing else would — the switcher showed
+    // "No library" until the user visited the Library.
+    this.libraryService.getCurrentLibrary().pipe(takeUntilDestroyed()).subscribe();
   }
 
   // ── Read-only projections of the real service state (never library-page copies)

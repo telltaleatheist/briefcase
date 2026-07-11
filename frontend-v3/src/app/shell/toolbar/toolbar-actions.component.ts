@@ -1,7 +1,9 @@
-import { ChangeDetectionStrategy, Component, input, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, effect, inject, input, output, signal } from '@angular/core';
 import { OverlayModule } from '@angular/cdk/overlay';
-import { AddDownloadsPayload } from '../../core/stores/workspace-actions.service';
+import { AddDownloadsPayload, WorkspaceActionsService } from '../../core/stores/workspace-actions.service';
+import { PipelineStep } from '../../core/stores/pipeline-presets.service';
 import { AddPopoverComponent } from './add-popover/add-popover.component';
+import { ProcessPopoverComponent } from './process-popover/process-popover.component';
 
 /**
  * Contextual toolbar actions (projected into the shell toolbar's slot):
@@ -15,16 +17,21 @@ import { AddPopoverComponent } from './add-popover/add-popover.component';
 @Component({
   selector: 'app-toolbar-actions',
   standalone: true,
-  imports: [OverlayModule, AddPopoverComponent],
+  imports: [OverlayModule, AddPopoverComponent, ProcessPopoverComponent],
   templateUrl: './toolbar-actions.component.html',
   styleUrls: ['./toolbar-actions.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class ToolbarActionsComponent {
+  private workspaceActions = inject(WorkspaceActionsService);
+
   hasSelection = input(false);
   singleSelection = input(false);
   selectionCount = input(0);
   aiReady = input(false);
+  /** Already-done counts for the Process popover's per-step hints. */
+  withoutTranscript = input(0);
+  notAnalyzed = input(0);
 
   submitAdd = output<AddDownloadsPayload>();
   importFiles = output<void>();
@@ -34,9 +41,26 @@ export class ToolbarActionsComponent {
   analyze = output<void>();
   openEditor = output<void>();
   viewInfo = output<void>();
-  addToQueue = output<void>();
+  processSteps = output<PipelineStep[]>();
 
   addOpen = signal(false);
+  processOpen = signal(false);
+
+  constructor() {
+    // The inspector's "Process…" button opens this popover (single instance,
+    // anchored at the toolbar). Skip the initial value; react to bumps only.
+    let initialRequest = true;
+    effect(() => {
+      this.workspaceActions.processPopoverRequested();
+      if (initialRequest) {
+        initialRequest = false;
+        return;
+      }
+      if (this.hasSelection()) {
+        this.processOpen.set(true);
+      }
+    }, { allowSignalWrites: true });
+  }
 
   toggleAdd(): void {
     this.addOpen.update(open => !open);
@@ -44,6 +68,24 @@ export class ToolbarActionsComponent {
 
   closeAdd(): void {
     this.addOpen.set(false);
+  }
+
+  toggleProcess(): void {
+    this.processOpen.update(open => !open);
+  }
+
+  closeProcess(): void {
+    this.processOpen.set(false);
+  }
+
+  onSubmitProcess(steps: PipelineStep[]): void {
+    this.closeProcess();
+    this.processSteps.emit(steps);
+  }
+
+  onProcessSetupAi(): void {
+    this.closeProcess();
+    this.setupAi.emit();
   }
 
   onSubmitAdd(payload: AddDownloadsPayload): void {

@@ -36,6 +36,8 @@ import { ExportIndicatorComponent } from '../../components/export-indicator/expo
 import { TrimOpenerModalComponent } from '../../components/trim-opener-modal/trim-opener-modal.component';
 import { getApiBase } from '../../core/runtime-url';
 import { WorkspaceActionsService } from '../../core/stores/workspace-actions.service';
+import { PipelineStep } from '../../core/stores/pipeline-presets.service';
+import { NavigationStore } from '../../core/stores/navigation.store';
 import { InspectorStore } from '../../core/stores/inspector.store';
 import { classifyItemKind } from '../../core/item-kind';
 import { SelectionStore } from '../../core/stores/selection.store';
@@ -108,6 +110,8 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   private cdr = inject(ChangeDetectorRef);
   private workspaceActions = inject(WorkspaceActionsService);
   private inspectorStore = inject(InspectorStore);
+  /** Active /collections/:id — scopes the collections view to one collection. */
+  protected navStore = inject(NavigationStore);
   private selectionStore = inject(SelectionStore);
 
   /** True when running in a plain browser (LAN web client) rather than Electron. */
@@ -444,8 +448,8 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         case 'analyzeSelection':
           this.analyzeSelected();
           break;
-        case 'addSelectionToQueue':
-          this.onAddSelectedToQueue();
+        case 'processSelection':
+          this.processSelection(action.steps);
           break;
         case 'openAiSetup':
           this.aiWizardOpen.set(true);
@@ -2152,32 +2156,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     }
 
     // Resolve default AI model (library-specific first, then global)
-    let defaultModel: string | null = null;
-    try {
-      const libResponse = await firstValueFrom(
-        this.http.get<{ success: boolean; aiModel: string | null }>(
-          `${getApiBase()}/database/libraries/default-ai-model`
-        )
-      );
-      defaultModel = libResponse?.aiModel || null;
-    } catch (error) {
-      console.error('Failed to fetch library default AI model:', error);
-    }
-
-    if (!defaultModel) {
-      try {
-        const configResponse = await firstValueFrom(
-          this.http.get<{ success: boolean; defaultAI: { provider: string; model: string } | null }>(
-            `${getApiBase()}/config/default-ai`
-          )
-        );
-        if (configResponse?.defaultAI) {
-          defaultModel = `${configResponse.defaultAI.provider}:${configResponse.defaultAI.model}`;
-        }
-      } catch (error) {
-        console.error('Failed to fetch global default AI model:', error);
-      }
-    }
+    const defaultModel = await this.resolveDefaultAiModel();
 
     if (!defaultModel) {
       this.notificationService.error(
@@ -2240,74 +2219,117 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     });
   }
 
-  onAddSelectedToQueue() {
-    console.log('[ADD TO QUEUE] Starting...');
-
-    if (this.selectedCount() === 0) {
-      this.notificationService.warning('No Selection', 'Please select at least one video');
+  /**
+   * Queue a composed pipeline (from the shell's Process popover) for every
+   * selected library video: one job per video, tasks in step order. Replaces
+   * the old defaults-based "Add to Queue" — the user now picks the exact
+   * steps per selection.
+   */
+  private async processSelection(steps: PipelineStep[]) {
+    const selected = this.getSelectedLibraryVideos();
+    if (selected.length === 0 || steps.length === 0) {
+      this.notificationService.warning('Nothing to Process', 'Select at least one video and one step');
       return;
     }
 
-    // Get selected videos and add them to staging queue
-    const allVideos: VideoItem[] = [];
-    this.videoWeeks().forEach(week => {
-      allVideos.push(...week.videos);
-    });
+    // All pipeline steps are video/audio operations — filter out documents,
+    // images, and webpages (same rule as analyzeVideos).
+    const videos = selected.filter(v => this.isProcessableVideo(v));
+    if (videos.length === 0) {
+      this.notificationService.error(
+        'No Videos Selected',
+        'Processing steps only work on video files. Please select at least one video.'
+      );
+      return;
+    }
+    if (videos.length < selected.length) {
+      const skipped = selected.length - videos.length;
+      this.notificationService.warning(
+        'Non-video Files Excluded',
+        `${skipped} item${skipped !== 1 ? 's' : ''} (documents/images/webpages) can't be processed and ${skipped !== 1 ? 'were' : 'was'} skipped.`
+      );
+    }
 
-    const selectedItemIds = this.selectedVideoIds();
-    console.log('[ADD TO QUEUE] Selected item IDs:', selectedItemIds);
-
-    // Extract unique video IDs from itemIds (format: "weekLabel|videoId")
-    const uniqueVideoIds = new Set<string>();
-    selectedItemIds.forEach(itemId => {
-      const parts = itemId.split('|');
-      const videoId = parts.length > 1 ? parts[1] : itemId;
-      // Skip queue/staging items
-      if (!videoId.startsWith('queue-') && !videoId.startsWith('staging-')) {
-        uniqueVideoIds.add(videoId);
+    // The AI step runs with the user's default model unless one was chosen.
+    let finalSteps = steps;
+    const aiStep = steps.find(s => s.type === 'ai-analyze');
+    if (aiStep && !aiStep.config['aiModel']) {
+      const defaultModel = await this.resolveDefaultAiModel();
+      if (!defaultModel) {
+        this.notificationService.error(
+          'No AI Model Configured',
+          'Pick a default AI model in Settings → AI, then try again.'
+        );
+        return;
       }
+      finalSteps = steps.map(s =>
+        s.type === 'ai-analyze' ? { ...s, config: { ...s.config, aiModel: defaultModel } } : s
+      );
+    }
+
+    videos.forEach(video => {
+      this.queueService.addJob({
+        title: video.name,
+        videoId: video.id,
+        duration: video.duration,
+        thumbnail: video.thumbnailUrl,
+        tasks: finalSteps.map(s => createQueueTask(s.type, { ...s.config })),
+        titleResolved: true
+      });
     });
 
-    console.log('[ADD TO QUEUE] Unique video IDs:', Array.from(uniqueVideoIds));
+    const stepText = `${finalSteps.length} step${finalSteps.length === 1 ? '' : 's'}`;
+    const videoText = `${videos.length} video${videos.length === 1 ? '' : 's'}`;
+    this.notificationService.success('Pipeline Queued', `${stepText} queued for ${videoText}`);
 
-    if (uniqueVideoIds.size === 0) return;
-
-    // Add jobs to QueueService (single source of truth)
-    uniqueVideoIds.forEach(videoId => {
-      const video = allVideos.find(v => v.id === videoId);
-      if (video) {
-        const tasks: QueueTask[] = this.defaultTaskSettings
-          .filter(t => t.type !== 'download-import') // Library items don't need download
-          .map(t => createQueueTask(t.type, t.config || {}));
-
-        this.queueService.addJob({
-          title: video.name,
-          videoId: video.id,
-          duration: video.duration,
-          thumbnail: video.thumbnailUrl,
-          tasks,
-          titleResolved: true // Library videos already have resolved titles
-        });
-      }
-    });
-
-    console.log('[ADD TO QUEUE] Jobs added to QueueService');
-
-    // Switch to Queue tab using the proper method
-    console.log('[ADD TO QUEUE] Current tab before switch:', this.activeTab());
     this.setActiveTab('queue');
-    console.log('[ADD TO QUEUE] Current tab after switch:', this.activeTab());
-
-    // Show notification
-    this.notificationService.success(
-      'Added to Staging',
-      `Added ${uniqueVideoIds.size} ${uniqueVideoIds.size === 1 ? 'video' : 'videos'} to staging queue`
-    );
-
-    // Clear selection (Angular will handle this reactively)
     if (this.cascadeComponent) {
       this.cascadeComponent.clearSelection();
     }
+  }
+
+  /** True for items the processing pipeline can operate on (video/audio). */
+  private isProcessableVideo(video: VideoItem): boolean {
+    const mediaType = video.mediaType?.toLowerCase() || '';
+    const ext = video.fileExtension?.toLowerCase() || '';
+    const fileName = video.name?.toLowerCase() || '';
+    const nonVideoExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg', '.pdf', '.doc', '.docx', '.txt', '.md'];
+    const isNonVideo =
+      mediaType === 'webpage' ||
+      mediaType.startsWith('image/') ||
+      mediaType === 'application/pdf' ||
+      nonVideoExtensions.some(e => ext === e || fileName.endsWith(e));
+    return !isNonVideo;
+  }
+
+  /**
+   * Resolve the default AI model: library-specific first, then global.
+   * Shared by the Process pipeline and webpage analysis.
+   */
+  private async resolveDefaultAiModel(): Promise<string | null> {
+    try {
+      const libResponse = await firstValueFrom(
+        this.http.get<{ success: boolean; aiModel: string | null }>(
+          `${getApiBase()}/database/libraries/default-ai-model`
+        )
+      );
+      if (libResponse?.aiModel) return libResponse.aiModel;
+    } catch (error) {
+      console.error('Failed to fetch library default AI model:', error);
+    }
+    try {
+      const configResponse = await firstValueFrom(
+        this.http.get<{ success: boolean; defaultAI: { provider: string; model: string } | null }>(
+          `${getApiBase()}/config/default-ai`
+        )
+      );
+      if (configResponse?.defaultAI) {
+        return `${configResponse.defaultAI.provider}:${configResponse.defaultAI.model}`;
+      }
+    } catch (error) {
+      console.error('Failed to fetch global default AI model:', error);
+    }
+    return null;
   }
 
   /**

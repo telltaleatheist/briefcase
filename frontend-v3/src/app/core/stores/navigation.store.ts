@@ -121,7 +121,7 @@ export class NavigationStore {
     this.router.navigate([`/${section}`]);
   }
 
-  /** Navigate to a specific collection (Phase 1: highlight only; view shows all). */
+  /** Navigate to a specific collection (scopes the view to that collection). */
   goToCollection(id: string): void {
     this.drawerOpen.set(false);
     this.router.navigate(['/collections', id]);

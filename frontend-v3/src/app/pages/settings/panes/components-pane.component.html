@@ -22,6 +22,16 @@
       <span class="row-meta">{{ component.installed ? '' : fmtSize(component.sizeBytes) }}</span>
       @if (component.installed) {
         <span class="pill ok">Installed</span>
+        @if (canRemove(component)) {
+          @if (confirmingRemoveId() === component.id) {
+            <ui-button variant="secondary" size="sm" (pressed)="remove(component)">Remove?</ui-button>
+            <ui-button variant="ghost" size="sm" (pressed)="cancelRemove()">Keep</ui-button>
+          } @else {
+            <ui-button variant="ghost" size="sm" (pressed)="remove(component)">
+              {{ removingId() === component.id ? 'Removing…' : 'Remove' }}
+            </ui-button>
+          }
+        }
       } @else if (isBusy(component)) {
         <span class="pill accent">{{ statusOf(component.id) === 'downloading' ? pctOf(component.id) + '%' : 'Queued' }}</span>
       } @else {
@@ -46,6 +56,16 @@
       <span class="row-meta">{{ component.installed ? '' : fmtSize(component.sizeBytes) }}</span>
       @if (component.installed) {
         <span class="pill ok">Installed</span>
+        @if (canRemove(component)) {
+          @if (confirmingRemoveId() === component.id) {
+            <ui-button variant="secondary" size="sm" (pressed)="remove(component)">Remove?</ui-button>
+            <ui-button variant="ghost" size="sm" (pressed)="cancelRemove()">Keep</ui-button>
+          } @else {
+            <ui-button variant="ghost" size="sm" (pressed)="remove(component)">
+              {{ removingId() === component.id ? 'Removing…' : 'Remove' }}
+            </ui-button>
+          }
+        }
       } @else if (isBusy(component)) {
         <span class="pill accent">{{ statusOf(component.id) === 'downloading' ? pctOf(component.id) + '%' : 'Queued' }}</span>
       } @else {
@@ -74,6 +94,16 @@
       <span class="row-meta">{{ component.installed ? '' : fmtSize(component.sizeBytes) }}</span>
       @if (component.installed) {
         <span class="pill ok">Installed</span>
+        @if (canRemove(component)) {
+          @if (confirmingRemoveId() === component.id) {
+            <ui-button variant="secondary" size="sm" (pressed)="remove(component)">Remove?</ui-button>
+            <ui-button variant="ghost" size="sm" (pressed)="cancelRemove()">Keep</ui-button>
+          } @else {
+            <ui-button variant="ghost" size="sm" (pressed)="remove(component)">
+              {{ removingId() === component.id ? 'Removing…' : 'Remove' }}
+            </ui-button>
+          }
+        }
       } @else if (isBusy(component)) {
         <span class="pill accent">{{ statusOf(component.id) === 'downloading' ? pctOf(component.id) + '%' : 'Queued' }}</span>
       } @else {

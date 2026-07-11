@@ -1,5 +1,6 @@
-import { Component, signal, computed, inject, input, output, effect } from '@angular/core';
+import { Component, signal, computed, inject, input, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { CascadeComponent } from '../cascade/cascade.component';
 import { NewTabDialogComponent } from '../new-tab-dialog/new-tab-dialog.component';
@@ -19,11 +20,15 @@ export class TabsTabComponent {
   private tabsService = inject(TabsService);
   private notificationService = inject(NotificationService);
   private libraryService = inject(LibraryService);
+  private router = inject(Router);
 
   // Input: callbacks for parent coordination
   onSelectionChanged = input<(event: { count: number; ids: Set<string> }) => void>();
   onVideoAction = input<(event: { action: string; videos: VideoItem[] }) => void>();
   onPreviewRequested = input<(video: VideoItem) => void>();
+
+  /** When set (/collections/:id), the view scopes to that single collection. */
+  collectionId = input<string | null>(null);
 
   // Tabs state
   allTabs = signal<any[]>([]);
@@ -63,12 +68,28 @@ export class TabsTabComponent {
     });
   }
 
-  // Computed property for tab weeks
+  /** The scoped collection when on /collections/:id (null = all-collections view). */
+  activeCollection = computed<{ id: string; name: string } | null>(() => {
+    const id = this.collectionId();
+    if (!id) return null;
+    return this.allTabs().find(t => t.id === id) ?? null;
+  });
+
+  /** Item count of the scoped collection. */
+  activeCollectionCount = computed(() => {
+    const active = this.activeCollection();
+    if (!active) return 0;
+    return (this.tabVideosMap().get(active.id) || []).length;
+  });
+
+  // Computed property for tab weeks — scoped to one collection when :id is set
   tabWeeks = computed<VideoWeek[]>(() => {
     const tabs = this.allTabs();
     const videosMap = this.tabVideosMap();
+    const scopedId = this.collectionId();
 
-    return tabs.map(tab => ({
+    const visible = scopedId ? tabs.filter(t => t.id === scopedId) : tabs;
+    return visible.map(tab => ({
       weekLabel: tab.name,
       videos: videosMap.get(tab.id) || []
     }));
@@ -187,15 +208,41 @@ export class TabsTabComponent {
     }
   }
 
+  // ── Scoped single-collection header actions ────────────────────────────
+
+  openActiveInScout() {
+    const active = this.activeCollection();
+    if (active) this.openAllInScout(active.name);
+  }
+
+  renameActive() {
+    const active = this.activeCollection();
+    if (active) this.openRenameDialog(active.name);
+  }
+
+  async deleteActive() {
+    const active = this.activeCollection();
+    if (!active) return;
+    await this.deleteTabByName(active.name);
+    // If the scoped collection is gone, fall back to the all-collections view.
+    if (!this.allTabs().some(t => t.id === active.id)) {
+      this.router.navigate(['/collections']);
+    }
+  }
+
+  backToAll() {
+    this.router.navigate(['/collections']);
+  }
+
   /**
-   * Open every video in this tab in Scout, in display order — the
+   * Open every video in this collection in Scout, in display order — the
    * run-of-show flow (each video becomes an editor tab).
    */
   openAllInScout(tabName: string) {
     const week = this.tabWeeks().find(w => w.weekLabel === tabName);
     const videos = week?.videos ?? [];
     if (videos.length === 0) {
-      this.notificationService.info('Empty Tab', 'This tab has no videos to open');
+      this.notificationService.info('Empty Collection', 'This collection has no videos to open');
       return;
     }
     const callback = this.onVideoAction();
@@ -210,7 +257,7 @@ export class TabsTabComponent {
   openRenameDialog(tabName: string) {
     const tab = this.allTabs().find(t => t.name === tabName);
     if (!tab) {
-      this.notificationService.error('Tab Not Found', `Could not find tab "${tabName}"`);
+      this.notificationService.error('Collection Not Found', `Could not find collection "${tabName}"`);
       return;
     }
 
@@ -243,12 +290,12 @@ export class TabsTabComponent {
       // Force fresh reload from backend
       await this.loadTabsData();
 
-      this.notificationService.success('Tab Renamed', `Renamed "${oldName}" to "${newName}"`);
+      this.notificationService.success('Collection Renamed', `Renamed "${oldName}" to "${newName}"`);
     } catch (error: any) {
       console.error('Failed to rename tab:', error);
       this.notificationService.error(
-        'Failed to Rename Tab',
-        error?.message || 'An error occurred while renaming the tab'
+        'Failed to Rename Collection',
+        error?.message || 'An error occurred while renaming the collection'
       );
     } finally {
       // Reset rename state
@@ -276,12 +323,12 @@ export class TabsTabComponent {
       // Find the tab by name
       const tab = this.allTabs().find(t => t.name === tabName);
       if (!tab) {
-        this.notificationService.error('Tab Not Found', `Could not find tab "${tabName}"`);
+        this.notificationService.error('Collection Not Found', `Could not find collection "${tabName}"`);
         return;
       }
 
       // Confirm deletion
-      if (!confirm(`Are you sure you want to delete the tab "${tabName}"? Videos will remain in your library.`)) {
+      if (!confirm(`Are you sure you want to delete the collection "${tabName}"? Items will remain in your library.`)) {
         return;
       }
 
@@ -328,12 +375,12 @@ export class TabsTabComponent {
       }
       this.tabVideosMap.set(videosMap);
 
-      this.notificationService.success('Tab Deleted', `Tab "${tabName}" has been deleted`);
+      this.notificationService.success('Collection Deleted', `Collection "${tabName}" has been deleted`);
     } catch (error: any) {
       console.error('Failed to delete tab:', error);
       this.notificationService.error(
-        'Failed to Delete Tab',
-        error?.message || 'An error occurred while deleting the tab'
+        'Failed to Delete Collection',
+        error?.message || 'An error occurred while deleting the collection'
       );
     }
   }
@@ -378,12 +425,12 @@ export class TabsTabComponent {
       await this.loadTabsData();
 
       const videoText = videoIds.length === 1 ? '1 video' : `${videoIds.length} videos`;
-      this.notificationService.success('Removed from Tab', `Removed ${videoText} from tab`);
+      this.notificationService.success('Removed from Collection', `Removed ${videoText} from collection`);
     } catch (error: any) {
       console.error('Failed to remove videos from tab:', error);
       this.notificationService.error(
-        'Failed to Remove from Tab',
-        error?.message || 'An error occurred while removing videos from the tab'
+        'Failed to Remove from Collection',
+        error?.message || 'An error occurred while removing videos from the collection'
       );
     }
   }
@@ -449,19 +496,19 @@ export class TabsTabComponent {
 
       let message = '';
       if (addedCount > 0 && alreadyInTab > 0) {
-        message = `Added ${addedCount} video${addedCount !== 1 ? 's' : ''} to "${tab.name}". ${alreadyInTab} already in tab.`;
+        message = `Added ${addedCount} video${addedCount !== 1 ? 's' : ''} to "${tab.name}". ${alreadyInTab} already in it.`;
       } else if (addedCount > 0) {
         message = `Added ${addedCount} video${addedCount !== 1 ? 's' : ''} to "${tab.name}"`;
       } else {
         message = `All videos already in "${tab.name}"`;
       }
 
-      this.notificationService.success('Videos Added to Tab', message);
+      this.notificationService.success('Added to Collection', message);
     } catch (error: any) {
       console.error('Failed to add videos to tab:', error);
       this.notificationService.error(
-        'Failed to Add to Tab',
-        error?.message || 'An error occurred while adding videos to the tab'
+        'Failed to Add to Collection',
+        error?.message || 'An error occurred while adding videos to the collection'
       );
     }
   }
@@ -495,14 +542,14 @@ export class TabsTabComponent {
         const videoCount = videoIds.length;
         const videoText = videoCount === 1 ? '1 video' : `${videoCount} videos`;
         this.notificationService.success(
-          'Tab Created',
+          'Collection Created',
           `Created "${tabName}" with ${videoText}`
         );
       } else {
         // Show success notification for empty tab
         this.notificationService.success(
-          'Tab Created',
-          `Created empty tab "${tabName}"`
+          'Collection Created',
+          `Created empty collection "${tabName}"`
         );
       }
 
@@ -514,8 +561,8 @@ export class TabsTabComponent {
     } catch (error: any) {
       console.error('Failed to create tab:', error);
       this.notificationService.error(
-        'Failed to Create Tab',
-        error?.message || 'An error occurred while creating the tab'
+        'Failed to Create Collection',
+        error?.message || 'An error occurred while creating the collection'
       );
     }
   }

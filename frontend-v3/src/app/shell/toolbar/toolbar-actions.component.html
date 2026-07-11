@@ -55,15 +55,37 @@
   <button
     type="button"
     class="action-btn"
+    cdkOverlayOrigin
+    #processTrigger="cdkOverlayOrigin"
     [disabled]="!hasSelection()"
-    (click)="addToQueue.emit()"
-    [title]="hasSelection() ? 'Add selected to the processing queue' : 'Select items to queue'">
-    <span class="btn-icon">⏳</span> Queue
+    (click)="toggleProcess()"
+    [attr.aria-expanded]="processOpen()"
+    [title]="hasSelection() ? 'Queue a pipeline of jobs for the selection' : 'Select items to process'">
+    <span class="btn-icon">⚡</span> Process
     @if (selectionCount() > 0) {
       <span class="count-badge">{{ selectionCount() }}</span>
     }
   </button>
 </div>
+
+<ng-template
+  cdkConnectedOverlay
+  [cdkConnectedOverlayOrigin]="processTrigger"
+  [cdkConnectedOverlayOpen]="processOpen()"
+  [cdkConnectedOverlayHasBackdrop]="true"
+  cdkConnectedOverlayBackdropClass="cdk-overlay-transparent-backdrop"
+  [cdkConnectedOverlayOffsetY]="8"
+  (backdropClick)="closeProcess()"
+  (detach)="closeProcess()">
+  <app-process-popover
+    [selectionCount]="selectionCount()"
+    [withoutTranscript]="withoutTranscript()"
+    [notAnalyzed]="notAnalyzed()"
+    [aiReady]="aiReady()"
+    (submitSteps)="onSubmitProcess($event)"
+    (setupAi)="onProcessSetupAi()"
+    (dismissed)="closeProcess()" />
+</ng-template>
 
 <ng-template
   cdkConnectedOverlay

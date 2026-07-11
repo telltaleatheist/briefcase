@@ -45,6 +45,7 @@ import { ComponentService } from '../../services/component.service';
                   @case ('downloading') {
                     <div class="di-bar"><div class="di-fill" [style.width.%]="dl.pctOf(id)"></div></div>
                     <span class="di-pct">{{ dl.pctOf(id) }}%</span>
+                    <button class="di-cancel" title="Cancel download" (click)="dl.cancelCurrent()">✕</button>
                   }
                   @case ('queued') { <span class="di-pct">Queued</span> }
                   @case ('done') { <span class="di-done">✓</span> }
@@ -100,6 +101,11 @@ import { ComponentService } from '../../services/component.service';
     .di-bar { flex: 0 0 60px; height: 4px; background: var(--bg-tertiary, #2d2d2d); border-radius: 2px; overflow: hidden; }
     .di-fill { height: 100%; background: var(--gradient-primary, linear-gradient(135deg,#ff6b35,#ffa366)); transition: width 0.2s ease; }
     .di-pct { color: var(--text-secondary, #d1d5db); font-variant-numeric: tabular-nums; }
+    .di-cancel {
+      background: none; border: 0; cursor: pointer; padding: 0 2px;
+      color: var(--text-secondary, #d1d5db); font-size: 11px; line-height: 1;
+    }
+    .di-cancel:hover { color: var(--error, #ef4444); }
     .di-done { color: var(--success, #22c55e); }
     .di-failed { color: var(--error, #ef4444); font-size: 0.6875rem; }
   `],

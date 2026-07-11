@@ -79,9 +79,10 @@
           (trimOpenerRequested)="onTrimOpenerRequested($event)"
         />
 
-        <!-- Tabs Tab: User-created tabs with videos -->
+        <!-- Collections: user-created working sets (scoped to one on /collections/:id) -->
         <app-tabs-tab
           *ngIf="activeTab() === 'tabs'"
+          [collectionId]="navStore.activeCollectionId()"
           [onSelectionChanged]="onSelectionChanged.bind(this)"
           [onVideoAction]="onVideoAction.bind(this)"
           [onPreviewRequested]="onPreviewRequested.bind(this)"

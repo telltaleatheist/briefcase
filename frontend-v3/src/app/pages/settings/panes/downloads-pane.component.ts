@@ -2,9 +2,12 @@ import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { AddDefaultsService, DownloadQuality, QUALITY_OPTIONS } from '../../../core/stores/add-defaults.service';
 
 /**
- * Settings → Downloads: defaults for the toolbar's one-shot Add flow.
- * Reads/writes the same AddDefaultsService the popover uses, so the two
- * surfaces can't drift.
+ * Settings → Downloads: the default download quality.
+ *
+ * Pipeline steps are configured per item, not here: the Add popover picks the
+ * steps for each add, and the toolbar's Process popover composes pipelines
+ * (with savable presets) for anything already in the library. Both remember
+ * your last choice on their own.
  */
 @Component({
   selector: 'app-downloads-pane',
@@ -14,8 +17,8 @@ import { AddDefaultsService, DownloadQuality, QUALITY_OPTIONS } from '../../../c
   template: `
     <h2 class="pane-title">Downloads</h2>
     <p class="pane-lede">
-      Defaults for the “+ Add” flow. These are also updated automatically each time
-      you change them in the Add popover — the popover always remembers your last choice.
+      Which jobs run on a video is chosen per add — in the “＋ Add” popover — and per
+      selection via the toolbar's “⚡ Process” pipeline. Both remember your last choice.
     </p>
 
     <div class="pane-section">
@@ -35,33 +38,6 @@ import { AddDefaultsService, DownloadQuality, QUALITY_OPTIONS } from '../../../c
         whatever you drag in keeps its original quality.
       </p>
     </div>
-
-    <div class="pane-section">
-      <p class="section-label">Default pipeline</p>
-      <label class="check-row">
-        <input
-          type="checkbox"
-          [checked]="defaults.defaults().trim"
-          (change)="setFlag('trim', $event)" />
-        Trim after download
-        <span class="check-hint">— opens the trimmer when the download finishes</span>
-      </label>
-      <label class="check-row">
-        <input
-          type="checkbox"
-          [checked]="defaults.defaults().transcribe"
-          (change)="setFlag('transcribe', $event)" />
-        Transcribe
-      </label>
-      <label class="check-row">
-        <input
-          type="checkbox"
-          [checked]="defaults.defaults().analyze"
-          (change)="setFlag('analyze', $event)" />
-        Analyze with AI
-        <span class="check-hint">— requires an AI provider (Settings → AI)</span>
-      </label>
-    </div>
   `
 })
 export class DownloadsPaneComponent {
@@ -71,10 +47,5 @@ export class DownloadsPaneComponent {
   setQuality(event: Event): void {
     const value = (event.target as HTMLSelectElement).value as DownloadQuality;
     this.defaults.update({ quality: value });
-  }
-
-  setFlag(flag: 'trim' | 'transcribe' | 'analyze', event: Event): void {
-    const checked = (event.target as HTMLInputElement).checked;
-    this.defaults.update({ [flag]: checked });
   }
 }

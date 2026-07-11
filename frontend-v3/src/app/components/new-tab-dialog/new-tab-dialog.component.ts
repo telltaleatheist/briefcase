@@ -12,13 +12,13 @@ import { ButtonComponent } from '../button/button.component';
       <div class="modal-overlay" (click)="onOverlayClick($event)" (mousedown)="$event.stopPropagation()">
         <div class="modal-dialog" (click)="$event.stopPropagation()">
           <div class="modal-header">
-            <h3 class="modal-title">{{ mode === 'rename' ? 'Rename Tab' : 'Create New Tab' }}</h3>
+            <h3 class="modal-title">{{ mode === 'rename' ? 'Rename Collection' : 'New Collection' }}</h3>
             <button class="modal-close" (click)="close()">×</button>
           </div>
 
           <div class="modal-body">
             <div class="form-group">
-              <label class="form-label">Tab Name</label>
+              <label class="form-label">Collection Name</label>
               <input
                 #nameInput
                 type="text"
@@ -48,7 +48,7 @@ import { ButtonComponent } from '../button/button.component';
               [icon]="mode === 'rename' ? '✏️' : '📑'"
               (click)="submit()"
               [disabled]="!tabName.trim() || (mode === 'rename' && tabName.trim() === initialName)">
-              {{ mode === 'rename' ? 'Rename Tab' : 'Create Tab' }}
+              {{ mode === 'rename' ? 'Rename' : 'Create Collection' }}
             </app-button>
           </div>
         </div>
