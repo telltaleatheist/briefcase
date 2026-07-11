@@ -28,6 +28,8 @@ export class FfmpegService {
   private readonly logger = new Logger(FfmpegService.name);
   private ffmpeg: FfmpegBridge;
   private ffprobe: FfprobeBridge;
+  /** Resolved ffmpeg path the current bridges were built for; gates lazy rebuild. */
+  private ffmpegBinaryPath?: string;
 
   constructor(
     private readonly eventService: MediaEventService,
@@ -35,32 +37,58 @@ export class FfmpegService {
     private readonly eventEmitter: EventEmitter2,
     private readonly thumbnailService: ThumbnailService
   ) {
-    try {
-      // ALWAYS use bundled binaries from getRuntimePaths() - NEVER use system binaries
-      // This ensures consistent behavior across all platforms and prevents using
-      // user's system-installed binaries which may be incompatible versions
-      const paths = getRuntimePaths();
-      const ffmpegPath = paths.ffmpeg;
-      const ffprobePath = paths.ffprobe;
-
-      // Verify binaries exist and have correct architecture
-      verifyBinary(ffmpegPath, 'FFmpeg');
-      verifyBinary(ffprobePath, 'FFprobe');
-
-      // Initialize bridges
-      this.ffmpeg = new FfmpegBridge(ffmpegPath);
-      this.ffprobe = new FfprobeBridge(ffprobePath);
-
-      this.logger.log(`FFmpeg path: ${ffmpegPath}`);
-      this.logger.log(`FFprobe path: ${ffprobePath}`);
-    } catch (error) {
-      this.logger.error('Failed to initialize FFmpeg/FFprobe bridges', error);
-      throw error;
+    // Resolve the bundled/downloaded binary paths but DEFER verification to use
+    // time (ensureFfmpegReady). Verifying here would throw whenever ffmpeg hasn't
+    // been downloaded yet and take the entire Nest bootstrap down with it — which
+    // would stop the backend from ever serving the first-run setup wizard that
+    // installs ffmpeg. Construction must stay non-fatal; a missing binary instead
+    // surfaces as an honest error when a media operation actually runs.
+    const { ffmpeg, ffprobe } = getRuntimePaths();
+    if (fs.existsSync(ffmpeg) && fs.existsSync(ffprobe)) {
+      this.ffmpeg = new FfmpegBridge(ffmpeg);
+      this.ffprobe = new FfprobeBridge(ffprobe);
+      this.ffmpegBinaryPath = ffmpeg;
+      this.logger.log(`FFmpeg path: ${ffmpeg}`);
+      this.logger.log(`FFprobe path: ${ffprobe}`);
+    } else {
+      this.logger.warn(
+        `FFmpeg/FFprobe not installed yet (expected at ${ffmpeg}). ` +
+        `Deferring until first-run setup installs the ffmpeg-tools component.`
+      );
     }
+  }
+
+  /**
+   * Resolve + verify the ffmpeg/ffprobe binaries at USE time (never at boot).
+   *
+   * getRuntimePaths() re-reads the downloaded-component state on every call, so a
+   * binary installed by first-run setup is picked up here WITHOUT restarting the
+   * backend: when the resolved path changes (or the bridges were never built
+   * because the binary was absent at boot) we rebuild the bridges against the
+   * current path. Throws an honest, user-facing error while ffmpeg is missing.
+   */
+  private ensureFfmpegReady(): void {
+    const { ffmpeg, ffprobe } = getRuntimePaths();
+    if (this.ffmpegBinaryPath === ffmpeg && fs.existsSync(ffmpeg) && fs.existsSync(ffprobe)) {
+      return;
+    }
+    if (!fs.existsSync(ffmpeg) || !fs.existsSync(ffprobe)) {
+      throw new Error(
+        'FFmpeg is not installed — complete first-run setup or install it in Settings → Components.'
+      );
+    }
+    verifyBinary(ffmpeg, 'FFmpeg');
+    verifyBinary(ffprobe, 'FFprobe');
+    this.ffmpeg = new FfmpegBridge(ffmpeg);
+    this.ffprobe = new FfprobeBridge(ffprobe);
+    this.ffmpegBinaryPath = ffmpeg;
+    this.logger.log(`FFmpeg path: ${ffmpeg}`);
+    this.logger.log(`FFprobe path: ${ffprobe}`);
   }
 
   async getVideoMetadata(videoPath: string): Promise<VideoMetadata> {
     try {
+      this.ensureFfmpegReady();
       const metadata = await this.ffprobe.probe(videoPath);
 
       const videoStream = metadata.streams?.find((stream) => stream.codec_type === 'video');
@@ -136,6 +164,7 @@ export class FfmpegService {
     let tempOutputFile: string | undefined;
 
     try {
+      this.ensureFfmpegReady();
       const selectedEncoder = 'libx264';
       const processId = `reencode-${Date.now()}`;
 
@@ -573,6 +602,7 @@ export class FfmpegService {
     }
 
     try {
+      this.ensureFfmpegReady();
       if (!outputPath) {
         if (videoId) {
           try {
@@ -653,6 +683,7 @@ export class FfmpegService {
     let tempOutputFile: string | undefined;
 
     try {
+      this.ensureFfmpegReady();
       const processId = `normalize-${Date.now()}`;
 
       // STEP 1: Copy source file to temp directory to avoid file locks (Syncthing, etc.)
@@ -850,6 +881,7 @@ export class FfmpegService {
   }
 
   async generateWaveform(filePath: string, samplesCount: number = 500): Promise<{ samples: number[], duration: number }> {
+    this.ensureFfmpegReady();
     if (!fs.existsSync(filePath)) {
       throw new Error(`File not found: ${filePath}`);
     }

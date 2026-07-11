@@ -43,9 +43,9 @@
     "dev:test-bundled": "node scripts/dev-test-bundled.js",
     "electron:test-packaged": "npm run build:all && cross-env NODE_ENV=production electron .",
     "electron": "npm run build:all && electron .",
-    "package:mac": "npm run clean:mac && npm run download:binaries && npm run install:ffmpeg:x64 && npm run build:all && npm run package:backend:prod && npm run package:mac:electron-arm64:unsigned && npm run package:mac:electron-x64:unsigned",
-    "package:mac:signed": "npm run clean:mac && npm run download:binaries && npm run install:ffmpeg:x64 && npm run build:all && npm run package:backend:prod && npm run package:mac:electron-arm64 && npm run package:mac:electron-x64",
-    "package:mac:fast": "npm run download:binaries && npm run install:ffmpeg:x64 && npm run build:fast && npm run package:backend:prod && npm run package:mac:electron-arm64:unsigned && npm run package:mac:electron-x64:unsigned",
+    "package:mac": "npm run clean:mac && npm run install:ffmpeg:x64 && npm run build:all && npm run package:backend:prod && npm run package:mac:electron-arm64:unsigned && npm run package:mac:electron-x64:unsigned",
+    "package:mac:signed": "npm run clean:mac && npm run install:ffmpeg:x64 && npm run build:all && npm run package:backend:prod && npm run package:mac:electron-arm64 && npm run package:mac:electron-x64",
+    "package:mac:fast": "npm run install:ffmpeg:x64 && npm run build:fast && npm run package:backend:prod && npm run package:mac:electron-arm64:unsigned && npm run package:mac:electron-x64:unsigned",
     "package:mac:electron-arm64": "electron-builder --mac --arm64 --publish never -c.directories.output=$HOME/Projects/Briefcase-builds",
     "package:mac:electron-x64": "electron-builder --mac --x64 --publish never -c.directories.output=$HOME/Projects/Briefcase-builds",
     "package:mac:electron-arm64:unsigned": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false SKIP_NOTARIZE=1 electron-builder --mac --arm64 --publish never -c.directories.output=$HOME/Projects/Briefcase-builds",
@@ -54,32 +54,24 @@
     "publish:mac:electron-x64": "electron-builder --mac --x64 --publish always -c.directories.output=$HOME/Projects/Briefcase-builds",
     "version:bump": "npm version patch --no-git-tag-version",
     "version:bump:minor": "npm version minor --no-git-tag-version",
-    "publish:mac": "npm run version:bump && npm run clean:mac && npm run download:binaries && npm run install:ffmpeg:x64 && npm run build:all && npm run package:backend:prod && npm run publish:mac:electron-arm64 && npm run publish:mac:electron-x64 && node scripts/publish-app.js --mac",
+    "publish:mac": "npm run version:bump && npm run clean:mac && npm run install:ffmpeg:x64 && npm run build:all && npm run package:backend:prod && npm run publish:mac:electron-arm64 && npm run publish:mac:electron-x64 && node scripts/publish-app.js --mac",
     "publish:app:dry:mac": "node scripts/publish-app.js --mac --dry-run",
     "publish:app:dry:win": "node scripts/publish-app.js --win --dry-run",
-    "package:mac-arm64": "npm run clean:mac && npm run download:binaries && npm run build:all && npm run package:backend:prod && electron-builder --mac --arm64 --publish never",
-    "package:mac-arm64:fast": "npm run download:binaries && npm run build:all && npm run package:backend:prod && electron-builder --mac --arm64 --publish never",
+    "package:mac-arm64": "npm run clean:mac && npm run build:all && npm run package:backend:prod && electron-builder --mac --arm64 --publish never",
+    "package:mac-arm64:fast": "npm run build:all && npm run package:backend:prod && electron-builder --mac --arm64 --publish never",
     "install:ffmpeg:x64": "node scripts/install-ffmpeg-x64.js",
     "binaries:build": "node scripts/package-binaries.js && node scripts/package-llama-extra.js && node scripts/add-whisper-models-to-manifest.js",
     "binaries:publish": "npm run binaries:build && node scripts/publish-binaries.js",
     "binaries:publish:dry": "node scripts/publish-binaries.js --dry-run",
-    "package:mac-x64": "npm run clean:mac && npm run download:binaries && npm run install:ffmpeg:x64 && npm run build:all && npm run package:backend:prod && electron-builder --mac --x64 --publish never",
-    "package:mac-x64:fast": "npm run download:binaries && npm run install:ffmpeg:x64 && npm run build:all && npm run package:backend:prod && electron-builder --mac --x64 --publish never",
-    "package:win-x64": "npm run clean:win && npm run download:binaries && npm run build:all && npm run package:backend:prod && electron-builder --win --x64 --publish never",
-    "publish:win-x64": "npm run version:bump && npm run clean:win && npm run download:binaries && npm run build:all && npm run package:backend:prod && electron-builder --win --x64 --publish always && node scripts/publish-app.js --win",
-    "package:win-x64:fast": "npm run download:binaries && npm run build:all && npm run package:backend:prod && electron-builder --win --x64 --publish never",
-    "package:win-arm64": "npm run clean:win && npm run download:binaries && npm run build:all && npm run package:backend:prod && electron-builder --win --arm64 --publish never",
-    "package:win-arm64:fast": "npm run download:binaries && npm run build:all && npm run package:backend:prod && electron-builder --win --arm64 --publish never",
-    "package:linux": "npm run clean:linux && npm run download:binaries && npm run build:all && npm run package:backend:prod && electron-builder --linux --publish never",
-    "package:linux:fast": "npm run download:binaries && npm run build:all && npm run package:backend:prod && electron-builder --linux --publish never",
-    "package:mac-arm64:lite": "npm run clean:mac && npm run download:binaries && npm run build:all && npm run package:backend:prod && electron-builder --config electron-builder.lite.json --mac --arm64 --publish never",
-    "package:mac-arm64:full": "npm run clean:mac && npm run download:binaries && npm run build:all && npm run package:backend:prod && electron-builder --config electron-builder.full.json --mac --arm64 --publish never",
-    "package:mac-x64:lite": "npm run clean:mac && npm run download:binaries && npm run install:ffmpeg:x64 && npm run build:all && npm run package:backend:prod && electron-builder --config electron-builder.lite.json --mac --x64 --publish never",
-    "package:mac-x64:full": "npm run clean:mac && npm run download:binaries && npm run install:ffmpeg:x64 && npm run build:all && npm run package:backend:prod && electron-builder --config electron-builder.full.json --mac --x64 --publish never",
-    "package:win-x64:lite": "npm run clean:win && npm run download:binaries && npm run build:all && npm run package:backend:prod && electron-builder --config electron-builder.lite.json --win --x64 --publish never",
-    "package:win-x64:full": "npm run clean:win && npm run download:binaries && npm run build:all && npm run package:backend:prod && electron-builder --config electron-builder.full.json --win --x64 --publish never",
-    "package:linux:lite": "npm run clean:linux && npm run download:binaries && npm run build:all && npm run package:backend:prod && electron-builder --config electron-builder.lite.json --linux --publish never",
-    "package:linux:full": "npm run clean:linux && npm run download:binaries && npm run build:all && npm run package:backend:prod && electron-builder --config electron-builder.full.json --linux --publish never",
+    "package:mac-x64": "npm run clean:mac && npm run install:ffmpeg:x64 && npm run build:all && npm run package:backend:prod && electron-builder --mac --x64 --publish never",
+    "package:mac-x64:fast": "npm run install:ffmpeg:x64 && npm run build:all && npm run package:backend:prod && electron-builder --mac --x64 --publish never",
+    "package:win-x64": "npm run clean:win && npm run build:all && npm run package:backend:prod && electron-builder --win --x64 --publish never",
+    "publish:win-x64": "npm run version:bump && npm run clean:win && npm run build:all && npm run package:backend:prod && electron-builder --win --x64 --publish always && node scripts/publish-app.js --win",
+    "package:win-x64:fast": "npm run build:all && npm run package:backend:prod && electron-builder --win --x64 --publish never",
+    "package:win-arm64": "npm run clean:win && npm run build:all && npm run package:backend:prod && electron-builder --win --arm64 --publish never",
+    "package:win-arm64:fast": "npm run build:all && npm run package:backend:prod && electron-builder --win --arm64 --publish never",
+    "package:linux": "npm run clean:linux && npm run build:all && npm run package:backend:prod && electron-builder --linux --publish never",
+    "package:linux:fast": "npm run build:all && npm run package:backend:prod && electron-builder --linux --publish never",
     "clean:cache": "find . -name '.DS_Store' -delete && find . -name '*.tsbuildinfo' -not -path '*/node_modules/*' -delete"
   },
   "keywords": [
@@ -144,7 +136,8 @@
         "to": "assets",
         "filter": [
           "tray-icon-*.png",
-          "tray-icon-*.ico"
+          "tray-icon-*.ico",
+          "manifest.json"
         ]
       },
       {
@@ -165,15 +158,6 @@
         "to": "dist-electron/shared",
         "filter": [
           "**/*"
-        ]
-      },
-      {
-        "from": "utilities/models",
-        "to": "utilities/models",
-        "filter": [
-          "ggml-tiny.bin",
-          "ggml-base.bin",
-          "ggml-small.bin"
         ]
       }
     ],
@@ -204,7 +188,6 @@
       "!**/node_modules/@ffprobe-installer/**"
     ],
     "asarUnpack": [
-      "utilities/**",
       "frontend-v3/dist/frontend-v3/**/*"
     ],
     "mac": {
@@ -224,64 +207,7 @@
       "notarize": false,
       "entitlements": "assets/entitlements.mac.plist",
       "entitlementsInherit": "assets/entitlements.mac.plist",
-      "extraResources": [
-        {
-          "from": "node_modules/@ffmpeg-installer/darwin-arm64",
-          "to": "node_modules/@ffmpeg-installer/darwin-arm64"
-        },
-        {
-          "from": "node_modules/@ffprobe-installer/darwin-arm64",
-          "to": "node_modules/@ffprobe-installer/darwin-arm64"
-        },
-        {
-          "from": "node_modules/@ffmpeg-installer/darwin-x64",
-          "to": "node_modules/@ffmpeg-installer/darwin-x64"
-        },
-        {
-          "from": "node_modules/@ffprobe-installer/darwin-x64",
-          "to": "node_modules/@ffprobe-installer/darwin-x64"
-        },
-        {
-          "from": "utilities/bin/yt-dlp_macos_dir",
-          "to": "utilities/bin/yt-dlp_macos_dir"
-        },
-        {
-          "from": "utilities/bin",
-          "to": "utilities/bin",
-          "filter": [
-            "whisper-cli-arm64",
-            "whisper-cli-x64",
-            "libwhisper.1-arm64.dylib",
-            "libwhisper.1-x64.dylib",
-            "libggml-arm64.dylib",
-            "libggml-x64.dylib",
-            "libggml-base-arm64.dylib",
-            "libggml-base-x64.dylib",
-            "libggml-cpu-arm64.dylib",
-            "libggml-cpu-x64.dylib",
-            "libggml-blas-arm64.dylib",
-            "libggml-blas-x64.dylib",
-            "libggml-metal-arm64.dylib",
-            "llama-server-arm64",
-            "llama-server-x64",
-            "libllama-arm64.dylib",
-            "libllama-x64.dylib",
-            "llama-libggml-arm64.dylib",
-            "llama-libggml-x64.dylib",
-            "llama-libggml-base-arm64.dylib",
-            "llama-libggml-base-x64.dylib",
-            "llama-libggml-cpu-arm64.dylib",
-            "llama-libggml-cpu-x64.dylib",
-            "llama-libggml-metal-arm64.dylib",
-            "llama-libggml-blas-arm64.dylib",
-            "llama-libggml-blas-x64.dylib",
-            "llama-libggml-rpc-arm64.dylib",
-            "llama-libggml-rpc-x64.dylib",
-            "libmtmd-arm64.dylib",
-            "libmtmd-x64.dylib"
-          ]
-        }
-      ],
+      "extraResources": [],
       "extendInfo": {
         "LSUIElement": false
       }
@@ -312,43 +238,7 @@
         }
       ],
       "artifactName": "${productName} Setup ${version}.${ext}",
-      "extraResources": [
-        {
-          "from": "node_modules/@ffmpeg-installer/win32-x64",
-          "to": "node_modules/@ffmpeg-installer/win32-x64"
-        },
-        {
-          "from": "node_modules/@ffprobe-installer/win32-x64",
-          "to": "node_modules/@ffprobe-installer/win32-x64"
-        },
-        {
-          "from": "utilities/bin/yt-dlp_win_dir",
-          "to": "utilities/bin/yt-dlp_win_dir"
-        },
-        {
-          "from": "utilities/bin",
-          "to": "utilities/bin",
-          "filter": [
-            "whisper-cli.exe",
-            "whisper.dll",
-            "llama-server.exe",
-            "llama.dll",
-            "mtmd.dll",
-            "ggml.dll",
-            "ggml-base.dll",
-            "ggml-cpu.dll",
-            "ggml-cpu-*.dll",
-            "ggml-rpc.dll",
-            "ggml-vulkan.dll",
-            "libcurl-x64.dll",
-            "libomp140.x86_64.dll",
-            "MSVCP140.dll",
-            "MSVCP140_CODECVT_IDS.dll",
-            "VCRUNTIME140.dll",
-            "VCRUNTIME140_1.dll"
-          ]
-        }
-      ]
+      "extraResources": []
     },
     "nsis": {
       "oneClick": false,
@@ -373,27 +263,7 @@
         "deb"
       ],
       "category": "Utility",
-      "extraResources": [
-        {
-          "from": "node_modules/@ffmpeg-installer/linux-x64",
-          "to": "node_modules/@ffmpeg-installer/linux-x64"
-        },
-        {
-          "from": "node_modules/@ffprobe-installer/linux-x64",
-          "to": "node_modules/@ffprobe-installer/linux-x64"
-        },
-        {
-          "from": "utilities/bin/yt-dlp_linux_dir",
-          "to": "utilities/bin/yt-dlp_linux_dir"
-        },
-        {
-          "from": "utilities/bin",
-          "to": "utilities/bin",
-          "filter": [
-            "whisper-cli"
-          ]
-        }
-      ]
+      "extraResources": []
     },
     "publish": {
       "provider": "github",

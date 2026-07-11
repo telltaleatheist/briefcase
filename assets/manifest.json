@@ -3,7 +3,7 @@
   "releaseTag": "binaries-v1",
   "repo": "telltaleatheist/briefcase",
   "baseUrl": "https://github.com/telltaleatheist/briefcase/releases/download/binaries-v1",
-  "note": "AI/whisper models are NOT here — they download from Hugging Face at runtime.",
+  "note": "AI/whisper models are NOT here \u2014 they download from Hugging Face at runtime.",
   "components": [
     {
       "id": "ffmpeg-tools",
@@ -69,8 +69,8 @@
           "arch": "x64",
           "url": "https://github.com/telltaleatheist/briefcase/releases/download/binaries-v1/whisper-win32-x64.zip",
           "file": "whisper-win32-x64.zip",
-          "sha256": "a2959a1b21bd58f44387e77a592900b088219a80f0108532f8e12642e24eb2a9",
-          "bytes": 1714118,
+          "sha256": "703dbf6419dd4273b2e60ac72cf4980d2be72b4d4338401e5241451a20af420e",
+          "bytes": 1982464,
           "entry": "whisper-cli.exe"
         }
       ]

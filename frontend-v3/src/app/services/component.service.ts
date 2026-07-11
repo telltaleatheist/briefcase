@@ -46,6 +46,24 @@ export class ComponentService {
     );
   }
 
+  /**
+   * Like listComponents() but SURFACES fetch failures instead of swallowing them
+   * into an empty list. The first-run check must tell "backend reports nothing is
+   * missing" apart from "couldn't reach the backend" — the latter must retry or
+   * show an error, never silently skip setup (which would leave a binary-less
+   * install looking fine until the first download/transcode fails). Still updates
+   * the reactive `components` signal on success.
+   */
+  fetchComponents(): Observable<ComponentStatus[]> {
+    return this.http.get<any>(`${this.API_BASE}/config/components`).pipe(
+      map((res) => {
+        const components: ComponentStatus[] = res.components || [];
+        this.components.set(components);
+        return components;
+      }),
+    );
+  }
+
   /** True if any required, supported component is not yet installed. */
   hasMissingRequired(components: ComponentStatus[]): boolean {
     return components.some((c) => c.required && c.supported && !c.installed);

@@ -22,86 +22,6 @@ const ARCH_MAP = {
 };
 
 /**
- * Rebuild a macOS .framework's symlink structure.
- *
- * Bundled frameworks (e.g. yt-dlp's Python.framework) can arrive with their
- * internal symlinks flattened into real file copies when the archive is
- * extracted on a filesystem/tool that doesn't preserve symlinks. codesign then
- * fails with "bundle format is ambiguous (could be app or framework)" because it
- * sees a real Mach-O at the framework root next to a Versions/ directory.
- *
- * This restores the canonical layout:
- *   Framework/Versions/Current -> <version>
- *   Framework/<entry>          -> Versions/Current/<entry>   (for each entry)
- */
-function repairFrameworkSymlinks(fwPath) {
-  const versionsDir = path.join(fwPath, 'Versions');
-  if (!fs.existsSync(versionsDir)) return false;
-
-  // Pick the concrete version directory (anything that isn't the "Current" alias).
-  const versionName = fs
-    .readdirSync(versionsDir)
-    .find((name) => name !== 'Current' && fs.statSync(path.join(versionsDir, name)).isDirectory());
-  if (!versionName) return false;
-
-  // Versions/Current -> <version>
-  const currentPath = path.join(versionsDir, 'Current');
-  fs.rmSync(currentPath, { recursive: true, force: true });
-  fs.symlinkSync(versionName, currentPath);
-
-  // Top-level entries mirror Versions/Current (Python, Resources, Headers, ...).
-  const currentContents = fs.readdirSync(path.join(versionsDir, versionName));
-  for (const entry of currentContents) {
-    const topLevel = path.join(fwPath, entry);
-    fs.rmSync(topLevel, { recursive: true, force: true });
-    fs.symlinkSync(path.join('Versions', 'Current', entry), topLevel);
-  }
-
-  return true;
-}
-
-/**
- * Find and repair every *.framework bundled under the packaged app's
- * Resources/utilities tree. Must run before codesign.
- */
-function repairMacFrameworks(context) {
-  const appName = context.packager.appInfo.productFilename;
-  const utilitiesRoot = path.join(
-    context.appOutDir,
-    `${appName}.app`,
-    'Contents',
-    'Resources',
-    'utilities'
-  );
-  if (!fs.existsSync(utilitiesRoot)) return;
-
-  const frameworks = [];
-  const walk = (dir) => {
-    for (const name of fs.readdirSync(dir)) {
-      const full = path.join(dir, name);
-      let stat;
-      try {
-        stat = fs.lstatSync(full);
-      } catch {
-        continue;
-      }
-      if (stat.isSymbolicLink() || !stat.isDirectory()) continue;
-      if (name.endsWith('.framework')) {
-        frameworks.push(full);
-      } else {
-        walk(full);
-      }
-    }
-  };
-  walk(utilitiesRoot);
-
-  for (const fw of frameworks) {
-    const repaired = repairFrameworkSymlinks(fw);
-    console.log(`[afterPack] ${repaired ? 'Repaired' : 'Skipped'} framework symlinks: ${path.relative(utilitiesRoot, fw)}`);
-  }
-}
-
-/**
  * Delete AppleDouble "._*" sidecar files from the packaged app.
  *
  * These get created when files carrying extended attributes / resource forks
@@ -146,14 +66,12 @@ module.exports = async function afterPack(context) {
   const arch = ARCH_MAP[context.arch] || 'x64';
   const platform = context.electronPlatformName;
 
-  // macOS-only cleanup/repair, all BEFORE codesign runs (which electron-builder
-  // does right after afterPack). Must happen for ALL macOS builds including
-  // same-arch, so it goes ahead of the early returns below.
+  // macOS-only cleanup, BEFORE codesign runs (which electron-builder does right
+  // after afterPack). Must happen for ALL macOS builds including same-arch, so it
+  // goes ahead of the early returns below.
   if (platform === 'darwin') {
-    // Strip ._* detritus first so nothing unsigned lands in the sealed bundle.
+    // Strip ._* detritus so nothing unsigned lands in the sealed bundle.
     stripAppleDoubleFiles(context);
-    // Then rebuild any flattened .framework symlink structure.
-    repairMacFrameworks(context);
   }
 
   // Skip for universal builds - they combine arm64 and x64

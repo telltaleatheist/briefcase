@@ -22,20 +22,50 @@ export class WaveformService {
   private readonly progressCache = new Map<string, { progress: number; status: string; partial?: WaveformData }>();
   private ffmpeg: FfmpegBridge;
   private ffprobe: FfprobeBridge;
+  /** Resolved ffmpeg path the current bridges were built for; gates lazy rebuild. */
+  private ffmpegBinaryPath?: string;
 
   constructor() {
-    // ALWAYS use bundled binaries from getRuntimePaths() - NEVER use system binaries
-    const runtimePaths = getRuntimePaths();
-    const ffmpegPath = runtimePaths.ffmpeg;
-    const ffprobePath = runtimePaths.ffprobe;
+    // Resolve the binary paths but DEFER verification to use time
+    // (ensureFfmpegReady). Verifying (and throwing) here would take the whole Nest
+    // bootstrap down whenever ffmpeg hasn't been downloaded yet, preventing the
+    // backend from serving the first-run setup wizard. Construction stays
+    // non-fatal; a missing binary surfaces honestly when a waveform is generated.
+    const { ffmpeg, ffprobe } = getRuntimePaths();
+    if (fs.existsSync(ffmpeg) && fs.existsSync(ffprobe)) {
+      this.ffmpeg = new FfmpegBridge(ffmpeg);
+      this.ffprobe = new FfprobeBridge(ffprobe);
+      this.ffmpegBinaryPath = ffmpeg;
+      this.logger.log(`WaveformService initialized`);
+    } else {
+      this.logger.warn(
+        `WaveformService: FFmpeg not installed yet (expected at ${ffmpeg}). ` +
+        `Deferring until first-run setup installs the ffmpeg-tools component.`
+      );
+    }
+  }
 
-    verifyBinary(ffmpegPath, 'FFmpeg');
-    verifyBinary(ffprobePath, 'FFprobe');
-
-    this.ffmpeg = new FfmpegBridge(ffmpegPath);
-    this.ffprobe = new FfprobeBridge(ffprobePath);
-
-    this.logger.log(`WaveformService initialized`);
+  /**
+   * Resolve + verify ffmpeg/ffprobe at USE time (never at boot). getRuntimePaths()
+   * re-reads downloaded-component state on every call, so a binary installed by
+   * first-run setup is picked up here WITHOUT a backend restart. Throws an honest,
+   * user-facing error while ffmpeg is missing.
+   */
+  private ensureFfmpegReady(): void {
+    const { ffmpeg, ffprobe } = getRuntimePaths();
+    if (this.ffmpegBinaryPath === ffmpeg && fs.existsSync(ffmpeg) && fs.existsSync(ffprobe)) {
+      return;
+    }
+    if (!fs.existsSync(ffmpeg) || !fs.existsSync(ffprobe)) {
+      throw new Error(
+        'FFmpeg is not installed — complete first-run setup or install it in Settings → Components.'
+      );
+    }
+    verifyBinary(ffmpeg, 'FFmpeg');
+    verifyBinary(ffprobe, 'FFprobe');
+    this.ffmpeg = new FfmpegBridge(ffmpeg);
+    this.ffprobe = new FfprobeBridge(ffprobe);
+    this.ffmpegBinaryPath = ffmpeg;
   }
 
   /**
@@ -62,6 +92,8 @@ export class WaveformService {
     this.logger.log(`Generating waveform for ${path.basename(videoPath)} with ${samples} samples`);
 
     try {
+      this.ensureFfmpegReady();
+
       // First, get the video duration
       const duration = await this.getVideoDuration(videoPath);
 

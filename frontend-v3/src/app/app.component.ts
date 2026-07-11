@@ -1,7 +1,7 @@
 import { Component, OnInit, Renderer2, inject, signal } from '@angular/core';
 import { DOCUMENT } from '@angular/common';
 import { RouterOutlet } from '@angular/router';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, retry } from 'rxjs';
 import { ThemeService } from './services/theme.service';
 import { QueueService } from './services/queue.service';
 import { LibraryService } from './services/library.service';
@@ -38,6 +38,17 @@ import { ComponentService } from './services/component.service';
 
     <!-- Download-on-demand progress dock (controls its own visibility) -->
     <app-download-dock />
+
+    <!-- Honest surface when the first-run component check itself failed (e.g. the
+         backend was unreachable). We must never silently skip setup — a
+         binary-less install would look fine until the first download/transcode
+         fails — so tell the user and offer a retry. -->
+    @if (componentCheckError(); as err) {
+      <div class="component-check-error" role="alert">
+        <span class="cce-text">{{ err }}</span>
+        <button type="button" class="cce-retry" (click)="retryComponentCheck()">Retry</button>
+      </div>
+    }
   `,
   styles: [`
     .app-container {
@@ -46,6 +57,40 @@ import { ComponentService } from './services/component.service';
       background: var(--bg-primary);
       color: var(--text-primary);
       transition: background-color 0.3s ease, color 0.3s ease;
+    }
+    .component-check-error {
+      position: fixed;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      max-width: 640px;
+      padding: 12px 16px;
+      border-radius: 8px;
+      background: var(--danger, #b3261e);
+      color: #fff;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .cce-text {
+      flex: 1;
+    }
+    .cce-retry {
+      flex: none;
+      padding: 6px 12px;
+      border: 1px solid rgba(255, 255, 255, 0.6);
+      border-radius: 6px;
+      background: transparent;
+      color: #fff;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .cce-retry:hover {
+      background: rgba(255, 255, 255, 0.15);
     }
   `]
 })
@@ -64,6 +109,8 @@ export class AppComponent implements OnInit {
 
   // Download-on-demand setup state
   showComponentSetup = signal(false);
+  // Honest error surface when the component check couldn't reach the backend.
+  componentCheckError = signal<string | null>(null);
   private componentsChecked = false;
 
   /**
@@ -102,15 +149,44 @@ export class AppComponent implements OnInit {
    */
   private checkComponents() {
     if (this.componentsChecked) return;
-    this.componentsChecked = true;
     // Binaries/models are installed and managed on the desktop. A browser client
     // can't download them anywhere useful, so never pop the setup wizard there.
     if (!this.isElectron) return;
-    this.componentService.listComponents().subscribe((components) => {
-      if (this.componentService.hasMissingEssential(components)) {
-        this.showComponentSetup.set(true);
-      }
-    });
+    this.componentsChecked = true;
+    this.runComponentCheck();
+  }
+
+  /**
+   * Fetch the component list and decide whether to auto-open the setup wizard.
+   *
+   * A fetch FAILURE must never be mistaken for "nothing missing": the backend may
+   * still be finishing boot, so retry a few times, and if it still fails surface
+   * an honest, retryable error instead of silently skipping first-run setup. With
+   * no media binaries bundled, that silent skip would leave the app looking fine
+   * until the first download/transcode fails.
+   */
+  private runComponentCheck() {
+    this.componentCheckError.set(null);
+    this.componentService
+      .fetchComponents()
+      .pipe(retry({ count: 4, delay: 1500 }))
+      .subscribe({
+        next: (components) => {
+          if (this.componentService.hasMissingEssential(components)) {
+            this.showComponentSetup.set(true);
+          }
+        },
+        error: (err) => {
+          console.error('Failed to check required components:', err);
+          this.componentCheckError.set(
+            "Couldn't check which components are installed — Briefcase may be missing tools it needs to download and process video. Check your connection and retry.",
+          );
+        },
+      });
+  }
+
+  retryComponentCheck() {
+    this.runComponentCheck();
   }
 
   onComponentSetupDone() {
