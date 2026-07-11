@@ -583,7 +583,18 @@ export class QueueService implements OnDestroy {
    * Returns a map of frontend job ID -> backend job ID, plus any warnings about skipped tasks
    */
   submitPendingJobs(): Observable<{ jobIdMap: Map<string, string>; warnings: string[] }> {
-    const pendingJobs = this.pendingJobs();
+    return this.submitJobs();
+  }
+
+  /**
+   * Submit specific pending jobs to the backend (all pending jobs when ids
+   * are omitted). Toolbar/inspector pipeline actions submit exactly the jobs
+   * they just staged, so items a user deliberately parked in staging are
+   * never swept along.
+   */
+  submitJobs(jobIds?: string[]): Observable<{ jobIdMap: Map<string, string>; warnings: string[] }> {
+    const allPending = this.pendingJobs();
+    const pendingJobs = jobIds ? allPending.filter(job => jobIds.includes(job.id)) : allPending;
     if (pendingJobs.length === 0) return of({ jobIdMap: new Map(), warnings: [] });
 
     // Get current library ID - REQUIRED for processing

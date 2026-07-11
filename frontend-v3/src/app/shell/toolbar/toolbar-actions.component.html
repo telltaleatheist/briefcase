@@ -12,36 +12,30 @@
 
   <span class="divider" aria-hidden="true"></span>
 
+  <!-- Process: THE selection action — lights up when items are selected.
+       Transcribe/Analyze live inside it as pipeline steps (preset chips give
+       the one-click combos); the inspector keeps per-step Run actions. -->
   <button
     type="button"
-    class="action-btn"
+    class="action-btn process"
+    [class.lit]="hasSelection()"
+    cdkOverlayOrigin
+    #processTrigger="cdkOverlayOrigin"
     [disabled]="!hasSelection()"
-    (click)="transcribe.emit()"
-    [title]="hasSelection() ? 'Transcribe selected (no AI required)' : 'Select items to transcribe'">
-    <span class="btn-icon">≋</span> Transcribe
-  </button>
-
-  <button
-    type="button"
-    class="action-btn"
-    [disabled]="!hasSelection() || !aiReady()"
-    (click)="analyze.emit()"
-    [title]="aiCheckFailed() ? 'AI status unknown — the availability check failed' : !aiReady() ? 'Set up an AI provider to analyze' : hasSelection() ? 'Analyze selected with AI' : 'Select items to analyze'">
-    <span class="btn-icon">✦</span> Analyze
-  </button>
-
-  @if (!aiReady() && hasSelection()) {
-    @if (aiCheckFailed()) {
-      <!-- Probe failed: readiness is UNKNOWN — never tell a configured user to "set up" -->
-      <button type="button" class="setup-ai-hint" (click)="retryAiCheck.emit()">AI check failed — retry</button>
-    } @else {
-      <button type="button" class="setup-ai-hint" (click)="setupAi.emit()">Set up AI…</button>
+    (click)="toggleProcess()"
+    [attr.aria-expanded]="processOpen()"
+    [title]="hasSelection() ? 'Run a pipeline of jobs on the selection' : 'Select items to process'">
+    <span class="btn-icon">⚡</span> Process
+    @if (selectionCount() > 0) {
+      <span class="count-badge">{{ selectionCount() }}</span>
     }
-  }
+    <span class="chevron">▾</span>
+  </button>
 
   <button
     type="button"
-    class="action-btn"
+    class="action-btn scout"
+    [class.lit]="hasSelection()"
     [disabled]="!hasSelection()"
     (click)="openEditor.emit()"
     [title]="hasSelection() ? 'Open selected in Scout' : 'Select items to open in Scout'">
@@ -55,21 +49,6 @@
     (click)="viewInfo.emit()"
     [title]="singleSelection() ? 'View details' : 'Select exactly one item'">
     <span class="btn-icon">ⓘ</span> Info
-  </button>
-
-  <button
-    type="button"
-    class="action-btn"
-    cdkOverlayOrigin
-    #processTrigger="cdkOverlayOrigin"
-    [disabled]="!hasSelection()"
-    (click)="toggleProcess()"
-    [attr.aria-expanded]="processOpen()"
-    [title]="hasSelection() ? 'Queue a pipeline of jobs for the selection' : 'Select items to process'">
-    <span class="btn-icon">⚡</span> Process
-    @if (selectionCount() > 0) {
-      <span class="count-badge">{{ selectionCount() }}</span>
-    }
   </button>
 </div>
 
@@ -87,8 +66,10 @@
     [withoutTranscript]="withoutTranscript()"
     [notAnalyzed]="notAnalyzed()"
     [aiReady]="aiReady()"
+    [aiCheckFailed]="aiCheckFailed()"
     (submitSteps)="onSubmitProcess($event)"
     (setupAi)="onProcessSetupAi()"
+    (retryAi)="retryAiCheck.emit()"
     (dismissed)="closeProcess()" />
 </ng-template>
 

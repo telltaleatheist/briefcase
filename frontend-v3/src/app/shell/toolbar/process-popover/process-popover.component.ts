@@ -30,9 +30,12 @@ export class ProcessPopoverComponent {
   withoutTranscript = input(0);
   notAnalyzed = input(0);
   aiReady = input(false);
+  /** AI readiness unknown — the availability probe failed (retry, don't lie). */
+  aiCheckFailed = input(false);
 
   submitSteps = output<PipelineStep[]>();
   setupAi = output<void>();
+  retryAi = output<void>();
   dismissed = output<void>();
 
   readonly stepDefs = PIPELINE_STEPS;
@@ -43,8 +46,12 @@ export class ProcessPopoverComponent {
   /** Per-step config (createQueueTask options). */
   private configs = signal<Record<PipelineStepType, Record<string, unknown>>>(this.restoreConfigs());
 
-  /** Which step's options are expanded (one at a time). */
-  expandedStep = signal<PipelineStepType | null>(null);
+  /** Per-step options accordion — each enabled step expands independently. */
+  private expandedSteps = signal<Partial<Record<PipelineStepType, boolean>>>({});
+
+  isExpanded(type: PipelineStepType): boolean {
+    return this.expandedSteps()[type] === true;
+  }
 
   /** Inline save-as-preset mode. */
   savingPreset = signal(false);
@@ -110,13 +117,14 @@ export class ProcessPopoverComponent {
 
   toggleStep(type: PipelineStepType): void {
     this.enabled.update(state => ({ ...state, [type]: !state[type] }));
-    if (!this.enabled()[type] && this.expandedStep() === type) {
-      this.expandedStep.set(null);
+    if (!this.enabled()[type]) {
+      this.expandedSteps.update(state => ({ ...state, [type]: false }));
     }
+    this.persistSticky();
   }
 
   toggleExpanded(type: PipelineStepType): void {
-    this.expandedStep.update(current => (current === type ? null : type));
+    this.expandedSteps.update(state => ({ ...state, [type]: !state[type] }));
   }
 
   setOption(type: PipelineStepType, key: string, value: unknown): void {
@@ -124,6 +132,22 @@ export class ProcessPopoverComponent {
       ...state,
       [type]: { ...state[type], [key]: value },
     }));
+    this.persistSticky();
+  }
+
+  /**
+   * Options are sticky: every toggle/option change persists the current
+   * composition immediately (not just on submit). Persisted from the raw
+   * enabled set — a temporarily AI-unready analyze step is remembered, not
+   * silently dropped.
+   */
+  private persistSticky(): void {
+    const enabled = this.enabled();
+    const configs = this.configs();
+    const raw = this.stepDefs
+      .filter(def => enabled[def.type])
+      .map(def => ({ type: def.type, config: { ...configs[def.type] } }));
+    this.presetsService.rememberSteps(raw);
   }
 
   onSelectOption(type: PipelineStepType, key: string, event: Event): void {
@@ -147,7 +171,8 @@ export class ProcessPopoverComponent {
     }
     this.enabled.set(enabled);
     this.configs.set(configs);
-    this.expandedStep.set(null);
+    this.expandedSteps.set({});
+    this.persistSticky();
   }
 
   deletePreset(id: string): void {

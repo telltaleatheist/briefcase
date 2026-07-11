@@ -26,8 +26,6 @@
           (openAdvanced)="dispatchToWorkspace({ type: 'openDownloadDialog' })"
           (setupAi)="dispatchToWorkspace({ type: 'openAiSetup' })"
           (retryAiCheck)="retryAiCheck()"
-          (transcribe)="dispatchToWorkspace({ type: 'transcribeSelection' })"
-          (analyze)="dispatchToWorkspace({ type: 'analyzeSelection' })"
           (openEditor)="dispatchToWorkspace({ type: 'openEditor' })"
           (viewInfo)="dispatchToWorkspace({ type: 'viewInfo' })"
           (processSteps)="dispatchToWorkspace({ type: 'processSelection', steps: $event })" />

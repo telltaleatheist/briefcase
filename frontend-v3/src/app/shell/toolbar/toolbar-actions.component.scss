@@ -48,6 +48,50 @@
       filter: brightness(1.05);
     }
   }
+
+  // Process lights up when a selection exists: same Creamsicle fill as + Add,
+  // with a single soft pulse on the 0→N selection edge (the class being added
+  // restarts the animation exactly once).
+  &.process.lit {
+    border-color: transparent;
+    background: var(--gradient-primary);
+    color: var(--text-inverse);
+    font-weight: 600;
+    animation: process-pulse 450ms ease 1;
+
+    &:hover:not(:disabled) {
+      background: var(--gradient-primary);
+      filter: brightness(1.05);
+    }
+
+    .count-badge {
+      background: var(--text-inverse);
+      color: var(--primary-orange);
+    }
+  }
+
+  // Scout: second-prominent — accent outline treatment on selection.
+  &.scout.lit {
+    border-color: var(--primary-orange);
+    color: var(--primary-orange);
+    font-weight: 600;
+
+    &:hover:not(:disabled) {
+      background: rgba(255, 107, 53, 0.1);
+    }
+  }
+}
+
+@keyframes process-pulse {
+  0% { transform: scale(1); }
+  45% { transform: scale(1.06); }
+  100% { transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .action-btn.process.lit {
+    animation: none;
+  }
 }
 
 .btn-icon {
@@ -65,27 +109,6 @@
   height: 22px;
   background: var(--border-color);
   margin: 0 4px;
-}
-
-.setup-ai-hint {
-  border: 0;
-  background: none;
-  padding: 0;
-  font-family: inherit;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--primary-orange);
-  white-space: nowrap;
-  cursor: pointer;
-
-  &:hover {
-    text-decoration: underline;
-  }
-
-  &:focus-visible {
-    outline: 2px solid var(--primary-orange);
-    outline-offset: 1px;
-  }
 }
 
 .count-badge {

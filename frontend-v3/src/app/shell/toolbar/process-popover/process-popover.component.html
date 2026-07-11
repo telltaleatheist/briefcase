@@ -75,15 +75,22 @@
               <span class="step-label">{{ def.label }}</span>
             </label>
             @if (def.type === 'ai-analyze' && !aiReady()) {
-              <button type="button" class="setup-ai-link" (click)="setupAi.emit()">Set up AI…</button>
+              @if (aiCheckFailed()) {
+                <!-- Probe failed: readiness UNKNOWN — never tell a configured user to "set up" -->
+                <button type="button" class="setup-ai-link" (click)="retryAi.emit()">AI check failed — retry</button>
+              } @else {
+                <button type="button" class="setup-ai-link" (click)="setupAi.emit()">Set up AI…</button>
+              }
             } @else if (isEnabled(def.type)) {
               <button
                 type="button"
                 class="options-toggle"
-                [class.open]="expandedStep() === def.type"
+                [class.open]="isExpanded(def.type)"
                 (click)="toggleExpanded(def.type)"
-                [attr.aria-expanded]="expandedStep() === def.type"
-                [attr.aria-label]="'Options for ' + def.label">⚙︎</button>
+                [attr.aria-expanded]="isExpanded(def.type)"
+                [attr.aria-label]="'Options for ' + def.label">
+                Options <span class="options-chevron">{{ isExpanded(def.type) ? '▴' : '▾' }}</span>
+              </button>
             }
           </div>
 
@@ -93,7 +100,7 @@
             <span class="step-desc">{{ def.description }}</span>
           }
 
-          @if (expandedStep() === def.type && isEnabled(def.type)) {
+          @if (isExpanded(def.type) && isEnabled(def.type)) {
             <div class="step-options">
               @switch (def.type) {
                 @case ('fix-aspect-ratio') {
@@ -169,7 +176,7 @@
   <div class="popover-footer">
     <span class="summary" [class.empty]="steps().length === 0">{{ summary() }}</span>
     <button type="button" class="submit-btn" [disabled]="!canSubmit()" (click)="submit()">
-      Add to Queue
+      Start Processing
     </button>
   </div>
 </div>

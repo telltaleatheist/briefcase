@@ -40,8 +40,6 @@ export class ToolbarActionsComponent {
   openAdvanced = output<void>();
   setupAi = output<void>();
   retryAiCheck = output<void>();
-  transcribe = output<void>();
-  analyze = output<void>();
   openEditor = output<void>();
   viewInfo = output<void>();
   processSteps = output<PipelineStep[]>();

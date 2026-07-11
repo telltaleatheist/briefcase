@@ -239,28 +239,39 @@
   }
 }
 
+// Accordion affordance: a labeled chevron (discoverable, touch-friendly) —
+// each enabled step's options expand independently beneath it.
 .options-toggle {
-  border: 0;
+  border: 1px solid transparent;
   background: none;
-  padding: 1px 4px;
-  font-size: 12px;
+  padding: 1px 7px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
   color: var(--text-tertiary);
   cursor: pointer;
-  border-radius: 5px;
-  transition: color 120ms ease, transform 160ms ease;
+  border-radius: 999px;
+  transition: color 120ms ease, border-color 120ms ease;
+  white-space: nowrap;
 
   &:hover {
     color: var(--primary-orange);
+    border-color: var(--border-color);
   }
 
   &.open {
     color: var(--primary-orange);
-    transform: rotate(90deg);
+    border-color: rgba(255, 107, 53, 0.35);
+    background: rgba(255, 107, 53, 0.07);
   }
 
   &:focus-visible {
     outline: 2px solid var(--primary-orange);
   }
+}
+
+.options-chevron {
+  font-size: 9px;
 }
 
 .step-desc,

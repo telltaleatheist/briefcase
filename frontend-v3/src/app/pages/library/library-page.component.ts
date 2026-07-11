@@ -37,7 +37,7 @@ import { TrimOpenerModalComponent } from '../../components/trim-opener-modal/tri
 import { getApiBase } from '../../core/runtime-url';
 import { ErrorSurface, describeError } from '../../core/error-surface.service';
 import { WorkspaceActionsService } from '../../core/stores/workspace-actions.service';
-import { PipelineStep } from '../../core/stores/pipeline-presets.service';
+import { PIPELINE_STEPS, PipelinePresetsService, PipelineStep, PipelineStepType } from '../../core/stores/pipeline-presets.service';
 import { NavigationStore } from '../../core/stores/navigation.store';
 import { InspectorStore } from '../../core/stores/inspector.store';
 import { classifyItemKind } from '../../core/item-kind';
@@ -103,6 +103,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   private aiSetupService = inject(AiSetupService);
   private notificationService = inject(NotificationService);
   private errorSurface = inject(ErrorSurface);
+  private pipelinePresets = inject(PipelinePresetsService);
   private tabsService = inject(TabsService);
   private fileImportService = inject(FileImportService);
   private electronService = inject(ElectronService);
@@ -2274,7 +2275,10 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
    * the old defaults-based "Add to Queue" — the user now picks the exact
    * steps per selection.
    */
-  private async processSelection(steps: PipelineStep[]) {
+  private async processSelection(
+    steps: PipelineStep[],
+    opts?: { onlyMissingTranscript?: boolean }
+  ) {
     const selected = this.getSelectedLibraryVideos();
     if (selected.length === 0 || steps.length === 0) {
       this.notificationService.warning('Nothing to Process', 'Select at least one video and one step');
@@ -2283,7 +2287,24 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
 
     // All pipeline steps are video/audio operations — filter out documents,
     // images, and webpages (same rule as analyzeVideos).
-    const videos = selected.filter(v => this.isProcessableVideo(v));
+    let videos = selected.filter(v => this.isProcessableVideo(v));
+
+    // Transcribe-only convenience path: skip items that already have one.
+    if (opts?.onlyMissingTranscript) {
+      const already = videos.filter(v => v.hasTranscript === true).length;
+      videos = videos.filter(v => v.hasTranscript !== true);
+      if (videos.length === 0) {
+        this.notificationService.info('Already Transcribed', 'All selected videos already have transcripts');
+        return;
+      }
+      if (already > 0) {
+        this.notificationService.info(
+          'Some Skipped',
+          `${already} already-transcribed video${already === 1 ? ' was' : 's were'} skipped`
+        );
+      }
+    }
+
     if (videos.length === 0) {
       this.notificationService.error(
         'No Videos Selected',
@@ -2323,7 +2344,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       );
     }
 
-    videos.forEach(video => {
+    const createdJobIds = videos.map(video =>
       this.queueService.addJob({
         title: video.name,
         videoId: video.id,
@@ -2331,17 +2352,47 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         thumbnail: video.thumbnailUrl,
         tasks: finalSteps.map(s => createQueueTask(s.type, { ...s.config })),
         titleResolved: true
-      });
-    });
+      }).id
+    );
 
+    // Process is an explicit "go" — submit exactly the jobs we just staged
+    // (never sweeping along items the user deliberately parked in staging).
     const stepText = `${finalSteps.length} step${finalSteps.length === 1 ? '' : 's'}`;
     const videoText = `${videos.length} video${videos.length === 1 ? '' : 's'}`;
-    this.notificationService.success('Pipeline Queued', `${stepText} queued for ${videoText}`);
+    this.queueService.submitJobs(createdJobIds).subscribe({
+      next: ({ jobIdMap, warnings }) => {
+        if (jobIdMap.size > 0) {
+          this.notificationService.success('Processing Started', `${stepText} running on ${videoText}`);
+        } else {
+          // submitJobs reverted the jobs to pending with per-job errors.
+          this.errorSurface.surfaceError(
+            'Processing didn\'t start — the jobs are waiting in the queue',
+            new Error('submitJobs returned no started jobs')
+          );
+        }
+        for (const warning of warnings) {
+          this.notificationService.warning('Task Skipped', warning);
+        }
+      },
+      error: (error) => {
+        this.errorSurface.surfaceError('Processing didn\'t start — the jobs are waiting in the queue', error);
+      }
+    });
 
     this.setActiveTab('queue');
     if (this.cascadeComponent) {
       this.cascadeComponent.clearSelection();
     }
+  }
+
+  /**
+   * Build a single pipeline step seeded from the user's sticky Process
+   * options (last-used), falling back to the step's defaults.
+   */
+  private stepFromStickyOptions(type: PipelineStepType): PipelineStep {
+    const def = PIPELINE_STEPS.find(d => d.type === type);
+    const remembered = this.pipelinePresets.lastSteps().find(s => s.type === type);
+    return { type, config: { ...(def?.defaultConfig ?? {}), ...(remembered?.config ?? {}) } };
   }
 
   /** True for items the processing pipeline can operate on (video/audio). */
@@ -2448,57 +2499,25 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
    * immediately with a single transcribe task, skipping items that already
    * have a transcript.
    */
+  /**
+   * Transcribe the selection (inspector Run / batch action): exactly a
+   * single-step Process pipeline — one code path, honoring the user's
+   * sticky whisper model/language options. Auto-submits.
+   */
   transcribeSelected() {
-    const selected = this.getSelectedLibraryVideos();
-    if (selected.length === 0) {
-      this.notificationService.warning('No Selection', 'Please select at least one video');
-      return;
-    }
-
-    const videos = selected.filter(v => v.hasTranscript !== true);
-    if (videos.length === 0) {
-      this.notificationService.info('Already Transcribed', 'All selected videos already have transcripts');
-      return;
-    }
-    if (videos.length < selected.length) {
-      this.notificationService.info(
-        'Some Skipped',
-        `${selected.length - videos.length} already-transcribed video(s) were skipped`
-      );
-    }
-
-    videos.forEach(video => {
-      this.queueService.addJob({
-        title: video.name,
-        videoId: video.id,
-        duration: video.duration,
-        thumbnail: video.thumbnailUrl,
-        tasks: [createQueueTask('transcribe', { model: 'base', language: 'en' })],
-        titleResolved: true
-      });
+    void this.processSelection([this.stepFromStickyOptions('transcribe')], {
+      onlyMissingTranscript: true
     });
-
-    this.notificationService.success(
-      'Transcription Queued',
-      `Added ${videos.length} ${videos.length === 1 ? 'video' : 'videos'} to the queue`
-    );
-    this.setActiveTab('queue');
-    if (this.cascadeComponent) {
-      this.cascadeComponent.clearSelection();
-    }
   }
 
   /**
-   * Analyze the current selection (shell toolbar). Reuses the existing
-   * analyzeVideos flow: AI-setup gate → config modal → queue.
+   * Analyze the selection (inspector Run / batch action): a single-step
+   * Process pipeline queued directly with the default AI model + sticky
+   * options — no config modal. The old modal stays reachable from
+   * queue-item Advanced config only.
    */
   analyzeSelected() {
-    const selected = this.getSelectedLibraryVideos();
-    if (selected.length === 0) {
-      this.notificationService.warning('No Selection', 'Please select at least one video');
-      return;
-    }
-    this.analyzeVideos(selected);
+    void this.processSelection([this.stepFromStickyOptions('ai-analyze')]);
   }
 
   // Configure selected queue items
