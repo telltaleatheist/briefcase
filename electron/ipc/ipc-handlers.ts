@@ -56,7 +56,6 @@ export function setupIpcHandlers(
   webCaptureService = new WebCaptureService();
 
   // Register handlers
-  setupDownloadHandlers();
   setupFileSystemHandlers();
   setupUpdateHandlers();
   setupSettingsHandlers();
@@ -64,15 +63,9 @@ export function setupIpcHandlers(
   setupWebCaptureHandlers();
 }
 
-/**
- * Set up download-related IPC handlers
- */
-function setupDownloadHandlers(): void {
-  // Download video
-  ipcMain.handle('download-video', async (_, options) => {
-    return downloadService.downloadVideo(options);
-  });
-}
+// NOTE: the old 'download-video' IPC handler was deleted deliberately. It was
+// a dead stub path (fake file write + system-ffmpeg "aspect fix") with zero
+// renderer callers — real downloads go through the backend queue.
 
 /**
  * Set up file system-related IPC handlers
@@ -271,60 +264,70 @@ function setupFileSystemHandlers(): void {
     }
   });
 
-  // Recursively scan directory for media files
+  // Recursively scan directory for media files.
+  // Returns { files, errors } — errors lists subdirectories that could not be
+  // read, so the renderer can tell the user the scan has holes instead of
+  // presenting a partial list as complete. A failure at the top level rejects
+  // the invoke (loud), it does not masquerade as "no media found".
   ipcMain.handle('scan-directory-for-media', async (_, directoryPath) => {
-    try {
-      const fs = require('fs');
-      const path = require('path');
-      const validExtensions = [
-        // Videos
-        '.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.flv',
-        // Audio
-        '.mp3', '.m4a', '.m4b', '.aac', '.flac', '.wav', '.ogg',
-        // Documents
-        '.pdf', '.epub', '.mobi', '.txt', '.md',
-        // Images
-        '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp',
-        // Webpages
-        '.html', '.htm', '.mhtml'
-      ];
+    const fs = require('fs');
+    const path = require('path');
+    const validExtensions = [
+      // Videos
+      '.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.flv',
+      // Audio
+      '.mp3', '.m4a', '.m4b', '.aac', '.flac', '.wav', '.ogg',
+      // Documents
+      '.pdf', '.epub', '.mobi', '.txt', '.md',
+      // Images
+      '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp',
+      // Webpages
+      '.html', '.htm', '.mhtml'
+    ];
 
-      const mediaFiles: string[] = [];
+    const mediaFiles: string[] = [];
+    const errors: { path: string; message: string }[] = [];
 
-      function scanDirectory(dirPath: string) {
-        try {
-          const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    function scanDirectory(dirPath: string) {
+      try {
+        const entries = fs.readdirSync(dirPath, { withFileTypes: true });
 
-          for (const entry of entries) {
-            // Skip macOS resource fork files (._*)
-            if (entry.name.startsWith('._')) {
-              continue;
-            }
+        for (const entry of entries) {
+          // Skip macOS resource fork files (._*)
+          if (entry.name.startsWith('._')) {
+            continue;
+          }
 
-            const fullPath = path.join(dirPath, entry.name);
+          const fullPath = path.join(dirPath, entry.name);
 
-            if (entry.isDirectory()) {
-              // Recursively scan subdirectories
-              scanDirectory(fullPath);
-            } else if (entry.isFile()) {
-              // Check if file has valid media extension
-              const ext = path.extname(entry.name).toLowerCase();
-              if (validExtensions.includes(ext)) {
-                mediaFiles.push(fullPath);
-              }
+          if (entry.isDirectory()) {
+            // Recursively scan subdirectories
+            scanDirectory(fullPath);
+          } else if (entry.isFile()) {
+            // Check if file has valid media extension
+            const ext = path.extname(entry.name).toLowerCase();
+            if (validExtensions.includes(ext)) {
+              mediaFiles.push(fullPath);
             }
           }
-        } catch (err) {
-          log.error(`Error scanning directory ${dirPath}:`, err);
         }
+      } catch (err) {
+        log.error(`Error scanning directory ${dirPath}:`, err);
+        errors.push({
+          path: dirPath,
+          message: err instanceof Error ? err.message : String(err)
+        });
       }
-
-      scanDirectory(directoryPath);
-      return mediaFiles;
-    } catch (error) {
-      log.error('Error scanning directory for media:', error);
-      return [];
     }
+
+    // Top-level failure (bad root path, permissions) rejects the invoke —
+    // the renderer must not confuse it with an empty directory.
+    scanDirectory(directoryPath);
+    if (mediaFiles.length === 0 && errors.length > 0 && errors[0].path === directoryPath) {
+      throw new Error(`Could not scan ${directoryPath}: ${errors[0].message}`);
+    }
+
+    return { files: mediaFiles, errors };
   });
 
   // Get downloads path
@@ -358,13 +361,11 @@ function setupUpdateHandlers(): void {
  */
 function setupSettingsHandlers(): void {
   // Get all settings
+  // NOTE: no catch-to-{} here. A corrupted settings store must reject the
+  // invoke (loud in the renderer) rather than read as a fresh install and
+  // silently reset the user's configuration.
   ipcMain.handle('get-settings', () => {
-    try {
-      return (store as any).store;
-    } catch (error) {
-      log.error('Error getting settings:', error);
-      return {};
-    }
+    return (store as any).store;
   });
 
   // Update settings
@@ -381,13 +382,10 @@ function setupSettingsHandlers(): void {
   });
 
   // Get a specific setting
+  // NOTE: no catch-to-null — store corruption must reject the invoke, not
+  // masquerade as "setting unset" (see get-settings above).
   ipcMain.handle('get-setting', (_, key) => {
-    try {
-      return (store as any).get(key);
-    } catch (error) {
-      log.error(`Error getting setting ${key}:`, error);
-      return null;
-    }
+    return (store as any).get(key);
   });
 
   // Set a specific setting
@@ -526,11 +524,13 @@ function setupWindowHandlers(): void {
   // Navigate to queue tab (from popout editor → main window)
   ipcMain.handle('navigate-to-queue', async () => {
     const mainWindow = windowServiceRef.getMainWindow();
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.focus();
-      mainWindow.webContents.send('navigate-to-queue');
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      log.warn('navigate-to-queue requested but the main window is unavailable');
+      return { success: false, error: 'Main window is not available' };
     }
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+    mainWindow.webContents.send('navigate-to-queue');
     return { success: true };
   });
 }

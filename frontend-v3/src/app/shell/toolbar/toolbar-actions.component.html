@@ -26,12 +26,17 @@
     class="action-btn"
     [disabled]="!hasSelection() || !aiReady()"
     (click)="analyze.emit()"
-    [title]="!aiReady() ? 'Set up an AI provider to analyze' : hasSelection() ? 'Analyze selected with AI' : 'Select items to analyze'">
+    [title]="aiCheckFailed() ? 'AI status unknown — the availability check failed' : !aiReady() ? 'Set up an AI provider to analyze' : hasSelection() ? 'Analyze selected with AI' : 'Select items to analyze'">
     <span class="btn-icon">✦</span> Analyze
   </button>
 
   @if (!aiReady() && hasSelection()) {
-    <button type="button" class="setup-ai-hint" (click)="setupAi.emit()">Set up AI…</button>
+    @if (aiCheckFailed()) {
+      <!-- Probe failed: readiness is UNKNOWN — never tell a configured user to "set up" -->
+      <button type="button" class="setup-ai-hint" (click)="retryAiCheck.emit()">AI check failed — retry</button>
+    } @else {
+      <button type="button" class="setup-ai-hint" (click)="setupAi.emit()">Set up AI…</button>
+    }
   }
 
   <button

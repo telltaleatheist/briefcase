@@ -29,6 +29,8 @@ export class ToolbarActionsComponent {
   singleSelection = input(false);
   selectionCount = input(0);
   aiReady = input(false);
+  /** AI readiness unknown — the availability probe failed (retry, don't lie). */
+  aiCheckFailed = input(false);
   /** Already-done counts for the Process popover's per-step hints. */
   withoutTranscript = input(0);
   notAnalyzed = input(0);
@@ -37,6 +39,7 @@ export class ToolbarActionsComponent {
   importFiles = output<void>();
   openAdvanced = output<void>();
   setupAi = output<void>();
+  retryAiCheck = output<void>();
   transcribe = output<void>();
   analyze = output<void>();
   openEditor = output<void>();

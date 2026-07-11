@@ -4,6 +4,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { HttpClient } from '@angular/common/http';
 import { timer } from 'rxjs';
 import { getApiBase } from '../../../core/runtime-url';
+import { ErrorSurface } from '../../../core/error-surface.service';
 
 type GpuMode = 'auto' | 'gpu' | 'cpu';
 
@@ -65,6 +66,7 @@ const GPU_MODE_DESCRIPTIONS: Record<GpuMode, string> = {
 export class TranscriptionPaneComponent {
   private http = inject(HttpClient);
   private destroyRef = inject(DestroyRef);
+  private errorSurface = inject(ErrorSurface);
   private readonly apiBase = getApiBase();
 
   gpuMode = signal<GpuMode>('auto');
@@ -84,7 +86,10 @@ export class TranscriptionPaneComponent {
           this.gpuFailed.set(data.gpuFailed ?? false);
           this.loading.set(false);
         },
-        error: () => this.loading.set(false),
+        error: error => {
+          this.loading.set(false);
+          this.errorSurface.surfaceError("Couldn't load transcription settings", error);
+        },
       });
   }
 
@@ -100,7 +105,10 @@ export class TranscriptionPaneComponent {
           this.saving.set(false);
           this.flashSaved();
         },
-        error: () => this.saving.set(false),
+        error: error => {
+          this.saving.set(false);
+          this.errorSurface.surfaceError("Transcription setting didn't save", error);
+        },
       });
   }
 

@@ -32,6 +32,13 @@
         <span class="loading-spinner">⏳</span>
         <p>Loading archives...</p>
       </div>
+    } @else if (loadError()) {
+      <div class="empty-state">
+        <span class="empty-icon">⚠️</span>
+        <p>Couldn't load archives</p>
+        <span class="empty-hint">{{ loadError() }}</span>
+        <button class="btn-backfill" (click)="retryLoad()">Retry</button>
+      </div>
     } @else if (archiveWeeks().length === 0) {
       <div class="empty-state">
         <span class="empty-icon">🌐</span>

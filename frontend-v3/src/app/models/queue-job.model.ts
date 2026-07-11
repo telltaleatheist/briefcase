@@ -58,6 +58,11 @@ export interface QueueJob {
   // Error info (for failed jobs)
   errorMessage?: string;
 
+  // Non-fatal issues from the backend (e.g. "downloaded without upload date",
+  // "exported without source link") — rendered on the queue item so partial
+  // degradation is visible, not silent (fallback-audit).
+  warnings?: string[];
+
   // Trim opener: seconds to trim from the start of the video after download
   trimStartTime?: number;
 

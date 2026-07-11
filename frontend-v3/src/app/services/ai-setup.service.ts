@@ -13,6 +13,13 @@ export interface AIAvailability {
   hasOpenAIKey: boolean;
   ollamaModels: string[];
   isChecking: boolean;
+  /**
+   * True when one of the availability probes FAILED (network/backend error) —
+   * distinct from "checked fine, nothing configured". A configured provider
+   * must never be presented as unconfigured because a probe blipped
+   * (fallback-audit discuss #13/#14).
+   */
+  checkFailed: boolean;
   lastChecked?: Date;
 }
 
@@ -49,6 +56,8 @@ export interface LocalModelInfo {
 export interface AISetupStatus {
   isReady: boolean;
   needsSetup: boolean;
+  /** True when readiness is UNKNOWN because the availability check failed. */
+  checkFailed: boolean;
   availableProviders: ('local' | 'ollama' | 'claude' | 'openai')[];
   message?: string;
 }
@@ -68,7 +77,8 @@ export class AiSetupService {
     hasClaudeKey: false,
     hasOpenAIKey: false,
     ollamaModels: [],
-    isChecking: false
+    isChecking: false,
+    checkFailed: false
   });
 
   // Subject to notify when models change (downloaded, deleted, etc.)
@@ -91,11 +101,23 @@ export class AiSetupService {
   async checkAIAvailability(): Promise<AIAvailability> {
     this.availability.update(v => ({ ...v, isChecking: true }));
 
+    // Distinguish "probe failed" from "probe says not configured" — a failed
+    // probe must not flip a configured provider to unconfigured.
+    let anyCheckFailed = false;
+
     try {
       // Check local AI status and API keys in parallel
       const [localResult, keysResult] = await Promise.all([
-        this.checkLocalAI().toPromise().catch(() => ({ available: false, ready: false })),
-        this.checkAPIKeys().toPromise()
+        this.checkLocalAI().toPromise().catch(error => {
+          console.error('Local AI availability probe failed:', error);
+          anyCheckFailed = true;
+          return { available: false, ready: false };
+        }),
+        this.checkAPIKeys().toPromise().catch(error => {
+          console.error('API-key availability probe failed:', error);
+          anyCheckFailed = true;
+          return { hasClaudeKey: false, hasOpenAIKey: false, lastUsedProvider: undefined };
+        })
       ]);
 
       // Only check Ollama if:
@@ -109,7 +131,11 @@ export class AiSetupService {
 
       let ollamaResult = { available: false, models: [] as string[] };
       if (shouldCheckOllama) {
-        ollamaResult = await this.checkOllama().toPromise() || { available: false, models: [] };
+        ollamaResult = await this.checkOllama().toPromise().catch(error => {
+          console.error('Ollama availability probe failed:', error);
+          anyCheckFailed = true;
+          return { available: false, models: [] as string[] };
+        }) || { available: false, models: [] };
       }
 
       const ollamaConnected = ollamaResult?.available || false;
@@ -124,6 +150,7 @@ export class AiSetupService {
         hasClaudeKey: keysResult?.hasClaudeKey || false,
         hasOpenAIKey: keysResult?.hasOpenAIKey || false,
         isChecking: false,
+        checkFailed: anyCheckFailed,
         lastChecked: new Date()
       };
 
@@ -134,6 +161,7 @@ export class AiSetupService {
       this.availability.update(v => ({
         ...v,
         isChecking: false,
+        checkFailed: true,
         lastChecked: new Date()
       }));
       return this.availability();
@@ -162,9 +190,14 @@ export class AiSetupService {
     }
 
     const isReady = providers.length > 0;
+    // Readiness is only "unknown" when nothing verified ready AND a probe
+    // failed — a successful probe of any provider beats a failed one.
+    const checkFailed = !isReady && avail.checkFailed;
     let message = '';
 
-    if (!isReady) {
+    if (checkFailed) {
+      message = "Couldn't check AI providers";
+    } else if (!isReady) {
       message = 'No AI providers configured';
     } else if (providers.includes('local')) {
       message = 'Local AI ready (Cogito 8B)';
@@ -176,7 +209,8 @@ export class AiSetupService {
 
     return {
       isReady,
-      needsSetup: !isReady,
+      needsSetup: !isReady && !checkFailed,
+      checkFailed,
       availableProviders: providers,
       message
     };
@@ -200,11 +234,9 @@ export class AiSetupService {
           available: isAvailable,
           models: modelNames
         };
-      }),
-      catchError(error => {
-        console.error('Error checking Ollama:', error);
-        return of({ available: false, models: [] });
       })
+      // No catchError: a failed probe must propagate so the caller can mark
+      // checkFailed instead of reporting "not configured" (fallback-audit).
     );
   }
 
@@ -218,11 +250,9 @@ export class AiSetupService {
         hasClaudeKey: !!response.claudeApiKey && response.claudeApiKey !== '',
         hasOpenAIKey: !!response.openaiApiKey && response.openaiApiKey !== '',
         lastUsedProvider: response.lastUsedProvider
-      })),
-      catchError(error => {
-        console.error('Error checking API keys:', error);
-        return of({ hasClaudeKey: false, hasOpenAIKey: false, lastUsedProvider: undefined });
-      })
+      }))
+      // No catchError: propagate so the caller marks checkFailed — a probe
+      // blip must not present configured API keys as missing.
     );
   }
 
@@ -234,11 +264,8 @@ export class AiSetupService {
       map(response => ({
         available: response.available || false,
         ready: response.ready || false
-      })),
-      catchError(error => {
-        console.error('Error checking local AI:', error);
-        return of({ available: false, ready: false });
-      })
+      }))
+      // No catchError: propagate so the caller marks checkFailed.
     );
   }
 

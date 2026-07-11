@@ -21,6 +21,24 @@ export class BackendService {
   private pidFilePath: string;
   private lockRelease: (() => Promise<void>) | null = null;
   private actualBackendPort: number = 3000;
+  // True while WE are stopping the backend (cleanup/shutdown), so the process
+  // 'exit' handler can distinguish an expected exit from a mid-session crash.
+  private shuttingDown: boolean = false;
+  // Registered by main.ts: called exactly when the backend dies unexpectedly.
+  private unexpectedExitHandler:
+    | ((info: { code: number | null; signal: NodeJS.Signals | null }) => void)
+    | null = null;
+
+  /**
+   * Register a handler invoked when the backend process exits without us
+   * having asked it to (i.e. a mid-session crash). The handler owns user
+   * notification and any restart policy.
+   */
+  setUnexpectedExitHandler(
+    handler: (info: { code: number | null; signal: NodeJS.Signals | null }) => void
+  ): void {
+    this.unexpectedExitHandler = handler;
+  }
 
   constructor() {
     this.lockFilePath = path.join(app.getPath('userData'), 'backend.lock');
@@ -97,6 +115,9 @@ export class BackendService {
     if (this.backendStarted) {
       return true;
     }
+
+    // A fresh start (or restart after a crash) is not a shutdown.
+    this.shuttingDown = false;
 
     // Kill any stale backend processes from previous runs
     await this.killStaleBackends();
@@ -285,8 +306,14 @@ export class BackendService {
             const ready = httpUp && (health.libraryReady || health.activeLibrary === null);
             resolve({ ready, httpUp });
           } catch {
-            // Couldn't parse the body but HTTP responded 200 - treat as up.
-            resolve({ ready: true, httpUp: true });
+            // 200 but not our health-check JSON: some OTHER process is
+            // answering on this port. Declaring it "ready" here would point
+            // the app at a stranger. Not ready, not our backend.
+            log.warn(
+              `Port ${this.actualBackendPort} responded 200 but the body is not ` +
+              `Briefcase's health JSON — another process may be squatting on the port`
+            );
+            resolve({ ready: false, httpUp: false });
           }
         });
       });
@@ -457,15 +484,28 @@ export class BackendService {
     this.backendProcess.on('error', (err: Error) => {
       log.error(`[Backend process error]: ${err.message}`);
     });
-  
-    // Handle process exit
+
+    // Handle process exit — distinguish expected shutdown from a crash.
     this.backendProcess.on('exit', (code: number | null, signal: NodeJS.Signals | null) => {
-      log.error(`[Backend process exited] code: ${code}, signal: ${signal}`);
+      if (this.shuttingDown) {
+        log.info(`[Backend process exited during shutdown] code: ${code}, signal: ${signal}`);
+        return;
+      }
+      log.error(
+        `[Backend process DIED unexpectedly] code: ${code}, signal: ${signal} — ` +
+        `invoking unexpected-exit handler`
+      );
+      this.backendStarted = false;
+      if (this.unexpectedExitHandler) {
+        this.unexpectedExitHandler({ code, signal });
+      } else {
+        log.error('No unexpected-exit handler registered — app is running against a dead backend');
+      }
     });
-  
-    // Handle process close
+
+    // Handle process close (log only; 'exit' owns crash handling)
     this.backendProcess.on('close', (code: number | null) => {
-      log.error(`[Backend process closed] code: ${code}`);
+      log.info(`[Backend process closed] code: ${code}`);
     });
   }
   
@@ -481,6 +521,9 @@ export class BackendService {
    */
   private async cleanup(): Promise<void> {
     log.info('Cleaning up backend resources...');
+
+    // Mark that any backend exit from here on is intentional.
+    this.shuttingDown = true;
 
     // Release lock file properly using proper-lockfile
     if (this.lockRelease) {

@@ -18,6 +18,7 @@ import {
 import { TaskType } from '../models/task.model';
 import { WebsocketService, TaskStarted, TaskProgress, TaskCompleted, TaskFailed } from './websocket.service';
 import { LibraryService, BackendJobRequest, BackendTask } from './library.service';
+import { ErrorSurface } from '../core/error-surface.service';
 import { getApiBase } from '../core/runtime-url';
 
 const STORAGE_KEY = 'briefcase-queue-jobs';
@@ -32,6 +33,11 @@ export class QueueService implements OnDestroy {
   private http = inject(HttpClient);
   private websocketService = inject(WebsocketService);
   private libraryService = inject(LibraryService);
+  private errorSurface = inject(ErrorSurface);
+
+  // True while the last restoreFromBackend attempt failed — used to notify
+  // once per outage (not once per poll) and to reconcile when it heals.
+  private backendUnreachable = false;
 
   // Single source of truth for all jobs
   private jobs = signal<QueueJob[]>([]);
@@ -388,16 +394,31 @@ export class QueueService implements OnDestroy {
     // Immediately remove from frontend state (user clicked cancel, honor it)
     frontendJobIds.forEach(id => this.removeJob(id));
 
-    // Notify backend to cancel (fire and forget - job may already be gone)
-    if (backendJobIds.length > 0) {
-      this.http.post<any>(`${this.API_BASE}/queue/cancel-all`, { jobIds: backendJobIds }).pipe(
-        tap(() => console.log(`[QueueService] Cancelled ${backendJobIds.length} backend jobs`)),
-        catchError(error => {
-          console.warn('[QueueService] Backend cancel failed (job may have already completed):', error);
-          return of(undefined);
-        })
-      ).subscribe();
+    // Optimistic removal stands; the backend is told to cancel and any
+    // failure to confirm is surfaced (job may still be running server-side).
+    this.notifyBackendCancel(backendJobIds);
+  }
+
+  /**
+   * Ask the backend to cancel jobs. Frontend state is already updated
+   * optimistically by the callers (user clicked cancel — honor it instantly),
+   * but a failed confirmation is surfaced: the job may still be consuming
+   * CPU/disk and can reappear on the next queue restore.
+   */
+  private notifyBackendCancel(backendJobIds: string[]): void {
+    if (backendJobIds.length === 0) {
+      return;
     }
+    this.http.post<{ success?: boolean }>(`${this.API_BASE}/queue/cancel-all`, { jobIds: backendJobIds }).pipe(
+      tap(() => console.log(`[QueueService] Cancelled ${backendJobIds.length} backend job(s)`)),
+      catchError(error => {
+        this.errorSurface.surfaceError(
+          "Backend didn't confirm cancel — job may still be running",
+          error
+        );
+        return of(undefined);
+      })
+    ).subscribe();
   }
 
   /**
@@ -444,16 +465,8 @@ export class QueueService implements OnDestroy {
 
     console.log('[QueueService] All jobs cleared from frontend');
 
-    // Notify backend to cancel any running jobs (fire and forget)
-    if (backendJobIds.length > 0) {
-      this.http.post<any>(`${this.API_BASE}/queue/cancel-all`, { jobIds: backendJobIds }).pipe(
-        tap(() => console.log('[QueueService] Backend notified to cancel jobs')),
-        catchError(error => {
-          console.error('[QueueService] Failed to notify backend (non-blocking):', error);
-          return of(undefined);
-        })
-      ).subscribe();
-    }
+    // Optimistic removal stands; failed confirmation is surfaced.
+    this.notifyBackendCancel(backendJobIds);
   }
 
   /**
@@ -485,16 +498,8 @@ export class QueueService implements OnDestroy {
 
     console.log(`[QueueService] Cleared ${jobsToClear.length} pending/processing jobs`);
 
-    // Notify backend to cancel running jobs (fire and forget)
-    if (backendJobIds.length > 0) {
-      this.http.post<any>(`${this.API_BASE}/queue/cancel-all`, { jobIds: backendJobIds }).pipe(
-        tap(() => console.log('[QueueService] Backend notified to cancel jobs')),
-        catchError(error => {
-          console.error('[QueueService] Failed to notify backend (non-blocking):', error);
-          return of(undefined);
-        })
-      ).subscribe();
-    }
+    // Optimistic removal stands; failed confirmation is surfaced.
+    this.notifyBackendCancel(backendJobIds);
   }
 
   /**
@@ -565,16 +570,8 @@ export class QueueService implements OnDestroy {
 
     console.log(`[QueueService] All processing jobs reset to pending. Notifying backend...`);
 
-    // Notify backend (fire and forget - don't block on this)
-    if (backendJobIds.length > 0) {
-      this.http.post<any>(`${this.API_BASE}/queue/cancel-all`, { jobIds: backendJobIds }).pipe(
-        tap(() => console.log('[QueueService] Backend notified of cancellation')),
-        catchError(error => {
-          console.error('[QueueService] Failed to notify backend (non-blocking):', error);
-          return of(undefined);
-        })
-      ).subscribe(); // Fire and forget
-    }
+    // Optimistic reset stands; failed confirmation is surfaced.
+    this.notifyBackendCancel(backendJobIds);
 
     return of(undefined);
   }
@@ -915,22 +912,25 @@ export class QueueService implements OnDestroy {
         }
       }
     } catch (error) {
-      console.error('[QueueService] Failed to restore from backend:', error);
-      // On error, mark processing jobs as completed to avoid zombie items.
-      // If the backend is unreachable, these jobs can't be tracked anyway.
-      // Don't touch pending jobs without backendJobId — those are local-only.
-      const currentJobs = this.jobs();
-      currentJobs.forEach(job => {
-        if (job.state === 'processing' || (job.state === 'pending' && job.backendJobId)) {
-          console.log(`[QueueService] Backend error - marking ${job.state} job as completed: ${job.id}`);
-          this.updateJobState(job.id, 'completed');
-          job.tasks.forEach(task => {
-            if (task.state === 'running') {
-              this.updateTaskState(job.id, task.type, 'completed');
-            }
-          });
-        }
-      });
+      // Do NOT touch job state here. Marking in-flight jobs "completed" on a
+      // backend hiccup fakes success on running downloads/transcriptions
+      // (fallback-audit critical #1). Keep everything as-is and reconcile on
+      // the next successful restore — the matching logic above already does
+      // that. Surface the outage once per episode, not once per poll.
+      if (!this.backendUnreachable) {
+        this.backendUnreachable = true;
+        this.errorSurface.surfaceError(
+          'Queue refresh failed — backend unreachable',
+          error
+        );
+      } else {
+        console.error('[QueueService] Restore still failing (already surfaced):', error);
+      }
+      return;
+    }
+    if (this.backendUnreachable) {
+      this.backendUnreachable = false;
+      console.log('[QueueService] Backend reachable again — queue reconciled');
     }
   }
 
@@ -1160,6 +1160,7 @@ export class QueueService implements OnDestroy {
       videoPath: backendJob.videoPath,
       backendJobId: backendJob.id,
       tasks,
+      warnings: backendJob.warnings?.length ? [...backendJob.warnings] : undefined,
       createdAt: new Date(backendJob.createdAt).getTime(),
       startedAt: backendJob.startedAt ? new Date(backendJob.startedAt).getTime() : undefined,
       completedAt: backendJob.completedAt ? new Date(backendJob.completedAt).getTime() : undefined

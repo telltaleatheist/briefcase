@@ -57,6 +57,8 @@
         <span>Analyzed</span>
         @if (aiReady()) {
           <button class="run" type="button" (click)="dispatch({ type: 'analyzeSelection' })">Run</button>
+        } @else if (aiCheckFailed()) {
+          <span class="run muted" title="AI status unknown — the availability check failed">Unknown</span>
         } @else {
           <button class="run" type="button" (click)="dispatch({ type: 'openAiSetup' })">Set up AI…</button>
         }
@@ -66,6 +68,11 @@
     <div class="section-label">Connected</div>
     @if (connectionsStore.connectionsLoading()) {
       <div class="connected-empty">Loading…</div>
+    } @else if (connectionsStore.connectionsError()) {
+      <div class="load-error">
+        <span>{{ connectionsStore.connectionsError() }}</span>
+        <button class="run" type="button" (click)="connectionsStore.retryLoad()">Retry</button>
+      </div>
     } @else {
       @for (conn of connectionsStore.connections(); track conn.relationshipId) {
         <div class="connected-item">
@@ -118,6 +125,11 @@
       </div>
       @if (store.transcriptLoading()) {
         <div class="transcript-body muted">Loading transcript…</div>
+      } @else if (store.transcriptError()) {
+        <div class="load-error">
+          <span>{{ store.transcriptError() }}</span>
+          <button class="run" type="button" (click)="store.retryTranscript()">Retry</button>
+        </div>
       } @else {
         @if (transcript(); as t) {
           <div class="transcript-body">
@@ -170,7 +182,7 @@
           <ui-button [block]="true" (pressed)="dispatch({ type: 'analyzeSelection' })">
             ✦ Analyze {{ store.notAnalyzed() }}
           </ui-button>
-        } @else {
+        } @else if (!aiCheckFailed()) {
           <ui-button [block]="true" (pressed)="dispatch({ type: 'openAiSetup' })">✦ Analyze — set up AI first</ui-button>
         }
       }

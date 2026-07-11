@@ -60,9 +60,14 @@ export class ConnectionsStore {
   /** Connections of the first selected item (single- and pair-selection). */
   connections = signal<ConnectedItem[]>([]);
   connectionsLoading = signal(false);
+  /**
+   * Set when the connections fetch FAILED — a failed load must not render
+   * (or cache) as "no connections" (fallback-audit high #11).
+   */
+  connectionsError = signal<string | null>(null);
   /** Which item the current `connections` belong to (null = none loaded). */
   private loadedForVideoId = signal<string | null>(null);
-  /** Bumped after connect/disconnect to force a refetch. */
+  /** Bumped after connect/disconnect (and by retry) to force a refetch. */
   private refreshCounter = signal(0);
 
   /** The selection pair when exactly two items are selected. */
@@ -99,6 +104,7 @@ export class ConnectionsStore {
       }
 
       this.connectionsLoading.set(true);
+      this.connectionsError.set(null);
       const sub: Subscription = this.http
         .get<{ success: boolean; relatedMedia: MediaRelationshipDto[] }>(
           `${this.apiBase}/videos/${anchor.id}/related`
@@ -110,15 +116,24 @@ export class ConnectionsStore {
             this.loadedForVideoId.set(anchor.id);
             this.connectionsLoading.set(false);
           },
-          error: () => {
+          error: error => {
+            console.error('[ConnectionsStore] Connections fetch failed:', error);
+            // Do NOT set loadedForVideoId — a failure must not be cached as
+            // "this item has no connections".
             this.connections.set([]);
-            this.loadedForVideoId.set(anchor.id);
+            this.connectionsError.set('Failed to load connections.');
             this.connectionsLoading.set(false);
           },
         });
       onCleanup(() => sub.unsubscribe());
       // allowSignalWrites: the loading flag is set synchronously in here.
     }, { allowSignalWrites: true });
+  }
+
+  /** Retry a failed connections fetch (inspector's "Retry" affordance). */
+  retryLoad(): void {
+    this.connectionsError.set(null);
+    this.refreshCounter.update(n => n + 1);
   }
 
   /** Connect the currently selected pair. */

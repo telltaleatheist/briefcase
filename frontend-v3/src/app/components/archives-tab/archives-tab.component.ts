@@ -170,6 +170,9 @@ export class ArchivesTabComponent implements OnInit, OnDestroy {
     }
   }
 
+  /** Failed-load state from the service — distinct from "no archives". */
+  loadError = this.webArchiveService.loadError;
+
   async loadData() {
     this.isLoading.set(true);
     try {
@@ -177,6 +180,10 @@ export class ArchivesTabComponent implements OnInit, OnDestroy {
     } finally {
       this.isLoading.set(false);
     }
+  }
+
+  retryLoad(): void {
+    void this.loadData();
   }
 
   async onUrlSubmit() {

@@ -5,7 +5,7 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom } from 'rxjs';
 import { LibrarySearchFiltersComponent, LibraryFilters } from '../../components/library-search-filters/library-search-filters.component';
-import { CascadeComponent } from '../../components/cascade/cascade.component';
+import { CascadeComponent, CascadeEmptyAction, CascadeEmptyState } from '../../components/cascade/cascade.component';
 import { LibraryManagerModalComponent } from '../../components/library-manager-modal/library-manager-modal.component';
 import { QueueItemConfigModalComponent } from '../../components/queue-item-config-modal/queue-item-config-modal.component';
 import { AiSetupWizardComponent } from '../../components/ai-setup-wizard/ai-setup-wizard.component';
@@ -35,6 +35,7 @@ import { QueueJob, QueueTask, createQueueJob, createQueueTask } from '../../mode
 import { ExportIndicatorComponent } from '../../components/export-indicator/export-indicator.component';
 import { TrimOpenerModalComponent } from '../../components/trim-opener-modal/trim-opener-modal.component';
 import { getApiBase } from '../../core/runtime-url';
+import { ErrorSurface, describeError } from '../../core/error-surface.service';
 import { WorkspaceActionsService } from '../../core/stores/workspace-actions.service';
 import { PipelineStep } from '../../core/stores/pipeline-presets.service';
 import { NavigationStore } from '../../core/stores/navigation.store';
@@ -56,6 +57,7 @@ export interface ProcessingQueueItem {
   jobId?: string; // Frontend job ID from videoProcessingService
   backendJobId?: string; // Backend job ID for mapping
   titleResolved?: boolean; // True when title has been built (not a placeholder)
+  warnings?: string[]; // Non-fatal backend issues, shown on the queue item
 }
 
 export interface ProcessingTask {
@@ -100,6 +102,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   private websocketService = inject(WebsocketService);
   private aiSetupService = inject(AiSetupService);
   private notificationService = inject(NotificationService);
+  private errorSurface = inject(ErrorSurface);
   private tabsService = inject(TabsService);
   private fileImportService = inject(FileImportService);
   private electronService = inject(ElectronService);
@@ -121,6 +124,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
 
   @ViewChild(CascadeComponent) private cascadeComponent?: CascadeComponent;
   @ViewChild(TabsTabComponent) private tabsTabComponent?: TabsTabComponent;
+  @ViewChild(LibrarySearchFiltersComponent) private searchFilters?: LibrarySearchFiltersComponent;
 
   // File input for import button
   private fileInput?: HTMLInputElement;
@@ -145,6 +149,13 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
 
   videoWeeks = signal<VideoWeek[]>([]);
   filteredWeeks = signal<VideoWeek[]>([]);
+
+  /**
+   * Set when loading the library (or the current-library lookup) failed —
+   * the cascade renders an honest load-error state with retry instead of
+   * pretending the library is empty (fallback-audit critical #3).
+   */
+  libraryLoadError = signal<string | null>(null);
 
   // Queue state - writable signals synced from QueueService (source of truth)
   // These are writable for backward compatibility, synced via effect in constructor
@@ -230,6 +241,38 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       }))
       .filter(week => week.videos.length > 0);
   });
+
+  /**
+   * Honest empty-state for the cascade: distinguishes "library is empty"
+   * from "load failed" from "everything is hidden by filters"
+   * (fallback-audit critical #4 — one empty state told three lies).
+   */
+  cascadeEmptyState = computed<CascadeEmptyState>(() => {
+    const error = this.libraryLoadError();
+    if (error) {
+      return { kind: 'error', detail: error };
+    }
+    const shown = this.combinedWeeks().reduce((sum, w) => sum + w.videos.length, 0);
+    if (shown > 0) {
+      return { kind: 'empty' }; // not shown — cascade has items
+    }
+    const total = this.videoWeeks().reduce((sum, w) => sum + w.videos.length, 0);
+    if (total > 0) {
+      return { kind: 'filtered', hiddenCount: total };
+    }
+    return { kind: 'empty' };
+  });
+
+  onCascadeEmptyAction(action: CascadeEmptyAction): void {
+    if (action === 'retry') {
+      this.retryLibraryLoad();
+    } else {
+      // Clear every layer that can hide items: search/filters accordion,
+      // the type-filter segments, and any active search query.
+      this.searchFilters?.clearFilters();
+      this.typeFilter.set('all');
+    }
+  }
 
   onTypeFilterChange(value: string): void {
     this.typeFilter.set(value as 'all' | 'video' | 'doc' | 'web');
@@ -1318,7 +1361,8 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       })),
       jobId: job.id,
       backendJobId: job.backendJobId,
-      titleResolved: job.titleResolved
+      titleResolved: job.titleResolved,
+      warnings: job.warnings
     };
   }
 
@@ -1544,19 +1588,29 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         console.log('Videos response:', response);
         if (response.success) {
           console.log('Setting video weeks:', response.data.length, 'weeks');
+          this.libraryLoadError.set(null);
           this.videoWeeks.set(response.data);
           // Re-apply current filters to preserve user's filter selections
           this.applyFilters();
         } else {
-          console.warn('Response not successful:', response);
+          // A success:false response is a failed load, not an empty library.
+          this.libraryLoadError.set('The backend reported an error loading this library.');
+          this.errorSurface.surfaceError('Failed to load library', response);
         }
       },
       error: (error) => {
-        console.error('Failed to load library:', error);
-        this.videoWeeks.set([]);
-        this.filteredWeeks.set([]);
+        // Keep whatever data we already have (stale beats a lie) and show
+        // the load-error state — never render "No videos yet" for a failure.
+        this.libraryLoadError.set(describeError(error));
+        this.errorSurface.surfaceError('Failed to load library', error);
       }
     });
+  }
+
+  /** Retry action for the cascade's load-error empty state. */
+  retryLibraryLoad(): void {
+    this.libraryLoadError.set(null);
+    this.loadCurrentLibrary();
   }
 
   loadCurrentLibrary() {
@@ -1573,19 +1627,13 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         }
       },
       error: (error) => {
-        console.error('Failed to load current library:', error);
-
-        // Check if it's a connection refused error
-        if (error.status === 0) {
-          console.error('Backend server appears to be unavailable. Please check if it\'s running.');
-          this.notificationService.error(
-            'Connection Error',
-            'Cannot connect to backend server. Please ensure the server is running on port 3000.'
-          );
-        } else {
-          // Open library manager if no library is set
-          this.openLibraryManager();
-        }
+        // A backend/connection fault is NOT "no library configured" — do not
+        // open the Library Manager here (that masks a server fault as user
+        // misconfiguration; fallback-audit discuss #20). Show the load-error
+        // state with retry instead. Only a successful "no current library"
+        // response (handled above) opens the manager.
+        this.libraryLoadError.set(describeError(error));
+        this.errorSurface.surfaceError('Failed to load current library', error);
       }
     });
   }
@@ -1749,9 +1797,11 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
             }
           },
           error: (error) => {
-            console.error('Search failed:', error);
-            // Fall back to showing all videos on error
-            this.filteredWeeks.set(this.videoWeeks());
+            // A failed search must not present the whole library as if it
+            // matched the query (fallback-audit critical #2). Empty results
+            // + a surfaced error; the user can retry or clear the search.
+            this.filteredWeeks.set([]);
+            this.errorSurface.surfaceError('Search failed', error);
           }
         });
         return;
@@ -2148,13 +2198,20 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     }
 
     // Resolve default AI model (library-specific first, then global)
-    const defaultModel = await this.resolveDefaultAiModel();
+    const { model: defaultModel, lookupFailed } = await this.resolveDefaultAiModel();
 
     if (!defaultModel) {
-      this.notificationService.error(
-        'No AI Model Configured',
-        'Please select a default AI model in Settings or via the video config dialog first.'
-      );
+      if (lookupFailed) {
+        this.errorSurface.surfaceError(
+          "Couldn't look up your default AI model — try again",
+          new Error('default-ai-model lookup failed')
+        );
+      } else {
+        this.notificationService.error(
+          'No AI Model Configured',
+          'Please select a default AI model in Settings or via the video config dialog first.'
+        );
+      }
       return;
     }
 
@@ -2246,12 +2303,19 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     let finalSteps = steps;
     const aiStep = steps.find(s => s.type === 'ai-analyze');
     if (aiStep && !aiStep.config['aiModel']) {
-      const defaultModel = await this.resolveDefaultAiModel();
+      const { model: defaultModel, lookupFailed } = await this.resolveDefaultAiModel();
       if (!defaultModel) {
-        this.notificationService.error(
-          'No AI Model Configured',
-          'Pick a default AI model in Settings → AI, then try again.'
-        );
+        if (lookupFailed) {
+          this.errorSurface.surfaceError(
+            "Couldn't look up your default AI model — try again",
+            new Error('default-ai-model lookup failed')
+          );
+        } else {
+          this.notificationService.error(
+            'No AI Model Configured',
+            'Pick a default AI model in Settings → AI, then try again.'
+          );
+        }
         return;
       }
       finalSteps = steps.map(s =>
@@ -2298,16 +2362,24 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
    * Resolve the default AI model: library-specific first, then global.
    * Shared by the Process pipeline and webpage analysis.
    */
-  private async resolveDefaultAiModel(): Promise<string | null> {
+  /**
+   * Resolve the default AI model: library-specific first, then global.
+   * `lookupFailed` distinguishes "the lookup errored" from "genuinely no
+   * default configured" — a transient fetch failure must not tell the user
+   * they haven't configured anything (fallback-audit discuss #24).
+   */
+  private async resolveDefaultAiModel(): Promise<{ model: string | null; lookupFailed: boolean }> {
+    let lookupFailed = false;
     try {
       const libResponse = await firstValueFrom(
         this.http.get<{ success: boolean; aiModel: string | null }>(
           `${getApiBase()}/database/libraries/default-ai-model`
         )
       );
-      if (libResponse?.aiModel) return libResponse.aiModel;
+      if (libResponse?.aiModel) return { model: libResponse.aiModel, lookupFailed: false };
     } catch (error) {
       console.error('Failed to fetch library default AI model:', error);
+      lookupFailed = true;
     }
     try {
       const configResponse = await firstValueFrom(
@@ -2316,12 +2388,16 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         )
       );
       if (configResponse?.defaultAI) {
-        return `${configResponse.defaultAI.provider}:${configResponse.defaultAI.model}`;
+        return {
+          model: `${configResponse.defaultAI.provider}:${configResponse.defaultAI.model}`,
+          lookupFailed: false
+        };
       }
     } catch (error) {
       console.error('Failed to fetch global default AI model:', error);
+      lookupFailed = true;
     }
-    return null;
+    return { model: null, lookupFailed };
   }
 
   /**

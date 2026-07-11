@@ -50,6 +50,8 @@
           <app-cascade
             [weeks]="combinedWeeks()"
             [tabbedVideoIds]="tabbedVideoIds()"
+            [emptyState]="cascadeEmptyState()"
+            (emptyAction)="onCascadeEmptyAction($event)"
             (selectionChanged)="onSelectionChanged($event)"
             (videoAction)="onVideoAction($event)"
             (configureItem)="onConfigureItem($event)"
@@ -91,19 +93,10 @@
         <!-- Archives Tab: Web page archives -->
         <app-archives-tab *ngIf="activeTab() === 'archives'" />
 
-        <!-- Empty State - Library -->
-        <div class="empty-state" *ngIf="activeTab() === 'library' && filteredWeeks().length === 0">
-          <div class="empty-icon">📹</div>
-          <h3 class="empty-title">No media found</h3>
-          <p class="empty-description">
-            <span *ngIf="currentFilters?.searchQuery">
-              Try adjusting your search filters
-            </span>
-            <span *ngIf="!currentFilters?.searchQuery">
-              Use “＋ Add” in the toolbar to paste URLs or import files, or drag and drop files here
-            </span>
-          </p>
-        </div>
+        <!-- Empty state lives inside the cascade (honest three-variant version:
+             empty / load-error+retry / filtered+clear) — the duplicate block
+             that used to render here stacked a second, sometimes-lying message
+             under the cascade's own (fallback-audit critical #4). -->
       </div>
     </div>
   </div>

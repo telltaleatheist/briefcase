@@ -1207,25 +1207,28 @@ export class LibraryService {
   /**
    * Get video info from URL (title, duration, etc.)
    * GET /api/downloader/info?url=...
+   *
+   * Honest semantics (fallback-audit #14): a failed lookup propagates as an
+   * error — it never fabricates a "Unknown Video" title that then gets
+   * displayed (or persisted) as if it were real data. Callers should show
+   * the URL and surface the failure.
    */
   getVideoInfo(url: string): Observable<ApiResponse<{ title: string; duration?: number; thumbnail?: string }>> {
     return this.http.get<any>(`${this.API_BASE}/downloader/info`, {
       params: { url }
     }).pipe(
-      map(response => ({
-        success: !response.error,
-        data: {
-          title: response.title || 'Unknown Video',
-          duration: response.duration,
-          thumbnail: response.thumbnail
+      map(response => {
+        if (response.error || !response.title) {
+          throw new Error(response.error || `No title returned for ${url}`);
         }
-      })),
-      catchError(error => {
-        console.error('Failed to fetch video info:', error);
-        return of({
-          success: false,
-          data: { title: 'Unknown Video' }
-        });
+        return {
+          success: true,
+          data: {
+            title: response.title as string,
+            duration: response.duration,
+            thumbnail: response.thumbnail
+          }
+        };
       })
     );
   }

@@ -36,11 +36,6 @@ interface ElectronAPI {
   copyFilesToClipboard: (filePaths: string[]) => Promise<{ success: boolean; error?: string }>;
   openInQuickTime: (filePath: string) => Promise<{ success: boolean; error?: string }>;
   installUpdate: () => Promise<void>;
-  downloadVideo: (options: any) => Promise<{
-    success: boolean;
-    outputFile?: string;
-    error?: string;
-  }>;
   selectDirectory: () => Promise<string | null>;
   selectVideoFile: () => Promise<{ canceled: boolean; filePaths: string[] }>;
   openFiles: (options: any) => Promise<{ canceled: boolean; filePaths: string[] }>;
@@ -133,7 +128,6 @@ contextBridge.exposeInMainWorld('electron', {
   copyFilesToClipboard: (filePaths: string[]) => ipcRenderer.invoke('copy-files-to-clipboard', filePaths),
   openInQuickTime: (filePath: string) => ipcRenderer.invoke('open-in-quicktime', filePath),
   installUpdate: () => ipcRenderer.invoke('install-update'),
-  downloadVideo: (options: any) => ipcRenderer.invoke('download-video', options),
   selectDirectory: () => ipcRenderer.invoke('select-directory'),
   selectVideoFile: () => ipcRenderer.invoke('select-video-file'),
   openFiles: (options: any) => ipcRenderer.invoke('dialog:openFiles', options),
@@ -176,6 +170,20 @@ ipcRenderer.on('update-available', () => {
 
 ipcRenderer.on('update-downloaded', () => {
   window.dispatchEvent(new CustomEvent('electron-update-downloaded'));
+});
+
+// Repeated update-check failures (surfaced after several consecutive errors)
+ipcRenderer.on('update-check-failed', (_, detail: { failures: number; message: string }) => {
+  window.dispatchEvent(new CustomEvent('electron-update-check-failed', { detail }));
+});
+
+// Backend crashed mid-session / recovered after the automatic restart
+ipcRenderer.on('backend-unexpected-exit', () => {
+  window.dispatchEvent(new CustomEvent('electron-backend-unexpected-exit'));
+});
+
+ipcRenderer.on('backend-restarted', () => {
+  window.dispatchEvent(new CustomEvent('electron-backend-restarted'));
 });
 
 // Listen for add-editor-tab events from main process (when opening videos in existing editor)

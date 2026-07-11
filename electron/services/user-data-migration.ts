@@ -1,5 +1,5 @@
 // Briefcase/electron/services/user-data-migration.ts
-import { app } from 'electron';
+import { app, dialog } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as log from 'electron-log';
@@ -79,8 +79,21 @@ export class UserDataMigration {
       log.info('[UserDataMigration] Migration complete. Legacy folder left in place as backup.');
     } catch (error) {
       log.error('[UserDataMigration] Migration failed:', error);
-      // Swallow errors — a failed migration should not prevent the app
-      // from booting with an empty userData folder.
+      // The app continues with a fresh profile, but the user MUST be told —
+      // otherwise they boot into what looks like total data loss (all
+      // libraries and settings "gone") with zero explanation, while their
+      // data actually still sits in the legacy folder.
+      const newUserData = app.getPath('userData');
+      const legacyUserData = path.join(path.dirname(newUserData), this.LEGACY_NAME);
+      dialog.showErrorBox(
+        'Briefcase data migration failed',
+        'Briefcase could not migrate your existing data from its previous location.\n\n' +
+        `Your data is NOT lost — the original is still at:\n${legacyUserData}\n\n` +
+        'Briefcase will start with a fresh (possibly incomplete) profile. To retry the ' +
+        `migration, quit Briefcase, delete the new folder at:\n${newUserData}\n` +
+        'and relaunch. If this keeps failing, report the issue with the app logs attached.\n\n' +
+        `Error: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
   }
 

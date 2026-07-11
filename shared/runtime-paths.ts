@@ -39,13 +39,20 @@ function getBriefcaseConfigDir(): string {
 }
 
 function getDownloadedComponents(): Record<string, DownloadedRecord> {
+  const p = path.join(getBriefcaseConfigDir(), 'components', 'installed.json');
   try {
-    const p = path.join(getBriefcaseConfigDir(), 'components', 'installed.json');
     if (fs.existsSync(p)) {
       return JSON.parse(fs.readFileSync(p, 'utf8')).components || {};
     }
-  } catch {
-    // ignore — fall back to bundled
+  } catch (err) {
+    // Falling back to bundled binaries is correct behavior (the app still
+    // works), but a corrupt/unreadable installed.json means every DOWNLOADED
+    // component (whisper/AI models, updated tools) silently vanishes — so the
+    // failure itself must be loud in the logs of whichever process hit it.
+    console.error(
+      `[runtime-paths] FAILED to read ${p} — downloaded components will appear ` +
+      `missing until this is fixed: ${err instanceof Error ? err.message : String(err)}`
+    );
   }
   return {};
 }

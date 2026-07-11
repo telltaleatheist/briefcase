@@ -1,5 +1,6 @@
-import { Injectable, signal } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
 import { TaskType } from '../../models/task.model';
+import { ErrorSurface } from '../error-surface.service';
 
 /**
  * Job steps the Process pipeline can queue for library videos.
@@ -136,12 +137,16 @@ export class PipelinePresetsService {
     this.persist();
   }
 
+  private errorSurface = inject(ErrorSurface);
+
   private persist(): void {
     try {
       const state: StoredState = { presets: this.presets(), lastSteps: this.lastSteps() };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch (error) {
-      console.warn('[PipelinePresets] Failed to persist', error);
+      // Presets are user-created, named artifacts — a failed save means the
+      // preset will silently vanish on restart. Say so.
+      this.errorSurface.surfaceError("Preset didn't save — it will be lost on restart", error);
     }
   }
 

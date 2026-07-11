@@ -110,13 +110,23 @@ export class InspectorStore {
   /** Lazy full transcript for the single selected item. */
   transcript = signal<InspectorTranscript | null>(null);
   transcriptLoading = signal(false);
+  /**
+   * Set when the transcript fetch FAILED — distinct from "no transcript".
+   * An item marked "Transcribed ✓" must never silently show an empty
+   * transcript section (fallback-audit high #10).
+   */
+  transcriptError = signal<string | null>(null);
+  /** Bumped by retryTranscript() to re-run the fetch after a failure. */
+  private transcriptRetryCounter = signal(0);
 
   constructor() {
     effect(onCleanup => {
+      this.transcriptRetryCounter(); // retry dependency
       const item = this.singleItem();
 
       if (!item || !item.hasTranscript) {
         this.transcriptLoading.set(false);
+        this.transcriptError.set(null);
         return;
       }
       if (this.transcript()?.videoId === item.id) {
@@ -124,6 +134,7 @@ export class InspectorStore {
       }
 
       this.transcriptLoading.set(true);
+      this.transcriptError.set(null);
       const sub: Subscription = this.libraryService.getVideoTranscript(item.id).subscribe({
         next: response => {
           const data = response?.data;
@@ -144,14 +155,22 @@ export class InspectorStore {
           );
           this.transcriptLoading.set(false);
         },
-        error: () => {
+        error: error => {
+          console.error('[InspectorStore] Transcript fetch failed:', error);
           this.transcript.set(null);
+          this.transcriptError.set('Failed to load the transcript.');
           this.transcriptLoading.set(false);
         },
       });
       onCleanup(() => sub.unsubscribe());
       // allowSignalWrites: the loading flag is set synchronously in here.
     }, { allowSignalWrites: true });
+  }
+
+  /** Retry a failed transcript fetch (inspector's "Retry" affordance). */
+  retryTranscript(): void {
+    this.transcriptError.set(null);
+    this.transcriptRetryCounter.update(n => n + 1);
   }
 
   /** Called by the workspace host whenever its week data changes. */
@@ -164,5 +183,6 @@ export class InspectorStore {
     this.libraryItems.set([]);
     this.transcript.set(null);
     this.transcriptLoading.set(false);
+    this.transcriptError.set(null);
   }
 }

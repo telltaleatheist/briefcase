@@ -18,12 +18,14 @@
           [singleSelection]="selection.count() === 1"
           [selectionCount]="selection.count()"
           [aiReady]="aiReady()"
+          [aiCheckFailed]="aiCheckFailed()"
           [withoutTranscript]="inspector.withoutTranscript()"
           [notAnalyzed]="inspector.notAnalyzed()"
           (submitAdd)="onSubmitAdd($event)"
           (importFiles)="dispatchToWorkspace({ type: 'import' })"
           (openAdvanced)="dispatchToWorkspace({ type: 'openDownloadDialog' })"
           (setupAi)="dispatchToWorkspace({ type: 'openAiSetup' })"
+          (retryAiCheck)="retryAiCheck()"
           (transcribe)="dispatchToWorkspace({ type: 'transcribeSelection' })"
           (analyze)="dispatchToWorkspace({ type: 'analyzeSelection' })"
           (openEditor)="dispatchToWorkspace({ type: 'openEditor' })"
@@ -63,7 +65,7 @@
         (widthChange)="nav.setInspectorWidth($event)"
         (resetWidth)="nav.resetInspectorWidth()"
         title="Drag to resize · double-click to reset"></div>
-      <app-inspector-panel [aiReady]="aiReady()" [collections]="collections()" />
+      <app-inspector-panel [aiReady]="aiReady()" [aiCheckFailed]="aiCheckFailed()" [collections]="collections()" />
     </div>
   }
 </div>

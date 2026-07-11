@@ -7,6 +7,16 @@
 <div class="pane-section">
   <p class="section-label">Providers</p>
 
+  @if (statusCheckFailed()) {
+    <div class="row-card">
+      <div class="row-main">
+        <div class="row-name">⚠️ Couldn't check provider status</div>
+        <div class="row-desc">Statuses below may be stale or wrong — the availability check failed.</div>
+      </div>
+      <ui-button variant="secondary" size="sm" (pressed)="retryStatusCheck()">Retry</ui-button>
+    </div>
+  }
+
   @for (provider of providers(); track provider.key) {
     <div class="row-card">
       <div class="row-main">
@@ -14,7 +24,7 @@
         <div class="row-desc">{{ provider.description }}</div>
       </div>
       <span class="pill" [class.ok]="provider.ready" [class.off]="!provider.ready">
-        {{ provider.ready ? 'Connected' : 'Not configured' }}
+        {{ provider.ready ? 'Connected' : statusCheckFailed() ? 'Unknown' : 'Not configured' }}
       </span>
     </div>
   }

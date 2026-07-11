@@ -5,6 +5,7 @@ import { InspectorStore } from '../core/stores/inspector.store';
 import { NavigationStore, ShellSection } from '../core/stores/navigation.store';
 import { SelectionStore } from '../core/stores/selection.store';
 import { WorkspaceActionsService, WorkspaceAction, AddDownloadsPayload } from '../core/stores/workspace-actions.service';
+import { SystemEventsService } from '../core/stores/system-events.service';
 import { AiSetupService } from '../services/ai-setup.service';
 import { LibraryService } from '../services/library.service';
 import { QueueService } from '../services/queue.service';
@@ -72,6 +73,10 @@ export class AppShellComponent {
     // (or any non-workspace route) nothing else would — the switcher showed
     // "No library" until the user visited the Library.
     this.libraryService.getCurrentLibrary().pipe(takeUntilDestroyed()).subscribe();
+
+    // Backend crash/restart + auto-update lifecycle notifications
+    // (fallback-audit: these events previously had no renderer listeners).
+    inject(SystemEventsService).start();
   }
 
   // ── Read-only projections of the real service state (never library-page copies)
@@ -85,6 +90,12 @@ export class AppShellComponent {
   hasTour = computed(() => this.tourService.hasTourForRoute(this.router.url));
   /** Reactive: getSetupStatus() reads the availability signal internally. */
   aiReady = computed(() => this.aiSetupService.getSetupStatus().isReady);
+  /** Readiness UNKNOWN (probe failed) — show retry, not "Set up AI…". */
+  aiCheckFailed = computed(() => this.aiSetupService.getSetupStatus().checkFailed);
+
+  retryAiCheck(): void {
+    void this.aiSetupService.checkAIAvailability();
+  }
   onWorkspace = computed(() => AppShellComponent.WORKSPACE_SECTIONS.includes(this.nav.activeSection()));
 
   onSelectSection(section: Exclude<ShellSection, 'other'>): void {

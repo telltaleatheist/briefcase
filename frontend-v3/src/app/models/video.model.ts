@@ -20,6 +20,7 @@ export interface VideoItem {
   aiDescription?: string;
   sourceUrl?: string;
   errorMessage?: string; // Error message for failed downloads/operations
+  warnings?: string[]; // Non-fatal issues from processing (queue items)
   tags?: string[];
   // Media type info
   mediaType?: string;

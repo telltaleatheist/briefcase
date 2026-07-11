@@ -1,4 +1,5 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
+import { ErrorSurface } from '../core/error-surface.service';
 
 // Type definitions for the Electron API exposed via preload
 interface ElectronAPI {
@@ -33,6 +34,7 @@ declare global {
   providedIn: 'root'
 })
 export class ElectronService {
+  private errorSurface = inject(ErrorSurface);
 
   /**
    * Check if running in Electron environment
@@ -92,7 +94,7 @@ export class ElectronService {
     try {
       await window.electron!.openFile(filePath);
     } catch (error) {
-      console.error('Error opening file:', error);
+      this.errorSurface.surfaceError("Couldn't open the file — it may have moved or been deleted", error);
     }
   }
 
@@ -110,7 +112,7 @@ export class ElectronService {
     try {
       return await window.electron!.openInBrowser(filePath);
     } catch (error: any) {
-      console.error('Error opening file in browser:', error);
+      this.errorSurface.surfaceError("Couldn't open the file in a browser", error);
       return { success: false, error: error.message };
     }
   }
@@ -128,7 +130,7 @@ export class ElectronService {
     try {
       await window.electron!.openMultipleFiles(filePaths);
     } catch (error) {
-      console.error('Error opening files:', error);
+      this.errorSurface.surfaceError("Couldn't open the files — they may have moved or been deleted", error);
     }
   }
 
@@ -144,7 +146,7 @@ export class ElectronService {
     try {
       await window.electron!.showInFolder(filePath);
     } catch (error) {
-      console.error('Error showing in folder:', error);
+      this.errorSurface.surfaceError("Couldn't show the file in Finder — it may have moved", error);
     }
   }
 

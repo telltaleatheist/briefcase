@@ -1,4 +1,19 @@
 <div class="video-editor" [class.fullscreen]="isFullscreen()" [class.timeline-hidden]="isFullscreen() && !showTimelineInFullscreen()">
+  <!-- In-editor error toast: the popout has no app notification surface;
+       save failures must be visible (fallback-audit critical #7) -->
+  @if (editorErrorToast(); as toastMsg) {
+    <div class="editor-error-toast" role="alert">
+      <span>⚠️ {{ toastMsg }}</span>
+      <button type="button" class="toast-dismiss" (click)="dismissEditorError()" title="Dismiss">✕</button>
+    </div>
+  }
+  <!-- Dismissible chip: analysis failed to load, timeline missing AI sections -->
+  @if (analysisLoadFailed()) {
+    <div class="analysis-failed-chip" role="status">
+      <span>AI analysis failed to load — timeline sections unavailable</span>
+      <button type="button" class="toast-dismiss" (click)="analysisLoadFailed.set(false)" title="Dismiss">✕</button>
+    </div>
+  }
   <!-- Header with controls (hidden in fullscreen) -->
   @if (!isFullscreen()) {
     <div class="editor-header">

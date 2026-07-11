@@ -1,14 +1,18 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { NotificationService } from './notification.service';
+import { ErrorSurface } from '../core/error-surface.service';
 
 @Injectable({
   providedIn: 'root'
 })
 export class FileImportService {
-  constructor(private notificationService: NotificationService) {}
+  private notificationService = inject(NotificationService);
+  private errorSurface = inject(ErrorSurface);
 
   /**
-   * Open Electron file dialog and return selected file paths
+   * Open Electron file dialog and return selected file paths.
+   * Returns null for user-cancel; IPC failure is surfaced (the Import
+   * button must never silently do nothing — fallback-audit critical #5).
    */
   async openFileDialog(): Promise<string[] | null> {
     try {
@@ -28,8 +32,7 @@ export class FileImportService {
       console.log('Selected files:', result.filePaths);
       return result.filePaths;
     } catch (error) {
-      console.error('Failed to open file dialog:', error);
-      console.error('Make sure Electron IPC is available');
+      this.errorSurface.surfaceError("Couldn't open the file picker", error);
       return null;
     }
   }
@@ -82,13 +85,19 @@ export class FileImportService {
         );
       }
 
-      if (filePaths.length === 0 && rejected === 0) {
-        console.error('Could not get file paths from files');
+      if (filePaths.length === 0 && rejected === 0 && files.length > 0) {
+        // Not transient-source rejection, not an exception — the resolver
+        // just produced nothing. Surface it; the drop must not silently no-op.
+        this.notificationService.error(
+          'Import failed',
+          "Couldn't resolve file paths for the dropped items.",
+          true
+        );
       }
 
       return filePaths;
     } catch (error) {
-      console.error('Error getting file paths:', error);
+      this.errorSurface.surfaceError("Couldn't read the dropped files", error);
       return [];
     }
   }
@@ -116,26 +125,35 @@ export class FileImportService {
 
       console.log('Import response:', response);
 
-      if (response?.success) {
-        // Execute success callback (e.g., reload library)
-        if (onSuccess) {
-          onSuccess();
-        }
+      const results: { filePath: string; success: boolean; error?: string }[] =
+        response?.results ?? [];
+      const failures = results.filter(r => !r.success);
+      const successCount = results.filter(r => r.success).length;
 
-        const successCount = response.results?.filter((r: any) => r.success).length || 0;
+      if (response?.success && failures.length === 0) {
+        onSuccess?.();
         console.log(`✓ Successfully imported ${successCount} of ${filePaths.length} file(s)`);
-      } else {
-        console.error('Import failed:', response);
-        if (response?.results) {
-          response.results.forEach((r: any) => {
-            if (!r.success) {
-              console.error(`Failed to import ${r.filePath}: ${r.error}`);
-            }
-          });
-        }
+        return;
       }
-    } catch (error: any) {
-      console.error('Import error:', error);
+
+      // Partial or total failure: the user dragged files in — tell them
+      // exactly which ones didn't make it (fallback-audit critical #5).
+      if (successCount > 0) {
+        onSuccess?.(); // some files did land; refresh for those
+      }
+      const failureList = failures
+        .map(f => `${basename(f.filePath)}: ${f.error ?? 'unknown error'}`)
+        .join('\n');
+      this.notificationService.error(
+        failures.length > 0
+          ? `${failures.length} of ${filePaths.length} file(s) failed to import`
+          : 'Import failed',
+        failureList || 'The import request failed — see the log for details.',
+        true
+      );
+      console.error('Import failures:', response);
+    } catch (error) {
+      this.errorSurface.surfaceError('Import failed', error);
     }
   }
 
@@ -163,11 +181,18 @@ export class FileImportService {
 
       if (filePaths.length > 0) {
         await this.importFilesByPath(filePaths, onSuccess);
-      } else {
-        console.error('Could not get file paths from File objects');
       }
+      // Empty result: getFilePathsFromFiles has already notified for every
+      // failure mode (transient-source warning, resolver-empty error, or a
+      // surfaced exception) — nothing silent left to cover here.
     } catch (error) {
-      console.error('Import error:', error);
+      this.errorSurface.surfaceError('Import failed', error);
     }
   }
+}
+
+/** Last path segment for readable per-file failure lists. */
+function basename(p: string): string {
+  const idx = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
+  return idx === -1 ? p : p.slice(idx + 1);
 }

@@ -1806,3 +1806,45 @@
       0 0 34px rgba(255, 107, 53, 0.95);
   }
 }
+
+// ── In-editor error surfaces (fallback-audit: popout has no app toasts) ─────
+.editor-error-toast,
+.analysis-failed-chip {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+
+  .toast-dismiss {
+    background: none;
+    border: 0;
+    color: inherit;
+    cursor: pointer;
+    font-size: 12px;
+    padding: 0 2px;
+    opacity: 0.8;
+
+    &:hover { opacity: 1; }
+  }
+}
+
+.editor-error-toast {
+  top: 14px;
+  background: var(--error, #ef4444);
+  color: #fff;
+  font-weight: 600;
+}
+
+.analysis-failed-chip {
+  top: 52px;
+  background: var(--bg-elevated, #252525);
+  color: var(--text-secondary, #d1d5db);
+  border: 1px solid var(--border-color, #374151);
+}

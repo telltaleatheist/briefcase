@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ComponentService, ComponentStatus } from '../../../services/component.service';
+import { ErrorSurface } from '../../../core/error-surface.service';
 import { SetupDownloadService } from '../../../services/setup-download.service';
 import { SetupWizardComponent } from '../../../components/setup-wizard/setup-wizard.component';
 import { UiButtonComponent } from '../../../ui';
@@ -23,6 +24,7 @@ import { UiButtonComponent } from '../../../ui';
 export class ComponentsPaneComponent {
   private componentService = inject(ComponentService);
   private destroyRef = inject(DestroyRef);
+  private errorSurface = inject(ErrorSurface);
   dl = inject(SetupDownloadService);
 
   all = signal<ComponentStatus[]>([]);
@@ -91,7 +93,12 @@ export class ComponentsPaneComponent {
           this.removingId.set(null);
           this.reload();
         },
-        error: () => this.removingId.set(null),
+        error: error => {
+          // Keep the item visible; tell the user the removal failed
+          // (this code originally reset silently — fallback-audit #17).
+          this.removingId.set(null);
+          this.errorSurface.surfaceError("Couldn't remove the component", error);
+        },
       });
   }
 

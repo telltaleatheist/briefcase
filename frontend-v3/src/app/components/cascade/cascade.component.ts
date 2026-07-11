@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, signal, computed, ChangeDetectionStrategy, ChangeDetectorRef, effect, inject, HostListener, ViewChild } from '@angular/core';
+import { Component, Input, Output, EventEmitter, signal, computed, ChangeDetectionStrategy, ChangeDetectorRef, effect, inject, input, output, HostListener, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
 import { ScrollingModule, CdkVirtualScrollViewport } from '@angular/cdk/scrolling';
@@ -13,6 +13,20 @@ import { LibraryService } from '../../services/library.service';
 import { NotificationService } from '../../services/notification.service';
 import { TabsService } from '../../services/tabs.service';
 import { extractTitleFromFilename, extractDateFromFilename, formatDateForDisplay } from '@shared/filename-utils';
+
+/**
+ * Honest empty-state descriptor (fallback-audit critical #4):
+ * 'empty'    — the library/collection genuinely has no items
+ * 'error'    — the load failed; `detail` explains, action offers retry
+ * 'filtered' — items exist but every one is hidden; `hiddenCount` says how many
+ */
+export interface CascadeEmptyState {
+  kind: 'empty' | 'error' | 'filtered';
+  detail?: string;
+  hiddenCount?: number;
+}
+
+export type CascadeEmptyAction = 'retry' | 'clear-filters';
 
 interface ExpandableVideoWeek extends VideoWeek {
   expanded: boolean;
@@ -50,6 +64,10 @@ export class CascadeComponent {
   private router = inject(Router);
   private tabsService = inject(TabsService);
   private cdr = inject(ChangeDetectorRef);
+
+  /** Which empty state to render when there are no rows (dumb: parent decides). */
+  emptyState = input<CascadeEmptyState>({ kind: 'empty' });
+  readonly emptyAction = output<CascadeEmptyAction>();
 
   @Input() set weeks(value: VideoWeek[]) {
     // Convert to expandable weeks (all expanded by default)

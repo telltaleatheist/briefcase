@@ -8,6 +8,7 @@ import { LibraryService } from '../../../services/library.service';
 import { AiSetupWizardComponent } from '../../../components/ai-setup-wizard/ai-setup-wizard.component';
 import { UiButtonComponent } from '../../../ui';
 import { getApiBase } from '../../../core/runtime-url';
+import { ErrorSurface } from '../../../core/error-surface.service';
 
 interface AnalysisCategory {
   id: string;
@@ -91,11 +92,14 @@ export class AiPaneComponent {
   private libraryService = inject(LibraryService);
   private http = inject(HttpClient);
   private destroyRef = inject(DestroyRef);
+  private errorSurface = inject(ErrorSurface);
   private readonly apiBase = getApiBase();
 
   // Provider status
   providers = signal<ProviderCard[]>([]);
   aiConfigured = signal(false);
+  /** The availability check itself failed — provider states are unknown. */
+  statusCheckFailed = signal(false);
   wizardOpen = signal(false);
 
   // Default model
@@ -145,6 +149,7 @@ export class AiPaneComponent {
 
   private async refreshStatus(): Promise<void> {
     const availability = await this.aiSetupService.checkAIAvailability();
+    this.statusCheckFailed.set(availability.checkFailed);
     this.aiConfigured.set(
       availability.hasLocal || availability.hasOllama || availability.hasClaudeKey || availability.hasOpenAIKey
     );
@@ -155,6 +160,10 @@ export class AiPaneComponent {
       { key: 'openai', name: 'OpenAI API', description: 'OpenAI cloud models. Requires an API key.', ready: availability.hasOpenAIKey },
     ]);
     await this.loadAvailableModels();
+  }
+
+  retryStatusCheck(): void {
+    void this.refreshStatus();
   }
 
   openWizard(): void {
@@ -176,8 +185,10 @@ export class AiPaneComponent {
           ? `${result.defaultAI.provider}:${result.defaultAI.model}`
           : null
       );
-    } catch {
+    } catch (error) {
+      // A failed lookup is not "no default configured" — surface it.
       this.defaultModel.set(null);
+      this.errorSurface.surfaceError("Couldn't load the default AI model setting", error);
     }
   }
 
@@ -185,13 +196,16 @@ export class AiPaneComponent {
     const availability = await this.aiSetupService.checkAIAvailability();
     const models: ModelOption[] = [];
 
-    try {
-      const local = await firstValueFrom(this.aiSetupService.getLocalModels());
-      local?.models?.filter(m => m.downloaded).forEach(model => {
-        models.push({ value: `local:${model.id}`, label: `${model.name} (Local)`, provider: 'local' });
-      });
-    } catch {
-      // Local engine not present — fine, it's optional.
+    if (availability.hasLocal) {
+      try {
+        const local = await firstValueFrom(this.aiSetupService.getLocalModels());
+        local?.models?.filter(m => m.downloaded).forEach(model => {
+          models.push({ value: `local:${model.id}`, label: `${model.name} (Local)`, provider: 'local' });
+        });
+      } catch (error) {
+        // Local AI IS configured, so a listing failure hides real models.
+        this.errorSurface.surfaceError("Couldn't list local AI models", error);
+      }
     }
 
     if (availability.hasOllama) {
@@ -206,8 +220,9 @@ export class AiPaneComponent {
           this.http.get<{ success: boolean; models: ModelOption[] }>(`${this.apiBase}/config/claude-models`)
         );
         if (response.success) models.push(...response.models);
-      } catch {
-        // Key present but listing failed — leave cloud models out.
+      } catch (error) {
+        // Key IS configured — a listing failure silently hides usable models.
+        this.errorSurface.surfaceError("Couldn't list Claude models", error);
       }
     }
 
@@ -217,8 +232,8 @@ export class AiPaneComponent {
           this.http.get<{ success: boolean; models: ModelOption[] }>(`${this.apiBase}/config/openai-models`)
         );
         if (response.success) models.push(...response.models);
-      } catch {
-        // Same as above.
+      } catch (error) {
+        this.errorSurface.surfaceError("Couldn't list OpenAI models", error);
       }
     }
 
@@ -234,37 +249,59 @@ export class AiPaneComponent {
       if (result.success) {
         this.defaultModel.set(value);
         this.flashSaved();
+      } else {
+        this.errorSurface.surfaceError("Default AI model didn't save", result);
       }
-    } catch {
-      // Backend surfaced the error; keep prior selection.
+    } catch (error) {
+      this.errorSurface.surfaceError("Default AI model didn't save", error);
     }
   }
 
   // ── Categories ──────────────────────────────────────────────────────────
 
+  /**
+   * True when categories FAILED to load. Editing is blocked in that state:
+   * saving defaults over the user's (existing but unloadable) custom
+   * categories would be silent data loss (fallback-audit).
+   */
+  categoriesLoadFailed = signal(false);
+
   private async loadCategories(): Promise<void> {
+    this.categoriesLoadFailed.set(false);
     try {
       const response = await fetch(`${this.apiBase}/config/analysis-categories`);
-      if (response.ok) {
-        const data = await response.json();
-        this.categories.set(data.categories || DEFAULT_CATEGORIES);
-        return;
+      if (!response.ok) {
+        throw new Error(`Analysis categories request failed (${response.status})`);
       }
-    } catch {
-      // fall through to defaults
+      const data = await response.json();
+      this.categories.set(data.categories || DEFAULT_CATEGORIES);
+    } catch (error) {
+      // Show defaults read-only rather than pretending they ARE the config.
+      this.categories.set([...DEFAULT_CATEGORIES]);
+      this.categoriesLoadFailed.set(true);
+      this.errorSurface.surfaceError("Couldn't load analysis categories", error);
     }
-    this.categories.set([...DEFAULT_CATEGORIES]);
   }
 
   private async saveCategories(): Promise<void> {
+    if (this.categoriesLoadFailed()) {
+      this.errorSurface.surfaceError(
+        "Categories weren't saved",
+        new Error('Refusing to overwrite unloadable existing categories — reload the pane first')
+      );
+      return;
+    }
     try {
-      await fetch(`${this.apiBase}/config/analysis-categories`, {
+      const response = await fetch(`${this.apiBase}/config/analysis-categories`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ categories: this.categories() }),
       });
+      if (!response.ok) {
+        throw new Error(`Save failed (${response.status})`);
+      }
     } catch (error) {
-      console.error('Failed to save categories:', error);
+      this.errorSurface.surfaceError("Analysis categories didn't save", error);
     }
   }
 
@@ -341,7 +378,7 @@ export class AiPaneComponent {
         this.hasCustomPrompts.set(data.hasCustom);
       }
     } catch (error) {
-      console.error('Failed to load prompts:', error);
+      this.errorSurface.surfaceError("Couldn't load analysis prompts", error);
     }
   }
 
@@ -365,7 +402,7 @@ export class AiPaneComponent {
         this.flashSaved();
       }
     } catch (error) {
-      console.error('Failed to save prompt:', error);
+      this.errorSurface.surfaceError("Prompt didn't save", error);
     }
   }
 
@@ -389,7 +426,7 @@ export class AiPaneComponent {
         this.hasCustomPrompts.set({ description: false, title: false, tags: false, quotes: false });
       }
     } catch (error) {
-      console.error('Failed to reset prompts:', error);
+      this.errorSurface.surfaceError("Prompts didn't reset", error);
     }
   }
 

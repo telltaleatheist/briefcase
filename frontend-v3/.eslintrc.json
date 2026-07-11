@@ -87,6 +87,14 @@
           {
             "selector": "MemberExpression[object.name='document'][property.name=/^(querySelector|querySelectorAll|getElementById|getElementsByClassName|getElementsByTagName)$/]",
             "message": "No global DOM queries \u2014 use viewChild() signal queries or Renderer2 \u2014 migration rule 3."
+          },
+          {
+            "selector": "CatchClause > BlockStatement[body.length=0]",
+            "message": "Empty catch blocks hide bugs \u2014 surface the failure via ErrorSurface.surfaceError(), or justify the silence with a comment and an explicit no-op."
+          },
+          {
+            "selector": "CatchClause > BlockStatement[body.length=1] > ExpressionStatement > CallExpression[callee.object.name='console'][callee.property.name=/^(error|warn|log)$/]",
+            "message": "console-only catch blocks hide failures from the user \u2014 use ErrorSurface.surfaceError() (fallback-audit rule)."
           }
         ]
       }

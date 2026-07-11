@@ -2,7 +2,7 @@ import { Component, signal, computed, effect, ViewChild, ElementRef, OnInit, OnD
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Router, ActivatedRoute } from '@angular/router';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, timer, Subscription } from 'rxjs';
 import { ExportDialogComponent, ExportDialogData } from '../export-dialog/export-dialog.component';
 import { NavigationService } from '../../services/navigation.service';
 import { LibraryService, LibraryAnalysis, AnalysisSection as LibAnalysisSection } from '../../services/library.service';
@@ -515,6 +515,33 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
   showMarkerDialog = signal(false);
   markerDialogData = signal<MarkerDialogData | null>(null);
 
+  /**
+   * In-editor error toast (fallback-audit critical #7): the popout editor has
+   * no notification surface — marker/chapter/mute save failures were console
+   * only, silently losing the user's on-air marks. Cleared by timer or click.
+   */
+  editorErrorToast = signal<string | null>(null);
+  private editorToastSub?: Subscription;
+
+  /** Show an error toast inside the editor window and log the full error. */
+  private showEditorError(message: string, error: unknown): void {
+    console.error(`[Editor] ${message}:`, error);
+    this.editorErrorToast.set(message);
+    this.editorToastSub?.unsubscribe();
+    this.editorToastSub = timer(6000).subscribe(() => this.editorErrorToast.set(null));
+  }
+
+  dismissEditorError(): void {
+    this.editorToastSub?.unsubscribe();
+    this.editorErrorToast.set(null);
+  }
+
+  /**
+   * Dismissible chip: AI analysis/sections failed to load — the timeline is
+   * rendering without them (progressive render stands, silence doesn't).
+   */
+  analysisLoadFailed = signal(false);
+
   // Export dialog
   showExportDialog = signal(false);
   exportDialogData = signal<ExportDialogData | null>(null);
@@ -881,10 +908,14 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
             }).finally(() => this.applySidebarDefault());
 
             // Always load sections (includes both AI sections and custom markers)
-            // loadAnalysisForVideo now handles both cases properly
+            // loadAnalysisForVideo now handles both cases properly.
+            // Progressive render stands, but the failure is no longer silent —
+            // the timeline missing its AI sections gets a visible chip
+            // (fallback-audit discuss #19).
             this.loadAnalysisForVideo(videoId).catch(err => {
               console.warn('Section/analysis loading failed, continuing without it:', err);
               this.hasAnalysis.set(false);
+              this.analysisLoadFailed.set(true);
             }).finally(() => this.applySidebarDefault());
 
             // Load mute sections for audio censoring
@@ -995,11 +1026,14 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
       if (response.success && response.data) {
         this.muteSections.set(response.data);
       } else {
+        // success:false = load FAILED (mutes may exist) — warn so the user
+        // doesn't edit mutes against an incomplete layer (fallback-audit #21).
         this.muteSections.set([]);
+        this.showEditorError("Couldn't load mute sections — existing mutes may not show", response);
       }
     } catch (error) {
-      console.log('Failed to load mute sections:', error);
       this.muteSections.set([]);
+      this.showEditorError("Couldn't load mute sections — existing mutes may not show", error);
     }
   }
 
@@ -1023,9 +1057,11 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
         await this.loadMuteSections(videoId);
         // Clear selection after adding mute
         this.highlightSelection.set(null);
+      } else {
+        this.showEditorError("Mute didn't save — try again", response);
       }
     } catch (error) {
-      console.error('Failed to add mute section:', error);
+      this.showEditorError("Mute didn't save — try again", error);
     }
   }
 
@@ -1044,9 +1080,11 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
           sections.filter(s => s.id !== section.id)
         );
         this.selectedMuteSection.set(undefined);
+      } else {
+        this.showEditorError("Mute didn't delete — try again", response);
       }
     } catch (error) {
-      console.error('Failed to delete mute section:', error);
+      this.showEditorError("Mute didn't delete — try again", error);
     }
   }
 
@@ -1119,10 +1157,17 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
             this.libraryService.updateMuteSection(section.id, section.startSeconds, section.endSeconds)
           );
           if (!response.success) {
-            console.error('Failed to update mute section:', response.error);
+            // Revert-worthy: the DB still has the old bounds — reload so the
+            // timeline shows the truth instead of an unsaved resize.
+            this.showEditorError("Mute resize didn't save — reverting", response.error);
+            await this.loadMuteSections(section.videoId);
           }
         } catch (error) {
-          console.error('Failed to update mute section:', error);
+          this.showEditorError("Mute resize didn't save — reverting", error);
+          const vid = this.activeTab()?.videoId;
+          if (vid) {
+            await this.loadMuteSections(vid);
+          }
         }
       }
 
@@ -1135,6 +1180,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
   }
 
   private async loadAnalysisForVideo(videoId: string) {
+    this.analysisLoadFailed.set(false);
     try {
       // Always fetch sections (both AI and custom markers)
       const sectionsData = await firstValueFrom(
@@ -1948,10 +1994,10 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
         // Clear selection after adding marker
         this.clearSelection();
       } else {
-        console.error('Failed to save marker:', result.error);
+        this.showEditorError("Marker didn't save — try again", result.error);
       }
     } catch (error) {
-      console.error('Error saving marker:', error);
+      this.showEditorError("Marker didn't save — try again", error);
     }
   }
 
@@ -1982,10 +2028,10 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
         // Clear selection after adding chapter
         this.clearSelection();
       } else {
-        console.error('Failed to save chapter:', result.error);
+        this.showEditorError("Chapter didn't save — try again", result.error);
       }
     } catch (error) {
-      console.error('Error saving chapter:', error);
+      this.showEditorError("Chapter didn't save — try again", error);
     }
   }
 
@@ -2005,7 +2051,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
         // Refresh sections
         await this.loadAnalysisForVideo(this.videoId()!);
       } else {
-        console.error('Failed to delete marker:', result.error);
+        this.showEditorError("Marker didn't delete — try again", result.error);
       }
     } catch (error) {
       console.error('Error deleting marker:', error);

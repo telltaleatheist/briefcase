@@ -37,6 +37,10 @@ export class AddDefaultsService {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
     } catch (error) {
+      // Justified quiet path (fallback-audit KEEP verdict): only remembered
+      // last-used choices are affected; the in-memory signal keeps them for
+      // this session and no user data is at risk.
+      // eslint-disable-next-line no-restricted-syntax -- audited: prefs-only, no data loss
       console.warn('[AddDefaults] Failed to persist add defaults', error);
     }
   }

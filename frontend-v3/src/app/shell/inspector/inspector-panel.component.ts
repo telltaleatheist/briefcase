@@ -38,6 +38,8 @@ export class InspectorPanelComponent {
 
   /** Whether an AI provider is configured (Analyze affordances). */
   aiReady = input(false);
+  /** AI readiness unknown — the availability probe failed. */
+  aiCheckFailed = input(false);
   /** Collections ("tabs") for the Add to Collection menu. */
   collections = input<VideoTab[]>([]);
 

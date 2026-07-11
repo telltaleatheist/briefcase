@@ -1,6 +1,6 @@
 // Briefcase/electron/main.ts
 // SIMPLIFIED: No more executable checking - binaries are bundled!
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, dialog } from 'electron';
 import * as log from 'electron-log';
 import * as path from 'path';
 import { AppConfig } from './config/app-config';
@@ -158,8 +158,16 @@ try {
     }
   });
 } catch (error) {
-  log.error('Error setting up single instance lock:', error);
-  // Continue anyway - better to run than fail completely
+  // Running WITHOUT the lock means a second instance could share the same
+  // SQLite library files — a corruption risk. Refuse to run unlocked.
+  log.error('Error setting up single instance lock — refusing to run unlocked:', error);
+  dialog.showErrorBox(
+    'Briefcase could not start',
+    'Failed to acquire the single-instance lock. Running two copies of Briefcase ' +
+    'against the same library risks data corruption, so this instance will exit.\n\n' +
+    `Error: ${error instanceof Error ? error.message : String(error)}`
+  );
+  app.exit(1);
 }
 
 // App is ready - start initialization sequence
@@ -206,6 +214,50 @@ app.whenReady().then(async () => {
       // Create tray icon
       trayService.createTray();
       trayService.setBackendPort(backendService.getBackendPort());
+
+      // Mid-session backend crash: tell every window, attempt exactly ONE
+      // automatic restart, and fall back to the backend-error window if the
+      // restart fails. Without this the app silently runs against a dead
+      // backend and every feature fails one HTTP error at a time.
+      let backendRestartAttempted = false;
+      backendService.setUnexpectedExitHandler((info) => {
+        void (async () => {
+          for (const win of BrowserWindow.getAllWindows()) {
+            if (!win.isDestroyed()) {
+              win.webContents.send('backend-unexpected-exit');
+            }
+          }
+
+          if (backendRestartAttempted) {
+            log.error('Backend died again after an automatic restart — showing error window');
+            windowService.showBackendErrorWindow();
+            return;
+          }
+          backendRestartAttempted = true;
+
+          log.warn(
+            `Attempting one automatic backend restart after unexpected exit ` +
+            `(code ${info.code}, signal ${info.signal})...`
+          );
+          const restarted = await backendService.startBackendServer();
+          if (restarted) {
+            log.info('Backend restarted successfully after unexpected exit');
+            windowService.setFrontendPort(backendService.getBackendPort());
+            trayService.setBackendPort(backendService.getBackendPort());
+            for (const win of BrowserWindow.getAllWindows()) {
+              if (!win.isDestroyed()) {
+                win.webContents.send('backend-restarted');
+              }
+            }
+          } else {
+            log.error('Automatic backend restart failed — showing error window');
+            windowService.showBackendErrorWindow();
+          }
+        })();
+      });
+
+      // Begin periodic auto-update checks (packaged builds only).
+      updateService.startPeriodicChecks();
     } else {
       // Backend failed twice - show error
       log.error('Backend failed to start after retry attempt');
@@ -231,9 +283,15 @@ app.whenReady().then(async () => {
 });
 
 // Don't quit when all windows are closed - keep running in tray
-// The app will only quit when user selects "Quit" from the tray menu
+// The app will only quit when user selects "Quit" from the tray menu.
+// EXCEPT: if tray creation failed, "running in the tray" would be an
+// unreachable zombie process — in that case, quit like a normal app.
 app.on('window-all-closed', () => {
-  // Keep the app running in the tray
+  if (trayService && !trayService.hasTray()) {
+    log.warn('All windows closed and no tray icon exists — quitting instead of running unreachable');
+    void gracefulExit(0);
+    return;
+  }
   log.info('All windows closed, app continues running in tray');
 });
 

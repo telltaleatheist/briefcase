@@ -559,6 +559,19 @@ cdk-virtual-scroll-viewport.library-content {
   font-size: 10px;
 }
 
+// Non-fatal processing warnings on queue items
+.warning-meta {
+  background: rgba(245, 158, 11, 0.1);
+  border-radius: 4px;
+  padding: 4px 8px;
+  margin-top: 2px;
+}
+
+.warning-text {
+  color: var(--warning, #f59e0b) !important;
+  font-size: 10px;
+}
+
 // Actions
 .video-actions {
   display: flex;
@@ -711,6 +724,23 @@ cdk-virtual-scroll-viewport.library-content {
   font-size: $font-size-lg;
   color: var(--text-secondary);
   margin: 0;
+}
+
+.empty-action {
+  margin-top: $spacing-lg;
+  padding: $spacing-sm $spacing-lg;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-md;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-size: $font-size-base;
+  font-weight: $font-weight-medium;
+  cursor: pointer;
+
+  &:hover {
+    border-color: var(--primary-orange);
+    color: var(--primary-orange);
+  }
 }
 
 // Progress Label (above progress bar)

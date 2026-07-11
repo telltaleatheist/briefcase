@@ -19,6 +19,15 @@ export class TrayService {
   }
 
   /**
+   * Whether the tray icon actually exists. main.ts consults this in
+   * window-all-closed: with no tray, "keep running in the tray" would be an
+   * unreachable zombie process, so the app must quit instead.
+   */
+  hasTray(): boolean {
+    return this.tray !== null;
+  }
+
+  /**
    * Create the system tray icon and menu
    */
   createTray(): void {

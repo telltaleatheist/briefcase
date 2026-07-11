@@ -87,7 +87,8 @@ export class QueueTabComponent {
           sourceUrl: job.url,
           tags: [`processing:${job.id}`, `status:${job.state}`],
           titleLoading: job.titleResolved === false,
-          errorMessage: errorMessage
+          errorMessage: errorMessage,
+          warnings: job.warnings
         };
       });
 
@@ -119,6 +120,7 @@ export class QueueTabComponent {
           sourceUrl: job.url,
           tags: [`completed:${job.id}`, hasFailed ? 'status:failed' : 'status:completed'],
           errorMessage: errorMessage,
+          warnings: job.warnings,
           hasTranscript,
           hasAnalysis,
           // Store actual video ID for navigation to video info page

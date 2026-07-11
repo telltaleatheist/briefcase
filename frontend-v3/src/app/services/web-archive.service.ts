@@ -4,6 +4,7 @@ import { firstValueFrom } from 'rxjs';
 import { ElectronService } from './electron.service';
 import { LibraryService } from './library.service';
 import { getApiBase } from '../core/runtime-url';
+import { describeError } from '../core/error-surface.service';
 
 export interface WebArchiveDomain {
   domain: string;
@@ -43,6 +44,8 @@ export class WebArchiveService {
 
   domains = signal<WebArchiveDomain[]>([]);
   archives = signal<WebArchiveItem[]>([]);
+  /** Set when loading archives/domains failed — distinct from "no archives". */
+  loadError = signal<string | null>(null);
   captureInProgress = signal(false);
 
   /**
@@ -136,9 +139,14 @@ export class WebArchiveService {
       );
       if (response?.success) {
         this.archives.set(response.archives || []);
+        this.loadError.set(null);
+      } else {
+        // A success:false response is a failed load, not an empty archive.
+        this.loadError.set('The backend reported an error loading archives.');
       }
     } catch (error) {
       console.error('Failed to load archives:', error);
+      this.loadError.set(describeError(error));
     }
   }
 
@@ -152,9 +160,13 @@ export class WebArchiveService {
       );
       if (response?.success) {
         this.domains.set(response.domains || []);
+        this.loadError.set(null);
+      } else {
+        this.loadError.set('The backend reported an error loading archive domains.');
       }
     } catch (error) {
       console.error('Failed to load domains:', error);
+      this.loadError.set(describeError(error));
     }
   }
 
