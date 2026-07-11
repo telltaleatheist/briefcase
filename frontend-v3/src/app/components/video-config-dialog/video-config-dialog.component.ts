@@ -7,6 +7,7 @@ import { VideoJobSettings } from '../../models/video-processing.model';
 import { AiSetupService } from '../../services/ai-setup.service';
 import { TourService } from '../../services/tour.service';
 import { LibraryService } from '../../services/library.service';
+import { PipelinePresetsService } from '../../core/stores/pipeline-presets.service';
 import { getApiBase } from '../../core/runtime-url';
 
 interface CustomInstructionHistoryItem {
@@ -35,6 +36,7 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges, OnDestroy 
   private cdr = inject(ChangeDetectorRef);
   private tourService = inject(TourService);
   private libraryService = inject(LibraryService);
+  private presetsService = inject(PipelinePresetsService);
   private readonly API_BASE = getApiBase();
   private modelsChangedSub?: Subscription;
 
@@ -285,20 +287,33 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges, OnDestroy 
       // Force change detection to update the dropdown
       this.cdr.detectChanges();
 
-      // Try to get library's default AI model first
+      // Resolve which model to preselect. Precedence: the model the user last
+      // chose (a personal preference, tracked across every picker) → the
+      // library default → the global config default → none. Only honor a
+      // last-used value that's actually installed, so a stale pick never
+      // selects a missing model.
       let defaultModel: string | null = null;
       console.log('=== LOADING DEFAULT AI MODEL ===');
 
-      try {
-        console.log('Step 1: Fetching library default from:', `${this.API_BASE}/database/libraries/default-ai-model`);
-        const response = await this.http.get<{ success: boolean; aiModel: string | null }>(
-          `${this.API_BASE}/database/libraries/default-ai-model`
-        ).toPromise();
-        console.log('Step 1 Response:', JSON.stringify(response));
-        defaultModel = response?.aiModel || null;
-        console.log('Step 1 Result - Library default AI model:', defaultModel);
-      } catch (error) {
-        console.error('Step 1 FAILED - Error fetching library default:', error);
+      const remembered = this.presetsService.lastChosenAiModel();
+      if (remembered && models.some(m => m.value === remembered)) {
+        defaultModel = remembered;
+        console.log('Step 0 Result - Using last-used AI model:', defaultModel);
+      }
+
+      // If no last-used pick, fall back to the library's saved default
+      if (!defaultModel) {
+        try {
+          console.log('Step 1: Fetching library default from:', `${this.API_BASE}/database/libraries/default-ai-model`);
+          const response = await this.http.get<{ success: boolean; aiModel: string | null }>(
+            `${this.API_BASE}/database/libraries/default-ai-model`
+          ).toPromise();
+          console.log('Step 1 Response:', JSON.stringify(response));
+          defaultModel = response?.aiModel || null;
+          console.log('Step 1 Result - Library default AI model:', defaultModel);
+        } catch (error) {
+          console.error('Step 1 FAILED - Error fetching library default:', error);
+        }
       }
 
       // If no library-specific default, try global config default
@@ -370,9 +385,15 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges, OnDestroy 
   }
 
   /**
-   * Handle AI model change
+   * Handle AI model change: record the pick as the user's remembered last model
+   * (a personal preference, honored ahead of the configured default next time
+   * any picker seeds an empty selection), and reset the saved-as-default state.
+   * Reads the authoritative value off the event target so it's independent of
+   * ngModel's write ordering.
    */
-  onAiModelChange() {
+  onAiModelChange(event: Event) {
+    const value = (event.target as HTMLSelectElement).value;
+    this.presetsService.rememberAiModel(value);
     // Reset saved state when model changes
     this.savedAsDefault = false;
   }
@@ -385,6 +406,10 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges, OnDestroy 
     if (!this.settings.aiModel) {
       return;
     }
+
+    // Saving as default also makes it the remembered last pick, so every picker
+    // seeds to it consistently.
+    this.presetsService.rememberAiModel(this.settings.aiModel);
 
     try {
       // Save to library-specific storage

@@ -164,7 +164,7 @@
               <div class="config-form">
                 <div class="form-group">
                   <label>AI Model</label>
-                  <select [(ngModel)]="settings.aiModel" (change)="onAiModelChange()" [disabled]="loadingModels">
+                  <select [(ngModel)]="settings.aiModel" (change)="onAiModelChange($event)" [disabled]="loadingModels">
                     <option *ngIf="loadingModels" value="">Loading models...</option>
                     <option *ngIf="!loadingModels && aiModels.length === 0" value="">No models available</option>
 

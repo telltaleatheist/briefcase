@@ -18,6 +18,7 @@ import { AiSetupService, AIAvailability } from '../../services/ai-setup.service'
 import { LibraryService } from '../../services/library.service';
 import { firstValueFrom } from 'rxjs';
 import { getApiBase } from '../../core/runtime-url';
+import { PipelinePresetsService } from '../../core/stores/pipeline-presets.service';
 
 interface AIModelOption {
   value: string;
@@ -36,6 +37,7 @@ export class QueueItemConfigModalComponent implements OnInit, OnDestroy {
   private aiSetupService = inject(AiSetupService);
   private libraryService = inject(LibraryService);
   private http = inject(HttpClient);
+  private presetsService = inject(PipelinePresetsService);
   private readonly API_BASE = getApiBase();
   private modelsChangedSub?: Subscription;
 
@@ -359,6 +361,8 @@ export class QueueItemConfigModalComponent implements OnInit, OnDestroy {
         console.log(`Saved ${modelValue} as default AI model`);
         // Update the local default so new tasks use this model
         this.defaultAIModel = modelValue;
+        // An explicit default is also a last-used pick — remember it too.
+        this.presetsService.rememberAiModel(modelValue);
         // Show success feedback
         this.savedAsDefault.set(true);
         // Reset after 1 second
@@ -369,6 +373,22 @@ export class QueueItemConfigModalComponent implements OnInit, OnDestroy {
     } catch (error) {
       console.error('Failed to save default AI:', error);
     }
+  }
+
+  /**
+   * Preferred value to seed a task's model when it has none of its own, in
+   * order: the model the user last chose (if still installed) → the configured
+   * server-side default (if installed) → none. Mirrors the inspector Process
+   * picker so last-used is honored here too, not only there. Both candidates are
+   * checked against the loaded model list so a stale/uninstalled value is never
+   * selected; values are "provider:model", matching every option value.
+   */
+  private preferredSeedModel(): string {
+    const models = this.aiModels();
+    const remembered = this.presetsService.lastChosenAiModel();
+    if (remembered && models.some(m => m.value === remembered)) return remembered;
+    if (this.defaultAIModel && models.some(m => m.value === this.defaultAIModel)) return this.defaultAIModel;
+    return '';
   }
 
   initializeTasks() {
@@ -383,9 +403,10 @@ export class QueueItemConfigModalComponent implements OnInit, OnDestroy {
         console.log('[initializeTasks] Processing task:', task.type, 'config:', task.config);
         const taskCopy = { ...task, config: { ...task.config } };
 
-        // Ensure ai-analyze task has the default AI model if not specified
+        // Ensure ai-analyze task has a seeded model when not specified: the
+        // task's own saved model wins, then last-used, then the server default.
         if (task.type === 'ai-analyze') {
-          const aiModel = task.config?.['aiModel'] || this.defaultAIModel;
+          const aiModel = task.config?.['aiModel'] || this.preferredSeedModel();
           taskCopy.config = {
             ...task.config,
             aiModel,
@@ -458,6 +479,8 @@ export class QueueItemConfigModalComponent implements OnInit, OnDestroy {
     this.selectedAIModel.set(modelValue);
     // Also update the task config
     this.updateTaskConfig('ai-analyze', { aiModel: modelValue });
+    // Record as the user's last-used model so every picker seeds it next time.
+    this.presetsService.rememberAiModel(modelValue);
   }
 
   getDefaultConfig(taskType: TaskType): any {
@@ -468,7 +491,7 @@ export class QueueItemConfigModalComponent implements OnInit, OnDestroy {
         return { model: 'base', language: 'en', translate: false } as TranscribeConfig;
       case 'ai-analyze':
         return {
-          aiModel: this.defaultAIModel,
+          aiModel: this.preferredSeedModel(),
           analysisGranularity: this.defaultGranularity,
         } as AIAnalyzeConfig;
       case 'fix-aspect-ratio':

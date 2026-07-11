@@ -43,7 +43,7 @@
   <select
     id="default-model"
     class="select"
-    [value]="defaultModel() ?? ''"
+    [value]="selectedModel()"
     [disabled]="availableModels().length === 0"
     (change)="saveDefaultModel($event)">
     <option value="" disabled>

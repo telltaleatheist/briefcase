@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -9,6 +9,7 @@ import { AiSetupWizardComponent } from '../../../components/ai-setup-wizard/ai-s
 import { UiButtonComponent } from '../../../ui';
 import { getApiBase } from '../../../core/runtime-url';
 import { ErrorSurface } from '../../../core/error-surface.service';
+import { PipelinePresetsService } from '../../../core/stores/pipeline-presets.service';
 
 interface AnalysisCategory {
   id: string;
@@ -93,6 +94,7 @@ export class AiPaneComponent {
   private http = inject(HttpClient);
   private destroyRef = inject(DestroyRef);
   private errorSurface = inject(ErrorSurface);
+  private presetsService = inject(PipelinePresetsService);
   private readonly apiBase = getApiBase();
 
   // Provider status
@@ -103,9 +105,39 @@ export class AiPaneComponent {
   wizardOpen = signal(false);
 
   // Default model
-  defaultModel = signal<string | null>(null);
+  /** The configured server-side default ("provider:model"), or null. */
+  private configuredDefault = signal<string | null>(null);
+  /**
+   * The model the user explicitly saved this session — wins over any seed so a
+   * fresh pick shows immediately, without waiting on a reload.
+   */
+  private userSelectedModel = signal<string | null>(null);
   availableModels = signal<ModelOption[]>([]);
   savedFlash = signal(false);
+
+  /**
+   * The value shown in the picker. An explicit save wins; otherwise it is seeded
+   * by preference (see preferredSeedModel): last-used first, then the configured
+   * server default, then none.
+   */
+  readonly selectedModel = computed<string>(
+    () => this.userSelectedModel() ?? this.preferredSeedModel() ?? ''
+  );
+
+  /**
+   * Preferred value to seed the picker, in order: the model the user last chose
+   * in ANY picker (if it's still an installed option) → the configured
+   * server-side default (the legitimate first-run state) → none. Reads signals,
+   * so the picker re-seeds as the model list and default load in.
+   */
+  private preferredSeedModel(): string | null {
+    const models = this.availableModels();
+    const remembered = this.presetsService.lastChosenAiModel();
+    if (remembered && models.some(m => m.value === remembered)) return remembered;
+    // Keep the configured server default as-is (membership unchecked, unchanged
+    // behavior) — a stale value simply falls through to the placeholder.
+    return this.configuredDefault();
+  }
 
   // Categories
   categories = signal<AnalysisCategory[]>([]);
@@ -180,14 +212,14 @@ export class AiPaneComponent {
   private async loadDefaultModel(): Promise<void> {
     try {
       const result = await firstValueFrom(this.libraryService.getDefaultAI());
-      this.defaultModel.set(
+      this.configuredDefault.set(
         result.success && result.defaultAI
           ? `${result.defaultAI.provider}:${result.defaultAI.model}`
           : null
       );
     } catch (error) {
       // A failed lookup is not "no default configured" — surface it.
-      this.defaultModel.set(null);
+      this.configuredDefault.set(null);
       this.errorSurface.surfaceError("Couldn't load the default AI model setting", error);
     }
   }
@@ -247,7 +279,10 @@ export class AiPaneComponent {
     try {
       const result = await firstValueFrom(this.libraryService.saveDefaultAI(provider, rest.join(':')));
       if (result.success) {
-        this.defaultModel.set(value);
+        this.userSelectedModel.set(value);
+        // Keep last-used in sync with the explicit default so every other picker
+        // (inspector Process, Add popover) seeds to the same model next time.
+        this.presetsService.rememberAiModel(value);
         this.flashSaved();
       } else {
         this.errorSurface.surfaceError("Default AI model didn't save", result);

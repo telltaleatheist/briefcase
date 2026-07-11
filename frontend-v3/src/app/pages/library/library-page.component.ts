@@ -2403,6 +2403,17 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
    * they haven't configured anything (fallback-audit discuss #24).
    */
   private async resolveDefaultAiModel(): Promise<{ model: string | null; lookupFailed: boolean }> {
+    // Prefer the model the user last chose (persisted as `provider:model` by
+    // PipelinePresetsService; a picker validated it as installed when written).
+    // Kept FIRST so the empty-picker downstream injection AND webpage analysis
+    // honor last-used, matching the inspector's Process picker. No installed-
+    // model list is available here, so we can't re-validate against the current
+    // session — that's intentional: the backend fails loudly if the model is
+    // gone, which is correct behavior over silently overriding the user's pick.
+    // The library/server defaults below remain the legitimate first-run state.
+    const remembered = this.pipelinePresets.lastChosenAiModel();
+    if (remembered) return { model: remembered, lookupFailed: false };
+
     let lookupFailed = false;
     try {
       const libResponse = await firstValueFrom(
