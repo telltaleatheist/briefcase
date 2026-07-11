@@ -36,9 +36,6 @@ export interface VideoItem {
   childIds?: string[]; // Array of child video IDs (many-to-many)
   children?: VideoItem[]; // Populated child video objects
   parents?: VideoItem[]; // Populated parent video objects
-  isGhost?: boolean; // True if this is a ghost item (shown in different week)
-  ghostType?: 'parent' | 'child'; // Type of ghost relationship
-  ghostRelatedName?: string; // Name of the related video (parent or child)
   // Queue-specific fields
   titleLoading?: boolean; // True when title/filename is being fetched
   videoId?: string; // Actual database video ID (for queue items where id has a prefix)

@@ -54,21 +54,18 @@
               [class.ai-processing]="isProcessingAi(item.video)"
               [class.selection-edge-top]="isSelectionEdgeTop(i)"
               [class.selection-edge-bottom]="isSelectionEdgeBottom(i)"
-              [class.has-children]="hasChildren(item.video) || hasVideoChildren(item.video)"
-              [class.is-ghost]="item.video.isGhost"
-              [class.is-child]="isVideoChild(item.video)"
+              [class.has-children]="hasChildren(item.video)"
               [class.in-tab]="isInTab(item.video)"
               (click)="handleVideoClick(item.itemId, item.video, $event)"
-              (dblclick)="handleVideoDoubleClick(item.video, $event)"
               (contextmenu)="onContextMenu(item.itemId, item.video, $event)"
             >
-              <!-- Processing Status Indicator (not for ghosts) -->
-              @if (showStatusIndicator && !item.video.isGhost) {
+              <!-- Processing Status Indicator -->
+              @if (showStatusIndicator) {
                 <div class="selection-indicator" [ngClass]="getProcessingStatus(item.video)"></div>
               }
 
-              <!-- Expand/Collapse Button (if children enabled, not for ghosts) -->
-              @if (childrenConfig?.expandable && hasChildren(item.video) && !item.video.isGhost) {
+              <!-- Expand/Collapse Button (if children enabled) -->
+              @if (childrenConfig?.expandable && hasChildren(item.video)) {
                 <button
                   class="expand-toggle"
                   (click)="toggleExpanded(item.video.id, $event)"
@@ -77,53 +74,34 @@
                 </button>
               }
 
-              <!-- Thumbnail (skip for ghost items) -->
-              @if (showThumbnails && !item.video.isGhost && item.video.thumbnailUrl) {
+              <!-- Thumbnail -->
+              @if (showThumbnails && item.video.thumbnailUrl) {
                 <img
                   [class]="item.video.mediaType === 'webpage' ? 'item-thumbnail favicon-thumbnail' : 'item-thumbnail'"
                   [src]="item.video.thumbnailUrl"
                   (error)="item.video.mediaType === 'webpage' ? $any($event.target).classList.add('favicon-error') : $any($event.target).classList.add('thumbnail-error')" />
               }
-              @if (showThumbnails && !item.video.isGhost && !item.video.thumbnailUrl && item.video.mediaType === 'webpage') {
+              @if (showThumbnails && !item.video.thumbnailUrl && item.video.mediaType === 'webpage') {
                 <span class="favicon-placeholder">🌐</span>
               }
 
             <!-- Video Content -->
             <div class="video-content">
-              <!-- Ghost relationship indicator for children (ABOVE title) -->
-              @if (item.video.isGhost && item.video.ghostType === 'child') {
-                <div class="ghost-relationship ghost-relationship-top">
-                  <span class="ghost-icon">↑</span>
-                  <span class="ghost-label">CHILD OF: {{ item.video.ghostRelatedName }}</span>
-                </div>
-              }
-
               <!-- Title -->
               <div class="video-title">
                 @if (item.video.titleLoading) {
                   <span class="title-spinner"></span>
                 }
-                <!-- Date badge or placeholder for alignment (skip for child/ghost items) -->
-                @if (!item.video.isGhost) {
-                  @if (getDateBadge(item.video.name); as dateBadge) {
-                    <span class="date-badge">{{ dateBadge }}</span>
-                  } @else {
-                    <span class="date-placeholder"></span>
-                  }
+                @if (getDateBadge(item.video.name); as dateBadge) {
+                  <span class="date-badge">{{ dateBadge }}</span>
+                } @else {
+                  <span class="date-placeholder"></span>
                 }
                 <span class="title-text">{{ getDisplayTitle(item.video.name) || item.video.name }}</span>
-                @if (item.video.hasConnections && !item.video.isGhost) {
+                @if (item.video.hasConnections) {
                   <span class="connection-indicator" title="Has connections" aria-label="Has connections">🔗</span>
                 }
               </div>
-
-              <!-- Ghost relationship indicator for parents (BELOW title) -->
-              @if (item.video.isGhost && item.video.ghostType === 'parent') {
-                <div class="ghost-relationship ghost-relationship-bottom">
-                  <span class="ghost-icon">↓</span>
-                  <span class="ghost-label">PARENT OF: {{ item.video.ghostRelatedName }}</span>
-                </div>
-              }
 
               <!-- Error Message Row (for failed downloads/operations) -->
               @if (item.video.errorMessage && (item.video.tags?.includes('download-failed') || item.video.tags?.includes('status:failed'))) {
@@ -141,7 +119,7 @@
               }
 
               <!-- Suggested Title Row (not for ghosts) -->
-              @if (showSuggestedTitle && (item.video.suggestedTitle || item.video.webPageTitle) && !item.video.isGhost) {
+              @if (showSuggestedTitle && (item.video.suggestedTitle || item.video.webPageTitle)) {
                 <div class="video-meta">
                   <!-- Placeholder to align with title above -->
                   <span class="date-placeholder"></span>
@@ -201,12 +179,12 @@
 
             <!-- Duration & Actions (not for ghosts) -->
             <div class="video-actions">
-              @if (showDuration && item.video.duration && item.video.duration !== '0:00' && item.video.duration !== '00:00:00' && item.video.duration !== '0:00:00' && !item.video.isGhost) {
+              @if (showDuration && item.video.duration && item.video.duration !== '0:00' && item.video.duration !== '00:00:00' && item.video.duration !== '0:00:00') {
                 <span class="video-duration">{{ item.video.duration }}</span>
               }
 
               <!-- Trim button for staging items -->
-              @if (isStagingItem(item.video) && !item.video.isGhost) {
+              @if (isStagingItem(item.video)) {
                 <button class="action-btn trim-btn" [class.trim-active]="hasTrimTime(item.video)"
                   (click)="onTrimClick(item.video, $event)"
                   [title]="hasTrimTime(item.video) ? 'Edit trim point: ' + getTrimLabel(item.video) : 'Set trim point'">
@@ -217,7 +195,7 @@
               <!-- Per-row quick-action buttons removed (Phase 7a): the toolbar,
                    inspector, double-click, and context menu cover open /
                    analysis / transcript / process. -->
-              @if (showEditButton && !item.video.isGhost) {
+              @if (showEditButton) {
                 <button
                   class="edit-btn"
                   (click)="onEditClick(item.video, $event)"
@@ -226,7 +204,7 @@
                   ✏️
                 </button>
               }
-              @if (showDeleteButton && (isStagingItem(item.video) || isProcessingItem(item.video) || isCompletedItem(item.video) || isQueueItem(item.video)) && !item.video.isGhost) {
+              @if (showDeleteButton && (isStagingItem(item.video) || isProcessingItem(item.video) || isCompletedItem(item.video) || isQueueItem(item.video))) {
                 <button
                   class="delete-btn"
                   [class.cancel-btn]="isProcessingItem(item.video)"
@@ -280,8 +258,8 @@
             }
           </div>
 
-            <!-- Relationships Section -->
-            @if (isExpanded(item.video.id) && hasRelationships(item.video)) {
+            <!-- Task children (processing sub-rows) -->
+            @if (isExpanded(item.video.id) && hasChildren(item.video)) {
               <div class="cascade-children" [@expandCollapse]>
                 <!-- Show task-based children first -->
                 @for (child of getChildren(item.video); track child.id) {
@@ -326,31 +304,6 @@
                   </div>
                 }
 
-                <!-- Show video relationships (parents and children) -->
-                @for (relationship of getVideoRelationships(item.video); track relationship.id) {
-                  <div
-                    class="cascade-child cascade-relationship"
-                    [class.is-parent]="relationship.type === 'parent'"
-                    [class.is-child]="relationship.type === 'child'"
-                    (click)="handleRelationshipClick(relationship, $event)">
-
-                    <!-- Relationship Icon -->
-                    <span class="child-icon">{{ relationship.type === 'parent' ? '↑' : '↓' }}</span>
-
-                    <!-- Relationship Label -->
-                    <span class="child-label">
-                      <span class="relationship-type">{{ relationship.type === 'parent' ? 'Parent:' : 'Child:' }}</span>
-                      {{ relationship.video.name }}
-                    </span>
-
-                    <!-- Remove button -->
-                    <button
-                      class="relationship-remove"
-                      (click)="removeRelationship(item.video, relationship, $event)"
-                      title="Remove relationship"
-                    >×</button>
-                  </div>
-                }
               </div>
             }
           </div>

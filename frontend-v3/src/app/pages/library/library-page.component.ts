@@ -1803,8 +1803,8 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     const allVideos: VideoItem[] = [];
     this.filteredWeeks().forEach(week => {
       week.videos.forEach(v => {
-        // Exclude queue items and ghost items
-        if (!v.id.startsWith('queue-') && !v.isGhost) {
+        // Exclude queue items
+        if (!v.id.startsWith('queue-')) {
           allVideos.push(v);
         }
       });
@@ -1934,14 +1934,6 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
 
       case 'refreshThumbnail':
         this.refreshThumbnails(videosToProcess);
-        break;
-
-      case 'removeFromParent':
-        this.removeFromParent(videosToProcess[0]);
-        break;
-
-      case 'removeChildren':
-        this.removeChildren(videosToProcess[0]);
         break;
 
       default:
@@ -3376,41 +3368,4 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     this.notificationService.success('Done', videos.length > 1 ? `Refreshed ${videos.length} thumbnails` : 'Thumbnail refreshed');
   }
 
-  /**
-   * Remove a child video from its parent(s)
-   */
-  private async removeFromParent(video: VideoItem) {
-    if (!video.parentIds || video.parentIds.length === 0) return;
-
-    try {
-      for (const parentId of video.parentIds) {
-        await firstValueFrom(
-          this.http.post(`${getApiBase()}/database/videos/${parentId}/remove-child/${video.id}`, {})
-        );
-      }
-      this.notificationService.success('Removed', `"${video.name}" removed from parent`);
-      this.loadLibrary();
-    } catch (error: any) {
-      console.error('Failed to remove from parent:', error);
-      this.notificationService.error('Error', 'Failed to remove from parent');
-    }
-  }
-
-  /**
-   * Remove all children from a parent video
-   */
-  private async removeChildren(video: VideoItem) {
-    if (!video.childIds || video.childIds.length === 0) return;
-
-    try {
-      await firstValueFrom(
-        this.http.post(`${getApiBase()}/database/videos/${video.id}/remove-all-children`, {})
-      );
-      this.notificationService.success('Removed', `All children removed from "${video.name}"`);
-      this.loadLibrary();
-    } catch (error: any) {
-      console.error('Failed to remove children:', error);
-      this.notificationService.error('Error', 'Failed to remove children');
-    }
-  }
 }

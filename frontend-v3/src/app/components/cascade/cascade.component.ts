@@ -598,24 +598,6 @@ export class CascadeComponent {
     actions.push({ label: `Run Analysis${countSuffix}`, icon: '🧠', action: 'analyze' });
     actions.push({ label: `Move to...${countSuffix}`, icon: '📦', action: 'moveToLibrary' });
 
-    // Parent/child relationship actions (single-select only)
-    if (count <= 1 && video) {
-      const isChild = video.parentIds && video.parentIds.length > 0;
-      const isParent = video.childIds && video.childIds.length > 0;
-
-      if (isChild || isParent) {
-        actions.push({ label: '', icon: '', action: '', divider: true });
-      }
-
-      if (isChild) {
-        actions.push({ label: 'Remove from Parent', icon: '🔗', action: 'removeFromParent' });
-      }
-
-      if (isParent) {
-        actions.push({ label: 'Remove Children', icon: '🔗', action: 'removeChildren' });
-      }
-    }
-
     // Final divider and delete/remove
     actions.push({ label: '', icon: '', action: '', divider: true });
 
@@ -1583,10 +1565,9 @@ export class CascadeComponent {
    * Used by parent component when preview modal changes selection
    */
   highlightAndScrollToVideoId(videoId: string): void {
-    // Find the itemId for this video (could be in multiple weeks)
-    // IMPORTANT: Filter out ghost items - they are duplicates and shouldn't be selected
+    // Find the itemId for this video
     const allItems = this.virtualItems().filter(item => item.type === 'video') as Array<{ type: 'video'; video: VideoItem; weekLabel: string; itemId: string }>;
-    const found = allItems.find(item => item.video.id === videoId && !item.video.isGhost);
+    const found = allItems.find(item => item.video.id === videoId);
 
     if (found) {
       this.highlightedItemId.set(found.itemId);
@@ -1942,8 +1923,7 @@ export class CascadeComponent {
   }
 
   // TrackBy function for virtual scroll
-  // IMPORTANT: Use unique itemId (includes week label) to avoid duplicate tracking keys
-  // for ghost videos that appear in multiple weeks
+  // IMPORTANT: itemId includes the week label, keeping tracking keys unique
   trackItem(index: number, item: VirtualListItem): string {
     if (item.type === 'header') {
       return `header-${item.week.weekLabel}`;
@@ -2053,122 +2033,9 @@ export class CascadeComponent {
     return false;
   }
 
-  /**
-   * Check if a video has any relationships (task children, video children, or parents)
-   */
-  hasRelationships(video: VideoItem): boolean {
-    // Check for task-based children
-    if (this.hasChildren(video)) return true;
-
-    // Check for video relationships (parents or children)
-    return this.hasVideoChildren(video) || this.isVideoChild(video);
-  }
-
-  /**
-   * Get video relationships (both parents and children)
-   */
-  getVideoRelationships(video: VideoItem): Array<{id: string; type: 'parent' | 'child'; video: VideoItem}> {
-    const relationships: Array<{id: string; type: 'parent' | 'child'; video: VideoItem}> = [];
-
-    // Add parents
-    if (video.parents && video.parents.length > 0) {
-      video.parents.forEach(parent => {
-        relationships.push({
-          id: `parent-${parent.id}`,
-          type: 'parent',
-          video: parent
-        });
-      });
-    }
-
-    // Add children
-    if (video.children && video.children.length > 0) {
-      video.children.forEach(child => {
-        relationships.push({
-          id: `child-${child.id}`,
-          type: 'child',
-          video: child
-        });
-      });
-    }
-
-    return relationships;
-  }
-
-  /**
-   * Handle click on a relationship item (navigate to related video)
-   */
-  handleRelationshipClick(relationship: {id: string; type: 'parent' | 'child'; video: VideoItem}, event: Event): void {
-    event.stopPropagation();
-    // Navigate to the related video's info page
-    this.router.navigate(['/video', relationship.video.id]);
-  }
-
-  /**
-   * Remove a relationship between videos
-   */
-  removeRelationship(currentVideo: VideoItem, relationship: {id: string; type: 'parent' | 'child'; video: VideoItem}, event: Event): void {
-    event.stopPropagation();
-
-    const relatedVideoId = relationship.video.id;
-    const confirmMessage = relationship.type === 'parent'
-      ? `Remove parent relationship with "${relationship.video.name}"?`
-      : `Remove child relationship with "${relationship.video.name}"?`;
-
-    if (!confirm(confirmMessage)) {
-      return;
-    }
-
-    // Determine parent and child based on relationship type
-    const parentId = relationship.type === 'parent' ? relatedVideoId : currentVideo.id;
-    const childId = relationship.type === 'parent' ? currentVideo.id : relatedVideoId;
-
-    // Call library service to remove the relationship
-    this.libraryService.removeParentChildRelationship(parentId, childId).subscribe({
-      next: (response: any) => {
-        if (response.success) {
-          console.log('Relationship removed successfully');
-
-          // Update local state - remove from parents or children arrays
-          if (relationship.type === 'parent' && currentVideo.parents) {
-            currentVideo.parents = currentVideo.parents.filter(p => p.id !== relatedVideoId);
-            if (currentVideo.parentIds) {
-              currentVideo.parentIds = currentVideo.parentIds.filter(id => id !== relatedVideoId);
-            }
-          } else if (relationship.type === 'child' && currentVideo.children) {
-            currentVideo.children = currentVideo.children.filter(c => c.id !== relatedVideoId);
-            if (currentVideo.childIds) {
-              currentVideo.childIds = currentVideo.childIds.filter(id => id !== relatedVideoId);
-            }
-          }
-
-          // Trigger change detection
-          this.videoWeeks.set([...this.videoWeeks()]);
-        } else {
-          console.error('Failed to remove relationship:', response.error);
-          this.notificationService.error('Remove Failed', response.error || 'Failed to remove relationship');
-        }
-      },
-      error: (error: any) => {
-        console.error('Error removing relationship:', error);
-        this.notificationService.error('Remove Failed', error.error?.error || error.message);
-      }
-    });
-  }
-
-  /**
-   * Check if a video has child videos (parent-child relationship)
-   */
-  hasVideoChildren(video: VideoItem): boolean {
-    return !!(video.childIds && video.childIds.length > 0);
-  }
-
-  /**
-   * Check if a video is a child (has parents)
-   */
-  isVideoChild(video: VideoItem): boolean {
-    return !!(video.parentIds && video.parentIds.length > 0);
-  }
+  // Parent/child relationship UI removed (phase 7c) — connections (🔗 + the
+  // inspector's Connected section) are the replacement. Task-based children
+  // (childrenConfig) below are unrelated and stay.
 
   /**
    * Check if a video is in any tab
@@ -2178,7 +2045,7 @@ export class CascadeComponent {
   }
 
   /**
-   * Handle video click (select for normal items, prevent for ghost items)
+   * Handle video click
    */
   handleVideoClick(itemId: string, video: VideoItem, event: MouseEvent): void {
     // Skip if we just finished a drag selection
@@ -2187,50 +2054,7 @@ export class CascadeComponent {
       return;
     }
 
-    if (video.isGhost) {
-      // Ghost items are not selectable
-      event.stopPropagation();
-      return;
-    }
     this.selectVideo(itemId, video, event);
-  }
-
-  /**
-   * Handle video double-click (navigate to actual location for ghost items)
-   */
-  handleVideoDoubleClick(video: VideoItem, event: MouseEvent): void {
-    if (video.isGhost) {
-      event.stopPropagation();
-      event.preventDefault();
-      // Scroll to and highlight the actual video
-      this.scrollToVideo(video.id);
-    }
-  }
-
-  /**
-   * Scroll to a video and highlight it
-   */
-  private scrollToVideo(videoId: string): void {
-    // Find the video's actual position in the list
-    const virtualItems = this.virtualItems();
-    const index = virtualItems.findIndex(item =>
-      item.type === 'video' && item.video.id === videoId && !item.video.isGhost
-    );
-
-    if (index !== -1 && this.viewport) {
-      const item = virtualItems[index];
-
-      // Scroll to the video
-      this.viewport.scrollToIndex(index, 'smooth');
-
-      // Temporarily highlight it using the correct itemId format
-      if (item.type === 'video') {
-        this.highlightedItemId.set(item.itemId);
-        setTimeout(() => {
-          this.highlightedItemId.set(null);
-        }, 2000);
-      }
-    }
   }
 
   /**

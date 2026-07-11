@@ -185,7 +185,7 @@ export class LibraryService {
         console.log('Raw API response:', response);
         const videos = this.transformVideos(response.videos || []);
         console.log('Transformed videos:', videos.length);
-        const weeks = this.groupVideosByWeekWithHierarchy(videos, processingQueueIds);
+        const weeks = this.groupVideosByWeek(videos, processingQueueIds);
         console.log('Grouped into weeks:', weeks.length);
         return {
           success: true,
@@ -321,12 +321,12 @@ export class LibraryService {
       width: video.width,
       height: video.height,
       fps: video.fps,
-      // Parent-child relationships
+      // Parent-child relationships (legacy model; video-info-page still reads
+      // these — the cascade UI uses connections instead)
       parentIds: video.parent_ids || [],
       childIds: video.child_ids || [],
       children: video.children ? video.children.map((c: any) => this.transformVideo(c)) : [],
-      parents: video.parents ? video.parents.map((p: any) => this.transformVideo(p)) : [],
-      isGhost: video.is_ghost || false
+      parents: video.parents ? video.parents.map((p: any) => this.transformVideo(p)) : []
     };
   }
 
@@ -452,139 +452,6 @@ export class LibraryService {
     result.push(...dateGroups);
 
     return result;
-  }
-
-  /**
-   * Group videos by week with hierarchical parent-child relationships and ghost items
-   */
-  private groupVideosByWeekWithHierarchy(videos: VideoItem[], processingQueueIds: string[] = []): VideoWeek[] {
-    // First, group videos by week normally
-    const weeks = this.groupVideosByWeek(videos, processingQueueIds);
-
-    // Create a map of video ID to video for quick lookup
-    const videoMap = new Map<string, VideoItem>();
-    videos.forEach(v => videoMap.set(v.id, v));
-
-    // Process each week to add hierarchical structure
-    weeks.forEach(week => {
-      const processedVideos: VideoItem[] = [];
-      const handledIds = new Set<string>();
-      const ghostIds = new Set<string>(); // Track ghost items to avoid duplicates
-
-      // PHASE 1: First identify children whose parents are in other weeks
-      // and add ghost parents + children at the TOP of the section
-      const childrenByParent = new Map<string, VideoItem[]>();
-      week.videos.forEach(video => {
-        const isChild = video.parentIds && video.parentIds.length > 0;
-        if (isChild && video.parentIds) {
-          video.parentIds.forEach(parentId => {
-            // Only consider parents that aren't in this week
-            if (!week.videos.some(v => v.id === parentId)) {
-              if (!childrenByParent.has(parentId)) {
-                childrenByParent.set(parentId, []);
-              }
-              childrenByParent.get(parentId)!.push(video);
-            }
-          });
-        }
-      });
-
-      // Add ghost parents with their children at TOP of section
-      const childrenWithIndicators = new Set<string>();
-      childrenByParent.forEach((children, parentId) => {
-        const parent = videoMap.get(parentId);
-        if (parent && !ghostIds.has(parentId)) {
-          // Check if any of these children already have an indicator
-          const firstChildWithoutIndicator = children.find(c => !childrenWithIndicators.has(c.id));
-          const shouldShowIndicator = firstChildWithoutIndicator !== undefined;
-
-          // Count how many children this parent has
-          const childCount = children.length;
-
-          // Add ghost parent at TOP (before its children)
-          const ghostParent: VideoItem = {
-            ...parent,
-            isGhost: true,
-            ...(shouldShowIndicator && {
-              ghostType: 'parent' as const,
-              ghostRelatedName: childCount === 1 ? children[0].name : `${childCount} videos`
-            })
-          };
-          processedVideos.push(ghostParent);
-          ghostIds.add(parentId);
-
-          // Add children right after their ghost parent
-          children.forEach(child => {
-            if (!handledIds.has(child.id)) {
-              processedVideos.push(child);
-              handledIds.add(child.id);
-              if (shouldShowIndicator) {
-                childrenWithIndicators.add(child.id);
-              }
-            }
-          });
-        }
-      });
-
-      // PHASE 2: Now process remaining videos (non-children = parents/roots)
-      // These go AFTER the ghost parent groups
-      week.videos.forEach(video => {
-        // Skip if already handled as a child of a ghost parent
-        if (handledIds.has(video.id)) return;
-
-        // Only show parent videos (videos with no parents)
-        // or root-level videos (no parent relationships)
-        const isChild = video.parentIds && video.parentIds.length > 0;
-
-        if (!isChild) {
-          // Add the parent/root video
-          processedVideos.push(video);
-          handledIds.add(video.id);
-
-          // Add its children if they're in the same week (right after parent)
-          if (video.childIds && video.childIds.length > 0) {
-            const ghostChildren: VideoItem[] = [];
-
-            video.childIds.forEach(childId => {
-              const child = videoMap.get(childId);
-              if (child && week.videos.some(v => v.id === childId)) {
-                // Child is in the same week - add it normally (will be indented by cascade)
-                processedVideos.push(child);
-                handledIds.add(childId);
-              } else if (child) {
-                // Child is in a different week - collect as ghost item
-                ghostChildren.push(child);
-              }
-            });
-
-            // Add ghost children right after parent
-            // Skip ghosts that have already been added (to avoid duplicates from multi-parent scenarios)
-            const newGhostChildren = ghostChildren.filter(c => !ghostIds.has(c.id));
-            newGhostChildren.forEach((child, index) => {
-              const isFirstGhost = index === 0;
-              const ghostCount = newGhostChildren.length;
-
-              const ghostChild: VideoItem = {
-                ...child,
-                isGhost: true,
-                // Only add relationship metadata to first ghost child
-                ...(isFirstGhost && {
-                  ghostType: 'child' as const,
-                  ghostRelatedName: ghostCount === 1 ? video.name : `${video.name} (${ghostCount} children)`
-                })
-              };
-              processedVideos.push(ghostChild);
-              ghostIds.add(child.id); // Track this ghost to avoid duplicates
-              // Don't add to handledIds - it can still appear in its own week
-            });
-          }
-        }
-      });
-
-      week.videos = processedVideos;
-    });
-
-    return weeks;
   }
 
   /**
