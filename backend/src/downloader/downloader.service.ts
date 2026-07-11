@@ -83,14 +83,38 @@ export class DownloaderService implements OnModuleInit {
   }
 
   /**
+   * Parse the user's quality selection into a height cap.
+   * Returns null for "best available" (absent or 'best'); throws on garbage —
+   * a corrupt quality value must fail the download, not silently pick for the user.
+   */
+  private parseQualityCap(quality?: string): number | null {
+    if (!quality || quality === 'best') return null;
+    const height = parseInt(quality, 10);
+    if (!Number.isFinite(height) || height <= 0) {
+      throw new Error(
+        `Invalid download quality "${quality}" — expected a height like "720" or "best"`,
+      );
+    }
+    return height;
+  }
+
+  /**
    * Configure YouTube download with multiple fallback client methods
    * Tries: android -> ios -> mweb -> web -> default
    */
   private configureYouTubeDownload(ytDlpManager: YtDlpManager, options: DownloadOptions, clientType: string = 'android'): void {
     this.logger.log(`Configuring YouTube download with client: ${clientType}`);
 
-    // Use QuickTime-compatible format (mp4 with avc1 video codec)
-    ytDlpManager.addOption('--format', 'bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/best[ext=mp4]/best');
+    // Use QuickTime-compatible format (mp4 with avc1 video codec), honoring
+    // the user's quality cap when one was chosen. No uncapped last-resort
+    // selector when capped: if the site has nothing at or below the cap the
+    // download fails loudly rather than silently upgrading.
+    const cap = this.parseQualityCap(options.quality);
+    const format = cap === null
+      ? 'bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+      : `bestvideo[ext=mp4][vcodec^=avc1][height<=${cap}]+bestaudio[ext=m4a]/best[ext=mp4][height<=${cap}]/best[height<=${cap}]`;
+    ytDlpManager.addOption('--format', format);
+    this.logger.log(cap === null ? 'YouTube format: best available' : `YouTube format: capped at ${cap}p`);
 
     // Set the player client based on type
     switch (clientType) {
@@ -306,7 +330,7 @@ export class DownloaderService implements OnModuleInit {
     playerUrl: string,
     referer: string,
     outputTemplate: string,
-    quality: string,
+    quality: string | undefined,
   ): YtDlpManager {
     const manager = new YtDlpManager();
     manager.input(playerUrl).output(outputTemplate);
@@ -327,8 +351,14 @@ export class DownloaderService implements OnModuleInit {
 
     // Vimeo serves separate HLS video-only + audio-only streams,
     // so we must use bestvideo+bestaudio to merge them with ffmpeg.
-    const q = parseInt(quality || '720');
-    manager.addOption('--format', `bestvideo[height<=${q}]+bestaudio/bestvideo+bestaudio/best`);
+    // Absent/'best' → best available; explicit cap → strictly honored.
+    const cap = this.parseQualityCap(quality);
+    manager.addOption(
+      '--format',
+      cap === null
+        ? 'bestvideo+bestaudio/best'
+        : `bestvideo[height<=${cap}]+bestaudio/best[height<=${cap}]`,
+    );
 
     return manager;
   }
@@ -377,6 +407,9 @@ export class DownloaderService implements OnModuleInit {
       // Capture start time BEFORE starting download
       const downloadStartTime = Date.now();
 
+      // Non-fatal degradations surfaced to the caller on the result.
+      const downloadWarnings: string[] = [];
+
       // Extract upload date and live status for filename formatting and download path
       let uploadDate: string | undefined;
       let isLive = false;
@@ -395,7 +428,9 @@ export class DownloaderService implements OnModuleInit {
           this.logger.log(`Video info: isLive=${videoInfo.isLive}, title="${videoInfo.title}"`);
         }
       } catch (error) {
-        this.logger.warn(`Could not fetch video info (upload date/live status unavailable): ${error instanceof Error ? error.message : 'Unknown error'}`);
+        const message = `Upload date unavailable for ${options.url} (${error instanceof Error ? error.message : 'Unknown error'}) — the video will be grouped by download date instead of upload date`;
+        this.logger.warn(message);
+        downloadWarnings.push(message);
       }
 
       // Emit download-started event
@@ -567,17 +602,22 @@ export class DownloaderService implements OnModuleInit {
         this.configureYouTubeDownload(ytDlpManager, options);
       } else if (options.url.includes('rumble.com')) {
         // Rumble-specific configuration: Use HLS formats to avoid .tar extension issues
-        // Map quality to HLS format codes based on Rumble's format naming
+        // Map quality to HLS format codes based on Rumble's format naming.
+        // Absent/'best' means best available — it must NOT be capped at 720
+        // (fallback audit: '|| 720' silently downgraded "Best available").
         let formatSelector: string;
-        const quality = parseInt(options.quality || '720');
+        const rumbleCap = this.parseQualityCap(options.quality);
 
-        if (quality <= 360) {
+        if (rumbleCap === null) {
+          // Best available: highest HLS rung first
+          formatSelector = 'hls-4108/hls-2138/hls-1057/hls-681';
+        } else if (rumbleCap <= 360) {
           // 360p or lower: use hls-222 (360p low bitrate) or hls-681 (360p high bitrate)
           formatSelector = 'hls-681/hls-222';
-        } else if (quality <= 480) {
+        } else if (rumbleCap <= 480) {
           // 480p: use hls-1057
           formatSelector = 'hls-1057/hls-681/hls-222';
-        } else if (quality <= 720) {
+        } else if (rumbleCap <= 720) {
           // 720p: use hls-2138
           formatSelector = 'hls-2138/hls-1057/hls-681';
         } else {
@@ -594,9 +634,15 @@ export class DownloaderService implements OnModuleInit {
           ytDlpManager.addOption('--cookies-from-browser', options.browser !== 'auto' ? options.browser : 'chrome');
         }
       } else if (options.url.includes('vimeo.com') || options.url.includes('player.vimeo.com')) {
-        // Vimeo-specific configuration — Vimeo serves separate HLS video + audio streams
-        const q = parseInt(options.quality || '720');
-        ytDlpManager.addOption('--format', `bestvideo[height<=${q}]+bestaudio/bestvideo+bestaudio/best`);
+        // Vimeo-specific configuration — Vimeo serves separate HLS video + audio streams.
+        // Absent/'best' → best available; explicit cap → strictly honored.
+        const vimeoCap = this.parseQualityCap(options.quality);
+        ytDlpManager.addOption(
+          '--format',
+          vimeoCap === null
+            ? 'bestvideo+bestaudio/best'
+            : `bestvideo[height<=${vimeoCap}]+bestaudio/best[height<=${vimeoCap}]`,
+        );
         ytDlpManager.addOption('--merge-output-format', 'mp4');
 
         // Add referer if this is an embed URL (player.vimeo.com)
@@ -612,8 +658,14 @@ export class DownloaderService implements OnModuleInit {
           this.logger.log(`Using cookies from ${browser} for Vimeo authentication`);
         }
       } else {
-        // For other sites, use standard format selection
-        ytDlpManager.addOption('--format', `best[height<=${options.quality}]/best`);
+        // For other sites, use standard format selection. Previously this
+        // built `best[height<=undefined]` when no quality was set — it only
+        // worked because yt-dlp ignores the malformed clause.
+        const genericCap = this.parseQualityCap(options.quality);
+        ytDlpManager.addOption(
+          '--format',
+          genericCap === null ? 'best' : `best[height<=${genericCap}]`,
+        );
         ytDlpManager.addOption('--merge-output-format', 'mp4');
         // Note: Cookies only used for YouTube - other sites work better without them
       }
@@ -825,7 +877,7 @@ export class DownloaderService implements OnModuleInit {
                       embedInfo.playerUrl,
                       embedInfo.referer,
                       outputTemplate,
-                      options.quality || '720',
+                      options.quality,
                     );
 
                     if (jobId) {
@@ -1047,10 +1099,11 @@ export class DownloaderService implements OnModuleInit {
             this.activeDownloads.delete(jobId);
           }
           
-          return { 
-            success: true, 
+          return {
+            success: true,
             outputFile,
-            isImage
+            isImage,
+            warnings: downloadWarnings.length > 0 ? downloadWarnings : undefined
           };
         } else {
           const errorMsg = `Download seemed to succeed but output file not found: ${outputFile}`;
@@ -1183,7 +1236,7 @@ export class DownloaderService implements OnModuleInit {
         this.logger.warn(`determineOutputFile: no literal prefix from template "${outputTemplate ?? '(none)'}"; falling back to newest-in-folder (concurrent downloads in the same folder may be misattributed)`);
       }
 
-      const mostRecentFile = files
+      const candidates = files
         .filter(file => {
           // Filter out hidden files, system files, and macOS metadata files
           if (file.startsWith('.') || file.startsWith('._')) return false;
@@ -1208,8 +1261,22 @@ export class DownloaderService implements OnModuleInit {
           path: path.join(downloadFolder, file),
           mtime: fs.statSync(path.join(downloadFolder, file)).mtime
         }))
-        .sort((a, b) => b.mtime.getTime() - a.mtime.getTime())[0];
+        .sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
 
+      // Without a job-specific name prefix, a guess is only safe when it
+      // cannot be wrong: exactly one new file. Multiple new files means a
+      // concurrent download could get attached to this record — refuse.
+      if (!namePrefix && candidates.length > 1) {
+        this.logger.error(
+          `determineOutputFile: refusing to guess — ${candidates.length} media files were created in ` +
+          `${downloadFolder} since this download started (${candidates.map(c => c.file).join(', ')}) and the ` +
+          `output template gives no way to tell which belongs to this job. The download will be reported as ` +
+          `failed rather than risk attaching the wrong video; the file is on disk and can be imported manually.`
+        );
+        return null;
+      }
+
+      const mostRecentFile = candidates[0];
       if (mostRecentFile) {
         outputFile = mostRecentFile.path;
         this.logger.log(`Inferred output file from file system: ${outputFile}`);

@@ -713,6 +713,14 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         throw new Error(result.error || 'Task failed');
       }
 
+      // Collect non-fatal degradations onto the job so the UI can surface them.
+      if (result.warnings && result.warnings.length > 0) {
+        job.warnings = [...(job.warnings ?? []), ...result.warnings];
+        for (const warning of result.warnings) {
+          this.logger.warn(`[${taskId}] Task warning: ${warning}`);
+        }
+      }
+
       // Update last_processed_date for tasks that process the video
       // (not for get-info or download which don't have a video ID yet)
       const processingTasks = ['import', 'transcribe', 'analyze', 'analyze-webpage', 'fix-aspect-ratio', 'strip-black-bars', 'normalize-audio', 'process-video'];
@@ -940,14 +948,17 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         if (result.success && result.data && result.data.outputPath) {
           job.videoPath = result.data.outputPath;
         }
-        // UPDATE DATABASE FLAG
+        // UPDATE DATABASE FLAG — a failed flag write fails the task: the video
+        // was re-encoded but skip-detection would re-encode it again on every
+        // future run (fallback audit #5).
         if (result.success && job.videoId) {
           try {
             await this.mediaOps.setVideoFlag(job.videoId, 'aspect_ratio_fixed', 1);
           } catch (error) {
-            this.logger.warn(
-              `Failed to update aspect_ratio_fixed flag: \${error instanceof Error ? error.message : 'Unknown error'}`,
-            );
+            return {
+              success: false,
+              error: `Aspect ratio was fixed, but recording that on video ${job.videoId} failed (${error instanceof Error ? error.message : 'Unknown error'}). Without the flag the video would be re-encoded on every future run — fix the database issue and re-run.`,
+            };
           }
         }
         break;
@@ -986,14 +997,15 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         if (result.success && result.data && result.data.outputPath) {
           job.videoPath = result.data.outputPath;
         }
-        // UPDATE DATABASE FLAG
+        // UPDATE DATABASE FLAG — failure fails the task (see aspect-ratio note).
         if (result.success && job.videoId) {
           try {
             await this.mediaOps.setVideoFlag(job.videoId, 'audio_normalized', 1);
           } catch (error) {
-            this.logger.warn(
-              `Failed to update audio_normalized flag: \${error instanceof Error ? error.message : 'Unknown error'}`,
-            );
+            return {
+              success: false,
+              error: `Audio was normalized, but recording that on video ${job.videoId} failed (${error instanceof Error ? error.message : 'Unknown error'}). Without the flag the video would be re-processed on every future run — fix the database issue and re-run.`,
+            };
           }
         }
         break;
@@ -1013,7 +1025,8 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         if (result.success && result.data && result.data.outputPath) {
           job.videoPath = result.data.outputPath;
         }
-        // UPDATE DATABASE FLAGS based on what was processed
+        // UPDATE DATABASE FLAGS based on what was processed — failure fails
+        // the task (see aspect-ratio note).
         if (result.success && job.videoId && task.options) {
           try {
             if (task.options.fixAspectRatio) {
@@ -1023,9 +1036,10 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
               await this.mediaOps.setVideoFlag(job.videoId, 'audio_normalized', 1);
             }
           } catch (error) {
-            this.logger.warn(
-              `Failed to update video flags: \${error instanceof Error ? error.message : 'Unknown error'}`,
-            );
+            return {
+              success: false,
+              error: `Video was processed, but recording the done-flags on video ${job.videoId} failed (${error instanceof Error ? error.message : 'Unknown error'}). Without them the video would be re-encoded on every future run — fix the database issue and re-run.`,
+            };
           }
         }
         break;
@@ -1087,7 +1101,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         break;
 
       default:
-        return { success: false, error: `Unknown task type: \${(task as any).type}` };
+        return { success: false, error: `Unknown task type: ${(task as any).type}` };
     }
 
     return result;
@@ -1216,6 +1230,9 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
   ): Promise<TaskResult> {
     const opts = task.options as any;
 
+    // Non-fatal degradations surfaced on the job (task still succeeds).
+    const exportWarnings: string[] = [];
+
     // Fallback: resolve videoPath/videoId from the job context if not in task options
     // (e.g., trim-opener injects export-clip before videoPath is known at queue time)
     if (!opts.videoPath && job.videoPath) opts.videoPath = job.videoPath;
@@ -1280,7 +1297,11 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
           this.logger.log(`[EXPORT-CLIP] No source video found in library for path`);
         }
       } catch (err) {
-        this.logger.warn(`[EXPORT-CLIP] Could not find source video for linking: ${(err as Error).message}`);
+        // Non-fatal, but surfaced: the clip will export without its
+        // connection edge to the source video.
+        const warning = `Clip exported without a link to its source video — the source lookup failed (${(err as Error).message}). You can connect them manually from the inspector.`;
+        this.logger.warn(`[EXPORT-CLIP] ${warning}`);
+        exportWarnings.push(warning);
       }
 
       // Generate clip filename
@@ -1364,9 +1385,12 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       this.logger.log(`[EXPORT-CLIP] Extraction complete: ${finalOutputPath}`);
       this.logger.log(`[EXPORT-CLIP] Duration: ${extractionResult.duration}s, Size: ${fileSizeMB} MB`);
 
-      // Auto-import the clip into the library
-      this.logger.log(`[EXPORT-CLIP] Auto-importing clip to library...`);
+      // Auto-import the clip into the library. Import failure fails the task:
+      // reporting "Export complete" for a clip that never appears in the app
+      // is a lie (fallback audit #4). The extracted file stays on disk either
+      // way — the error names its path so nothing is lost.
       try {
+        this.logger.log(`[EXPORT-CLIP] Auto-importing clip to library...`);
         const importResult = await this.fileScannerService.importVideos(
           [finalOutputPath],
           undefined,
@@ -1377,11 +1401,19 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
           const videoId = importResult.imported[0];
           this.databaseService.updateLastProcessedDate(videoId);
           this.logger.log(`[EXPORT-CLIP] Imported to library as video ID: ${videoId}${parentVideoId ? ` (child of ${parentVideoId})` : ''}`);
+        } else if (importResult.skipped.length > 0) {
+          // Already in the library (e.g. re-export of an identical clip) — not a failure.
+          this.logger.log(`[EXPORT-CLIP] Clip already present in library (skipped by import)`);
         } else {
-          this.logger.warn(`[EXPORT-CLIP] Import returned no video IDs (skipped: ${importResult.skipped.length}, errors: ${importResult.errors.length})`);
+          const importErrors = importResult.errors.join('; ');
+          throw new Error(importErrors || 'import returned no video ID');
         }
       } catch (importError) {
-        this.logger.error(`[EXPORT-CLIP] Failed to import exported clip: ${(importError as Error).message}`);
+        const message =
+          `Clip was extracted to ${finalOutputPath} but could not be imported into the library: ` +
+          `${(importError as Error).message}. The file is intact on disk — fix the issue and import it manually.`;
+        this.logger.error(`[EXPORT-CLIP] ${message}`);
+        return { success: false, error: message };
       }
 
       this.eventService.emitTaskProgress(taskId, 'export-clip', 100, 'Export complete');
@@ -1395,6 +1427,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
           duration: extractionResult.duration,
           fileSize: extractionResult.fileSize,
         },
+        warnings: exportWarnings.length > 0 ? exportWarnings : undefined,
       };
     } catch (error) {
       this.logger.error(`[EXPORT-CLIP] Unexpected error: ${(error as Error).message}`);

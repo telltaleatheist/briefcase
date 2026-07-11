@@ -759,7 +759,14 @@ export class DatabaseService {
           this.saveDatabase();
           this.logger.log('Migration complete: added_at column added');
         } catch (migrationError: any) {
-          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+          // Fallback audit #6: a half-migrated schema corrupts every later
+          // write to the missing column. Abort the library load loudly —
+          // the log line above names the migration that failed.
+          throw new Error(
+            `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
+            `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
+            `Check that the library volume is mounted and writable, then reopen the library.`,
+          );
         }
       }
     }
@@ -778,7 +785,14 @@ export class DatabaseService {
           this.saveDatabase();
           this.logger.log('Migration complete: ai_description column added');
         } catch (migrationError: any) {
-          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+          // Fallback audit #6: a half-migrated schema corrupts every later
+          // write to the missing column. Abort the library load loudly —
+          // the log line above names the migration that failed.
+          throw new Error(
+            `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
+            `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
+            `Check that the library volume is mounted and writable, then reopen the library.`,
+          );
         }
       }
     }
@@ -797,7 +811,14 @@ export class DatabaseService {
           this.saveDatabase();
           this.logger.log('Migration complete: source_url column added');
         } catch (migrationError: any) {
-          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+          // Fallback audit #6: a half-migrated schema corrupts every later
+          // write to the missing column. Abort the library load loudly —
+          // the log line above names the migration that failed.
+          throw new Error(
+            `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
+            `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
+            `Check that the library volume is mounted and writable, then reopen the library.`,
+          );
         }
       }
     }
@@ -817,7 +838,14 @@ export class DatabaseService {
           this.saveDatabase();
           this.logger.log('Migration complete: source column added to analysis_sections');
         } catch (migrationError: any) {
-          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+          // Fallback audit #6: a half-migrated schema corrupts every later
+          // write to the missing column. Abort the library load loudly —
+          // the log line above names the migration that failed.
+          throw new Error(
+            `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
+            `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
+            `Check that the library volume is mounted and writable, then reopen the library.`,
+          );
         }
       }
     }
@@ -849,7 +877,14 @@ export class DatabaseService {
             this.saveDatabase();
             this.logger.log(`Migration complete: Moved ${checkResult.count} custom markers to custom_markers table`);
           } catch (migrationError: any) {
-            this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+            // Fallback audit #6: a half-migrated schema corrupts every later
+          // write to the missing column. Abort the library load loudly —
+          // the log line above names the migration that failed.
+          throw new Error(
+            `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
+            `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
+            `Check that the library volume is mounted and writable, then reopen the library.`,
+          );
           }
         }
       }
@@ -876,7 +911,14 @@ export class DatabaseService {
           this.saveDatabase();
           this.logger.log('Migration complete: media_type column added');
         } catch (migrationError: any) {
-          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+          // Fallback audit #6: a half-migrated schema corrupts every later
+          // write to the missing column. Abort the library load loudly —
+          // the log line above names the migration that failed.
+          throw new Error(
+            `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
+            `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
+            `Check that the library volume is mounted and writable, then reopen the library.`,
+          );
         }
       }
     }
@@ -907,7 +949,14 @@ export class DatabaseService {
           this.saveDatabase();
           this.logger.log('Migration complete: file_extension column added');
         } catch (migrationError: any) {
-          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+          // Fallback audit #6: a half-migrated schema corrupts every later
+          // write to the missing column. Abort the library load loudly —
+          // the log line above names the migration that failed.
+          throw new Error(
+            `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
+            `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
+            `Check that the library volume is mounted and writable, then reopen the library.`,
+          );
         }
       }
     }
@@ -926,7 +975,14 @@ export class DatabaseService {
           this.saveDatabase();
           this.logger.log('Migration complete: parent_id column added');
         } catch (migrationError: any) {
-          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+          // Fallback audit #6: a half-migrated schema corrupts every later
+          // write to the missing column. Abort the library load loudly —
+          // the log line above names the migration that failed.
+          throw new Error(
+            `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
+            `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
+            `Check that the library volume is mounted and writable, then reopen the library.`,
+          );
         }
       }
     }
@@ -1032,7 +1088,14 @@ export class DatabaseService {
           this.saveDatabase();
           this.logger.log('Migration complete: suggested_title column added');
         } catch (migrationError: any) {
-          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+          // Fallback audit #6: a half-migrated schema corrupts every later
+          // write to the missing column. Abort the library load loudly —
+          // the log line above names the migration that failed.
+          throw new Error(
+            `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
+            `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
+            `Check that the library volume is mounted and writable, then reopen the library.`,
+          );
         }
       }
     }
@@ -1051,7 +1114,14 @@ export class DatabaseService {
           this.saveDatabase();
           this.logger.log('Migration complete: transcription_time_seconds column added');
         } catch (migrationError: any) {
-          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+          // Fallback audit #6: a half-migrated schema corrupts every later
+          // write to the missing column. Abort the library load loudly —
+          // the log line above names the migration that failed.
+          throw new Error(
+            `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
+            `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
+            `Check that the library volume is mounted and writable, then reopen the library.`,
+          );
         }
       }
     }
@@ -1070,7 +1140,14 @@ export class DatabaseService {
           this.saveDatabase();
           this.logger.log('Migration complete: analysis_time_seconds column added');
         } catch (migrationError: any) {
-          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+          // Fallback audit #6: a half-migrated schema corrupts every later
+          // write to the missing column. Abort the library load loudly —
+          // the log line above names the migration that failed.
+          throw new Error(
+            `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
+            `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
+            `Check that the library volume is mounted and writable, then reopen the library.`,
+          );
         }
       }
     }
@@ -1097,7 +1174,14 @@ export class DatabaseService {
           this.saveDatabase();
           this.logger.log('Migration complete: has_transcript column added and populated');
         } catch (migrationError: any) {
-          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+          // Fallback audit #6: a half-migrated schema corrupts every later
+          // write to the missing column. Abort the library load loudly —
+          // the log line above names the migration that failed.
+          throw new Error(
+            `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
+            `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
+            `Check that the library volume is mounted and writable, then reopen the library.`,
+          );
         }
       }
     }
@@ -1124,7 +1208,14 @@ export class DatabaseService {
           this.saveDatabase();
           this.logger.log('Migration complete: has_analysis column added and populated');
         } catch (migrationError: any) {
-          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+          // Fallback audit #6: a half-migrated schema corrupts every later
+          // write to the missing column. Abort the library load loudly —
+          // the log line above names the migration that failed.
+          throw new Error(
+            `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
+            `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
+            `Check that the library volume is mounted and writable, then reopen the library.`,
+          );
         }
       }
     }
@@ -1143,7 +1234,14 @@ export class DatabaseService {
           this.saveDatabase();
           this.logger.log('Migration complete: aspect_ratio_fixed column added');
         } catch (migrationError: any) {
-          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+          // Fallback audit #6: a half-migrated schema corrupts every later
+          // write to the missing column. Abort the library load loudly —
+          // the log line above names the migration that failed.
+          throw new Error(
+            `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
+            `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
+            `Check that the library volume is mounted and writable, then reopen the library.`,
+          );
         }
       }
     }
@@ -1162,7 +1260,14 @@ export class DatabaseService {
           this.saveDatabase();
           this.logger.log('Migration complete: audio_normalized column added');
         } catch (migrationError: any) {
-          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+          // Fallback audit #6: a half-migrated schema corrupts every later
+          // write to the missing column. Abort the library load loudly —
+          // the log line above names the migration that failed.
+          throw new Error(
+            `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
+            `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
+            `Check that the library volume is mounted and writable, then reopen the library.`,
+          );
         }
       }
     }
@@ -1181,7 +1286,14 @@ export class DatabaseService {
           this.saveDatabase();
           this.logger.log('Migration complete: last_processed_date column added');
         } catch (migrationError: any) {
-          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+          // Fallback audit #6: a half-migrated schema corrupts every later
+          // write to the missing column. Abort the library load loudly —
+          // the log line above names the migration that failed.
+          throw new Error(
+            `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
+            `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
+            `Check that the library volume is mounted and writable, then reopen the library.`,
+          );
         }
       }
     }
@@ -1235,7 +1347,14 @@ export class DatabaseService {
           this.saveDatabase();
           this.logger.log('Migration complete: video_relationships table created and existing data migrated');
         } catch (migrationError: any) {
-          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+          // Fallback audit #6: a half-migrated schema corrupts every later
+          // write to the missing column. Abort the library load loudly —
+          // the log line above names the migration that failed.
+          throw new Error(
+            `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
+            `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
+            `Check that the library volume is mounted and writable, then reopen the library.`,
+          );
         }
       }
     }
@@ -1309,7 +1428,14 @@ export class DatabaseService {
           this.saveDatabase();
           this.logger.log('Migration complete: video_tab_items now supports multiple item types');
         } catch (migrationError: any) {
-          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+          // Fallback audit #6: a half-migrated schema corrupts every later
+          // write to the missing column. Abort the library load loudly —
+          // the log line above names the migration that failed.
+          throw new Error(
+            `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
+            `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
+            `Check that the library volume is mounted and writable, then reopen the library.`,
+          );
         }
       } else if (tableInfo && tableInfo.sql && !tableInfo.sql.includes('item_type')) {
         // Table exists with nullable video_id but missing new columns
@@ -1325,7 +1451,14 @@ export class DatabaseService {
           this.saveDatabase();
           this.logger.log('Migration complete: Added item_type columns');
         } catch (migrationError: any) {
-          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+          // Fallback audit #6: a half-migrated schema corrupts every later
+          // write to the missing column. Abort the library load loudly —
+          // the log line above names the migration that failed.
+          throw new Error(
+            `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
+            `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
+            `Check that the library volume is mounted and writable, then reopen the library.`,
+          );
         }
       }
     } catch (error: any) {
@@ -1348,7 +1481,40 @@ export class DatabaseService {
           this.saveDatabase();
           this.logger.log('Migration complete: width, height, fps columns added');
         } catch (migrationError: any) {
-          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+          // Fallback audit #6: a half-migrated schema corrupts every later
+          // write to the missing column. Abort the library load loudly —
+          // the log line above names the migration that failed.
+          throw new Error(
+            `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
+            `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
+            `Check that the library volume is mounted and writable, then reopen the library.`,
+          );
+        }
+      }
+    }
+
+    // Migration 20b: Add needs_metadata flag to videos table.
+    // Set when ffprobe failed during import (fallback audit #12) so
+    // half-populated records are identifiable and retryable instead of
+    // silently carrying NULL duration/width/height forever.
+    try {
+      db.exec("SELECT needs_metadata FROM videos LIMIT 1");
+      // If we get here without error, column exists
+    } catch (error: any) {
+      if (error.message && error.message.includes('no such column: needs_metadata')) {
+        this.logger.log('Running migration: Adding needs_metadata column to videos table');
+        try {
+          db.exec(`
+            ALTER TABLE videos ADD COLUMN needs_metadata INTEGER DEFAULT 0;
+          `);
+          this.saveDatabase();
+          this.logger.log('Migration complete: needs_metadata column added');
+        } catch (migrationError: any) {
+          throw new Error(
+            `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
+            `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
+            `Check that the library volume is mounted and writable, then reopen the library.`,
+          );
         }
       }
     }
@@ -1373,7 +1539,14 @@ export class DatabaseService {
           this.saveDatabase();
           this.logger.log('Migration complete: custom_instructions_history table created');
         } catch (migrationError: any) {
-          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+          // Fallback audit #6: a half-migrated schema corrupts every later
+          // write to the missing column. Abort the library load loudly —
+          // the log line above names the migration that failed.
+          throw new Error(
+            `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
+            `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
+            `Check that the library volume is mounted and writable, then reopen the library.`,
+          );
         }
       }
     }
@@ -1396,7 +1569,14 @@ export class DatabaseService {
           this.saveDatabase();
           this.logger.log('Migration complete: token stats columns added to analyses table');
         } catch (migrationError: any) {
-          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+          // Fallback audit #6: a half-migrated schema corrupts every later
+          // write to the missing column. Abort the library load loudly —
+          // the log line above names the migration that failed.
+          throw new Error(
+            `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
+            `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
+            `Check that the library volume is mounted and writable, then reopen the library.`,
+          );
         }
       }
     }
@@ -1414,7 +1594,14 @@ export class DatabaseService {
           this.saveDatabase();
           this.logger.log('Migration complete: soundex_content column added to transcripts table');
         } catch (migrationError: any) {
-          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+          // Fallback audit #6: a half-migrated schema corrupts every later
+          // write to the missing column. Abort the library load loudly —
+          // the log line above names the migration that failed.
+          throw new Error(
+            `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
+            `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
+            `Check that the library volume is mounted and writable, then reopen the library.`,
+          );
         }
       }
     }
@@ -1453,7 +1640,14 @@ export class DatabaseService {
           this.saveDatabase();
           this.logger.log('Migration complete: web_archives table created');
         } catch (migrationError: any) {
-          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+          // Fallback audit #6: a half-migrated schema corrupts every later
+          // write to the missing column. Abort the library load loudly —
+          // the log line above names the migration that failed.
+          throw new Error(
+            `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
+            `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
+            `Check that the library volume is mounted and writable, then reopen the library.`,
+          );
         }
       }
     } catch (error: any) {
@@ -1483,7 +1677,14 @@ export class DatabaseService {
           // Backfill soundex data for existing transcripts
           this.backfillSoundexData();
         } catch (migrationError: any) {
-          this.logger.error(`Migration failed: ${migrationError?.message || 'Unknown error'}`);
+          // Fallback audit #6: a half-migrated schema corrupts every later
+          // write to the missing column. Abort the library load loudly —
+          // the log line above names the migration that failed.
+          throw new Error(
+            `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
+            `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
+            `Check that the library volume is mounted and writable, then reopen the library.`,
+          );
         }
       }
     } catch (error: any) {
@@ -2452,6 +2653,8 @@ export class DatabaseService {
     width?: number;
     height?: number;
     fps?: number;
+    /** True when ffprobe failed at import time — record is half-populated and retryable. */
+    needsMetadata?: boolean;
   }): { inserted: boolean; existingId?: string } {
     const db = this.ensureInitialized();
     const now = new Date().toISOString();
@@ -2499,8 +2702,9 @@ export class DatabaseService {
       `INSERT OR REPLACE INTO videos (
         id, filename, file_hash, current_path, upload_date,
         duration_seconds, file_size_bytes, source_url, media_type, file_extension,
-        download_date, last_verified, added_at, is_linked, width, height, fps
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`
+        download_date, last_verified, added_at, is_linked, width, height, fps,
+        needs_metadata
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`
     ).run(
       video.id,
       video.filename,
@@ -2517,7 +2721,8 @@ export class DatabaseService {
       now, // added_at (when database entry was created)
       video.width || null,
       video.height || null,
-      video.fps || null
+      video.fps || null,
+      video.needsMetadata ? 1 : 0
     );
 
     // Insert/update FTS5 table for video search

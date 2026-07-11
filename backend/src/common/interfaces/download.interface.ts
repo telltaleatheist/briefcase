@@ -85,6 +85,8 @@ export interface DownloadResult {
   reason?: string; // Reason for skip/failure
   existingVideoId?: string; // ID of existing video if skipped due to duplicate
   url?: string; // The URL that was downloaded/skipped
+  /** Non-fatal degradations the user should see (e.g. upload date unavailable). */
+  warnings?: string[];
 }
 
 export interface DownloadProgress {

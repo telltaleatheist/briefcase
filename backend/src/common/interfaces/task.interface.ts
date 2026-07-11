@@ -140,6 +140,8 @@ export interface TaskResult {
   success: boolean;
   error?: string;
   data?: any; // Task-specific result data
+  /** Non-fatal degradations to surface on the job (task still succeeded). */
+  warnings?: string[];
 }
 
 export interface GetInfoResult extends TaskResult {
@@ -215,6 +217,13 @@ export interface QueueJob {
   progress: number; // 0-100
   currentPhase: string;
   error?: string;
+  /**
+   * Non-fatal degradations that occurred while processing (job still
+   * succeeded, but something the user should know about happened —
+   * e.g. upload date unavailable, connection edge not created).
+   * Additive; serialized to the frontend with the job.
+   */
+  warnings?: string[];
 
   // Shared context between tasks
   videoInfo?: {

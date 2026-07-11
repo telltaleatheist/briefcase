@@ -102,7 +102,10 @@ export class MediaOperationsService {
       const result = await this.downloaderService.downloadVideo(
         {
           url,
-          quality: options.quality || '720',
+          // No coercion: absent/'best' means best available; the downloader
+          // honors an explicit height cap. (Fallback audit: '|| 720' here
+          // silently capped "Best available" for every site.)
+          quality: options.quality,
           convertToMp4: options.convertToMp4 !== false,
           useCookies: options.useCookies !== false,
           browser: options.browser || 'auto',
@@ -131,6 +134,7 @@ export class MediaOperationsService {
           videoPath: result.outputFile,
           title: filename,
         },
+        warnings: result.warnings,
       };
     } catch (error) {
       this.logger.error(`Download failed: ${error instanceof Error ? error.message : 'Unknown error'}`);

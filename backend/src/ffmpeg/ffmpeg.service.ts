@@ -176,6 +176,11 @@ export class FfmpegService {
       }
 
       const duration = videoAnalysis.duration || 0;
+      if (duration <= 0) {
+        // Progress percentages can't be computed without a duration; the
+        // encode itself still runs (and may repair the broken container).
+        this.logger.warn(`ffprobe returned no duration for ${fileName} — progress will be indeterminate for this re-encode`);
+      }
       const needsAspectRatioFix = videoAnalysis.needsAspectRatioFix ?? false;
 
       // Create output path in temp directory
@@ -597,6 +602,9 @@ export class FfmpegService {
 
       const metadata = await this.getVideoMetadata(videoPath);
       const duration = metadata?.duration || 0;
+      if (duration <= 0) {
+        this.logger.warn(`No duration available for ${videoPath} — thumbnail will be taken at the 2s mark`);
+      }
       // Seek to 25% of duration to avoid black intro frames
       const thumbnailTime = Math.max(2, duration * 0.25);
 
@@ -677,6 +685,9 @@ export class FfmpegService {
       // STEP 2: Get duration for progress tracking
       const metadata = await this.getVideoMetadata(tempInputFile);
       const duration = metadata?.duration || 0;
+      if (duration <= 0) {
+        this.logger.warn(`No duration available for ${tempInputFile} — normalization progress will be indeterminate`);
+      }
 
       // Create output path in temp directory
       tempOutputFile = `${tempInputFile}_normalized${fileExt}`;
@@ -849,7 +860,12 @@ export class FfmpegService {
     const duration = metadata.duration || 0;
 
     if (duration <= 0) {
-      return { samples: [], duration: 0 };
+      // An empty waveform would be persisted and rendered as if it were the
+      // real audio shape (fallback audit #9). Fail instead.
+      throw new Error(
+        `Cannot generate waveform for ${filePath}: ffprobe reported no duration. ` +
+        `The file may be corrupt or still downloading.`,
+      );
     }
 
     const chunks: Buffer[] = [];

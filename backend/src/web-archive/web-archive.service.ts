@@ -34,15 +34,20 @@ export class WebArchiveService {
   }) {
     const { videoId, filePath, filename, originalUrl, pageTitle, captureMethod } = params;
 
-    // Try to extract metadata from the MHTML file
+    // Try to extract metadata from the MHTML file. Failures are persisted on
+    // the archive record (error_message) so the UI can show why the archive
+    // is missing its URL/title or is unsearchable (fallback audit #14).
     let extractedUrl = originalUrl;
     let extractedTitle = pageTitle;
+    const extractionProblems: string[] = [];
     try {
       const metadata = this.extractMhtmlMetadata(filePath);
       if (!extractedUrl && metadata.url) extractedUrl = metadata.url;
       if (!extractedTitle && metadata.title) extractedTitle = metadata.title;
     } catch (error: any) {
-      this.logger.warn(`Could not extract MHTML metadata from ${filename}: ${error.message}`);
+      const message = `Metadata extraction failed: ${error.message}`;
+      this.logger.warn(`${filename}: ${message}`);
+      extractionProblems.push(message);
     }
 
     const domain = extractedUrl ? this.extractDomain(extractedUrl) : null;
@@ -51,19 +56,8 @@ export class WebArchiveService {
     const dateMatch = filename.match(/^(\d{4}-\d{2}-\d{2})/);
     const captureDate = dateMatch ? dateMatch[1] : new Date().toISOString().split('T')[0];
 
-    // Create web_archives record
-    this.databaseService.insertWebArchive({
-      videoId,
-      originalUrl: extractedUrl || undefined,
-      domain: domain || undefined,
-      pageTitle: extractedTitle || undefined,
-      captureDate,
-      captureMethod: captureMethod || 'import',
-      captureStatus: 'completed',
-      textExtracted: false,
-    });
-
     // Extract and store text content
+    let textExtracted = false;
     try {
       const text = this.extractTextFromMhtml(filePath);
       if (text && text.trim().length > 0) {
@@ -72,22 +66,31 @@ export class WebArchiveService {
           extractedText: text,
           extractionMethod: 'mhtml-parse',
         });
-        this.databaseService.insertWebArchive({
-          videoId,
-          originalUrl: extractedUrl || undefined,
-          domain: domain || undefined,
-          pageTitle: extractedTitle || undefined,
-          captureDate,
-          captureMethod: captureMethod || 'import',
-          captureStatus: 'completed',
-          textExtracted: true,
-        });
+        textExtracted = true;
+      } else {
+        extractionProblems.push('Text extraction produced no content — the archive is not searchable');
+        this.logger.warn(`${filename}: text extraction produced no content`);
       }
     } catch (error: any) {
-      this.logger.warn(`Could not extract text from ${filename}: ${error.message}`);
+      const message = `Text extraction failed: ${error.message} — the archive is not searchable`;
+      this.logger.warn(`${filename}: ${message}`);
+      extractionProblems.push(message);
     }
 
-    this.logger.log(`Imported web archive: ${filename} (domain: ${domain})`);
+    // Create the web_archives record once, with the honest extraction state.
+    this.databaseService.insertWebArchive({
+      videoId,
+      originalUrl: extractedUrl || undefined,
+      domain: domain || undefined,
+      pageTitle: extractedTitle || undefined,
+      captureDate,
+      captureMethod: captureMethod || 'import',
+      captureStatus: 'completed',
+      errorMessage: extractionProblems.length > 0 ? extractionProblems.join('; ') : undefined,
+      textExtracted,
+    });
+
+    this.logger.log(`Imported web archive: ${filename} (domain: ${domain}, textExtracted: ${textExtracted})`);
     return { videoId, domain, url: extractedUrl, title: extractedTitle };
   }
 

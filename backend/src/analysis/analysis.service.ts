@@ -546,11 +546,22 @@ export class AnalysisService implements OnModuleInit {
             currentPhase: 'Import complete, preparing for transcription...',
           });
         } else {
-          this.logger.warn('Video import returned no imported IDs');
+          // Fallback audit #10: continuing would produce a transcript with no
+          // library video to attach to (orphaned work, invisible in the app).
+          throw new Error(
+            `Video at ${request.videoPath} could not be imported into the library ` +
+            `(import returned no video ID${importResult.errors.length ? `: ${importResult.errors.join('; ')}` : ''}). ` +
+            `Transcription was not started — the file is intact on disk.`,
+          );
         }
       } catch (error: any) {
-        this.logger.error(`Error importing video: ${(error as Error).message}`);
-        // Continue anyway - transcription can still work without database import
+        if ((error as Error).message?.includes('Transcription was not started')) {
+          throw error; // already our loud error from above
+        }
+        throw new Error(
+          `Video at ${request.videoPath} could not be imported into the library ` +
+          `(${(error as Error).message}). Transcription was not started — the file is intact on disk.`,
+        );
       }
     } else {
       // Local file - already imported, just set the path

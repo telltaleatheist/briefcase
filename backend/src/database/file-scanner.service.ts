@@ -126,7 +126,7 @@ export class FileScannerService {
 
     try {
       // Step 1: Scan filesystem and collect all media files
-      const videoFiles = await this.findAllVideoFiles(clipsRoot);
+      const videoFiles = await this.findAllVideoFiles(clipsRoot, result.errors);
       result.totalFiles = videoFiles.length;
       this.logger.log(`Found ${videoFiles.length} media files in clips folder`);
 
@@ -217,6 +217,7 @@ export class FileScannerService {
             let width: number | undefined;
             let height: number | undefined;
             let fps: number | undefined;
+            let needsMetadata = false;
             try {
               const metadata = await this.ffmpegService.getVideoMetadata(file.fullPath);
               durationSeconds = metadata.duration;
@@ -224,7 +225,13 @@ export class FileScannerService {
               height = metadata.height;
               fps = metadata.fps;
             } catch (metadataError: any) {
-              this.logger.warn(`Could not extract metadata for ${file.filename}: ${metadataError.message}`);
+              // Fallback audit #12: persist the degradation instead of
+              // silently inserting NULLs that never get retried.
+              needsMetadata = true;
+              const message = `Metadata extraction failed for ${file.filename}: ${metadataError.message} — imported with needs_metadata flag`;
+              this.logger.warn(message);
+              result.errors.push(message);
+              result.errorCount++;
             }
 
             this.databaseService.insertVideo({
@@ -239,6 +246,7 @@ export class FileScannerService {
               width,
               height,
               fps,
+              needsMetadata,
             });
 
             result.newVideos++;
@@ -339,7 +347,7 @@ export class FileScannerService {
    * Recursively find all media files in clips folder
    * @param clipsRoot - Root directory to scan
    */
-  private async findAllVideoFiles(clipsRoot: string): Promise<VideoFileInfo[]> {
+  private async findAllVideoFiles(clipsRoot: string, scanErrors?: string[]): Promise<VideoFileInfo[]> {
     const results: VideoFileInfo[] = [];
 
     const scanDirectory = async (dir: string) => {
@@ -384,8 +392,12 @@ export class FileScannerService {
           }
         }
       } catch (error) {
+        // Fallback audit #13: a skipped directory must not make a partial
+        // scan look complete — roll it up for the caller/UI.
         const err = error as Error;
-        this.logger.error(`Error scanning directory ${dir}: ${err.message}`);
+        const message = `Directory not scanned: ${dir} (${err.message})`;
+        this.logger.error(message);
+        scanErrors?.push(message);
       }
     };
 

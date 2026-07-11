@@ -172,14 +172,30 @@ export class ComponentManagerService implements OnModuleInit {
   // ---------- installed state ----------
 
   private loadInstalled(): InstalledManifest {
-    try {
-      if (fs.existsSync(this.installedPath)) {
-        return JSON.parse(fs.readFileSync(this.installedPath, 'utf8'));
-      }
-    } catch {
-      // ignore
+    if (!fs.existsSync(this.installedPath)) {
+      // Genuinely absent (fresh install) — empty manifest is the truth.
+      return { components: {} };
     }
-    return { components: {} };
+    const raw = fs.readFileSync(this.installedPath, 'utf8');
+    try {
+      return JSON.parse(raw);
+    } catch (error) {
+      // Corrupt manifest. Returning {} here would report every installed
+      // component (gigabytes of models) as uninstalled and let the next
+      // recordInstalled() overwrite the recoverable file. Preserve it and
+      // fail loudly (same pattern as api-keys.service).
+      const corruptPath = `${this.installedPath}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+      try {
+        fs.renameSync(this.installedPath, corruptPath);
+        this.logger.error(`installed.json is corrupt; backed it up to ${corruptPath}`);
+      } catch (backupError) {
+        this.logger.error(`installed.json is corrupt and could not be backed up: ${(backupError as Error).message}`);
+      }
+      throw new Error(
+        `Component manifest at ${this.installedPath} is corrupt (${(error as Error).message}). ` +
+        `It was backed up alongside the original; restore or delete it, then restart.`,
+      );
+    }
   }
 
   private saveInstalled(manifest: InstalledManifest): void {
