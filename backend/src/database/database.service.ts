@@ -136,6 +136,20 @@ export interface MediaRelationshipRecord {
   file_extension?: string;
 }
 
+/**
+ * One OTHER member of a media item's connected group. `id` is the member's
+ * video id (there is no single relationship id or direction for a member that
+ * may be reachable only transitively). Shaped to match the video columns the
+ * inspector's ConnectionsStore already maps (filename / media_type /
+ * file_extension).
+ */
+export interface ConnectedGroupMember {
+  id: string;
+  filename?: string;
+  media_type?: string;
+  file_extension?: string;
+}
+
 export interface TextContentRecord {
   media_id: string;
   extracted_text: string;
@@ -4797,6 +4811,40 @@ export class DatabaseService {
   }
 
   /**
+   * Get every OTHER member of a media item's connected group (its whole
+   * relationship component), treating media_relationships as undirected edges.
+   *
+   * A recursive CTE walks outward from `mediaId`: at each hop it follows an
+   * edge in either direction (CASE picks the neighbor), incrementing a depth
+   * counter. UNION dedups the frontier so cycles terminate; the depth < 100
+   * guard caps runaway walks on pathological data (real components are tiny).
+   * The self node is excluded from the result.
+   */
+  getConnectedGroup(mediaId: string): ConnectedGroupMember[] {
+    const db = this.ensureInitialized();
+
+    return db.prepare(`
+      WITH RECURSIVE component(node, depth) AS (
+        SELECT ?, 0
+        UNION
+        SELECT
+          CASE WHEN r.primary_media_id = c.node THEN r.related_media_id
+               ELSE r.primary_media_id END,
+          c.depth + 1
+        FROM media_relationships r
+        JOIN component c
+          ON (r.primary_media_id = c.node OR r.related_media_id = c.node)
+        WHERE c.depth < 100
+      )
+      SELECT DISTINCT v.id, v.filename, v.media_type, v.file_extension
+      FROM component
+      JOIN videos v ON v.id = component.node
+      WHERE component.node != ?
+      LIMIT 500
+    `).all(mediaId, mediaId) as ConnectedGroupMember[];
+  }
+
+  /**
    * Delete a media relationship
    */
   deleteMediaRelationship(relationshipId: string) {
@@ -4816,6 +4864,17 @@ export class DatabaseService {
     ).run(mediaId, mediaId);
     this.saveDatabase();
     this.logger.log(`Deleted all media relationships for ${mediaId}`);
+  }
+
+  /**
+   * Remove a media item from its connected group entirely. Every edge of an
+   * item is by definition within its own component, so deleting all of the
+   * item's edges cleanly detaches it (and splits the component wherever it was
+   * the only bridge). Equivalent to deleteAllMediaRelationships, exposed under
+   * the group vocabulary the connections rework speaks in.
+   */
+  removeFromGroup(mediaId: string) {
+    this.deleteAllMediaRelationships(mediaId);
   }
 
   // ============================================================================

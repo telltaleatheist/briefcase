@@ -572,6 +572,15 @@ cdk-virtual-scroll-viewport.library-content {
   font-size: 10px;
 }
 
+// Compact warning count appended to an error row (full text is in the tooltip)
+.meta-warn-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: $font-weight-medium;
+  color: var(--warning, #f59e0b);
+  white-space: nowrap;
+}
+
 // Actions
 .video-actions {
   display: flex;

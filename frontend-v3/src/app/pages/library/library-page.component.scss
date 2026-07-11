@@ -231,64 +231,6 @@
   flex-shrink: 0;
 }
 
-// URL Input Bar
-.url-input-bar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
-  background: var(--bg-card);
-  border-radius: 8px;
-  flex-shrink: 0;
-
-  .url-input-label {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text-secondary);
-    white-space: nowrap;
-  }
-
-  app-url-input {
-    flex: 1;
-  }
-
-  .start-queue-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 12px 20px;
-    height: 44px;
-    background: var(--primary-orange);
-    color: white;
-    border: none;
-    border-radius: 6px;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    white-space: nowrap;
-
-    &:hover {
-      background: var(--dark-orange);
-    }
-
-    .btn-icon {
-      font-size: 12px;
-    }
-
-    .badge {
-      background: rgba(255, 255, 255, 0.25);
-      min-width: 18px;
-      height: 18px;
-      padding: 0 5px;
-      border-radius: 9px;
-      font-size: 11px;
-      display: grid;
-      place-content: center;
-    }
-  }
-}
-
 .library-section {
   flex: 1;
   display: flex;

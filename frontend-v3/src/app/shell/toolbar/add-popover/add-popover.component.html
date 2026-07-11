@@ -1,65 +1,123 @@
 <div class="add-popover" role="dialog" aria-label="Add media">
-  <label class="field-label" for="add-popover-urls">Paste URL(s) — one per line</label>
-  <textarea
-    id="add-popover-urls"
-    [ngModel]="urlText()"
-    (ngModelChange)="urlText.set($event)"
-    (keydown.enter)="onTextareaEnter($event)"
-    placeholder="https://youtube.com/watch?v=…"
-    rows="3"
-    autocomplete="off"
-    spellcheck="false"></textarea>
+  <!-- Scroll region: the full pipeline config makes this tall, so everything
+       above the Download button scrolls; the button + links stay pinned. -->
+  <div class="popover-scroll">
+    <label class="field-label" for="add-popover-urls">Paste URL(s) — one per line</label>
+    <textarea
+      id="add-popover-urls"
+      [ngModel]="urlText()"
+      (ngModelChange)="urlText.set($event)"
+      (keydown.enter)="onTextareaEnter($event)"
+      placeholder="https://youtube.com/watch?v=…"
+      rows="3"
+      autocomplete="off"
+      spellcheck="false"></textarea>
 
-  <div class="quality-row">
-    <label class="field-label inline" for="add-popover-quality">Quality</label>
-    <select
-      id="add-popover-quality"
-      [ngModel]="quality()"
-      (ngModelChange)="quality.set($event)">
-      @for (option of qualityOptions; track option.value) {
-        <option [value]="option.value">{{ option.label }}</option>
+    <div class="quality-row">
+      <label class="field-label inline" for="add-popover-quality">Quality</label>
+      <select
+        id="add-popover-quality"
+        [ngModel]="quality()"
+        (ngModelChange)="quality.set($event)">
+        @for (option of qualityOptions; track option.value) {
+          <option [value]="option.value">{{ option.label }}</option>
+        }
+      </select>
+    </div>
+
+    <!-- Trim: a download-time option, deliberately distinct from the processing
+         steps below. The whole card toggles; the chevron expands the amounts.
+         Never auto-expands on check. -->
+    <div class="trim-card" [class.on]="trim()">
+      <div class="trim-head">
+        <label class="trim-toggle">
+          <input type="checkbox" [ngModel]="trim()" (ngModelChange)="onTrimToggle($event)" />
+          <span class="trim-text">
+            <span class="trim-title">✂︎ Trim after download</span>
+            @if (trim() && !trimExpanded()) {
+              <span class="trim-summary">{{ trimSummary() }}</span>
+            } @else {
+              <span class="trim-sub">Cut an amount off the start and/or the end.</span>
+            }
+          </span>
+        </label>
+        @if (trim()) {
+          <button
+            type="button"
+            class="trim-chevron"
+            [class.open]="trimExpanded()"
+            (click)="onTrimExpandToggle()"
+            [attr.aria-expanded]="trimExpanded()"
+            aria-label="Edit trim amounts">
+            <svg class="chevron-icon" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+              <path d="M3 4.5 6 7.5 9 4.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </button>
+        }
+      </div>
+
+      @if (trim() && trimExpanded()) {
+        <div class="trim-body">
+          <div class="trim-field">
+            <span class="trim-field-label">Remove from start</span>
+            <ui-timecode-input
+              label="Remove from start"
+              [seconds]="trimStartSeconds()"
+              (secondsChange)="trimStartSeconds.set($event ?? 0)"
+              (invalid)="trimStartInvalid.set($event)" />
+            @if (trimStartInvalid()) {
+              <span class="trim-error">Minutes and seconds must be 00–59</span>
+            }
+          </div>
+
+          <div class="trim-field">
+            <span class="trim-field-label">Remove from end</span>
+            <ui-timecode-input
+              label="Remove from end"
+              [seconds]="trimEndSeconds()"
+              (secondsChange)="trimEndSeconds.set($event ?? 0)"
+              (invalid)="trimEndInvalid.set($event)" />
+            <span class="trim-hint">Amount cut off the end — not a timecode. Resolved against the real length after download.</span>
+            @if (trimEndInvalid()) {
+              <span class="trim-error">Minutes and seconds must be 00–59</span>
+            }
+          </div>
+        </div>
       }
-    </select>
+    </div>
+
+    <!-- Full pipeline configuration — the same step cards the inspector uses,
+         in compose mode. Its steps are shared sticky state (last-used composition
+         is the same one the inspector edits). Header + footer hidden; the popover
+         supplies its own context and Download button, reading the composed steps
+         via a viewChild at submit. -->
+    <span class="field-label steps-label">Process after download</span>
+    <app-process-config
+      [initialSteps]="null"
+      [persistSticky]="true"
+      [showHeader]="false"
+      [showFooter]="false"
+      [aiReady]="aiReady()"
+      [aiCheckFailed]="aiCheckFailed()"
+      (setupAi)="setupAi.emit()"
+      (retryAi)="retryAi.emit()"
+      (openComponents)="openComponents.emit()" />
+
+    <p class="hint">Quality, trim, and steps are remembered — change anytime.</p>
   </div>
 
-  <!-- Trim: a download-time option, deliberately distinct from the
-       processing steps below. -->
-  <label class="trim-row" [class.on]="trim()">
-    <input type="checkbox" [ngModel]="trim()" (ngModelChange)="trim.set($event)" />
-    <span class="trim-text">
-      <span class="trim-title">✂︎ Trim after download</span>
-      <span class="trim-sub">Opens the trimmer to set start/end points for each item.</span>
-    </span>
-  </label>
-
-  <div class="pipeline-opts">
-    <label>
-      <input type="checkbox" [ngModel]="transcribe()" (ngModelChange)="transcribe.set($event)" />
-      Transcribe
-    </label>
-    <label [class.disabled]="!aiReady()">
-      <input
-        type="checkbox"
-        [ngModel]="analyze()"
-        (ngModelChange)="analyze.set($event)"
-        [disabled]="!aiReady()" />
-      Analyze
-    </label>
-    @if (!aiReady()) {
-      <button type="button" class="setup-ai-link" (click)="setupAi.emit()">Set up AI…</button>
-    }
-  </div>
-
-  <p class="hint">Remembered from last time — change anytime.</p>
-
-  <div class="actions">
-    <button type="button" class="submit-btn" [disabled]="!canSubmit()" (click)="onSubmit()">
-      Add to Queue
+  <!-- Pinned footer: THE primary action + escape hatches, always visible. -->
+  <div class="popover-footer">
+    <button type="button" class="download-btn" [disabled]="!canSubmit()" (click)="onSubmit()">
+      {{ submitLabel() }}
     </button>
-    <button type="button" class="link-btn" (click)="importFiles.emit()">Import files…</button>
-    <span class="actions-spacer"></span>
-    <button type="button" class="link-btn subtle" (click)="openAdvanced.emit()" title="Full download options (aspect ratio, audio, models)">
-      Advanced…
-    </button>
+
+    <div class="secondary-actions">
+      <button type="button" class="link-btn" (click)="importFiles.emit()">Import files…</button>
+      <span class="actions-spacer"></span>
+      <button type="button" class="link-btn subtle" (click)="openAdvanced.emit()" title="Full download options (aspect ratio, audio, models)">
+        Advanced…
+      </button>
+    </div>
   </div>
 </div>

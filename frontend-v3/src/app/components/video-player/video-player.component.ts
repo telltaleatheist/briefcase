@@ -1233,7 +1233,11 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
         this.processSectionsOnly(sections);
       }
     } catch (error: any) {
-      console.log('Failed to load sections:', error);
+      // Surface the failure so the caller's dismissible chip appears — this
+      // inner catch used to swallow it, leaving analysisLoadFailed dead code.
+      console.error('Failed to load sections/analysis:', error);
+      this.hasAnalysis.set(false);
+      this.analysisLoadFailed.set(true);
     }
   }
 

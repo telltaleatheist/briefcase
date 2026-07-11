@@ -547,14 +547,8 @@ export class TourService {
         {
           element: '.timeline-tracks',
           title: 'Timeline Editing',
-          description: 'With a range selected: Press I to set in point, O for out point. The selection shows what will be exported.',
+          description: 'Use the Range tool (R) to drag-select a portion of the timeline. The selection shows what will be exported.',
           side: 'top',
-        },
-        {
-          element: '.timeline-toolbar',
-          title: 'Ripple Cut',
-          description: 'Select a range and press X to ripple cut - removes the selection and closes the gap. Perfect for removing unwanted sections.',
-          side: 'bottom',
         },
         {
           element: '.speed-selector',
@@ -570,7 +564,7 @@ export class TourService {
         },
         {
           title: 'Keyboard Shortcuts',
-          description: 'Ripple Cut has many keyboard shortcuts to speed up your workflow. Press ? anytime to see the full list of available shortcuts.',
+          description: 'The editor has many keyboard shortcuts to speed up your workflow. Press ? anytime to see the full list of available shortcuts.',
           side: 'bottom',
         },
       ],

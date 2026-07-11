@@ -32,41 +32,38 @@ export interface PipelinePreset {
 export const PIPELINE_STEPS: {
   type: PipelineStepType;
   label: string;
-  icon: string;
   description: string;
   defaultConfig: Record<string, unknown>;
 }[] = [
   {
     type: 'fix-aspect-ratio',
     label: 'Fix Aspect Ratio',
-    icon: '📐',
     description: 'Crop or letterbox to a target ratio',
     defaultConfig: { targetRatio: '16:9', stripBlackBars: false },
   },
   {
     type: 'normalize-audio',
     label: 'Normalize Loudness',
-    icon: '🔊',
     description: 'Even out audio levels',
     defaultConfig: { targetLevel: -16 },
   },
   {
     type: 'transcribe',
     label: 'Transcribe',
-    icon: '≋',
     description: 'Whisper transcript — no AI setup needed',
-    defaultConfig: { model: 'base', language: 'en' },
+    defaultConfig: { model: 'base', language: 'en', translate: false },
   },
   {
     type: 'ai-analyze',
     label: 'AI Analyze',
-    icon: '✦',
     description: 'Sections & flags via your default AI model',
-    defaultConfig: { analysisQuality: 'fast' },
+    defaultConfig: { analysisGranularity: 5, customInstructions: '', aiModel: '' },
   },
 ];
 
 const STORAGE_KEY = 'briefcase-pipeline-presets';
+/** The AI model the user last explicitly chose in the Process picker. */
+const LAST_AI_MODEL_KEY = 'briefcase-last-ai-model';
 
 interface StoredState {
   presets: PipelinePreset[];
@@ -79,8 +76,8 @@ const STARTER_PRESETS: PipelinePreset[] = [
     id: 'starter-transcribe-analyze',
     name: 'Transcribe + Analyze',
     steps: [
-      { type: 'transcribe', config: { model: 'base', language: 'en' } },
-      { type: 'ai-analyze', config: { analysisQuality: 'fast' } },
+      { type: 'transcribe', config: { model: 'base', language: 'en', translate: false } },
+      { type: 'ai-analyze', config: { analysisGranularity: 5, customInstructions: '', aiModel: '' } },
     ],
   },
   {
@@ -110,10 +107,19 @@ export class PipelinePresetsService {
   readonly presets = signal<PipelinePreset[]>([]);
   readonly lastSteps = signal<PipelineStep[]>([]);
 
+  /**
+   * The AI model the user last explicitly picked in the Process model picker
+   * ("provider:model"). A personal preference, not job config — recorded even
+   * in per-job mode — and used to seed an empty picker ahead of the configured
+   * server-side default. Persisted under its own key.
+   */
+  readonly lastChosenAiModel = signal<string>('');
+
   constructor() {
     const restored = this.restore();
     this.presets.set(restored.presets);
     this.lastSteps.set(restored.lastSteps);
+    this.lastChosenAiModel.set(this.restoreLastAiModel());
   }
 
   savePreset(name: string, steps: PipelineStep[]): PipelinePreset {
@@ -137,6 +143,58 @@ export class PipelinePresetsService {
     this.persist();
   }
 
+  /**
+   * Record the model the user just chose in the Process picker as their
+   * remembered last model. A user preference (persisted even from per-job
+   * mode); seeds an empty picker ahead of the configured default. Ignores
+   * empties so clearing the picker never wipes the remembered value.
+   */
+  rememberAiModel(value: string): void {
+    if (!value) return;
+    this.lastChosenAiModel.set(value);
+    try {
+      localStorage.setItem(LAST_AI_MODEL_KEY, value);
+    } catch (error) {
+      this.errorSurface.surfaceError("Couldn't remember your last AI model", error);
+    }
+  }
+
+  /**
+   * Reactive request for a live ProcessConfigComponent to enable specific steps.
+   * Monotonic token so an already-mounted component reacts exactly once per call;
+   * a freshly-mounted component reads the (already-updated) sticky lastSteps and
+   * treats the current token as "already seen".
+   */
+  readonly enableStepsRequest = signal<{ types: PipelineStepType[]; token: number }>({
+    types: [],
+    token: 0,
+  });
+  private enableStepsToken = 0;
+
+  /**
+   * Turn the given steps on: merge them into the sticky last-used composition
+   * (keeping each already-remembered step's config, seeding new ones from their
+   * defaults) and signal a live process-config to reflect it. The reveal itself
+   * is a separate concern (WorkspaceActionsService.revealProcessConfig).
+   *
+   * An empty list is a no-op — it means "respect the sticky steps, just reveal".
+   */
+  enableSteps(types: PipelineStepType[]): void {
+    if (types.length === 0) return;
+    this.lastSteps.update(steps => {
+      const present = new Set(steps.map(s => s.type));
+      const additions: PipelineStep[] = [];
+      for (const type of types) {
+        if (present.has(type)) continue;
+        const def = PIPELINE_STEPS.find(d => d.type === type);
+        additions.push({ type, config: { ...(def?.defaultConfig ?? {}) } });
+      }
+      return additions.length ? sortPipelineSteps([...steps, ...additions]) : steps;
+    });
+    this.persist();
+    this.enableStepsRequest.set({ types: [...types], token: ++this.enableStepsToken });
+  }
+
   private errorSurface = inject(ErrorSurface);
 
   private persist(): void {
@@ -147,6 +205,14 @@ export class PipelinePresetsService {
       // Presets are user-created, named artifacts — a failed save means the
       // preset will silently vanish on restart. Say so.
       this.errorSurface.surfaceError("Preset didn't save — it will be lost on restart", error);
+    }
+  }
+
+  private restoreLastAiModel(): string {
+    try {
+      return localStorage.getItem(LAST_AI_MODEL_KEY) ?? '';
+    } catch {
+      return '';
     }
   }
 

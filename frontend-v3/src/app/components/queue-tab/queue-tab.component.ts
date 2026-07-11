@@ -1,9 +1,10 @@
-import { ChangeDetectionStrategy, Component, Input, Output, EventEmitter, inject, signal, computed } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, Input, Output, EventEmitter, inject, signal, computed, effect, untracked } from '@angular/core';
 import { OverlayModule } from '@angular/cdk/overlay';
 import { CascadeComponent } from '../cascade/cascade.component';
 import { VideoWeek, VideoItem, ItemProgress, ChildrenConfig } from '../../models/video.model';
 import { QueueService } from '../../services/queue.service';
 import { QueueJob } from '../../models/queue-job.model';
+import { QueueSelectionStore } from '../../core/stores/queue-selection.store';
 import { ErrorSurface } from '../../core/error-surface.service';
 
 /** Which Clear-menu option is awaiting its confirming second click. */
@@ -19,7 +20,48 @@ type ClearOption = 'completed' | 'selected' | 'all';
 })
 export class QueueTabComponent {
   private queueService = inject(QueueService);
+  private queueSelection = inject(QueueSelectionStore);
   private errorSurface = inject(ErrorSurface);
+
+  constructor() {
+    // Reconcile the shared queue selection against the live pending set: a job
+    // that gets started or removed leaves the pending list, so drop it from both
+    // the local badge set and the inspector's QueueSelectionStore (never point
+    // the inspector at a job that no longer exists). Reacts to pending changes;
+    // user selection changes are pushed synchronously by onStagingSelectionChanged.
+    effect(() => {
+      const pendingIds = new Set(this.queueService.pendingJobs().map(j => j.id));
+      untracked(() => {
+        const live = new Set(
+          Array.from(this.selectedStagingIds()).filter(id =>
+            pendingIds.has(this.stripStagingId(id))
+          )
+        );
+        if (live.size !== this.selectedStagingIds().size) {
+          this.selectedStagingIds.set(live);
+        }
+        this.syncQueueSelection();
+      });
+    });
+
+    // Leaving the queue page destroys this component — clear the shared
+    // selection so the inspector reverts to the library branch.
+    inject(DestroyRef).onDestroy(() => this.queueSelection.clear());
+  }
+
+  /** Strip the cascade row prefix ("[week|]staging-<jobId>") → raw job id. */
+  private stripStagingId(id: string): string {
+    return id.replace(/^.*staging-/, '');
+  }
+
+  /** Push the current staging selection (pending-only) to the shared store. */
+  private syncQueueSelection(): void {
+    const pendingIds = new Set(this.queueService.pendingJobs().map(j => j.id));
+    const rawIds = Array.from(this.selectedStagingIds())
+      .map(id => this.stripStagingId(id))
+      .filter(id => pendingIds.has(id));
+    this.queueSelection.set(rawIds);
+  }
 
   // Keep inputs for backward compatibility during migration
   // These are now optional - if not provided, we use QueueService directly
@@ -42,7 +84,6 @@ export class QueueTabComponent {
   @Output() trimOpenerRequested = new EventEmitter<VideoItem>();
 
   selectedStagingIds = signal<Set<string>>(new Set());
-  selectedProcessingIds = signal<Set<string>>(new Set());
 
   // Computed counts for template
   pendingCount = computed(() => this.queueService.pendingJobs().length);
@@ -87,6 +128,7 @@ export class QueueTabComponent {
       case 'selected':
         this.onRemoveSelected();
         this.selectedStagingIds.set(new Set());
+        this.syncQueueSelection();
         break;
       case 'all':
         this.onClearAll();
@@ -211,11 +253,15 @@ export class QueueTabComponent {
   });
 
   onStagingSelectionChanged(event: { count: number; ids: Set<string> }) {
-    this.selectedStagingIds.set(event.ids);
-  }
-
-  onProcessingSelectionChanged(event: { count: number; ids: Set<string> }) {
-    this.selectedProcessingIds.set(event.ids);
+    // The consolidated cascade lists Pending/Processing/Completed together and
+    // every row is selectable, but only staging (pending) rows can be started
+    // or removed from staging. Keep just those so the Start badge, the Clear ▾
+    // "Selected (N)" count, and the acted-on set never overstate what happens.
+    const stagingIds = new Set(
+      Array.from(event.ids).filter(id => id.includes('staging-'))
+    );
+    this.selectedStagingIds.set(stagingIds);
+    this.syncQueueSelection();
   }
 
   onVideoAction(event: any) {
@@ -380,8 +426,7 @@ export class QueueTabComponent {
   }
 
   onClearCompleted() {
-    // Can clear directly via QueueService
-    this.queueService.clearCompleted();
+    // Emit only — the parent (library-page) owns the clear so it runs once.
     this.clearCompleted.emit();
   }
 
@@ -390,6 +435,7 @@ export class QueueTabComponent {
     this.queueService.clearPending();
     // Clear any selection
     this.selectedStagingIds.set(new Set());
+    this.syncQueueSelection();
   }
 
   /**
@@ -402,7 +448,7 @@ export class QueueTabComponent {
     this.queueService.clearPendingAndProcessing();
     // Clear any selection
     this.selectedStagingIds.set(new Set());
-    this.selectedProcessingIds.set(new Set());
+    this.syncQueueSelection();
   }
 
   onStopProcessing() {

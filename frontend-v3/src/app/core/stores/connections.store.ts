@@ -1,39 +1,38 @@
 import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Subscription } from 'rxjs';
+import { Subscription, forkJoin } from 'rxjs';
 import { VideoItem } from '../../models/video.model';
 import { getApiBase } from '../runtime-url';
 import { ItemKind, classifyItemKind } from '../item-kind';
 import { InspectorStore } from './inspector.store';
 
-/** A connection edge as shown in the inspector. */
+/**
+ * A member of the anchor's connected group, as shown in the inspector.
+ *
+ * A group member may be reachable only transitively (it need not share a
+ * direct edge with the anchor), so there is no per-row relationship id to key
+ * on — actions key on `videoId`.
+ */
 export interface ConnectedItem {
-  relationshipId: string;
   videoId: string;
   title: string;
   kind: ItemKind;
 }
 
-interface MediaRelationshipDto {
+/** One OTHER member of a connected group, as returned by the group endpoint. */
+interface ConnectedGroupMemberDto {
   id: string;
-  primary_media_id: string;
-  related_media_id: string;
-  relationship_type: string;
-  created_at: string;
   filename?: string;
   media_type?: string;
   file_extension?: string;
 }
 
-function toConnectedItem(record: MediaRelationshipDto, selfId: string): ConnectedItem {
-  const videoId =
-    record.primary_media_id === selfId ? record.related_media_id : record.primary_media_id;
+function toConnectedItem(record: ConnectedGroupMemberDto): ConnectedItem {
   return {
-    relationshipId: record.id,
-    videoId,
-    title: record.filename ?? videoId,
+    videoId: record.id,
+    title: record.filename ?? record.id,
     kind: classifyItemKind({
-      id: videoId,
+      id: record.id,
       mediaType: record.media_type,
       fileExtension: record.file_extension,
     } as VideoItem),
@@ -41,14 +40,16 @@ function toConnectedItem(record: MediaRelationshipDto, selfId: string): Connecte
 }
 
 /**
- * Connections (flat, undirected links between library items) for the
- * inspector. Loaded lazily — only while the inspector is open and one or two
- * items are selected — mirroring InspectorStore's transcript-preview pattern.
+ * Connections (undirected links between library items) for the inspector.
+ * Loaded lazily — only while the inspector is open and one or two items are
+ * selected — mirroring InspectorStore's transcript-preview pattern.
  *
- * Backed by the media_relationships endpoints:
- *   GET    /database/videos/:id/related
- *   POST   /database/videos/:id/link
- *   DELETE /database/relationships/:relationshipId
+ * Connections are now transitive: an item belongs to a *group* (the connected
+ * component of the relationship graph), and the inspector shows every OTHER
+ * member of the anchor's group. Backed by:
+ *   GET    /database/videos/:id/connected-group   (whole group)
+ *   POST   /database/videos/:id/link              (add an edge)
+ *   DELETE /database/videos/:id/connections       (remove item from its group)
  */
 @Injectable({ providedIn: 'root' })
 export class ConnectionsStore {
@@ -57,7 +58,7 @@ export class ConnectionsStore {
 
   private readonly apiBase = `${getApiBase()}/database`;
 
-  /** Connections of the first selected item (single- and pair-selection). */
+  /** The anchor's connected group (single- and pair-selection). */
   connections = signal<ConnectedItem[]>([]);
   connectionsLoading = signal(false);
   /**
@@ -65,6 +66,13 @@ export class ConnectionsStore {
    * (or cache) as "no connections" (fallback-audit high #11).
    */
   connectionsError = signal<string | null>(null);
+  /**
+   * Set when a connect/disconnect MUTATION failed (fully or partially). Kept
+   * separate from `connectionsError` so the post-mutation refetch (which
+   * clears the load error) does not silently swallow it — the refetch shows
+   * the true server state and this flag says some of the change did not land.
+   */
+  mutationError = signal<string | null>(null);
   /** Which item the current `connections` belong to (null = none loaded). */
   private loadedForVideoId = signal<string | null>(null);
   /** Bumped after connect/disconnect (and by retry) to force a refetch. */
@@ -77,8 +85,9 @@ export class ConnectionsStore {
   });
 
   /**
-   * When two items are selected: the connection edge between them, if any.
-   * `connections` holds item A's edges; look item B up among them.
+   * When two items are selected: whether the second item is already in the
+   * first item's group (directly or transitively). `connections` holds item
+   * A's group; look item B up among it.
    */
   pairConnection = computed<ConnectedItem | null>(() => {
     const pair = this.selectedPair();
@@ -106,13 +115,13 @@ export class ConnectionsStore {
       this.connectionsLoading.set(true);
       this.connectionsError.set(null);
       const sub: Subscription = this.http
-        .get<{ success: boolean; relatedMedia: MediaRelationshipDto[] }>(
-          `${this.apiBase}/videos/${anchor.id}/related`
+        .get<{ success: boolean; group: ConnectedGroupMemberDto[] }>(
+          `${this.apiBase}/videos/${anchor.id}/connected-group`
         )
         .subscribe({
           next: response => {
-            const records = response?.relatedMedia ?? [];
-            this.connections.set(records.map(r => toConnectedItem(r, anchor.id)));
+            const records = response?.group ?? [];
+            this.connections.set(records.map(toConnectedItem));
             this.loadedForVideoId.set(anchor.id);
             this.connectionsLoading.set(false);
           },
@@ -136,31 +145,70 @@ export class ConnectionsStore {
     this.refreshCounter.update(n => n + 1);
   }
 
-  /** Connect the currently selected pair. */
-  connectPair(): void {
-    const pair = this.selectedPair();
-    if (!pair || this.mutating()) return;
-    this.mutating.set(true);
-    this.http
-      .post<{ success: boolean }>(`${this.apiBase}/videos/${pair[0].id}/link`, {
-        relatedMediaId: pair[1].id,
-        relationshipType: 'connected',
-      })
-      .subscribe({
-        next: () => this.afterMutation(),
-        error: () => this.afterMutation(),
-      });
+  /**
+   * Connect every currently selected item into one group. Generalizes the old
+   * pair-connect to any N ≥ 2 (also the N = 2 case).
+   */
+  connectSelection(): void {
+    this.connectAll(this.inspectorStore.selectedItems());
   }
 
-  /** Remove a connection edge by its relationship id. */
-  disconnect(relationshipId: string): void {
+  /**
+   * Link N ≥ 2 items into a single group using a star topology (every item
+   * after the first is linked to the first). Because connections are
+   * transitive the topology is irrelevant — a star yields the same group as a
+   * clique. Partial failures are surfaced honestly: `mutationError` is set and
+   * the group is refetched so the UI shows exactly which links landed.
+   */
+  connectAll(items: VideoItem[]): void {
+    if (items.length < 2 || this.mutating()) return;
+    const [anchor, ...rest] = items;
+    this.mutating.set(true);
+    this.mutationError.set(null);
+
+    const requests = rest.map(item =>
+      this.http.post<{ success: boolean }>(`${this.apiBase}/videos/${anchor.id}/link`, {
+        relatedMediaId: item.id,
+        relationshipType: 'connected',
+      })
+    );
+
+    forkJoin(requests).subscribe({
+      next: responses => {
+        if (responses.some(r => !r?.success)) {
+          this.mutationError.set('Some items could not be connected.');
+        }
+        this.afterMutation();
+      },
+      error: () => {
+        this.mutationError.set('Failed to connect the selected items.');
+        this.afterMutation();
+      },
+    });
+  }
+
+  /**
+   * Remove an item from the anchor's group entirely (delete all of its edges).
+   * The group is refetched afterward, so a failed delete honestly shows the
+   * item still present rather than faking its removal.
+   */
+  disconnect(videoId: string): void {
     if (this.mutating()) return;
     this.mutating.set(true);
+    this.mutationError.set(null);
     this.http
-      .delete<{ success: boolean }>(`${this.apiBase}/relationships/${relationshipId}`)
+      .delete<{ success: boolean }>(`${this.apiBase}/videos/${videoId}/connections`)
       .subscribe({
-        next: () => this.afterMutation(),
-        error: () => this.afterMutation(),
+        next: response => {
+          if (!response?.success) {
+            this.mutationError.set('Failed to remove the connection.');
+          }
+          this.afterMutation();
+        },
+        error: () => {
+          this.mutationError.set('Failed to remove the connection.');
+          this.afterMutation();
+        },
       });
   }
 

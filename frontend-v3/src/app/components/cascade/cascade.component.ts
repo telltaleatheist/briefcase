@@ -613,7 +613,7 @@ export class CascadeComponent {
 
     // Processing actions
     actions.push({ label: `Refresh Thumbnail${countSuffix}`, icon: '🖼️', action: 'refreshThumbnail' });
-    actions.push({ label: `Run Analysis${countSuffix}`, icon: '🧠', action: 'analyze' });
+    actions.push({ label: `Run Analysis${countSuffix}`, icon: '', action: 'analyze' });
     actions.push({ label: `Move to...${countSuffix}`, icon: '📦', action: 'moveToLibrary' });
 
     // Final divider and delete/remove
@@ -1579,19 +1579,37 @@ export class CascadeComponent {
   }
 
   /**
-   * Public method to highlight and scroll to a video by its database ID
-   * Used by parent component when preview modal changes selection
+   * Highlight and scroll to a video by its database ID.
+   *
+   * Searches ALL videos in the current (filtered) view — including those inside
+   * collapsed weeks — so a collapsed week never hides the target. If the
+   * containing week is collapsed it is expanded first, then the scroll is
+   * deferred one tick so the virtual list can materialize the revealed rows.
+   *
+   * Returns true if the video is in the current view (and was revealed), false
+   * if it is filtered out entirely — letting the caller decide whether to relax
+   * filters and retry.
    */
-  highlightAndScrollToVideoId(videoId: string): void {
-    // Find the itemId for this video
-    const allItems = this.virtualItems().filter(item => item.type === 'video') as Array<{ type: 'video'; video: VideoItem; weekLabel: string; itemId: string }>;
-    const found = allItems.find(item => item.video.id === videoId);
-
-    if (found) {
-      this.highlightedItemId.set(found.itemId);
-      this.selectedVideos.set(new Set([found.itemId]));
-      this.scrollToItemId(found.itemId);
+  highlightAndScrollToVideoId(videoId: string): boolean {
+    const target = this.allVideosInOrder().find(item => item.video.id === videoId);
+    if (!target) {
+      return false; // hidden by the active search/type filter — not just collapsed
     }
+
+    this.highlightedItemId.set(target.itemId);
+    this.selectedVideos.set(new Set([target.itemId]));
+
+    const week = this.videoWeeks().find(w => w.weekLabel === target.weekLabel);
+    if (week && !week.expanded) {
+      week.expanded = true;
+      this.videoWeeks.set([...this.videoWeeks()]);
+      // The virtual list needs a change-detection pass to render the rows the
+      // now-expanded week just revealed before the offset math is valid.
+      setTimeout(() => this.scrollToItemId(target.itemId), 0);
+    } else {
+      this.scrollToItemId(target.itemId);
+    }
+    return true;
   }
 
   /**

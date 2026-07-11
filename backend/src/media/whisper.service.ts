@@ -16,32 +16,67 @@ export class WhisperService {
   private readonly logger = new Logger(WhisperService.name);
   private ffmpeg: FfmpegBridge;
   private ffprobe: FfprobeBridge;
+  /** Resolved ffmpeg path the current bridges were built for; gates lazy rebuild. */
+  private ffmpegBinaryPath?: string;
 
   constructor(
     private readonly eventService: MediaEventService,
   ) {
-    // ALWAYS use bundled binaries from getRuntimePaths() - NEVER use system binaries
-    const paths = getRuntimePaths();
-    const ffmpegPath = paths.ffmpeg;
-    const ffprobePath = paths.ffprobe;
-
-    verifyBinary(ffmpegPath, 'FFmpeg');
-    verifyBinary(ffprobePath, 'FFprobe');
-    this.ffmpeg = new FfmpegBridge(ffmpegPath);
-    this.ffprobe = new FfprobeBridge(ffprobePath);
-    this.logger.log(`WhisperService initialized with FFmpeg: ${ffmpegPath}`);
+    // Resolve the binary paths but DEFER verification to use time
+    // (ensureFfmpegReady). Verifying (and throwing) here would take the whole Nest
+    // bootstrap down whenever ffmpeg hasn't been downloaded yet, preventing the
+    // backend from serving the first-run setup wizard. Construction stays
+    // non-fatal; a missing binary surfaces honestly when transcription runs.
+    const { ffmpeg, ffprobe } = getRuntimePaths();
+    if (fs.existsSync(ffmpeg) && fs.existsSync(ffprobe)) {
+      this.ffmpeg = new FfmpegBridge(ffmpeg);
+      this.ffprobe = new FfprobeBridge(ffprobe);
+      this.ffmpegBinaryPath = ffmpeg;
+      this.logger.log(`WhisperService initialized with FFmpeg: ${ffmpeg}`);
+    } else {
+      this.logger.warn(
+        `WhisperService: FFmpeg not installed yet (expected at ${ffmpeg}). ` +
+        `Deferring until first-run setup installs the ffmpeg-tools component.`
+      );
+    }
   }
 
-  async transcribeVideo(videoFile: string, jobId?: string, model?: string): Promise<string | null> {
+  /**
+   * Resolve + verify ffmpeg/ffprobe at USE time (never at boot). getRuntimePaths()
+   * re-reads downloaded-component state on every call, so a binary installed by
+   * first-run setup is picked up here WITHOUT a backend restart. Throws an honest,
+   * user-facing error while ffmpeg is missing.
+   */
+  private ensureFfmpegReady(): void {
+    const { ffmpeg, ffprobe } = getRuntimePaths();
+    if (this.ffmpegBinaryPath === ffmpeg && fs.existsSync(ffmpeg) && fs.existsSync(ffprobe)) {
+      return;
+    }
+    if (!fs.existsSync(ffmpeg) || !fs.existsSync(ffprobe)) {
+      throw new Error(
+        'FFmpeg is not installed — complete first-run setup or install it in Settings → Components.'
+      );
+    }
+    verifyBinary(ffmpeg, 'FFmpeg');
+    verifyBinary(ffprobe, 'FFprobe');
+    this.ffmpeg = new FfmpegBridge(ffmpeg);
+    this.ffprobe = new FfprobeBridge(ffprobe);
+    this.ffmpegBinaryPath = ffmpeg;
+  }
+
+  async transcribeVideo(videoFile: string, jobId?: string, model?: string, translate?: boolean): Promise<string | null> {
     console.log(`[WHISPER SERVICE] Transcription started`);
     console.log(`[WHISPER SERVICE] Video file: ${videoFile}`);
     console.log(`[WHISPER SERVICE] Job ID: ${jobId}`);
     console.log(`[WHISPER SERVICE] Model: ${model || 'default'}`);
+    console.log(`[WHISPER SERVICE] Translate to English: ${translate === true}`);
 
     let outputDir: string | undefined;
     let audioFile: string | undefined;
 
     try {
+      this.ensureFfmpegReady();
+
       if (!fs.existsSync(videoFile)) {
         throw new Error(`Video file not found: ${videoFile}`);
       }
@@ -181,7 +216,7 @@ export class WhisperService {
 
       // Start transcription on the extracted audio file
       // Pass audio duration for time-based progress estimation
-      const srtFile = await whisperManager.transcribe(audioFile, outputDir, model, audioDurationSeconds);
+      const srtFile = await whisperManager.transcribe(audioFile, outputDir, model, audioDurationSeconds, translate);
 
       if (srtFile && fs.existsSync(srtFile)) {
         // If we skipped silence at the start, offset all timestamps to match original video

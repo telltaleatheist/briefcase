@@ -119,11 +119,20 @@
                 }
               </div>
 
-              <!-- Error Message Row (for failed downloads/operations) -->
+              <!-- Status Row: fatal error takes precedence; non-fatal warnings
+                   append as a compact badge. Kept to ONE truncated line so the
+                   fixed 56px virtual-scroll row never overflows — the full text
+                   (error + every warning) lives in the [title] tooltip so
+                   nothing is ever silent. -->
               @if (item.video.errorMessage && (item.video.tags?.includes('download-failed') || item.video.tags?.includes('status:failed'))) {
-                <div class="video-meta error-meta">
+                <div
+                  class="video-meta error-meta"
+                  [title]="item.video.errorMessage + (item.video.warnings?.length ? '\n\nWarnings:\n' + item.video.warnings!.join('\n') : '')">
                   <span class="meta-icon">❌</span>
                   <span class="meta-filename error-text">{{ item.video.errorMessage }}</span>
+                  @if (item.video.warnings?.length) {
+                    <span class="meta-warn-badge">⚠️ {{ item.video.warnings!.length }}</span>
+                  }
                   @if (item.video.sourceUrl) {
                     <span
                       class="meta-action"
@@ -132,10 +141,7 @@
                     >Copy URL</span>
                   }
                 </div>
-              }
-
-              <!-- Warnings Row: non-fatal processing issues (never silent) -->
-              @if (item.video.warnings?.length) {
+              } @else if (item.video.warnings?.length) {
                 <div class="video-meta warning-meta" [title]="item.video.warnings!.join('\n')">
                   <span class="meta-icon">⚠️</span>
                   <span class="meta-filename warning-text">
@@ -144,7 +150,7 @@
                 </div>
               }
 
-              <!-- Suggested Title Row (not for ghosts) -->
+              <!-- Suggested Title Row -->
               @if (showSuggestedTitle && (item.video.suggestedTitle || item.video.webPageTitle)) {
                 <div class="video-meta">
                   <!-- Placeholder to align with title above -->
@@ -203,7 +209,7 @@
               }
             </div>
 
-            <!-- Duration & Actions (not for ghosts) -->
+            <!-- Duration & Actions -->
             <div class="video-actions">
               @if (showDuration && item.video.duration && item.video.duration !== '0:00' && item.video.duration !== '00:00:00' && item.video.duration !== '0:00:00') {
                 <span class="video-duration">{{ item.video.duration }}</span>

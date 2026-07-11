@@ -3428,6 +3428,51 @@ export class DatabaseController {
   }
 
   /**
+   * GET /api/database/videos/:id/connected-group
+   * Get every OTHER member of this item's connected group (the whole
+   * relationship component, transitively — not just 1-hop neighbours).
+   */
+  @Get('videos/:id/connected-group')
+  getConnectedGroup(@Param('id') videoId: string) {
+    try {
+      const group = this.databaseService.getConnectedGroup(videoId);
+      return {
+        success: true,
+        group
+      };
+    } catch (error) {
+      this.logger.error(`Error getting connected group: ${(error as Error).message}`);
+      return {
+        success: false,
+        error: (error as Error).message,
+        group: []
+      };
+    }
+  }
+
+  /**
+   * DELETE /api/database/videos/:id/connections
+   * Remove this item from its connected group entirely (delete all of its
+   * relationship edges).
+   */
+  @Delete('videos/:id/connections')
+  removeFromGroup(@Param('id') videoId: string) {
+    try {
+      this.databaseService.removeFromGroup(videoId);
+      return {
+        success: true,
+        message: 'Item removed from its connected group'
+      };
+    } catch (error) {
+      this.logger.error(`Error removing item from group: ${(error as Error).message}`);
+      return {
+        success: false,
+        error: (error as Error).message
+      };
+    }
+  }
+
+  /**
    * POST /api/database/videos/:childId/set-parent
    * Set a parent for a video (create parent-child relationship)
    */

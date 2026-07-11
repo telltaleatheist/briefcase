@@ -1,0 +1,314 @@
+<section class="process-config" aria-label="Process selected videos">
+  @if (showHeader()) {
+    <div class="pc-header">
+      <span class="pc-title">Process</span>
+      <span class="pc-count">{{ selectionCount() }} selected</span>
+    </div>
+  }
+
+  <!-- Preset chips: one click composes the pipeline -->
+  <div class="preset-row">
+    @for (preset of presets(); track preset.id) {
+      <span class="preset-chip" [class.active]="isPresetActive(preset)">
+        <button
+          type="button"
+          class="chip-apply"
+          (click)="applyPreset(preset)"
+          [title]="'Apply preset: ' + preset.name">
+          {{ preset.name }}
+        </button>
+        <button
+          type="button"
+          class="chip-delete"
+          (click)="deletePreset(preset.id)"
+          [attr.aria-label]="'Delete preset ' + preset.name">×</button>
+      </span>
+    }
+    @if (!savingPreset()) {
+      <button
+        type="button"
+        class="chip-save"
+        [disabled]="steps().length === 0"
+        (click)="startSavePreset()"
+        title="Save the current steps as a preset">+ Save preset</button>
+    }
+  </div>
+
+  @if (savingPreset()) {
+    <div class="save-preset-row">
+      <input
+        type="text"
+        class="preset-name-input"
+        placeholder="Preset name…"
+        [value]="presetName()"
+        (input)="onPresetNameInput($event)"
+        (keydown.enter)="confirmSavePreset()"
+        (keydown.escape)="cancelSavePreset()" />
+      <button type="button" class="link-btn" (click)="confirmSavePreset()" [disabled]="!presetName().trim()">Save</button>
+      <button type="button" class="link-btn subtle" (click)="cancelSavePreset()">Cancel</button>
+    </div>
+  }
+
+  <!-- Pipeline steps: selectable cards, in run order. The card is the checkbox;
+       the chevron expands its options without toggling the step. -->
+  <div class="steps-list">
+    @for (def of stepDefs; track def.type) {
+      <div class="step">
+        <div
+          class="step-card"
+          [class.on]="isEnabled(def.type)"
+          [class.disabled]="def.type === 'ai-analyze' && !aiReady()">
+          <label class="step-lead">
+            <input
+              type="checkbox"
+              class="step-box"
+              [checked]="isEnabled(def.type)"
+              [disabled]="def.type === 'ai-analyze' && !aiReady()"
+              (change)="toggleStep(def.type)" />
+            <span class="step-text">
+              <span class="step-title">{{ def.label }}</span>
+              @if (doneHint(def.type); as hint) {
+                <span class="step-sub">{{ hint }}</span>
+              }
+            </span>
+          </label>
+
+          @if (def.type === 'ai-analyze' && !aiReady()) {
+            @if (aiCheckFailed()) {
+              <!-- Probe failed: readiness UNKNOWN — never tell a configured user to "set up" -->
+              <button type="button" class="link-affordance" (click)="$event.stopPropagation(); retryAi.emit()">AI check failed — retry</button>
+            } @else {
+              <button type="button" class="link-affordance" (click)="$event.stopPropagation(); setupAi.emit()">Set up AI…</button>
+            }
+          } @else if (isEnabled(def.type)) {
+            <button
+              type="button"
+              class="step-chevron"
+              [class.open]="isExpanded(def.type)"
+              (click)="$event.stopPropagation(); toggleExpanded(def.type)"
+              [attr.aria-expanded]="isExpanded(def.type)"
+              [attr.aria-label]="'Options for ' + def.label">
+              <svg class="chevron-icon" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+                <path d="M3 4.5 6 7.5 9 4.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </button>
+          }
+        </div>
+
+        @if (isExpanded(def.type) && isEnabled(def.type)) {
+          <div class="step-options">
+            @switch (def.type) {
+              @case ('fix-aspect-ratio') {
+                <label class="opt">
+                  <span>Ratio</span>
+                  <select [value]="config(def.type)['targetRatio']" (change)="onSelectOption(def.type, 'targetRatio', $event)">
+                    <option value="16:9">16:9</option>
+                    <option value="4:3">4:3</option>
+                    <option value="1:1">1:1</option>
+                    <option value="9:16">9:16</option>
+                    <option value="auto">Auto</option>
+                  </select>
+                </label>
+                <label class="opt check">
+                  <input
+                    type="checkbox"
+                    [checked]="config(def.type)['stripBlackBars'] === true"
+                    (change)="onCheckboxOption(def.type, 'stripBlackBars', $event)" />
+                  <span>Strip black bars</span>
+                </label>
+              }
+              @case ('normalize-audio') {
+                <div class="opt-block">
+                  <div class="opt-row">
+                    <span class="opt-label">Target loudness</span>
+                    <span class="opt-value">{{ audioLevelValue() }} LUFS</span>
+                  </div>
+                  <input
+                    type="range"
+                    class="opt-slider"
+                    min="-24"
+                    max="-14"
+                    step="1"
+                    [value]="audioLevelValue()"
+                    (input)="onNumberOption(def.type, 'targetLevel', $event)"
+                    aria-label="Target loudness in LUFS" />
+                  <span class="opt-hint">{{ audioLevelDescription() }}</span>
+                </div>
+              }
+              @case ('transcribe') {
+                @if (whisperModelsError()) {
+                  <div class="opt-error">
+                    Couldn't load installed models
+                    <button type="button" class="retry-link" (click)="loadWhisperModels()">Retry</button>
+                  </div>
+                } @else if (whisperModelsEmpty()) {
+                  <!-- Nothing installed: never offer a doomed "(not installed)" model -->
+                  <div class="opt-guidance">
+                    <span>No transcription models installed.</span>
+                    <button type="button" class="link-affordance" (click)="openComponents.emit()">Install in Settings → Components</button>
+                  </div>
+                } @else {
+                  <label class="opt">
+                    <span>Model</span>
+                    <select
+                      [value]="config(def.type)['model']"
+                      [disabled]="whisperModelsLoading()"
+                      (change)="onSelectOption(def.type, 'model', $event)">
+                      @if (whisperModelsLoading()) {
+                        <option [value]="config(def.type)['model']">Loading installed models…</option>
+                      } @else {
+                        @for (model of whisperModels() ?? []; track model.id) {
+                          <option [value]="model.id">{{ model.name }}{{ model.description ? ' — ' + model.description : '' }}</option>
+                        }
+                        @if (missingModelValue(); as missing) {
+                          <option [value]="missing">{{ missing }} (not installed)</option>
+                        }
+                      }
+                    </select>
+                  </label>
+                  <label class="opt">
+                    <span>Language</span>
+                    <select [value]="config(def.type)['language']" (change)="onSelectOption(def.type, 'language', $event)">
+                      <option value="en">English</option>
+                      <option value="auto">Auto-detect</option>
+                      <option value="es">Spanish</option>
+                      <option value="fr">French</option>
+                      <option value="de">German</option>
+                    </select>
+                  </label>
+                  <label class="opt check">
+                    <input
+                      type="checkbox"
+                      [checked]="config(def.type)['translate'] === true"
+                      (change)="onCheckboxOption(def.type, 'translate', $event)" />
+                    <span>Translate to English</span>
+                  </label>
+                }
+              }
+              @case ('ai-analyze') {
+                <!-- Detection sensitivity (analysisGranularity 1..10) -->
+                <div class="opt-block">
+                  <div class="opt-row">
+                    <span class="opt-label">Detection sensitivity</span>
+                    <span class="opt-value">{{ granularityLabel() }}</span>
+                  </div>
+                  <input
+                    type="range"
+                    class="opt-slider"
+                    min="1"
+                    max="10"
+                    step="1"
+                    [disabled]="granularityLoading()"
+                    [value]="granularityValue()"
+                    (input)="onGranularityInput($event)"
+                    aria-label="Detection sensitivity, 1 strict to 10 aggressive" />
+                  <span class="opt-hint">{{ granularityDescription() }}</span>
+                  @if (granularityError()) {
+                    <div class="opt-error">
+                      Couldn't load your saved sensitivity
+                      <button type="button" class="retry-link" (click)="loadDefaultGranularity()">Retry</button>
+                    </div>
+                  }
+                </div>
+
+                <!-- Custom instructions + history -->
+                <div class="opt-block">
+                  <div class="opt-row">
+                    <span class="opt-label">Custom instructions</span>
+                    @if (instructionsHistory().length > 0) {
+                      <button
+                        type="button"
+                        class="link-btn subtle"
+                        [attr.aria-expanded]="showInstructionsDropdown()"
+                        (click)="toggleInstructionsDropdown()">History</button>
+                    }
+                  </div>
+                  @if (showInstructionsDropdown()) {
+                    <div class="history-list">
+                      @for (item of instructionsHistory(); track item.id) {
+                        <button
+                          type="button"
+                          class="history-item"
+                          [title]="item.instruction_text"
+                          (click)="selectHistoryItem(item.instruction_text)">
+                          {{ truncateInstruction(item.instruction_text) }}
+                        </button>
+                      }
+                    </div>
+                  }
+                  <textarea
+                    class="opt-textarea"
+                    rows="3"
+                    placeholder="Optional — focus the analysis (e.g. flag logical fallacies)"
+                    aria-label="Custom analysis instructions"
+                    [value]="config(def.type)['customInstructions'] ?? ''"
+                    (input)="onTextOption(def.type, 'customInstructions', $event)"></textarea>
+                  @if (instructionsHistoryError()) {
+                    <div class="opt-error">
+                      Couldn't load instruction history
+                      <button type="button" class="retry-link" (click)="loadInstructionsHistory()">Retry</button>
+                    </div>
+                  }
+                </div>
+
+                <!-- AI model picker -->
+                <div class="opt-block">
+                  @if (aiModelsError()) {
+                    <div class="opt-error">
+                      Couldn't load AI models
+                      <button type="button" class="retry-link" (click)="loadAiModels()">Retry</button>
+                    </div>
+                  } @else {
+                    <label class="opt">
+                      <span>Model</span>
+                      <select
+                        [value]="config(def.type)['aiModel']"
+                        [disabled]="aiModelsLoading()"
+                        (change)="onAiModelChange($event)">
+                        @if (aiModelsLoading()) {
+                          <option [value]="config(def.type)['aiModel']">Loading models…</option>
+                        } @else {
+                          @if (!config(def.type)['aiModel']) {
+                            <option value="">Select a model…</option>
+                          }
+                          @for (group of modelGroups(); track group.provider) {
+                            <optgroup [label]="group.label">
+                              @for (model of group.models; track model.value) {
+                                <option [value]="model.value">{{ model.label }}</option>
+                              }
+                            </optgroup>
+                          }
+                          @if (missingAiModel(); as missing) {
+                            <option [value]="missing">{{ missing }} (unavailable)</option>
+                          }
+                        }
+                      </select>
+                    </label>
+                    @if (!aiModelsLoading()) {
+                      @if (isCurrentModelDefault()) {
+                        <span class="opt-note">This is your default model</span>
+                      } @else if (config(def.type)['aiModel']) {
+                        <button type="button" class="link-btn" (click)="saveAiAsDefault()">Save as default</button>
+                      }
+                    }
+                  }
+                </div>
+              }
+            }
+          </div>
+        }
+      </div>
+    }
+  </div>
+
+  @if (showFooter()) {
+    <div class="pc-footer">
+      <span class="summary" [class.warn]="blockReason()" [class.empty]="steps().length === 0">
+        {{ blockReason() ?? summary() }}
+      </span>
+      <button type="button" class="submit-btn" [disabled]="!canSubmit()" (click)="submit()">
+        {{ submitLabel() }}
+      </button>
+    </div>
+  }
+</section>

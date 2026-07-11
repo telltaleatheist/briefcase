@@ -457,6 +457,7 @@ export class MediaOperationsService {
     options: {
       model?: string;
       language?: string;
+      translate?: boolean;
     } = {},
     jobId?: string,
   ): Promise<TranscribeResult> {
@@ -486,7 +487,7 @@ export class MediaOperationsService {
 
       this.eventService.emitTaskProgress(jobId || '', 'transcribe', 0, 'Starting transcription...');
 
-      const transcriptFile = await this.whisperService.transcribeVideo(videoPath, jobId, options.model);
+      const transcriptFile = await this.whisperService.transcribeVideo(videoPath, jobId, options.model, options.translate);
 
       if (!transcriptFile) {
         throw new Error('Transcription failed');

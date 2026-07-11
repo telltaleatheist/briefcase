@@ -30,11 +30,19 @@ export const INSPECTOR_MIN_WIDTH = 240;
 export const INSPECTOR_MAX_WIDTH = 800;
 export const INSPECTOR_DEFAULT_WIDTH = 300; // keep in sync with --inspector-width token
 
+/** Startup cap: the inspector opens at no more than ~30% of the window, even
+ *  if a wider width was persisted from a resize on a larger screen. */
+function startupMaxWidth(): number {
+  return Math.max(INSPECTOR_MIN_WIDTH, Math.min(INSPECTOR_MAX_WIDTH, Math.round(window.innerWidth * 0.3)));
+}
+
 function readStoredInspectorWidth(): number {
+  const cap = startupMaxWidth();
   const stored = Number(localStorage.getItem(INSPECTOR_WIDTH_KEY));
-  return Number.isFinite(stored) && stored >= INSPECTOR_MIN_WIDTH && stored <= INSPECTOR_MAX_WIDTH
-    ? stored
-    : INSPECTOR_DEFAULT_WIDTH;
+  if (Number.isFinite(stored) && stored >= INSPECTOR_MIN_WIDTH) {
+    return Math.min(stored, cap);
+  }
+  return Math.min(INSPECTOR_DEFAULT_WIDTH, cap);
 }
 
 /**

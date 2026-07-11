@@ -37,11 +37,22 @@
     outline-offset: 1px;
   }
 
+  // "+ Add" is THE entry point — bigger presence than the selection actions:
+  // more padding, a larger/heavier label, and a soft lift. Gradient + tokens
+  // unchanged (no new colors).
   &.primary {
     border-color: transparent;
+    padding: 9px 17px;
     background: var(--gradient-primary);
     color: var(--text-inverse);
-    font-weight: 600;
+    font-size: 14px;
+    font-weight: 700;
+    box-shadow: 0 2px 8px var(--shadow-color);
+
+    .btn-icon {
+      font-size: 14px;
+      opacity: 1;
+    }
 
     &:hover:not(:disabled) {
       background: var(--gradient-primary);

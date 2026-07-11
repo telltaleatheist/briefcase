@@ -126,9 +126,11 @@ export class AIProviderService {
       case 'local':
         return this.generateWithLocal(prompt, temperature);
       case 'claude':
-        return this.generateWithClaude(prompt, config, temperature);
+        // Cloud providers get NO sampling params (see generateWithClaude).
+        return this.generateWithClaude(prompt, config);
       case 'openai':
-        return this.generateWithOpenAI(prompt, config, temperature);
+        // Cloud providers get NO sampling params (see generateWithOpenAI).
+        return this.generateWithOpenAI(prompt, config);
       case 'ollama':
         return this.generateWithOllama(prompt, config, temperature);
       default:
@@ -138,11 +140,19 @@ export class AIProviderService {
 
   /**
    * Generate text using Claude API
+   *
+   * NOTE: We deliberately send NO sampling parameters (temperature/top_p/top_k)
+   * on Claude requests. Newer Claude model families (e.g. claude-sonnet-5,
+   * claude-opus-4-7/4-8, claude-fable-*, claude-mythos-*) REMOVE these params —
+   * sending a non-default value returns 400 invalid_request_error
+   * ("`temperature` is deprecated for this model."). Older models accept
+   * temperature but don't require it, so omitting it everywhere is the single
+   * behavior that works across all Claude models. Prompting is the intended
+   * steering mechanism. Do not reintroduce temperature here.
    */
   private async generateWithClaude(
     prompt: string,
     config: AIProviderConfig,
-    temperature: number,
   ): Promise<AIResponse> {
     if (!config.apiKey) {
       throw new Error('Claude API key is required');
@@ -159,7 +169,7 @@ export class AIProviderService {
       const message = await this.anthropic.messages.create({
         model: config.model,
         max_tokens: 4096,
-        temperature,
+        // No temperature / top_p / top_k — removed on newer Claude models (400).
         messages: [
           {
             role: 'user',
@@ -196,11 +206,14 @@ export class AIProviderService {
 
   /**
    * Generate text using OpenAI API
+   *
+   * NOTE: No sampling parameters (temperature) are sent — newer OpenAI models
+   * likewise reject non-default sampling params, and omitting it keeps this
+   * path uniform with the Claude path. Do not reintroduce temperature here.
    */
   private async generateWithOpenAI(
     prompt: string,
     config: AIProviderConfig,
-    temperature: number,
   ): Promise<AIResponse> {
     if (!config.apiKey) {
       throw new Error('OpenAI API key is required');
@@ -223,7 +236,7 @@ export class AIProviderService {
           },
         ],
         max_tokens: 4096,
-        temperature,
+        // No temperature — omitted for all cloud providers.
       });
 
       const text = stripThinkTags(completion.choices[0]?.message?.content || '');

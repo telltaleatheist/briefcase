@@ -1,214 +1,326 @@
 <aside class="inspector" aria-label="Inspector">
-  @if (selection.count() === 0) {
+  @if (queueSelection.hasSelection()) {
+    <!-- ── Queue page: per-job config for the selected pending jobs ──────── -->
+    <div class="sections">
+      <section class="section">
+        <button
+          type="button"
+          class="section-header"
+          [attr.aria-expanded]="pendingOpen()"
+          (click)="togglePending()">
+          <span class="section-title">Pending — {{ queueSelection.count() }} selected</span>
+          <svg class="chevron-icon" [class.open]="pendingOpen()" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+            <path d="M3 4.5 6 7.5 9 4.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
+        <div class="section-body" [class.hidden]="!pendingOpen()">
+          <!-- Trim block: seconds removed from each end (rides the Save action) -->
+          <div class="trim-block">
+            <div class="trim-field">
+              <span class="trim-label">Remove from start</span>
+              <ui-timecode-input
+                label="Remove from start"
+                [seconds]="queueTrimStart()"
+                (secondsChange)="queueTrimStart.set($event)"
+                (invalid)="setTrimStartInvalid($event)" />
+            </div>
+            <div class="trim-field">
+              <span class="trim-label">Remove from end</span>
+              <ui-timecode-input
+                label="Remove from end"
+                [seconds]="queueTrimEnd()"
+                (secondsChange)="queueTrimEnd.set($event)"
+                (invalid)="setTrimEndInvalid($event)" />
+              <span class="trim-hint">Duration cut off the end — not a timestamp.</span>
+            </div>
+          </div>
+
+          <app-process-config
+            [selectionCount]="queueSelection.count()"
+            [initialSteps]="pendingInitialSteps()"
+            [persistSticky]="false"
+            [submitLabel]="'Save to ' + queueSelection.count() + ' pending'"
+            [submitBlockedReason]="queueTrimInvalid() ? 'Fix the invalid trim time' : null"
+            [aiReady]="aiReady()"
+            [aiCheckFailed]="aiCheckFailed()"
+            (submitSteps)="onSavePendingSteps($event)"
+            (setupAi)="dispatch({ type: 'openAiSetup' })"
+            (retryAi)="onRetryAi()"
+            (openComponents)="onOpenComponents()" />
+        </div>
+      </section>
+    </div>
+
+  } @else if (selection.count() === 0) {
     <div class="empty">Select an item to see details,<br />status, and actions.</div>
 
   } @else {
-    @if (item(); as single) {
-    <!-- ── Single selection ─────────────────────────────────────────── -->
-    <div class="thumb" [class.icon]="kindIcon()">
-      @if (kindIcon(); as icon) {
-        <span class="type-icon" aria-hidden="true">{{ icon }}</span>
-      } @else if (single.thumbnailUrl) {
-        <img [src]="single.thumbnailUrl" alt="" />
-      } @else {
-        <span class="type-icon" aria-hidden="true">🎞</span>
-      }
-    </div>
-
-    <h4 class="title">{{ single.name }}</h4>
-    @if (single.sourceUrl) {
-      <div class="source" [title]="single.sourceUrl">{{ single.sourceUrl }}</div>
-    }
-
-    <dl class="kv">
-      <dt>Added</dt><dd>{{ addedDate() }}</dd>
-      @if (single.duration) {
-        <dt>Duration</dt><dd>{{ single.duration }}</dd>
-      }
-      @if (resolution(); as res) {
-        <dt>Video</dt><dd>{{ res }}</dd>
-      }
-      <dt>Size</dt><dd>{{ size() }}</dd>
-    </dl>
-
-    <div class="section-label">Pipeline</div>
-    <div class="pipe-row">
-      <span class="state done" aria-hidden="true">✓</span>
-      <span>{{ single.sourceUrl ? 'Downloaded' : 'Imported' }}</span>
-    </div>
-    @if (kind() === 'video') {
-      <div class="pipe-row">
-        @if (single.hasTranscript) {
-          <span class="state done" aria-hidden="true">✓</span>
-          <span>Transcribed</span>
-        } @else {
-          <span class="state pending" aria-hidden="true">—</span>
-          <span>Transcribed</span>
-          <button class="run" type="button" (click)="dispatch({ type: 'transcribeSelection' })">Run</button>
-        }
-      </div>
-    }
-    <div class="pipe-row">
-      @if (single.hasAnalysis) {
-        <span class="state done" aria-hidden="true">✓</span>
-        <span>Analyzed</span>
-      } @else {
-        <span class="state pending" aria-hidden="true">—</span>
-        <span>Analyzed</span>
-        @if (aiReady()) {
-          <button class="run" type="button" (click)="dispatch({ type: 'analyzeSelection' })">Run</button>
-        } @else if (aiCheckFailed()) {
-          <span class="run muted" title="AI status unknown — the availability check failed">Unknown</span>
-        } @else {
-          <button class="run" type="button" (click)="dispatch({ type: 'openAiSetup' })">Set up AI…</button>
-        }
-      }
-    </div>
-
-    <div class="section-label">Connected</div>
-    @if (connectionsStore.connectionsLoading()) {
-      <div class="connected-empty">Loading…</div>
-    } @else if (connectionsStore.connectionsError()) {
-      <div class="load-error">
-        <span>{{ connectionsStore.connectionsError() }}</span>
-        <button class="run" type="button" (click)="connectionsStore.retryLoad()">Retry</button>
-      </div>
-    } @else {
-      @for (conn of connectionsStore.connections(); track conn.relationshipId) {
-        <div class="connected-item">
-          <button
-            class="connected-open"
-            type="button"
-            [title]="'Open ' + conn.title"
-            (click)="openConnected(conn.videoId)">
-            <span class="ci-icon" aria-hidden="true">{{ kindIconFor(conn.kind) }}</span>
-            <span class="ci-title">{{ conn.title }}</span>
-            <span class="ci-kind">{{ kindLabelFor(conn.kind) }}</span>
-          </button>
-          <button
-            class="connected-remove"
-            type="button"
-            title="Disconnect"
-            [disabled]="connectionsStore.mutating()"
-            (click)="connectionsStore.disconnect(conn.relationshipId)">✕</button>
+    <!-- ── One scroll column: stacked disclosure sections ────────────────── -->
+    <div class="sections">
+      <!-- ── Process section: the pipeline config ────────────────────────── -->
+      <section class="section" #processSection>
+        <button
+          type="button"
+          class="section-header"
+          [attr.aria-expanded]="processOpen()"
+          (click)="toggleProcess()">
+          <span class="section-title">Process</span>
+          <svg class="chevron-icon" [class.open]="processOpen()" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+            <path d="M3 4.5 6 7.5 9 4.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
+        <div class="section-body" [class.hidden]="!processOpen()">
+          <div class="process-config-slot" [class.flash]="configFlash()">
+            <app-process-config
+              [selectionCount]="store.selectedItems().length"
+              [withoutTranscript]="store.withoutTranscript()"
+              [notAnalyzed]="store.notAnalyzed()"
+              [aiReady]="aiReady()"
+              [aiCheckFailed]="aiCheckFailed()"
+              (submitSteps)="onProcessSteps($event)"
+              (setupAi)="dispatch({ type: 'openAiSetup' })"
+              (retryAi)="onRetryAi()"
+              (openComponents)="onOpenComponents()" />
+          </div>
         </div>
-      } @empty {
-        <div class="connected-empty">No connections. Select this and one other item to connect them.</div>
-      }
-    }
+      </section>
 
-    @if (single.hasTranscript) {
-      <div class="section-label transcript-header">
-        <span>Transcript</span>
-        @if (transcript()) {
-          <span class="transcript-tools">
-            @if (hasTimestamps()) {
-              <button
-                type="button"
-                class="tool-btn"
-                [class.active]="showTimestamps()"
-                (click)="showTimestamps.set(!showTimestamps())"
-                [title]="showTimestamps() ? 'Hide timestamps' : 'Show timestamps'">
-                🕐
-              </button>
-            }
-            <button
-              type="button"
-              class="tool-btn"
-              [class.confirm]="copied()"
-              (click)="copyTranscript()"
-              title="Copy transcript to clipboard">
-              {{ copied() ? '✓ Copied' : '⧉ Copy' }}
-            </button>
-          </span>
-        }
-      </div>
-      @if (store.transcriptLoading()) {
-        <div class="transcript-body muted">Loading transcript…</div>
-      } @else if (store.transcriptError()) {
-        <div class="load-error">
-          <span>{{ store.transcriptError() }}</span>
-          <button class="run" type="button" (click)="store.retryTranscript()">Retry</button>
-        </div>
-      } @else {
-        @if (transcript(); as t) {
-          <div class="transcript-body">
-            @if (showTimestamps() && t.segments) {
-              @for (seg of t.segments; track $index) {
-                <div class="cue">
-                  <span class="cue-time">{{ seg.start }}</span>
-                  <span class="cue-text">{{ seg.text }}</span>
-                </div>
-              }
+      <!-- ── Info section: everything about the selection ────────────────── -->
+      <section class="section">
+        <button
+          type="button"
+          class="section-header"
+          [attr.aria-expanded]="infoOpen()"
+          (click)="toggleInfo()">
+          <span class="section-title">Info</span>
+          <svg class="chevron-icon" [class.open]="infoOpen()" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+            <path d="M3 4.5 6 7.5 9 4.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
+        <div class="section-body" [class.hidden]="!infoOpen()">
+          @if (item(); as single) {
+          <!-- ── Single selection ────────────────────────────────────────── -->
+          <div class="thumb" [class.icon]="kindIcon()">
+            @if (kindIcon(); as icon) {
+              <span class="type-icon" aria-hidden="true">{{ icon }}</span>
+            } @else if (single.thumbnailUrl) {
+              <app-inspector-preview
+                [posterUrl]="single.thumbnailUrl"
+                [streamUrl]="previewUrl()"
+                [active]="infoOpen()" />
             } @else {
-              <p class="flowing">{{ t.plainText }}</p>
+              <span class="type-icon" aria-hidden="true">🎞</span>
             }
           </div>
-        } @else {
-          <div class="transcript-body muted">No transcript available.</div>
-        }
-      }
-    }
 
-    <div class="actions">
-      @if (kind() === 'video') {
-        <ui-button variant="primary" [block]="true" (pressed)="dispatch({ type: 'openEditor' })">▶ Open in Scout</ui-button>
-        <ui-button [block]="true" (pressed)="requestProcess()">⚡ Process…</ui-button>
-      }
-      <ui-button [block]="true" (pressed)="dispatch({ type: 'viewInfo' })">Show Full Info</ui-button>
-      <ui-button
-        [block]="true"
-        cdkOverlayOrigin
-        (pressed)="collectionsMenuOpen.set(!collectionsMenuOpen())">
-        Add to Collection…
-      </ui-button>
-    </div>
+          <h4 class="title">{{ single.name }}</h4>
+          @if (single.sourceUrl) {
+            <div class="source" [title]="single.sourceUrl">{{ single.sourceUrl }}</div>
+          }
 
-    } @else {
-    <!-- ── Multi selection ──────────────────────────────────────────── -->
-    <div class="multi-count">{{ store.selectedItems().length }} items selected</div>
-    <div class="multi-sub">
-      {{ store.withoutTranscript() }} without a transcript · {{ store.notAnalyzed() }} not analyzed
-    </div>
+          <dl class="kv">
+            <dt>Added</dt><dd>{{ addedDate() }}</dd>
+            @if (single.duration) {
+              <dt>Duration</dt><dd>{{ single.duration }}</dd>
+            }
+            @if (resolution(); as res) {
+              <dt>Video</dt><dd>{{ res }}</dd>
+            }
+            <dt>Size</dt><dd>{{ size() }}</dd>
+          </dl>
 
-    <div class="actions">
-      @if (store.withoutTranscript() > 0) {
-        <ui-button variant="primary" [block]="true" (pressed)="dispatch({ type: 'transcribeSelection' })">
-          ≋ Transcribe {{ store.withoutTranscript() }}
-        </ui-button>
-      }
-      @if (store.notAnalyzed() > 0) {
-        @if (aiReady()) {
-          <ui-button [block]="true" (pressed)="dispatch({ type: 'analyzeSelection' })">
-            ✦ Analyze {{ store.notAnalyzed() }}
-          </ui-button>
-        } @else if (!aiCheckFailed()) {
-          <ui-button [block]="true" (pressed)="dispatch({ type: 'openAiSetup' })">✦ Analyze — set up AI first</ui-button>
-        }
-      }
-      @if (store.anyVideos()) {
-        <ui-button [block]="true" (pressed)="requestProcess()">⚡ Process…</ui-button>
-        <ui-button [block]="true" (pressed)="dispatch({ type: 'openEditor' })">▶ Open in Scout (tabs)</ui-button>
-      }
-      @if (isPair()) {
-        @if (connectionsStore.pairConnection(); as edge) {
-          <ui-button [block]="true" (pressed)="connectionsStore.disconnect(edge.relationshipId)">
-            🔗 Disconnect these two
-          </ui-button>
-        } @else {
-          <ui-button [block]="true" (pressed)="connectionsStore.connectPair()">
-            🔗 Connect these two
-          </ui-button>
-        }
-      }
-      <ui-button
-        [block]="true"
-        cdkOverlayOrigin
-        (pressed)="collectionsMenuOpen.set(!collectionsMenuOpen())">
-        Add to Collection…
-      </ui-button>
+          <div class="section-label">Pipeline</div>
+          <div class="pipe-row">
+            <span class="state done" aria-hidden="true">✓</span>
+            <span>{{ single.sourceUrl ? 'Downloaded' : 'Imported' }}</span>
+          </div>
+          @if (kind() === 'video') {
+            <div class="pipe-row">
+              @if (single.hasTranscript) {
+                <span class="state done" aria-hidden="true">✓</span>
+                <span>Transcribed</span>
+              } @else {
+                <span class="state pending" aria-hidden="true">—</span>
+                <span>Transcribed</span>
+                <button class="run" type="button" (click)="dispatch({ type: 'transcribeSelection' })">Run</button>
+              }
+            </div>
+          }
+          <div class="pipe-row">
+            @if (single.hasAnalysis) {
+              <span class="state done" aria-hidden="true">✓</span>
+              <span>Analyzed</span>
+            } @else {
+              <span class="state pending" aria-hidden="true">—</span>
+              <span>Analyzed</span>
+              @if (aiReady()) {
+                <button class="run" type="button" (click)="dispatch({ type: 'analyzeSelection' })">Run</button>
+              } @else if (aiCheckFailed()) {
+                <span class="run muted" title="AI status unknown — the availability check failed">Unknown</span>
+              } @else {
+                <button class="run" type="button" (click)="dispatch({ type: 'openAiSetup' })">Set up AI…</button>
+              }
+            }
+          </div>
+
+          <div class="section-label">Connected</div>
+          @if (connectionsStore.mutationError(); as err) {
+            <div class="connected-error">{{ err }}</div>
+          }
+          @if (connectionsStore.connectionsLoading()) {
+            <div class="connected-empty">Loading…</div>
+          } @else if (connectionsStore.connectionsError()) {
+            <div class="load-error">
+              <span>{{ connectionsStore.connectionsError() }}</span>
+              <button class="run" type="button" (click)="connectionsStore.retryLoad()">Retry</button>
+            </div>
+          } @else {
+            @for (conn of connectionsStore.connections(); track conn.videoId) {
+              <div class="connected-item">
+                <div class="ci-main">
+                  <span class="ci-title" [title]="conn.title">{{ conn.title }}</span>
+                  <span class="ci-kind">{{ kindLabelFor(conn.kind) }}</span>
+                </div>
+                <div class="ci-actions">
+                  <button
+                    class="ci-action"
+                    type="button"
+                    [title]="'Open ' + conn.title + ' in Scout'"
+                    (click)="openConnected(conn.videoId)">Open</button>
+                  <button
+                    class="ci-action"
+                    type="button"
+                    [title]="'Locate ' + conn.title + ' in the library'"
+                    (click)="locateConnected(conn.videoId)">Locate</button>
+                  <button
+                    class="ci-action remove"
+                    type="button"
+                    title="Remove from connections"
+                    [disabled]="connectionsStore.mutating()"
+                    (click)="connectionsStore.disconnect(conn.videoId)">✕</button>
+                </div>
+              </div>
+            } @empty {
+              <div class="connected-empty">No connections. Select this and one or more other items to connect them.</div>
+            }
+          }
+
+          @if (single.hasTranscript) {
+            <div class="section-label transcript-header">
+              <span>Transcript</span>
+              @if (transcript()) {
+                <span class="transcript-tools">
+                  @if (hasTimestamps()) {
+                    <button
+                      type="button"
+                      class="tool-btn"
+                      [class.active]="showTimestamps()"
+                      (click)="showTimestamps.set(!showTimestamps())"
+                      [title]="showTimestamps() ? 'Hide timestamps' : 'Show timestamps'">
+                      🕐
+                    </button>
+                  }
+                  <button
+                    type="button"
+                    class="tool-btn"
+                    [class.confirm]="copied()"
+                    (click)="copyTranscript()"
+                    title="Copy transcript to clipboard">
+                    {{ copied() ? '✓ Copied' : '⧉ Copy' }}
+                  </button>
+                </span>
+              }
+            </div>
+            @if (store.transcriptLoading()) {
+              <div class="transcript-body muted">Loading transcript…</div>
+            } @else if (store.transcriptError()) {
+              <div class="load-error">
+                <span>{{ store.transcriptError() }}</span>
+                <button class="run" type="button" (click)="store.retryTranscript()">Retry</button>
+              </div>
+            } @else {
+              @if (transcript(); as t) {
+                <div class="transcript-body">
+                  @if (showTimestamps() && t.segments) {
+                    @for (seg of t.segments; track $index) {
+                      <div class="cue">
+                        <span class="cue-time">{{ seg.start }}</span>
+                        <span class="cue-text">{{ seg.text }}</span>
+                      </div>
+                    }
+                  } @else {
+                    <p class="flowing">{{ t.plainText }}</p>
+                  }
+                </div>
+              } @else {
+                <div class="transcript-body muted">No transcript available.</div>
+              }
+            }
+          }
+
+          <div class="actions">
+            @if (kind() === 'video') {
+              <ui-button variant="primary" [block]="true" (pressed)="dispatch({ type: 'openEditor' })">▶ Open in Scout</ui-button>
+            }
+            <ui-button [block]="true" (pressed)="dispatch({ type: 'viewInfo' })">Show Full Info</ui-button>
+            <ui-button
+              [block]="true"
+              cdkOverlayOrigin
+              (pressed)="collectionsMenuOpen.set(!collectionsMenuOpen())">
+              Add to Collection…
+            </ui-button>
+          </div>
+
+          } @else {
+          <!-- ── Multi selection: compact list + secondary actions ───────── -->
+          <div class="multi-count">{{ store.selectedItems().length }} items selected</div>
+          <div class="multi-list">
+            @for (it of store.selectedItems(); track it.id) {
+              <div class="multi-item">
+                <span class="mi-thumb">
+                  @if (it.thumbnailUrl) {
+                    <img [src]="it.thumbnailUrl" alt="" />
+                  }
+                </span>
+                <span class="mi-title" [title]="it.name">{{ it.name }}</span>
+                <span class="mi-dur">{{ formatDuration(it.duration) }}</span>
+              </div>
+            }
+          </div>
+
+          <div class="actions">
+            @if (store.anyVideos()) {
+              <ui-button variant="primary" [block]="true" (pressed)="dispatch({ type: 'openEditor' })">▶ Open in Scout (tabs)</ui-button>
+            }
+            @if (isPair() && connectionsStore.pairConnection(); as edge) {
+              <ui-button
+                [block]="true"
+                [disabled]="connectionsStore.mutating()"
+                (pressed)="connectionsStore.disconnect(edge.videoId)">
+                Disconnect these two
+              </ui-button>
+            } @else {
+              <ui-button
+                [block]="true"
+                [disabled]="connectionsStore.mutating()"
+                (pressed)="connectionsStore.connectSelection()">
+                Connect these {{ store.selectedItems().length }}
+              </ui-button>
+            }
+            @if (connectionsStore.mutationError(); as err) {
+              <div class="connected-error">{{ err }}</div>
+            }
+            <ui-button
+              [block]="true"
+              cdkOverlayOrigin
+              (pressed)="collectionsMenuOpen.set(!collectionsMenuOpen())">
+              Add to Collection…
+            </ui-button>
+          </div>
+          }
+        </div>
+      </section>
     </div>
-    }
   }
 </aside>
 

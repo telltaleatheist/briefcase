@@ -19,16 +19,15 @@
           [selectionCount]="selection.count()"
           [aiReady]="aiReady()"
           [aiCheckFailed]="aiCheckFailed()"
-          [withoutTranscript]="inspector.withoutTranscript()"
-          [notAnalyzed]="inspector.notAnalyzed()"
           (submitAdd)="onSubmitAdd($event)"
           (importFiles)="dispatchToWorkspace({ type: 'import' })"
           (openAdvanced)="dispatchToWorkspace({ type: 'openDownloadDialog' })"
           (setupAi)="dispatchToWorkspace({ type: 'openAiSetup' })"
-          (retryAiCheck)="retryAiCheck()"
+          (retryAi)="onRetryAi()"
+          (openComponents)="onOpenComponents()"
           (openEditor)="dispatchToWorkspace({ type: 'openEditor' })"
           (viewInfo)="dispatchToWorkspace({ type: 'viewInfo' })"
-          (processSteps)="dispatchToWorkspace({ type: 'processSelection', steps: $event })" />
+          (revealProcess)="onRevealProcess()" />
       }
     </app-toolbar>
 

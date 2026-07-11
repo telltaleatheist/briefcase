@@ -77,6 +77,7 @@ export interface TranscribeTask extends BaseTask {
   options?: {
     model?: string; // Whisper model (tiny, base)
     language?: string; // Language code (en, es, fr, etc.)
+    translate?: boolean; // Translate speech to English (whisper --translate)
   };
 }
 

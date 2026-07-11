@@ -561,8 +561,12 @@ export class AIAnalysisService {
     // Job-level failure accounting: record explicit failures and abort loudly
     // rather than fabricating success once too many steps fail.
     let failureCount = 0;
+    // Remember the most recent failure so an all-failed run can report the real
+    // reason (e.g. the underlying Claude API error) instead of an opaque message.
+    let lastFailureReason = '';
     const recordFailure = (what: string): void => {
       failureCount++;
+      lastFailureReason = what;
       this.logger.error(`[Analysis Failure ${failureCount}/${MAX_FAILURES}] ${what}`);
       if (failureCount >= MAX_FAILURES) {
         throw new Error(
@@ -714,6 +718,20 @@ export class AIAnalysisService {
         },
       );
       sendProgress('analysis', calculateProgress(), `Analyzed ${chapters.length} chapters, found ${flags.length} flags`);
+
+      // Honest-failure gate: if NOT ONE chapter was successfully analyzed, the
+      // run produced nothing real (every API call failed). Fail loudly with the
+      // real reason instead of returning an empty analysis that looks successful
+      // — stale/no data beats a lie. A partial run (some chapters analyzed, some
+      // failed) still completes below with whatever succeeded.
+      const successfulChapters = chapters.filter((ch) => !ch.failed).length;
+      if (successfulChapters === 0) {
+        throw new Error(
+          lastFailureReason
+            ? `no chapters could be analyzed — every analysis call failed. Last failure: ${lastFailureReason}`
+            : 'no chapters could be analyzed — every analysis call failed.',
+        );
+      }
 
       // Write chapter flags to file
       for (const flag of flags) {
@@ -1110,6 +1128,9 @@ export class AIAnalysisService {
       // result is a recorded failure — NOT silently dropped (its boundaries are
       // lost, which is why it must be counted against the abort threshold).
       let result: BoundaryDetectionResult | null = null;
+      // Capture the underlying error so a recorded failure carries the real
+      // reason (e.g. a Claude 400) rather than a generic message.
+      let lastError = '';
       for (let attempt = 0; attempt <= 1; attempt++) {
         try {
           const response = await this.aiProviderService.generateText(prompt, config, 'boundary');
@@ -1122,13 +1143,17 @@ export class AIAnalysisService {
             this.logger.warn(`[Pass 1] No response for chunk ${i + 1} (attempt ${attempt + 1})`);
           }
         } catch (error) {
-          this.logger.warn(`[Pass 1] Error processing chunk ${i + 1} (attempt ${attempt + 1}): ${(error as Error).message}`);
+          lastError = (error as Error).message;
+          this.logger.warn(`[Pass 1] Error processing chunk ${i + 1} (attempt ${attempt + 1}): ${lastError}`);
         }
         if (attempt < 1) await this.delay(1000);
       }
 
       if (!result) {
-        recordFailure(`Pass 1 boundary detection failed for chunk ${i + 1}/${chunks.length} after retry`);
+        recordFailure(
+          `Pass 1 boundary detection failed for chunk ${i + 1}/${chunks.length} after retry` +
+          (lastError ? `: ${lastError}` : ''),
+        );
         continue;
       }
 
@@ -1238,6 +1263,9 @@ export class AIAnalysisService {
     onTokens?: (response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void,
   ): Promise<ChapterAnalysisResult> {
     const maxRetries = JSON_PARSE_RETRIES;
+    // Capture the underlying error so the final throw carries the real reason
+    // (e.g. a Claude 400) rather than an opaque "failed after N attempts".
+    let lastError = '';
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
@@ -1275,7 +1303,8 @@ export class AIAnalysisService {
           continue;
         }
       } catch (error) {
-        this.logger.warn(`[Pass 2] Error analyzing chapter ${chapterNumber} (attempt ${attempt + 1}): ${(error as Error).message}`);
+        lastError = (error as Error).message;
+        this.logger.warn(`[Pass 2] Error analyzing chapter ${chapterNumber} (attempt ${attempt + 1}): ${lastError}`);
         if (attempt < maxRetries) {
           await this.delay(1000 * (attempt + 1));
           continue;
@@ -1286,7 +1315,10 @@ export class AIAnalysisService {
     // All retries exhausted — fail loudly. The caller records this as an explicit
     // failure and marks the chapter failed; it is NEVER written to the DB as a
     // fabricated "Chapter N (analysis failed)" success row.
-    throw new Error(`Chapter ${chapterNumber} analysis failed after ${maxRetries + 1} attempts`);
+    throw new Error(
+      `Chapter ${chapterNumber} analysis failed after ${maxRetries + 1} attempts` +
+      (lastError ? `: ${lastError}` : ''),
+    );
   }
 
   /**

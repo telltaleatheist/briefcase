@@ -22,7 +22,6 @@ import { TaskType, AVAILABLE_TASKS } from '../../models/task.model';
 import { LibraryService } from '../../services/library.service';
 import { WebsocketService, TaskStarted, TaskCompleted, TaskProgress, TaskFailed, AnalysisCompleted } from '../../services/websocket.service';
 import { AiSetupService } from '../../services/ai-setup.service';
-import { VideoJobSettings } from '../../models/video-processing.model';
 import { NotificationService } from '../../services/notification.service';
 import { TabsService } from '../../services/tabs.service';
 import { FileImportService } from '../../services/file-import.service';
@@ -32,11 +31,13 @@ import { QueueService } from '../../services/queue.service';
 import { LibraryFilterService } from '../../services/library-filter.service';
 import { WebArchiveService } from '../../services/web-archive.service';
 import { QueueJob, QueueTask, createQueueJob, createQueueTask } from '../../models/queue-job.model';
+import { VideoJobSettings } from '../../models/video-processing.model';
 import { ExportIndicatorComponent } from '../../components/export-indicator/export-indicator.component';
 import { TrimOpenerModalComponent } from '../../components/trim-opener-modal/trim-opener-modal.component';
 import { getApiBase } from '../../core/runtime-url';
 import { ErrorSurface, describeError } from '../../core/error-surface.service';
-import { WorkspaceActionsService } from '../../core/stores/workspace-actions.service';
+import { WorkspaceActionsService, AddDownloadsPayload } from '../../core/stores/workspace-actions.service';
+import { QueueSelectionStore } from '../../core/stores/queue-selection.store';
 import { PIPELINE_STEPS, PipelinePresetsService, PipelineStep, PipelineStepType } from '../../core/stores/pipeline-presets.service';
 import { NavigationStore } from '../../core/stores/navigation.store';
 import { InspectorStore } from '../../core/stores/inspector.store';
@@ -113,6 +114,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   private webArchiveService = inject(WebArchiveService);
   private cdr = inject(ChangeDetectorRef);
   private workspaceActions = inject(WorkspaceActionsService);
+  private queueSelection = inject(QueueSelectionStore);
   private inspectorStore = inject(InspectorStore);
   /** Active /collections/:id — scopes the collections view to one collection. */
   protected navStore = inject(NavigationStore);
@@ -477,11 +479,18 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
           break;
         case 'submitDownloads':
           if (this.requireLibrary()) {
-            this.onDownloadSubmit(action.payload.items, action.payload.trimAfter);
+            this.onDownloadSubmit(action.payload.items);
           }
           break;
         case 'openEditor':
-          this.openInEditor();
+          if (action.videoId) {
+            this.openConnectedInEditor(action.videoId);
+          } else {
+            this.openInEditor();
+          }
+          break;
+        case 'locateVideo':
+          this.locateVideo(action.videoId);
           break;
         case 'viewInfo':
           this.viewMore();
@@ -494,6 +503,14 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
           break;
         case 'processSelection':
           this.processSelection(action.steps);
+          break;
+        case 'updatePendingJobs':
+          this.updatePendingJobs(
+            action.jobIds,
+            action.steps,
+            action.trimStartSeconds,
+            action.trimEndSeconds
+          );
           break;
         case 'openAiSetup':
           this.aiWizardOpen.set(true);
@@ -680,12 +697,13 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     // Refresh AI availability after setup
     this.aiSetupService.checkAIAvailability();
 
-    // If there were videos pending analysis, continue with them
+    // If there were videos pending analysis, reveal the Process config seeded
+    // for them now that AI is set up (rather than reopening the old modal).
     if (this.pendingAnalysisVideos.length > 0) {
       const videos = [...this.pendingAnalysisVideos];
       this.pendingAnalysisVideos = [];
-      // Use setTimeout to let wizard close fully before starting analysis
-      setTimeout(() => this.analyzeVideos(videos), 100);
+      // Let the wizard close fully before revealing the inspector.
+      setTimeout(() => this.revealProcessForAnalyze(videos), 100);
       return;
     }
 
@@ -1961,13 +1979,11 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       }
 
       case 'configure':
-        // Open the processing configuration modal for this video
-        this.analyzeVideos(videosToProcess);
-        break;
-
       case 'process':
-        // Add to processing queue with AI analysis
-        this.analyzeVideos(videosToProcess);
+        // Reveal the inspector's Process config for the current selection,
+        // respecting the user's sticky (last-used) steps.
+        this.pipelinePresets.enableSteps([]);
+        this.workspaceActions.revealProcessConfig();
         break;
 
       case 'viewTranscript':
@@ -1977,8 +1993,9 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
             // Navigate to video info page on the transcription tab
             this.router.navigate(['/video', video.id], { queryParams: { tab: 'transcription' } });
           } else {
-            // No transcript yet - add to queue with transcribe task
-            this.analyzeVideos([video]);
+            // No transcript yet — seed the Transcribe step and reveal Process.
+            this.pipelinePresets.enableSteps(['transcribe']);
+            this.workspaceActions.revealProcessConfig();
           }
         }
         break;
@@ -2097,89 +2114,26 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     this.router.navigate(['/video', videoId]);
   }
 
-  private async analyzeVideos(videos: VideoItem[]) {
+  /**
+   * "Run Analysis" entry point. Instead of the old right-click modal, this now
+   * seeds the inspector's Process config (analyze step, plus transcribe when any
+   * selected video still lacks a transcript — the same auto-inject the modal
+   * did) and reveals it. AI readiness is handled inside the card's "Set up AI…"
+   * affordance, so we reveal even when AI isn't configured yet.
+   */
+  private analyzeVideos(videos: VideoItem[]) {
     if (videos.length === 0) return;
+    this.revealProcessForAnalyze(videos);
+  }
 
-    // Check if AI is configured before proceeding
-    const setupStatus = this.aiSetupService.getSetupStatus();
-    if (setupStatus.needsSetup) {
-      // Store the videos to analyze after wizard completes
-      this.pendingAnalysisVideos = videos;
-      this.aiWizardOpen.set(true);
-      return;
+  private revealProcessForAnalyze(videos: VideoItem[]): void {
+    const steps: PipelineStepType[] = ['ai-analyze'];
+    // Any selected video without a transcript needs one first (modal parity).
+    if (videos.some(v => v.hasTranscript !== true)) {
+      steps.push('transcribe');
     }
-
-    // Filter out non-video files (images, PDFs, etc.)
-    // Transcribe and AI analysis only work on video/audio files
-    const videoOnlyItems = videos.filter(video => {
-      const mediaType = video.mediaType?.toLowerCase() || '';
-      const ext = video.fileExtension?.toLowerCase() || '';
-      const fileName = video.name?.toLowerCase() || '';
-
-      // List of non-video extensions to exclude
-      const nonVideoExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg', '.pdf', '.doc', '.docx', '.txt', '.md'];
-
-      // Check if it's a non-video file
-      const isNonVideo = mediaType.startsWith('image/') ||
-                         mediaType === 'application/pdf' ||
-                         nonVideoExtensions.some(e => ext === e || fileName.endsWith(e));
-
-      return !isNonVideo;
-    });
-
-    // Show notification if some items were filtered out
-    if (videoOnlyItems.length < videos.length) {
-      const filtered = videos.length - videoOnlyItems.length;
-      this.notificationService.warning(
-        'Non-video Files Excluded',
-        `${filtered} image${filtered !== 1 ? 's' : ''} or document${filtered !== 1 ? 's' : ''} cannot be transcribed or analyzed. Only video files were added.`
-      );
-    }
-
-    // If all items were filtered out, don't proceed
-    if (videoOnlyItems.length === 0) {
-      this.notificationService.error(
-        'No Videos Selected',
-        'Transcription and analysis only work on video files. Please select at least one video.'
-      );
-      return;
-    }
-
-    // Store videos pending configuration (not added to queue yet)
-    this.pendingConfigVideos.set(videoOnlyItems);
-
-    // Clear selection
-    if (this.cascadeComponent) {
-      this.cascadeComponent.clearSelection();
-    }
-
-    // Check if all videos already have transcripts
-    // For bulk mode, only set hasTranscript to true if ALL videos have transcripts
-    const allHaveTranscripts = videoOnlyItems.every(v => v.hasTranscript === true);
-
-    // Open config modal with default tasks (transcribe + ai-analyze)
-    // Note: transcribe will be auto-added on save if AI analysis is selected but no transcript exists
-    const defaultTasks: QueueItemTask[] = [
-      {
-        type: 'transcribe',
-        status: 'pending',
-        progress: 0,
-        config: { model: 'base', language: 'en' }
-      },
-      {
-        type: 'ai-analyze',
-        status: 'pending',
-        progress: 0,
-        config: {}
-      }
-    ];
-
-    this.configItemIds.set([]); // No existing queue items
-    this.configBulkMode.set(videos.length > 1);
-    this.configItemSource.set('library');
-    this.configExistingTasks.set(defaultTasks);
-    this.configHasTranscript.set(allHaveTranscripts);
-    this.configModalOpen.set(true);
+    this.pipelinePresets.enableSteps(steps);
+    this.workspaceActions.revealProcessConfig();
   }
 
   /**
@@ -2355,33 +2309,62 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       }).id
     );
 
-    // Process is an explicit "go" — submit exactly the jobs we just staged
-    // (never sweeping along items the user deliberately parked in staging).
-    const stepText = `${finalSteps.length} step${finalSteps.length === 1 ? '' : 's'}`;
-    const videoText = `${videos.length} video${videos.length === 1 ? '' : 's'}`;
-    this.queueService.submitJobs(createdJobIds).subscribe({
-      next: ({ jobIdMap, warnings }) => {
-        if (jobIdMap.size > 0) {
-          this.notificationService.success('Processing Started', `${stepText} running on ${videoText}`);
-        } else {
-          // submitJobs reverted the jobs to pending with per-job errors.
-          this.errorSurface.surfaceError(
-            'Processing didn\'t start — the jobs are waiting in the queue',
-            new Error('submitJobs returned no started jobs')
-          );
-        }
-        for (const warning of warnings) {
-          this.notificationService.warning('Task Skipped', warning);
-        }
-      },
-      error: (error) => {
-        this.errorSurface.surfaceError('Processing didn\'t start — the jobs are waiting in the queue', error);
-      }
-    });
+    // Staging-first: adding to the queue NEVER auto-runs. The user starts jobs
+    // explicitly from the queue page's Start button (processStagingItems →
+    // submitJobs is the one and only submit trigger). The toast reflects exactly
+    // what happened — items were staged, not started.
+    const count = createdJobIds.length;
+    this.notificationService.success(
+      'Added to Queue',
+      `${count} ${count === 1 ? 'video' : 'videos'} added to the queue`
+    );
 
     this.setActiveTab('queue');
     if (this.cascadeComponent) {
       this.cascadeComponent.clearSelection();
+    }
+  }
+
+  /**
+   * Queue-page inspector Save: rewrite the pipeline steps + trim of already-
+   * staged (pending) jobs in place. Non-pipeline tasks (download-import,
+   * export-clip, …) are preserved in their original order; only the four
+   * pipeline steps are replaced by the edited ones. Reports what actually
+   * applied — a job that left the pending set in the meantime is skipped, not
+   * faked as updated.
+   */
+  private updatePendingJobs(
+    jobIds: string[],
+    steps: PipelineStep[],
+    trimStartSeconds: number | null,
+    trimEndSeconds: number | null
+  ) {
+    const pipelineTypes = new Set<string>(PIPELINE_STEPS.map(s => s.type));
+    let updated = 0;
+    for (const jobId of jobIds) {
+      const job = this.queueService.allJobs().find(j => j.id === jobId && j.state === 'pending');
+      if (!job) continue;
+      const preserved = job.tasks.filter(t => !pipelineTypes.has(t.type));
+      const pipelineTasks = steps.map(s => createQueueTask(s.type, { ...s.config }));
+      this.queueService.updateJobTasks(jobId, [...preserved, ...pipelineTasks]);
+      this.queueService.updateJobTrim(
+        jobId,
+        trimStartSeconds && trimStartSeconds > 0 ? trimStartSeconds : undefined,
+        trimEndSeconds && trimEndSeconds > 0 ? trimEndSeconds : undefined
+      );
+      updated++;
+    }
+
+    if (updated > 0) {
+      this.notificationService.success(
+        'Queue Updated',
+        `Updated ${updated} pending item${updated === 1 ? '' : 's'}`
+      );
+    } else {
+      this.notificationService.info(
+        'Nothing Updated',
+        'Those items are no longer pending in the queue'
+      );
     }
   }
 
@@ -2630,6 +2613,56 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     }
   }
 
+  /**
+   * Open a specific connected item in Scout (inspector "Open"). Resolves the id
+   * against the same library-items snapshot that feeds the inspector; an
+   * unresolved id surfaces an honest error rather than a silent no-op.
+   */
+  private openConnectedInEditor(videoId: string): void {
+    const item = this.allLibraryItems().find(v => v.id === videoId);
+    if (!item) {
+      this.notificationService.error(
+        'Video Not Found',
+        'Could not open this connected item — it is no longer in this library.'
+      );
+      return;
+    }
+    this.openInEditor([item]);
+  }
+
+  /**
+   * Reveal a specific item in the library cascade (inspector "Locate").
+   *
+   * Fast path: if it's in the current view the cascade scrolls to it (expanding
+   * a collapsed week itself). Otherwise, if it's not in this library at all,
+   * surface an honest toast; if it's merely hidden by the active search/type
+   * filter, relax both (only what can hide it) and retry once the cascade has
+   * re-rendered — mirroring onViewInLibrary's post-filter scroll sequencing.
+   */
+  private locateVideo(videoId: string): void {
+    const cascade = this.cascadeComponent;
+    if (!cascade) return;
+
+    if (cascade.highlightAndScrollToVideoId(videoId)) {
+      return; // already in view (collapsed weeks handled inside the cascade)
+    }
+
+    if (!this.allLibraryItems().some(v => v.id === videoId)) {
+      this.notificationService.warning(
+        'Not in this library',
+        'This connected item lives in a different library.'
+      );
+      return;
+    }
+
+    // Hidden by search and/or the type filter — relax both, then retry.
+    this.searchFilters?.clearFilters();
+    this.typeFilter.set('all');
+    setTimeout(() => {
+      this.cascadeComponent?.highlightAndScrollToVideoId(videoId);
+    }, 100);
+  }
+
   // ========================================
   // Processing Queue UI Methods
   // ========================================
@@ -2750,22 +2783,36 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
    * Handle download dialog submission - add to staging instantly, then fetch video info asynchronously
    * Now uses QueueService as single source of truth
    */
-  async onDownloadSubmit(items: { url: string; name: string; settings: VideoJobSettings }[], trimAfter = false) {
+  async onDownloadSubmit(items: AddDownloadsPayload['items']) {
     this.downloadDialogOpen.set(false);
 
     const addedJobs: QueueJob[] = [];
 
     // Add all items to QueueService IMMEDIATELY with placeholder titles
     for (const item of items) {
-      // Convert settings to QueueTask array
-      const tasks = this.convertSettingsToQueueTasks(item.settings);
+      // A URL download always begins with download-import (quality rides its
+      // options → yt-dlp height cap; 'best'/absent keeps the per-site default).
+      // The Add popover's fully-composed pipeline steps follow verbatim, so every
+      // option survives — translate, granularity, stripBlackBars,
+      // customInstructions — that the old lossy settings→tasks conversion dropped.
+      const downloadOptions: Record<string, unknown> =
+        item.quality && item.quality !== 'best' ? { quality: item.quality } : {};
+      const tasks: QueueTask[] = [
+        createQueueTask('download-import', downloadOptions),
+        ...item.steps.map(step => createQueueTask(step.type, { ...step.config })),
+      ];
 
-      // Add job to QueueService
+      // Add job to QueueService. Per-batch trim amounts (from the Add popover)
+      // ride in-band on the job as trimStartTime/trimEndTime; the dispatch-time
+      // export-clip conversion (queue.service convertTasksToBackendFormat) then
+      // cuts them post-download against the file's real duration.
       const job = this.queueService.addJob({
         url: item.url,
         title: item.name || 'Building title...',
         titleResolved: false,
-        tasks
+        tasks,
+        trimStartTime: item.trimStartSeconds && item.trimStartSeconds > 0 ? item.trimStartSeconds : undefined,
+        trimEndTime: item.trimEndSeconds && item.trimEndSeconds > 0 ? item.trimEndSeconds : undefined
       });
 
       addedJobs.push(job);
@@ -2779,24 +2826,6 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
 
     // Switch to Queue tab immediately
     this.setActiveTab('queue');
-
-    // Trim-after-download (Add popover): open the trim opener for a single
-    // add; for batches point at the per-item trim buttons in the queue.
-    if (trimAfter && addedJobs.length > 0) {
-      if (addedJobs.length === 1) {
-        const job = addedJobs[0];
-        this.trimModalJobId.set(job.id);
-        this.trimModalVideoTitle.set(job.title);
-        this.trimModalInitialTime.set(job.trimStartTime || 0);
-        this.trimModalInitialEndTime.set(job.trimEndTime || 0);
-        this.trimModalOpen.set(true);
-      } else {
-        this.notificationService.info(
-          'Set Trim Per Item',
-          'Use each queue item\'s trim button to set its opener/ending trim'
-        );
-      }
-    }
 
     // Now fetch video info asynchronously in the background for each item
     for (let i = 0; i < items.length; i++) {
@@ -2841,49 +2870,49 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Convert VideoJobSettings to QueueTask array for URL downloads
+   * Legacy "Advanced…" download dialog submit. That dialog still emits a
+   * VideoJobSettings bag; adapt it to the unified steps-based path (quality +
+   * pipeline steps) so both add surfaces stage jobs through one code path. The
+   * produced tasks are identical to the old settings→tasks conversion — this is
+   * a shape adapter, not a behavior change.
    */
-  private convertSettingsToQueueTasks(settings: VideoJobSettings): QueueTask[] {
-    const tasks: QueueTask[] = [];
+  onAdvancedDownloadSubmit(items: { url: string; name: string; settings: VideoJobSettings }[]): void {
+    const adapted: AddDownloadsPayload['items'] = items.map(item => ({
+      url: item.url,
+      name: item.name,
+      quality: item.settings.downloadQuality ?? 'best',
+      steps: this.settingsToSteps(item.settings),
+    }));
+    void this.onDownloadSubmit(adapted);
+  }
 
-    // Always add download-import task first for URL downloads.
-    // downloadQuality rides task.options → queue-manager spreads it into
-    // DownloadOptions.quality → yt-dlp height cap. 'best'/absent keeps the
-    // per-site default format selection.
-    const downloadOptions: Record<string, any> =
-      settings.downloadQuality && settings.downloadQuality !== 'best'
-        ? { quality: settings.downloadQuality }
-        : {};
-    tasks.push(createQueueTask('download-import', downloadOptions));
-
+  /**
+   * Reconstruct the pipeline steps a VideoJobSettings bag implies, matching the
+   * exact task options the removed convertSettingsToQueueTasks produced (the
+   * legacy ai-analyze carries analysisQuality, not analysisGranularity).
+   */
+  private settingsToSteps(settings: VideoJobSettings): PipelineStep[] {
+    const steps: PipelineStep[] = [];
     if (settings.fixAspectRatio) {
-      tasks.push(createQueueTask('fix-aspect-ratio', {
-        targetRatio: settings.aspectRatio || '16:9'
-      }));
+      steps.push({ type: 'fix-aspect-ratio', config: { targetRatio: settings.aspectRatio || '16:9' } });
     }
-
     if (settings.normalizeAudio) {
-      tasks.push(createQueueTask('normalize-audio', {
-        targetLevel: settings.audioLevel || -16
-      }));
+      steps.push({ type: 'normalize-audio', config: { targetLevel: settings.audioLevel || -16 } });
     }
-
     if (settings.transcribe) {
-      tasks.push(createQueueTask('transcribe', {
-        model: settings.whisperModel || 'base',
-        language: settings.whisperLanguage
-      }));
+      steps.push({ type: 'transcribe', config: { model: settings.whisperModel || 'base', language: settings.whisperLanguage } });
     }
-
     if (settings.aiAnalysis) {
-      tasks.push(createQueueTask('ai-analyze', {
-        aiModel: settings.aiModel,
-        customInstructions: settings.customInstructions,
-        analysisQuality: settings.analysisQuality
-      }));
+      steps.push({
+        type: 'ai-analyze',
+        config: {
+          aiModel: settings.aiModel,
+          customInstructions: settings.customInstructions,
+          analysisQuality: settings.analysisQuality,
+        },
+      });
     }
-
-    return tasks;
+    return steps;
   }
 
   /**
@@ -3004,6 +3033,10 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       console.log('[LibraryPage] Switching to Queue tab');
       console.log('[LibraryPage] Staging queue:', this.stagingQueue());
       console.log('[LibraryPage] Processing queue:', this.processingQueue());
+    } else {
+      // Leaving the queue: drop the queue selection so the inspector reverts to
+      // the library branch (the queue-tab also clears on destroy, belt-and-braces).
+      this.queueSelection.clear();
     }
 
     // Auto-start tour for this tab if user hasn't seen it (desktop only — the
@@ -3120,59 +3153,41 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Open config modal for selected staging items
+   * Configure selected staging (pending) items. The pending-item config now
+   * lives in the queue-page inspector, not the modal — so just make the
+   * requested items the queue selection and the inspector shows their per-job
+   * config. (The modal is retained only for PROCESSING/in-flight items via
+   * openConfigModal / onConfigureQueueItem.)
    */
   onQueueConfigureSelected(itemIds: string[]) {
     if (itemIds.length === 0) return;
-
-    // Find staging items by ID
-    const stagingItems = this.stagingQueue().filter(item =>
-      itemIds.includes(item.id)
-    );
-
-    if (stagingItems.length === 0) return;
-
-    // Get existing tasks from first item
-    const firstItem = stagingItems[0];
-    const existingTasks: QueueItemTask[] = firstItem.tasks?.map(t => ({
-      type: t.type as any,
-      status: 'pending' as const,
-      progress: 0,
-      config: t.options
-    })) || [];
-
-    // Check if items have transcripts (for library items)
-    // URL items don't have transcripts yet
-    let hasTranscript = false;
-    if (!firstItem.url && firstItem.videoId) {
-      const allVideos = this.videoWeeks().flatMap(week => week.videos);
-      const videosInStaging = stagingItems
-        .filter(item => item.videoId)
-        .map(item => allVideos.find(v => v.id === item.videoId))
-        .filter((v): v is VideoItem => v !== undefined);
-
-      // Only true if ALL videos have transcripts
-      hasTranscript = videosInStaging.length > 0 && videosInStaging.every(v => v.hasTranscript === true);
-    }
-
-    this.configItemIds.set(stagingItems.map(item => item.id));
-    this.configBulkMode.set(stagingItems.length > 1);
-    this.configItemSource.set(firstItem.url ? 'url' : 'library');
-    this.configExistingTasks.set(existingTasks);
-    this.configHasTranscript.set(hasTranscript);
-    this.configModalOpen.set(true);
+    const pendingIds = new Set(this.queueService.pendingJobs().map(j => j.id));
+    const ids = itemIds.filter(id => pendingIds.has(id));
+    if (ids.length === 0) return;
+    this.queueSelection.set(ids);
   }
 
   /**
    * Remove selected staging items
    */
   onQueueRemoveSelected(itemIds: string[]) {
-    // Remove each item via QueueService
-    itemIds.forEach(id => this.queueService.removeJob(id));
+    // Only report what actually got removed — non-staging selections (completed
+    // rows, stale ids) match no job, so never fake a "Removed N" success toast.
+    const existingIds = new Set(this.queueService.allJobs().map(job => job.id));
+    const removedIds = itemIds.filter(id => existingIds.has(id));
+    removedIds.forEach(id => this.queueService.removeJob(id));
+
+    if (removedIds.length === 0) {
+      this.notificationService.info(
+        'Nothing Removed',
+        'No staging items were selected to remove'
+      );
+      return;
+    }
 
     this.notificationService.success(
       'Items Removed',
-      `Removed ${itemIds.length} ${itemIds.length === 1 ? 'item' : 'items'} from staging queue`
+      `Removed ${removedIds.length} ${removedIds.length === 1 ? 'item' : 'items'} from staging queue`
     );
   }
 

@@ -132,7 +132,7 @@ export class WhisperManager extends EventEmitter {
    * @param modelName - Whisper model to use (optional)
    * @param audioDurationSeconds - Duration of audio in seconds for progress estimation (optional)
    */
-  async transcribe(audioFile: string, outputDir: string, modelName?: string, audioDurationSeconds?: number): Promise<string> {
+  async transcribe(audioFile: string, outputDir: string, modelName?: string, audioDurationSeconds?: number, translate?: boolean): Promise<string> {
     this.logger.log('='.repeat(60));
     this.logger.log('STARTING TRANSCRIPTION');
     this.logger.log('='.repeat(60));
@@ -165,7 +165,7 @@ export class WhisperManager extends EventEmitter {
     // Use chunked transcription for long files to avoid whisper hallucination/looping
     if (audioDurationSeconds && audioDurationSeconds > WhisperManager.CHUNK_THRESHOLD_S) {
       this.logger.log(`Audio exceeds ${WhisperManager.CHUNK_THRESHOLD_S}s threshold, using chunked transcription`);
-      return this.transcribeChunked(audioFile, outputDir, modelName, audioDurationSeconds);
+      return this.transcribeChunked(audioFile, outputDir, modelName, audioDurationSeconds, translate);
     }
 
     // Generate a process ID for tracking
@@ -179,6 +179,7 @@ export class WhisperManager extends EventEmitter {
         model: modelName,
         processId,
         audioDurationSeconds,
+        translate,
       });
 
       this.currentProcessId = null;
@@ -234,6 +235,7 @@ export class WhisperManager extends EventEmitter {
     outputDir: string,
     modelName: string | undefined,
     audioDurationSeconds: number,
+    translate?: boolean,
   ): Promise<string> {
     const chunkDurationS = WhisperManager.CHUNK_DURATION_S;
     const totalChunks = Math.ceil(audioDurationSeconds / chunkDurationS);
@@ -271,6 +273,7 @@ export class WhisperManager extends EventEmitter {
           offsetMs,
           durationMs,
           outputSuffix: `_chunk${i}`,
+          translate,
         });
 
         if (!result.success) {

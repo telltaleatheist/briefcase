@@ -1,7 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
 import { Router, RouterOutlet } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { InspectorStore } from '../core/stores/inspector.store';
 import { NavigationStore, ShellSection } from '../core/stores/navigation.store';
 import { SelectionStore } from '../core/stores/selection.store';
 import { WorkspaceActionsService, WorkspaceAction, AddDownloadsPayload } from '../core/stores/workspace-actions.service';
@@ -47,7 +46,6 @@ const SECTION_TITLES: Record<ShellSection, string> = {
 export class AppShellComponent {
   nav = inject(NavigationStore);
   selection = inject(SelectionStore);
-  inspector = inject(InspectorStore);
   private router = inject(Router);
   private libraryService = inject(LibraryService);
   private queueService = inject(QueueService);
@@ -93,10 +91,22 @@ export class AppShellComponent {
   /** Readiness UNKNOWN (probe failed) — show retry, not "Set up AI…". */
   aiCheckFailed = computed(() => this.aiSetupService.getSetupStatus().checkFailed);
 
-  retryAiCheck(): void {
+  onWorkspace = computed(() => AppShellComponent.WORKSPACE_SECTIONS.includes(this.nav.activeSection()));
+
+  /** Toolbar ⚡ Process → reveal & highlight the inspector's config section. */
+  onRevealProcess(): void {
+    this.workspaceActions.revealProcessConfig();
+  }
+
+  /** Add popover's embedded config asked to re-run the AI availability probe. */
+  onRetryAi(): void {
     void this.aiSetupService.checkAIAvailability();
   }
-  onWorkspace = computed(() => AppShellComponent.WORKSPACE_SECTIONS.includes(this.nav.activeSection()));
+
+  /** Add popover's embedded config: no whisper models → Settings → Components. */
+  onOpenComponents(): void {
+    this.router.navigate(['/settings/components']);
+  }
 
   onSelectSection(section: Exclude<ShellSection, 'other'>): void {
     this.nav.goTo(section);

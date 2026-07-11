@@ -1319,7 +1319,8 @@ export class QueueService implements OnDestroy {
         type: 'transcribe',
         options: {
           model: transcribeTask.options?.['model'] || 'base',
-          language: transcribeTask.options?.['language']
+          language: transcribeTask.options?.['language'],
+          translate: transcribeTask.options?.['translate'] === true
         }
       });
     }

@@ -1,0 +1,607 @@
+:host {
+  display: block;
+}
+
+.process-config {
+  padding: 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+}
+
+.pc-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.pc-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.pc-count {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+// ── Preset chips ─────────────────────────────────────────────────────────────
+.preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.preset-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: var(--bg-input);
+  overflow: hidden;
+  transition: border-color 120ms ease, background 120ms ease;
+
+  &:hover {
+    border-color: var(--primary-orange);
+  }
+
+  &.active {
+    border-color: var(--primary-orange);
+    background: rgba(255, 107, 53, 0.1);
+
+    .chip-apply {
+      color: var(--dark-orange);
+    }
+  }
+
+  .chip-apply {
+    min-width: 0;
+    border: 0;
+    background: none;
+    padding: 4px 4px 4px 10px;
+    font-family: inherit;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--text-primary);
+    cursor: pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  // The delete affordance stays out of the way until the chip is hovered.
+  .chip-delete {
+    flex: none;
+    border: 0;
+    background: none;
+    padding: 4px 8px 4px 3px;
+    font-size: 12px;
+    line-height: 1;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 120ms ease, color 120ms ease;
+
+    &:hover {
+      color: var(--error);
+    }
+  }
+
+  &:hover .chip-delete,
+  .chip-delete:focus-visible {
+    opacity: 1;
+  }
+}
+
+[data-theme='dark'] .preset-chip.active .chip-apply {
+  color: var(--accent-orange);
+}
+
+.chip-save {
+  border: 1px dashed var(--border-strong, var(--border-color));
+  border-radius: 999px;
+  background: none;
+  padding: 4px 10px;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 120ms ease, border-color 120ms ease;
+
+  &:hover:not(:disabled) {
+    color: var(--primary-orange);
+    border-color: var(--primary-orange);
+  }
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+}
+
+.save-preset-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+
+  .preset-name-input {
+    flex: 1;
+    min-width: 0;
+    padding: 5px 9px;
+    border: 1px solid var(--primary-orange);
+    border-radius: 7px;
+    background: var(--bg-input);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 12px;
+
+    &:focus {
+      outline: none;
+    }
+  }
+}
+
+// ── Pipeline steps: selectable cards ─────────────────────────────────────────
+// The card mirrors the app's canonical checkbox card (add-popover's .trim-row):
+// full-width bordered card, the whole card toggles the step, orange border when
+// on. Run order is implied by list order — no rail, no numbers.
+.steps-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.step-card {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-input);
+  transition: border-color 120ms ease;
+
+  &:hover:not(.disabled) {
+    border-color: var(--primary-orange);
+  }
+
+  &.on {
+    border-color: rgba(255, 107, 53, 0.5);
+  }
+
+  // The label fills the card (minus the chevron), so a click anywhere on the
+  // card toggles the step natively — the card is the checkbox.
+  .step-lead {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: flex-start;
+    gap: 9px;
+    padding: 9px 11px;
+    cursor: pointer;
+  }
+
+  &.disabled .step-lead {
+    cursor: default;
+    // Muted, but the setup affordance beside it stays legible.
+    opacity: 0.55;
+  }
+
+  .step-box {
+    flex: none;
+    accent-color: var(--primary-orange);
+    margin-top: 2px;
+    cursor: pointer;
+  }
+
+  &.disabled .step-box {
+    cursor: default;
+  }
+
+  .step-text {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+  }
+
+  .step-title {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  // Done-hint sub-line ("3 of 5 already transcribed") — quiet, like .trim-sub.
+  .step-sub {
+    font-size: 11px;
+    color: var(--text-tertiary);
+  }
+}
+
+// Accordion affordance: a chevron that expands this step's options beneath it.
+// Its own click must never toggle the step (sibling of the label + stopPropagation).
+.step-chevron {
+  flex: none;
+  align-self: center;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  margin-right: 4px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: color 120ms ease;
+
+  .chevron-icon {
+    transition: transform 160ms ease;
+  }
+
+  &:hover {
+    color: var(--primary-orange);
+  }
+
+  &.open {
+    color: var(--primary-orange);
+
+    .chevron-icon {
+      transform: rotate(180deg);
+    }
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--primary-orange);
+    outline-offset: 1px;
+  }
+}
+
+// Options stack vertically and each control fills the column — the inspector
+// is narrower than the old popover, so long labels must never overflow it.
+.step-options {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  margin: 6px 0 2px;
+  padding: 10px 11px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+
+  .opt {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    font-size: 11.5px;
+    color: var(--text-secondary);
+
+    > span {
+      flex: none;
+      font-weight: 600;
+    }
+
+    select {
+      flex: 1;
+      min-width: 0;
+      max-width: 100%;
+      padding: 6px 8px;
+      border: 1px solid var(--border-color);
+      border-radius: 7px;
+      background: var(--bg-input);
+      color: var(--text-primary);
+      font-family: inherit;
+      font-size: 12.5px;
+
+      &:focus {
+        outline: none;
+        border-color: var(--primary-orange);
+      }
+    }
+
+    &.check {
+      cursor: pointer;
+
+      input[type='checkbox'] {
+        flex: none;
+        accent-color: var(--primary-orange);
+        margin: 0;
+      }
+    }
+  }
+
+  .opt-note {
+    font-size: 10.5px;
+    color: var(--text-tertiary);
+    font-style: italic;
+  }
+
+  .opt-error,
+  .opt-guidance {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 8px;
+    font-size: 11.5px;
+  }
+
+  .opt-error {
+    color: var(--error);
+  }
+
+  .opt-guidance {
+    color: var(--text-secondary);
+  }
+
+  .retry-link {
+    border: 0;
+    background: none;
+    padding: 0;
+    font-family: inherit;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--primary-orange);
+    cursor: pointer;
+
+    &:hover {
+      text-decoration: underline;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--primary-orange);
+      outline-offset: 1px;
+    }
+  }
+
+  // ── Slider-based options (sensitivity, target loudness) ────────────────────
+  // Grouped controls (label + live value, slider, description) stack in a block.
+  .opt-block {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .opt-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .opt-label {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--text-secondary);
+  }
+
+  .opt-value {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--primary-orange);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .opt-slider {
+    width: 100%;
+    margin: 0;
+    accent-color: var(--primary-orange);
+    cursor: pointer;
+
+    &:disabled {
+      cursor: default;
+      opacity: 0.5;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--primary-orange);
+      outline-offset: 2px;
+    }
+  }
+
+  .opt-hint {
+    font-size: 10.5px;
+    line-height: 1.35;
+    color: var(--text-tertiary);
+  }
+
+  // ── Custom instructions textarea + history ─────────────────────────────────
+  .opt-textarea {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    resize: vertical;
+    padding: 6px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 7px;
+    background: var(--bg-input);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 12px;
+    line-height: 1.4;
+
+    &::placeholder {
+      color: var(--text-tertiary);
+    }
+
+    &:focus {
+      outline: none;
+      border-color: var(--primary-orange);
+    }
+  }
+
+  .history-list {
+    display: flex;
+    flex-direction: column;
+    max-height: 132px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    border-radius: 7px;
+    background: var(--bg-input);
+  }
+
+  .history-item {
+    border: 0;
+    border-bottom: 1px solid var(--border-color);
+    background: none;
+    padding: 6px 8px;
+    font-family: inherit;
+    font-size: 11.5px;
+    color: var(--text-secondary);
+    text-align: left;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+
+    &:last-child {
+      border-bottom: 0;
+    }
+
+    &:hover {
+      background: var(--bg-hover, rgba(255, 107, 53, 0.08));
+      color: var(--text-primary);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--primary-orange);
+      outline-offset: -2px;
+    }
+  }
+}
+
+// Shared inline affordance — "Set up AI…", "AI check failed — retry",
+// "Install in Settings → Components".
+.link-affordance {
+  border: 0;
+  background: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--primary-orange);
+  cursor: pointer;
+  white-space: nowrap;
+
+  &:hover {
+    text-decoration: underline;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--primary-orange);
+    outline-offset: 1px;
+  }
+}
+
+// Card-level affordance (AI not ready) sits at the card's right edge, undimmed.
+.step-card > .link-affordance {
+  flex: none;
+  align-self: center;
+  margin: 0 11px 0 6px;
+}
+
+.opt-guidance .link-affordance {
+  margin-left: 0;
+}
+
+// ── Footer ───────────────────────────────────────────────────────────────────
+.pc-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color);
+}
+
+.summary {
+  flex: 1;
+  min-width: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+
+  &.warn {
+    color: var(--warning);
+  }
+
+  &.empty {
+    font-weight: 500;
+    color: var(--text-tertiary);
+  }
+}
+
+.submit-btn {
+  flex: none;
+  padding: 7px 14px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--gradient-primary);
+  color: var(--text-inverse);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--primary-orange);
+    outline-offset: 1px;
+  }
+}
+
+.link-btn {
+  border: 0;
+  background: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary-orange);
+  cursor: pointer;
+
+  &.subtle {
+    color: var(--text-secondary);
+    font-weight: 500;
+  }
+
+  &:hover:not(:disabled) {
+    text-decoration: underline;
+  }
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--primary-orange);
+    outline-offset: 1px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .step-card,
+  .step-chevron,
+  .chevron-icon,
+  .preset-chip,
+  .chip-delete,
+  .chip-save {
+    transition: none;
+  }
+}

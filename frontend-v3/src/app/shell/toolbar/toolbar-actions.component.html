@@ -13,23 +13,19 @@
   <span class="divider" aria-hidden="true"></span>
 
   <!-- Process: THE selection action — lights up when items are selected.
-       Transcribe/Analyze live inside it as pipeline steps (preset chips give
-       the one-click combos); the inspector keeps per-step Run actions. -->
+       The pipeline composer now lives in the inspector; this button reveals
+       and highlights it. -->
   <button
     type="button"
     class="action-btn process"
     [class.lit]="hasSelection()"
-    cdkOverlayOrigin
-    #processTrigger="cdkOverlayOrigin"
     [disabled]="!hasSelection()"
-    (click)="toggleProcess()"
-    [attr.aria-expanded]="processOpen()"
-    [title]="hasSelection() ? 'Run a pipeline of jobs on the selection' : 'Select items to process'">
+    (click)="revealProcess.emit()"
+    [title]="hasSelection() ? 'Configure and run a pipeline on the selection' : 'Select items to process'">
     <span class="btn-icon">⚡</span> Process
     @if (selectionCount() > 0) {
       <span class="count-badge">{{ selectionCount() }}</span>
     }
-    <span class="chevron">▾</span>
   </button>
 
   <button
@@ -54,39 +50,24 @@
 
 <ng-template
   cdkConnectedOverlay
-  [cdkConnectedOverlayOrigin]="processTrigger"
-  [cdkConnectedOverlayOpen]="processOpen()"
-  [cdkConnectedOverlayHasBackdrop]="true"
-  cdkConnectedOverlayBackdropClass="cdk-overlay-transparent-backdrop"
-  [cdkConnectedOverlayOffsetY]="8"
-  (backdropClick)="closeProcess()"
-  (detach)="closeProcess()">
-  <app-process-popover
-    [selectionCount]="selectionCount()"
-    [withoutTranscript]="withoutTranscript()"
-    [notAnalyzed]="notAnalyzed()"
-    [aiReady]="aiReady()"
-    [aiCheckFailed]="aiCheckFailed()"
-    (submitSteps)="onSubmitProcess($event)"
-    (setupAi)="onProcessSetupAi()"
-    (retryAi)="retryAiCheck.emit()"
-    (dismissed)="closeProcess()" />
-</ng-template>
-
-<ng-template
-  cdkConnectedOverlay
   [cdkConnectedOverlayOrigin]="addTrigger"
   [cdkConnectedOverlayOpen]="addOpen()"
   [cdkConnectedOverlayHasBackdrop]="true"
   cdkConnectedOverlayBackdropClass="cdk-overlay-transparent-backdrop"
   [cdkConnectedOverlayOffsetY]="8"
+  [cdkConnectedOverlayPush]="true"
+  [cdkConnectedOverlayFlexibleDimensions]="true"
+  [cdkConnectedOverlayGrowAfterOpen]="true"
   (backdropClick)="closeAdd()"
   (detach)="closeAdd()">
   <app-add-popover
     [aiReady]="aiReady()"
+    [aiCheckFailed]="aiCheckFailed()"
     (submitAdd)="onSubmitAdd($event)"
     (importFiles)="onImportFiles()"
     (openAdvanced)="onOpenAdvanced()"
     (setupAi)="onSetupAi()"
+    (retryAi)="onRetryAi()"
+    (openComponents)="onOpenComponents()"
     (dismissed)="closeAdd()" />
 </ng-template>

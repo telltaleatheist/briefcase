@@ -239,9 +239,6 @@ export class KeyboardShortcutsDialogComponent {
     {
       title: 'Selection',
       shortcuts: [
-        { keys: ['I'], description: 'Set in point' },
-        { keys: ['O'], description: 'Set out point' },
-        { keys: ['X'], description: 'Ripple cut selection' },
         { keys: ['Esc'], description: 'Clear selection / Close dialog' },
       ]
     },

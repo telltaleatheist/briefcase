@@ -4,3 +4,4 @@ export { UiButtonComponent } from './button/ui-button.component';
 export { UiBadgeComponent } from './badge/ui-badge.component';
 export { UiSegmentedControlComponent, type SegmentOption } from './segmented-control/ui-segmented-control.component';
 export { UiPanelComponent } from './panel/ui-panel.component';
+export { UiTimecodeInputComponent } from './timecode-input/ui-timecode-input.component';
