@@ -16,6 +16,7 @@ import { NotificationService } from '../../services/notification.service';
 import { DatabaseLibraryService } from '../../services/database-library.service';
 import { BackendUrlService } from '../../services/backend-url.service';
 import { AnalysisQueueService } from '../../services/analysis-queue.service';
+import { WebsocketService } from '../../services/websocket.service';
 import { VideoTimelineComponent } from '../video-timeline/video-timeline.component';
 import { TimelineSection, TimelineSelection } from 'ngx-video-timeline-editor';
 import { TranscriptSearchComponent } from '../transcript-search/transcript-search.component';
@@ -88,6 +89,10 @@ export class VideoPreviewComponent implements OnInit, AfterViewInit, OnDestroy {
 
   // Track all subscriptions for cleanup
   private subscriptions: Subscription[] = [];
+
+  // Teardown for the websocket video-path-updated listener (not an rxjs
+  // Subscription — onVideoPathUpdated returns a plain unsubscribe function).
+  private unsubVideoPathUpdated?: () => void;
 
   // Cached media element to avoid repeated DOM queries
   private cachedMediaElement?: HTMLVideoElement | HTMLAudioElement;
@@ -178,7 +183,8 @@ export class VideoPreviewComponent implements OnInit, AfterViewInit, OnDestroy {
     private backendUrlService: BackendUrlService,
     private http: HttpClient,
     private analysisQueueService: AnalysisQueueService,
-    private hotkeys: HotkeysService
+    private hotkeys: HotkeysService,
+    private websocketService: WebsocketService
   ) {
     // If opened as dialog, use dialog data; otherwise use router state
     if (dialogData) {
@@ -202,6 +208,20 @@ export class VideoPreviewComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   async ngOnInit() {
+    // Reload the video when its underlying file is replaced in place (e.g. an
+    // aspect-ratio fix or other reprocess emits video-path-updated). Match by the
+    // videoId we're currently showing and swap in a cache-busted stream URL so the
+    // media element fetches the new content instead of the browser-cached old file.
+    this.unsubVideoPathUpdated = this.websocketService.onVideoPathUpdated((event) => {
+      const currentVideoId = this.data.videoId || this.data.analysis?.id;
+      if (!currentVideoId || event.videoId !== currentVideoId) {
+        return;
+      }
+      // Keep the cached path in sync for any later re-init, then reload in place.
+      this.data.videoPath = event.newPath;
+      this.reloadVideoSource();
+    });
+
     try {
       // Determine the video ID to use for loading metadata
       const videoId = this.data.videoId || this.data.analysis?.id;
@@ -460,6 +480,11 @@ export class VideoPreviewComponent implements OnInit, AfterViewInit, OnDestroy {
     // Unsubscribe from ALL keyboard shortcuts to prevent memory leaks
     this.subscriptions.forEach(sub => sub.unsubscribe());
     this.subscriptions = [];
+
+    // Tear down the websocket video-path-updated listener so a replaced-video
+    // event can't fire against this destroyed view.
+    this.unsubVideoPathUpdated?.();
+    this.unsubVideoPathUpdated = undefined;
 
     // Remove document-level mouse listeners if they exist
     this.detachFullscreenMouseListeners();
@@ -874,6 +899,31 @@ export class VideoPreviewComponent implements OnInit, AfterViewInit, OnDestroy {
       console.error('Failed to initialize player:', error);
       this.error = 'Failed to initialize video player';
       this.isLoading = false;
+    }
+  }
+
+  /**
+   * Reload the current media element with a cache-busted stream URL. Called when
+   * a video-path-updated event replaces the underlying file in place, so the
+   * player fetches the new content instead of the browser-cached old file.
+   * Mirrors the reload pattern in video-player.component.ts.
+   */
+  private async reloadVideoSource() {
+    const videoId = this.data.videoId || this.data.analysis?.id;
+    if (!videoId || !this.player) {
+      return;
+    }
+
+    try {
+      const backendUrl = await this.backendUrlService.getBackendUrl();
+      const freshUrl = `${backendUrl}/api/database/videos/${videoId}/stream?t=${Date.now()}`;
+      this.player.src({
+        src: freshUrl,
+        type: this.mediaType === 'audio' ? 'audio/mp4' : 'video/mp4'
+      });
+      this.player.load();
+    } catch (error) {
+      console.error('Failed to reload video source after path update:', error);
     }
   }
 
