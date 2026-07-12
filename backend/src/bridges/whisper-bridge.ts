@@ -553,20 +553,14 @@ export class WhisperBridge extends EventEmitter {
     let message: string | null = null;
 
     // whisper.cpp with -pp outputs: "progress = XX%"
+    // This is the ONLY real progress marker. A generic /(\d+)%/ fallback used to
+    // live here, but whisper's stdout also carries transcribed TEXT, so a spoken
+    // "raised taxes by 50%" (or "99%") would match and jump the bar — and since
+    // progress only increases, a spoken high number pins it near-complete. Rely
+    // solely on the marker above.
     const progressMatch = output.match(/progress\s*=\s*(\d+)%/i);
     if (progressMatch) {
       percent = Math.min(99, parseInt(progressMatch[1], 10));
-    }
-
-    // Simple percentage pattern
-    if (percent === null) {
-      const simpleMatch = output.match(/(\d+)%/);
-      if (simpleMatch) {
-        const parsed = parseInt(simpleMatch[1], 10);
-        if (parsed > processInfo.lastReportedPercent + 5) {
-          percent = Math.min(99, parsed);
-        }
-      }
     }
 
     // Status messages

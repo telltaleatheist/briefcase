@@ -290,9 +290,12 @@ export class FfmpegBridge extends EventEmitter {
   async getVolumeLevel(
     inputPath: string,
     startSeconds: number = 0,
-    durationSeconds: number = 10
+    durationSeconds: number = 10,
+    callerProcessId?: string
   ): Promise<{ mean: number; max: number }> {
-    const processId = `volumedetect-${crypto.randomBytes(6).toString('hex')}`;
+    // A caller may pass a deterministic id (e.g. volumedetect-<jobId>) so it can
+    // abort()/abortAll() this probe on cancel; otherwise keep the random id.
+    const processId = callerProcessId ?? `volumedetect-${crypto.randomBytes(6).toString('hex')}`;
     const args = [
       '-ss', String(startSeconds),
       '-t', String(durationSeconds),
@@ -362,12 +365,15 @@ export class FfmpegBridge extends EventEmitter {
       silenceThreshold?: number;  // dB threshold (default -45)
       minSilenceDuration?: number; // Minimum silence duration in seconds (default 1)
       maxSearchDuration?: number;  // How far into the file to search (default 600 = 10 min)
+      processId?: string;          // Caller-provided id so this probe can be aborted on cancel
     }
   ): Promise<number> {
     const threshold = options?.silenceThreshold ?? -45;
     const minDuration = options?.minSilenceDuration ?? 1;
     const maxSearch = options?.maxSearchDuration ?? 600;
-    const processId = `silencedetect-${crypto.randomBytes(6).toString('hex')}`;
+    // A caller may pass a deterministic id (e.g. silencedetect-<jobId>) so it can
+    // abort()/abortAll() this probe on cancel; otherwise keep the random id.
+    const processId = options?.processId ?? `silencedetect-${crypto.randomBytes(6).toString('hex')}`;
 
     return new Promise((resolve, reject) => {
       const args = [

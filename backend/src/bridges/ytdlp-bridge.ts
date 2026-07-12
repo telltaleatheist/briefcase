@@ -732,7 +732,8 @@ export class YtDlpBridge extends EventEmitter {
     const fragDownloadMatch = line.match(/\[download\]\s+Downloading\s+fragment\s+(\d+)\s+of\s+(\d+)/i);
     if (fragDownloadMatch) {
       const [, current, total] = fragDownloadMatch;
-      const fragPercent = (parseInt(current) / parseInt(total)) * 100;
+      const totalFrags = parseInt(total);
+      const fragPercent = totalFrags > 0 ? (parseInt(current) / totalFrags) * 100 : 0;
 
       this.emit('progress', {
         processId,
@@ -792,7 +793,8 @@ export class YtDlpBridge extends EventEmitter {
     const fragMatch = line.match(/\(frag\s+(\d+)\/(\d+)\)/);
     if (fragMatch) {
       const [, current, total] = fragMatch;
-      const fragPercent = (parseInt(current) / parseInt(total)) * 100;
+      const totalFrags = parseInt(total);
+      const fragPercent = totalFrags > 0 ? (parseInt(current) / totalFrags) * 100 : 0;
 
       // Try to extract speed from the same line (e.g., "at  569.45KiB/s" or "at    2.00MiB/s")
       let speed = 0;
