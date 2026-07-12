@@ -52,12 +52,11 @@ export class TabsService {
    * Load all tabs and update the cache
    */
   loadTabs(): Observable<VideoTab[]> {
-    // Also refresh tabbed video IDs whenever tabs are loaded
-    this.refreshTabbedVideoIds();
-
     return this.http.get<VideoTab[]>(`${this.baseUrl}/tabs`).pipe(
       map(tabs => {
         this.tabs.set(tabs);
+        // Also refresh tabbed video IDs on subscription, alongside the tabs fetch
+        this.refreshTabbedVideoIds();
         return tabs;
       })
     );

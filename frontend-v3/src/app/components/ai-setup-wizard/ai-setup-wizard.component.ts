@@ -69,6 +69,9 @@ export class AiSetupWizardComponent implements OnInit, OnDestroy {
   // WebSocket unsubscribe functions
   private wsUnsubscribers: (() => void)[] = [];
 
+  // Pending tour-start timer, cleared on destroy so it can't fire post-teardown.
+  private tourTimeout?: ReturnType<typeof setTimeout>;
+
   async ngOnInit() {
     // Check initial AI availability
     await this.refreshAvailability();
@@ -83,6 +86,10 @@ export class AiSetupWizardComponent implements OnInit, OnDestroy {
   ngOnDestroy() {
     // Unsubscribe from WebSocket events
     this.wsUnsubscribers.forEach(unsub => unsub());
+    // Clear any pending tour-start timer so it doesn't run against a torn-down DOM.
+    if (this.tourTimeout) {
+      clearTimeout(this.tourTimeout);
+    }
   }
 
   private setupWebSocketListeners() {
@@ -197,7 +204,7 @@ export class AiSetupWizardComponent implements OnInit, OnDestroy {
   selectProvider(provider: 'ollama' | 'claude' | 'openai') {
     this.currentStep.set(provider);
     // Trigger provider-specific tour after DOM updates
-    setTimeout(() => {
+    this.tourTimeout = setTimeout(() => {
       this.tourService.tryAutoStartTour(`ai-wizard-${provider}`, 300);
     }, 100);
   }
@@ -208,7 +215,7 @@ export class AiSetupWizardComponent implements OnInit, OnDestroy {
     await this.loadLocalModels();
     this.currentStep.set('local-models');
     // Trigger local models tour after DOM updates
-    setTimeout(() => {
+    this.tourTimeout = setTimeout(() => {
       this.tourService.tryAutoStartTour('ai-wizard-local', 300);
     }, 100);
   }
@@ -311,6 +318,18 @@ export class AiSetupWizardComponent implements OnInit, OnDestroy {
 
   hasDownloadedModel(): boolean {
     return this.localModels().some(m => m.downloaded);
+  }
+
+  /**
+   * Name of the active local model to show on the done step. Prefers the
+   * default, then any downloaded model. Returns '' when unknown (local models
+   * weren't loaded on this path) so the template can fall back rather than
+   * asserting a hardcoded model name.
+   */
+  activeLocalModelName(): string {
+    const models = this.localModels();
+    const active = models.find(m => m.downloaded && m.isDefault) || models.find(m => m.downloaded);
+    return active?.name || '';
   }
 
   continueFromLocalModels() {

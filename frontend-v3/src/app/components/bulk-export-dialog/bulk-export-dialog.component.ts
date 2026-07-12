@@ -1,4 +1,4 @@
-import { Component, Inject, OnInit } from '@angular/core';
+import { Component, Inject, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MAT_DIALOG_DATA, MatDialogModule, MatDialogRef } from '@angular/material/dialog';
@@ -310,9 +310,11 @@ interface CategoryGroup {
     }
   `]
 })
-export class BulkExportDialogComponent implements OnInit {
+export class BulkExportDialogComponent implements OnInit, OnDestroy {
   categoryGroups: CategoryGroup[] = [];
   isExporting = false;
+  // Set once the dialog is torn down so the export loop can stop POSTing.
+  private destroyed = false;
   exportComplete = false;
   currentClip = 0;
   totalClips = 0;
@@ -337,6 +339,10 @@ export class BulkExportDialogComponent implements OnInit {
 
   ngOnInit() {
     this.groupSectionsByCategory();
+  }
+
+  ngOnDestroy() {
+    this.destroyed = true;
   }
 
   groupSectionsByCategory() {
@@ -425,15 +431,18 @@ export class BulkExportDialogComponent implements OnInit {
     }
 
     this.isExporting = true;
+    // Block ESC/backdrop from destroying the dialog mid-export (FC-21).
+    this.dialogRef.disableClose = true;
     this.totalClips = selectedSections.length;
     this.currentClip = 0;
     this.successCount = 0;
     this.failedCount = 0;
 
     for (const section of selectedSections) {
+      // Stop immediately if the dialog was torn down while exporting.
+      if (this.destroyed) return;
       this.currentClip++;
       this.currentClipName = section.title || section.description || 'Unnamed section';
-      this.exportProgress = (this.currentClip / this.totalClips) * 100;
 
       try {
         await this.exportSection(section);
@@ -442,8 +451,14 @@ export class BulkExportDialogComponent implements OnInit {
         console.error('Failed to export section:', error);
         this.failedCount++;
       }
+
+      // Progress reflects clips actually finished — never 100% while one is
+      // still in flight.
+      this.exportProgress = ((this.successCount + this.failedCount) / this.totalClips) * 100;
     }
 
+    if (this.destroyed) return;
+    this.dialogRef.disableClose = false;
     this.isExporting = false;
     this.exportComplete = true;
   }

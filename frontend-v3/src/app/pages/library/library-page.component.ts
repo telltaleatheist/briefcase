@@ -138,6 +138,14 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   // Navigate-to-queue event handler reference (for cleanup)
   private navigateToQueueHandler?: () => void;
 
+  // WebSocket unsubscribe fns — the singleton accumulates callbacks across every
+  // /settings round-trip; without tearing these down each event fires N times
+  // through stale closures (FC-6).
+  private wsUnsubscribers: (() => void)[] = [];
+
+  // Deferred analysis-trigger timeout (cleared on destroy so it can't fire after teardown)
+  private triggerAnalysisTimeout?: ReturnType<typeof setTimeout>;
+
   // Track videos pending analysis (waiting for AI wizard to complete)
   private pendingAnalysisVideos: VideoItem[] = [];
 
@@ -566,7 +574,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     }
 
     // Task completion - refresh library (queue updates handled by QueueService)
-    this.websocketService.onTaskCompleted((event: TaskCompleted) => {
+    this.wsUnsubscribers.push(this.websocketService.onTaskCompleted((event: TaskCompleted) => {
       console.log('Task completed:', event);
 
       // Refresh library when a task completes
@@ -579,10 +587,10 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
           this.loadCurrentLibrary();
         }
       }
-    });
+    }));
 
     // Task failed - show notification (queue updates handled by QueueService)
-    this.websocketService.onTaskFailed((event: TaskFailed) => {
+    this.wsUnsubscribers.push(this.websocketService.onTaskFailed((event: TaskFailed) => {
 
       // Get error message
       const errorMessage = event.error?.message || 'Unknown error';
@@ -593,17 +601,17 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         errorMessage,
         true  // showToast
       );
-    });
+    }));
 
     // Video renamed - update video list (including upload date and path)
-    this.websocketService.onVideoRenamed((event) => {
+    this.wsUnsubscribers.push(this.websocketService.onVideoRenamed((event) => {
       console.log('Video renamed event received:', event);
       this.updateVideoName(event.videoId, event.newFilename, event.uploadDate, event.newPath);
       this.cdr.markForCheck(); // Trigger change detection for OnPush strategy
-    });
+    }));
 
     // Video path updated - refresh video data (e.g., after aspect ratio fix or audio normalization)
-    this.websocketService.onVideoPathUpdated((event) => {
+    this.wsUnsubscribers.push(this.websocketService.onVideoPathUpdated((event) => {
       console.log('Video path updated event received:', event);
       this.updateVideoPath(event.videoId, event.newPath);
 
@@ -615,26 +623,26 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       }
 
       this.cdr.markForCheck(); // Trigger change detection for OnPush strategy
-    });
+    }));
 
     // Analysis completed - update video with suggested title
-    this.websocketService.onAnalysisCompleted((event) => {
+    this.wsUnsubscribers.push(this.websocketService.onAnalysisCompleted((event) => {
       console.log('Analysis completed event received:', event);
       this.updateVideoSuggestedTitle(event.videoId, event.suggestedTitle, event.aiDescription);
       this.cdr.markForCheck(); // Trigger change detection for OnPush strategy
-    });
+    }));
 
     // Suggestion rejected - reload library to clear the suggestion
-    this.websocketService.onSuggestionRejected((event) => {
+    this.wsUnsubscribers.push(this.websocketService.onSuggestionRejected((event) => {
       console.log('Suggestion rejected event received:', event);
       this.loadLibrary(); // Reload to get updated data from database
-    });
+    }));
 
     // Video added - reload library to show new video
-    this.websocketService.onVideoAdded((event) => {
+    this.wsUnsubscribers.push(this.websocketService.onVideoAdded((event) => {
       console.log('Video added event received:', event);
       this.loadLibrary(); // Reload to show the new video
-    });
+    }));
 
     // Check for navigation state to trigger analysis
     const navigation = this.router.getCurrentNavigation();
@@ -642,7 +650,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
 
     if (state?.triggerAnalysis && state?.videoId) {
       // Wait for library to load, then add video to queue
-      setTimeout(() => {
+      this.triggerAnalysisTimeout = setTimeout(() => {
         this.addVideoToAnalysisQueue(state.videoId, state.videoName);
       }, 500);
     }
@@ -1587,9 +1595,19 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy() {
+    // Remove every websocket callback this instance registered — disconnect()
+    // alone never clears the singleton's callback arrays, so stale closures
+    // accumulate across /settings round-trips (FC-6).
+    this.wsUnsubscribers.forEach(unsub => unsub());
+    this.wsUnsubscribers = [];
+
     this.websocketService.disconnect();
     this.selectionStore.clear();
     this.inspectorStore.reset();
+
+    if (this.triggerAnalysisTimeout) {
+      clearTimeout(this.triggerAnalysisTimeout);
+    }
 
     if (this.navigateToQueueHandler) {
       window.removeEventListener('electron-navigate-to-queue', this.navigateToQueueHandler);

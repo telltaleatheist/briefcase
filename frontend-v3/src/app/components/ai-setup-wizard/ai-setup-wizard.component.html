@@ -559,7 +559,11 @@
                 <span class="check-icon">✓</span>
                 <div>
                   <strong>Local AI</strong>
-                  <span>Cogito 8B - Ready to use</span>
+                  @if (activeLocalModelName(); as modelName) {
+                    <span>{{ modelName }} - Ready to use</span>
+                  } @else {
+                    <span>Ready to use</span>
+                  }
                 </div>
               </div>
             }

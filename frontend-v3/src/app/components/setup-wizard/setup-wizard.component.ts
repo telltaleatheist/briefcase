@@ -181,7 +181,12 @@ type Step = 'welcome' | 'tools' | 'models' | 'ai' | 'review' | 'finishing';
 
             @case ('finishing') {
               <div class="finishing">
-                @if (dl.running()) {
+                @if (essentialFailed()) {
+                  <div class="done-check error">!</div>
+                  <h3>Something went wrong</h3>
+                  <p class="finishing-sub">An essential tool couldn't be downloaded, so Briefcase can't start yet. Check your internet connection and try again.</p>
+                  <button class="btn btn-secondary" (click)="retryEssentials()">Retry</button>
+                } @else if (dl.running()) {
                   <div class="engine-spinner"></div>
                   @if (essentialPending()) {
                     <h3>Setting things up…</h3>
@@ -208,7 +213,7 @@ type Step = 'welcome' | 'tools' | 'models' | 'ai' | 'review' | 'finishing';
           }
           <span class="spacer"></span>
           @if (step() === 'finishing') {
-            <button class="btn btn-primary" [disabled]="essentialPending()" (click)="finish()">
+            <button class="btn btn-primary" [disabled]="essentialPending() || essentialFailed()" (click)="finish()">
               {{ mode === 'config' ? 'Done' : 'Open Briefcase' }}
             </button>
           } @else if (step() === 'review') {
@@ -289,6 +294,17 @@ export class SetupWizardComponent implements OnInit {
       (id) =>
         this.componentService.isEssential(id) &&
         (this.dl.statusOf(id) === 'queued' || this.dl.statusOf(id) === 'downloading'),
+    ),
+  );
+
+  /**
+   * True when an essential tool failed to download. Briefcase can't run without
+   * these, so a failure must block "Open Briefcase" and surface an error +
+   * retry — never fall through to the success screen (FC-2).
+   */
+  readonly essentialFailed = computed(() =>
+    this.dl.order().some(
+      (id) => this.componentService.isEssential(id) && this.dl.statusOf(id) === 'failed',
     ),
   );
 
@@ -395,6 +411,21 @@ export class SetupWizardComponent implements OnInit {
     const ids = this.reviewItems().map((c) => c.id);
     if (ids.length) this.dl.enqueue(ids);
     this.step.set('finishing');
+  }
+
+  /** Re-attempt any essential downloads that failed, from the finishing screen. */
+  retryEssentials(): void {
+    const failedEssentials = this.dl
+      .order()
+      .filter((id) => this.componentService.isEssential(id) && this.dl.statusOf(id) === 'failed');
+    if (failedEssentials.length === 0) return;
+    // Clear the failed flag so the queue drain picks them back up.
+    this.dl.failed.update((f) => {
+      const next = { ...f };
+      failedEssentials.forEach((id) => delete next[id]);
+      return next;
+    });
+    this.dl.enqueue(failedEssentials);
   }
 
   finish(): void {

@@ -115,6 +115,12 @@ export class ExportQueueService {
 
     this.isProcessing.set(true);
 
+    // Snapshot cumulative counts so the end-of-run summary reflects only the
+    // jobs processed in THIS drain (completed jobs are cleared manually, so
+    // completedCount()/failedCount() include earlier runs).
+    const startCompleted = this.completedCount();
+    const startFailed = this.failedCount();
+
     while (true) {
       const pendingJob = this.queue().find(j => j.status === 'pending');
       if (!pendingJob) break;
@@ -139,8 +145,8 @@ export class ExportQueueService {
     this.isProcessing.set(false);
 
     // Show summary notification
-    const completed = this.completedCount();
-    const failed = this.failedCount();
+    const completed = this.completedCount() - startCompleted;
+    const failed = this.failedCount() - startFailed;
 
     if (completed > 0 || failed > 0) {
       if (failed === 0) {

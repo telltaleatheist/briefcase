@@ -1,4 +1,4 @@
-import { Component, OnInit, Input, inject, ViewChild, ChangeDetectorRef } from '@angular/core';
+import { Component, OnInit, OnDestroy, Input, inject, ViewChild, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient, HttpClientModule } from '@angular/common/http';
@@ -26,7 +26,11 @@ import { getApiBase } from '../../core/runtime-url';
   templateUrl: './video-info-page.component.html',
   styleUrls: ['./video-info-page.component.scss']
 })
-export class VideoInfoPageComponent implements OnInit {
+export class VideoInfoPageComponent implements OnInit, OnDestroy {
+  private destroyed = false;
+  private transcriptCopiedTimeout?: ReturnType<typeof setTimeout>;
+  private contextMenuCloseHandler?: () => void;
+
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private libraryService = inject(LibraryService);
@@ -140,6 +144,18 @@ export class VideoInfoPageComponent implements OnInit {
     setTimeout(() => {
       this.tourService.tryAutoStartTour('video-info', 500);
     }, 1000);
+  }
+
+  ngOnDestroy(): void {
+    this.destroyed = true;
+    if (this.transcriptCopiedTimeout) {
+      clearTimeout(this.transcriptCopiedTimeout);
+      this.transcriptCopiedTimeout = undefined;
+    }
+    if (this.contextMenuCloseHandler) {
+      document.removeEventListener('click', this.contextMenuCloseHandler);
+      this.contextMenuCloseHandler = undefined;
+    }
   }
 
   goBack(): void {
@@ -352,8 +368,10 @@ export class VideoInfoPageComponent implements OnInit {
       transcription: transcriptionSegments,
       thumbnail: video.thumbnailUrl || video.thumbnail_url,
       videoUrl: video.current_path || video.filePath,
-      uploadDate: video.uploadDate ? new Date(video.uploadDate) : undefined,
-      downloadDate: video.downloadDate ? new Date(video.downloadDate) : new Date(),
+      uploadDate: video.upload_date ? new Date(video.upload_date) :
+                 video.uploadDate ? new Date(video.uploadDate) : undefined,
+      downloadDate: video.download_date ? new Date(video.download_date) :
+                   video.downloadDate ? new Date(video.downloadDate) : new Date(),
       createdAt: video.download_date ? new Date(video.download_date) :
                 video.downloadDate ? new Date(video.downloadDate) : new Date(),
       updatedAt: video.last_verified ? new Date(video.last_verified) : new Date(),
@@ -706,8 +724,10 @@ export class VideoInfoPageComponent implements OnInit {
     if (!text) return;
 
     navigator.clipboard.writeText(text).then(() => {
+      if (this.destroyed) return;
       this.transcriptCopied = true;
-      setTimeout(() => {
+      this.transcriptCopiedTimeout = setTimeout(() => {
+        if (this.destroyed) return;
         this.transcriptCopied = false;
         this.cdr.detectChanges();
       }, 2000);
@@ -731,7 +751,7 @@ export class VideoInfoPageComponent implements OnInit {
             this.childVideos = response.children;
             console.log(`Loaded ${this.childVideos.length} children for video ${videoId}`);
             // Force change detection to update the view immediately
-            this.cdr.detectChanges();
+            if (!this.destroyed) this.cdr.detectChanges();
           } else {
             console.warn('Failed to load children:', response.error || 'Unknown error');
             this.childVideos = [];
@@ -751,7 +771,7 @@ export class VideoInfoPageComponent implements OnInit {
             this.parentVideos = response.parents;
             console.log(`Loaded ${this.parentVideos.length} parents for video ${videoId}`);
             // Force change detection to update the view immediately
-            this.cdr.detectChanges();
+            if (!this.destroyed) this.cdr.detectChanges();
           } else {
             console.warn('Failed to load parents:', response.error || 'Unknown error');
             this.parentVideos = [];
@@ -968,7 +988,7 @@ export class VideoInfoPageComponent implements OnInit {
   formatDuration(seconds: number): string {
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
+    const secs = Math.floor(seconds % 60);
 
     if (hours > 0) {
       return `${hours}h ${minutes}m ${secs}s`;
@@ -1065,7 +1085,9 @@ export class VideoInfoPageComponent implements OnInit {
       this.showRelationshipContextMenu = false;
       this.contextMenuTarget = null;
       document.removeEventListener('click', closeHandler);
+      this.contextMenuCloseHandler = undefined;
     };
+    this.contextMenuCloseHandler = closeHandler;
     setTimeout(() => document.addEventListener('click', closeHandler), 0);
   }
 

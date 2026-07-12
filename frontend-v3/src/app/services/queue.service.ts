@@ -355,6 +355,18 @@ export class QueueService implements OnDestroy {
   }
 
   /**
+   * Clear a job's backend job ID through the signal (so the persisted job
+   * doesn't keep a stale backendJobId after updateJobState replaced it)
+   */
+  private clearBackendJobId(jobId: string): void {
+    this.jobs.update(jobs =>
+      jobs.map(job =>
+        job.id === jobId ? { ...job, backendJobId: undefined } : job
+      )
+    );
+  }
+
+  /**
    * Get frontend job ID from backend job ID
    */
   getFrontendJobId(backendJobId: string): string | undefined {
@@ -808,7 +820,7 @@ export class QueueService implements OnDestroy {
             // Clear the backend job ID since it no longer exists
             this.frontendToBackendIdMap.delete(job.id);
             this.backendToFrontendIdMap.delete(job.backendJobId);
-            job.backendJobId = undefined;
+            this.clearBackendJobId(job.id);
             // Mark running tasks as completed too
             job.tasks.forEach(task => {
               if (task.state === 'running') {
@@ -909,7 +921,7 @@ export class QueueService implements OnDestroy {
             this.updateJobState(job.id, 'completed');
             this.frontendToBackendIdMap.delete(job.id);
             this.backendToFrontendIdMap.delete(job.backendJobId);
-            job.backendJobId = undefined;
+            this.clearBackendJobId(job.id);
             job.tasks.forEach(task => {
               if (task.state === 'running') {
                 this.updateTaskState(job.id, task.type, 'completed');

@@ -72,14 +72,26 @@ export class QueueItemConfigModalComponent implements OnInit, OnDestroy {
   instructionsHistory = signal<{ id: number; instruction_text: string; used_at: string }[]>([]);
   showInstructionsDropdown = signal(false);
 
+  // True once tasks have been initialized for the current open session. Prevents
+  // a mid-edit model refresh (modelsChanged$ → loadAIModels) from re-running
+  // initializeTasks and discarding the user's in-progress edits.
+  private initializedForOpen = false;
+
   constructor() {
     // When modal opens, reload default AI and then initialize tasks
     effect(() => {
       const isOpen = this.isOpen();
       const loading = this.loadingModels();
 
-      // Only initialize when modal is open AND models are loaded
-      if (isOpen && !loading) {
+      if (!isOpen) {
+        // Closed: arm re-init for the next open.
+        this.initializedForOpen = false;
+        return;
+      }
+
+      // Only initialize once per open, after models have loaded.
+      if (!loading && !this.initializedForOpen) {
+        this.initializedForOpen = true;
         // Reload default AI first, then initialize tasks
         this.reloadDefaultAIModelAndInit();
       }
@@ -394,6 +406,10 @@ export class QueueItemConfigModalComponent implements OnInit, OnDestroy {
   initializeTasks() {
     const taskMap = new Map<TaskType, QueueItemTask>();
 
+    // Reset the dropdown-bound model so a previous item's pick can't leak into
+    // this item's save; it's re-seeded below from the item's own ai-analyze task.
+    this.selectedAIModel.set('');
+
     // Initialize from existing tasks or defaults
     const existing = this.existingTasks();
     console.log('[initializeTasks] defaultAIModel:', this.defaultAIModel);
@@ -450,12 +466,18 @@ export class QueueItemConfigModalComponent implements OnInit, OnDestroy {
       currentTasks.delete(task.type);
       // No dependency enforcement - allow independent selection
     } else {
+      const config = this.getDefaultConfig(task.type);
       currentTasks.set(task.type, {
         type: task.type,
         status: 'pending',
         progress: 0,
-        config: this.getDefaultConfig(task.type)
+        config
       });
+      // Seed the dropdown-bound signal too, so the AI Model select reflects the
+      // freshly-seeded model and onSave doesn't submit an empty aiModel (FC-8).
+      if (task.type === 'ai-analyze') {
+        this.selectedAIModel.set(config?.aiModel || '');
+      }
       // No dependency enforcement - allow independent selection
     }
 
@@ -532,11 +554,15 @@ export class QueueItemConfigModalComponent implements OnInit, OnDestroy {
       const aiTask = currentTasks.get('ai-analyze')!;
       const selectedModel = this.selectedAIModel();
       console.log('[onSave] Ensuring ai-analyze task uses selected model:', selectedModel);
-      aiTask.config = {
-        ...aiTask.config,
-        aiModel: selectedModel
-      };
-      currentTasks.set('ai-analyze', aiTask);
+      // Only overwrite when the signal actually holds a model — an empty signal
+      // must never clobber a model the task already carries (FC-8).
+      if (selectedModel) {
+        aiTask.config = {
+          ...aiTask.config,
+          aiModel: selectedModel
+        };
+        currentTasks.set('ai-analyze', aiTask);
+      }
     }
 
     // If AI analysis is selected but there's no transcript and transcribe wasn't selected,

@@ -137,6 +137,8 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
   currentGroupNumber = signal<number | null>(null);
   private isRestoringTab = false; // Flag to ignore time updates during tab restore
   private pendingSeekTime: number | null = null; // Time to seek to after video loads
+  private restoreTabTimeout?: ReturnType<typeof setTimeout>; // Fallback to clear isRestoringTab if the video never reports a duration (e.g. media error)
+  private waveformPollInterval?: ReturnType<typeof setInterval>; // Server waveform progress poller, cleared on destroy
 
   // Computed active tab - derives current state from tabs array
   activeTab = computed(() => {
@@ -189,7 +191,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
     }
 
     // Fullscreen with F key
-    if (event.key === 'f' || event.key === 'F') {
+    if ((event.key === 'f' || event.key === 'F') && !event.metaKey && !event.ctrlKey) {
       event.preventDefault();
       this.toggleFullscreen();
     }
@@ -238,31 +240,31 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
     }
 
     // L to increase speed (and start playing if stopped)
-    if (event.key === 'l' || event.key === 'L') {
+    if ((event.key === 'l' || event.key === 'L') && !event.metaKey && !event.ctrlKey) {
       event.preventDefault();
       this.increasePlaybackSpeed();
     }
 
     // J to decrease speed
-    if (event.key === 'j' || event.key === 'J') {
+    if ((event.key === 'j' || event.key === 'J') && !event.metaKey && !event.ctrlKey) {
       event.preventDefault();
       this.decreasePlaybackSpeed();
     }
 
     // A for cursor tool
-    if (event.key === 'a' || event.key === 'A') {
+    if ((event.key === 'a' || event.key === 'A') && !event.metaKey && !event.ctrlKey) {
       event.preventDefault();
       this.setTool(EditorTool.CURSOR);
     }
 
     // R for highlight/range tool
-    if (event.key === 'r' || event.key === 'R') {
+    if ((event.key === 'r' || event.key === 'R') && !event.metaKey && !event.ctrlKey) {
       event.preventDefault();
       this.setTool(EditorTool.HIGHLIGHT);
     }
 
     // M for marker at playhead, Shift+M for marker on selection
-    if (event.key === 'm' || event.key === 'M') {
+    if ((event.key === 'm' || event.key === 'M') && !event.metaKey && !event.ctrlKey) {
       event.preventDefault();
       if (event.shiftKey && this.highlightSelection()) {
         // Shift+M: Add marker for current selection
@@ -469,7 +471,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
     currentTime: 0,
     duration: 120,
     isPlaying: false,
-    volume: 3.5,
+    volume: 1,
     playbackRate: 1,
     zoomState: { level: 1, offset: 0 }
   });
@@ -1444,6 +1446,18 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
 
     this.clearFullscreenTimeout();
 
+    // Stop any in-flight waveform progress poller
+    if (this.waveformPollInterval) {
+      clearInterval(this.waveformPollInterval);
+      this.waveformPollInterval = undefined;
+    }
+
+    // Clear the tab-restore fallback timeout
+    if (this.restoreTabTimeout) {
+      clearTimeout(this.restoreTabTimeout);
+      this.restoreTabTimeout = undefined;
+    }
+
     // Clean up ResizeObserver
     if (this.resizeObserver) {
       this.resizeObserver.disconnect();
@@ -1627,7 +1641,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
 
     // If not playing, start playing first
     if (!this.editorState().isPlaying) {
-      this.startPlayback();
+      this.togglePlayPause();
       return;
     }
 
@@ -2637,6 +2651,11 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
 
     // If we were restoring a tab, seek to the saved position now that video is loaded
     if (this.isRestoringTab && this.pendingSeekTime !== null) {
+      // Restore completed normally — cancel the media-error fallback timeout
+      if (this.restoreTabTimeout) {
+        clearTimeout(this.restoreTabTimeout);
+        this.restoreTabTimeout = undefined;
+      }
       // Use setTimeout to ensure video element is ready
       setTimeout(() => {
         if (this.videoPlayer && this.pendingSeekTime !== null) {
@@ -2682,6 +2701,17 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
     }));
   }
 
+  // Media failed to load — clear any in-flight tab-restore state so time updates
+  // aren't dropped for later tabs. (Wire via (error) on <app-media-display>.)
+  onVideoError(_message?: string) {
+    if (this.restoreTabTimeout) {
+      clearTimeout(this.restoreTabTimeout);
+      this.restoreTabTimeout = undefined;
+    }
+    this.isRestoringTab = false;
+    this.pendingSeekTime = null;
+  }
+
   // Utilities
   formatTime(seconds: number): string {
     const hrs = Math.floor(seconds / 3600);
@@ -2708,6 +2738,8 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
   // Phase 2: Generate quick low-resolution waveform from client-side
   // Only samples every N seconds to avoid memory issues
   private async generateQuickClientWaveform(videoUrl: string, duration: number): Promise<void> {
+    // Capture the video this load is for; bail on completion if the tab switched
+    const startVideoId = this.videoId();
     try {
       // Skip client-side generation for very large files (>3 hours)
       if (duration > 10800) { // > 3 hours
@@ -2759,12 +2791,14 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
 
         console.log(`✓ Generated ${normalizedSamples.length} client-side samples from partial audio`);
 
-        // Update waveform with real (but low-res) data
-        this.waveformData.set({
-          samples: normalizedSamples,
-          sampleRate: 44100,
-          duration
-        });
+        // Update waveform with real (but low-res) data — only if still on this video
+        if (this.videoId() === startVideoId) {
+          this.waveformData.set({
+            samples: normalizedSamples,
+            sampleRate: 44100,
+            duration
+          });
+        }
 
         await audioContext.close();
       } catch (decodeError) {
@@ -2807,8 +2841,9 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
             const { progress, status, partial } = progressResponse.data;
             console.log(`📊 Waveform progress: ${progress}% - ${status}`);
 
-            // Update with partial waveform if available
-            if (partial && partial.samples && partial.samples.length > 0) {
+            // Update with partial waveform if available — but only if this video
+            // is still active (tab may have switched mid-load)
+            if (partial && partial.samples && partial.samples.length > 0 && this.videoId() === videoId) {
               console.log(`✓ Updating with ${partial.samples.length} samples (${progress}%)`);
               // Create a completely new object to trigger change detection
               // Always use the video element duration for accurate alignment
@@ -2822,20 +2857,23 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
             // Stop polling when complete
             if (progress >= 100) {
               clearInterval(pollInterval);
+              this.waveformPollInterval = undefined;
             }
           }
         } catch (err) {
           // Progress endpoint might not be ready yet, continue polling
         }
       }, 1000);
+      this.waveformPollInterval = pollInterval;
 
       // Wait for final result
       const response = await generationPromise;
       clearInterval(pollInterval);
+      this.waveformPollInterval = undefined;
 
       console.log('Server waveform response:', response);
 
-      if (response.success && response.data && response.data.samples && response.data.samples.length > 0) {
+      if (response.success && response.data && response.data.samples && response.data.samples.length > 0 && this.videoId() === videoId) {
         console.log(`✅ Final waveform: ${response.data.samples.length} samples`);
 
         // Replace with final high-quality waveform
@@ -3055,6 +3093,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
         editorState: this.editorState(),
         sections: this.sections(),
         chapters: this.chapters(),
+        muteSections: this.muteSections(),
         transcript: this.transcript(),
         analysisData: this.analysisData() || null,
         waveformData: this.waveformData(),
@@ -3079,6 +3118,14 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
     if (isVideoChanging && tab.editorState.currentTime > 0) {
       this.isRestoringTab = true;
       this.pendingSeekTime = tab.editorState.currentTime;
+      // Fallback: if the video never reports a duration (e.g. media error),
+      // clear the restore flag so time updates aren't dropped for later tabs.
+      if (this.restoreTabTimeout) clearTimeout(this.restoreTabTimeout);
+      this.restoreTabTimeout = setTimeout(() => {
+        this.isRestoringTab = false;
+        this.pendingSeekTime = null;
+        this.restoreTabTimeout = undefined;
+      }, 5000);
     }
 
     this.videoId.set(tab.videoId);
@@ -3088,6 +3135,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
     this.editorState.set(tab.editorState);
     this.sections.set(tab.sections);
     this.chapters.set(tab.chapters);
+    this.muteSections.set(tab.muteSections ?? []);
     this.transcript.set(tab.transcript);
     this.analysisData.set(tab.analysisData || undefined);
     this.waveformData.set(tab.waveformData);
@@ -3256,6 +3304,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
       editorState: tab.editorState,
       sections: tab.sections,
       chapters: tab.chapters,
+      muteSections: tab.muteSections,
       waveformData: tab.waveformData,
       transcript: tab.transcript,
       analysisData: tab.analysisData,
@@ -3300,6 +3349,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
       editorState: tabData.editorState || newTab.editorState,
       sections: tabData.sections || [],
       chapters: tabData.chapters || [],
+      muteSections: tabData.muteSections || [],
       waveformData: tabData.waveformData || newTab.waveformData,
       transcript: tabData.transcript || [],
       analysisData: tabData.analysisData,
@@ -3349,6 +3399,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
           editorState: tabData.editorState || t.editorState,
           sections: tabData.sections || t.sections,
           chapters: tabData.chapters || t.chapters,
+          muteSections: tabData.muteSections || t.muteSections,
           waveformData: tabData.waveformData || t.waveformData,
           transcript: tabData.transcript || t.transcript,
           analysisData: tabData.analysisData ?? t.analysisData,

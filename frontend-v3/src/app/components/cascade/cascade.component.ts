@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, signal, computed, ChangeDetectionStrategy, ChangeDetectorRef, effect, inject, input, output, HostListener, ViewChild } from '@angular/core';
+import { Component, Input, Output, EventEmitter, signal, computed, ChangeDetectionStrategy, ChangeDetectorRef, effect, inject, input, output, HostListener, ViewChild, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
 import { ScrollingModule, CdkVirtualScrollViewport } from '@angular/cdk/scrolling';
@@ -57,7 +57,7 @@ export type VirtualListItem =
     ])
   ]
 })
-export class CascadeComponent {
+export class CascadeComponent implements OnDestroy {
   private electronService = inject(ElectronService);
   private libraryService = inject(LibraryService);
   private notificationService = inject(NotificationService);
@@ -70,11 +70,17 @@ export class CascadeComponent {
   readonly emptyAction = output<CascadeEmptyAction>();
 
   @Input() set weeks(value: VideoWeek[]) {
-    // Convert to expandable weeks (all expanded by default)
-    const expandableWeeks = value.map(week => ({
-      ...week,
-      expanded: true
-    }));
+    // Preserve the user's prior expand/collapse state across re-emissions
+    // (e.g. progress refreshes) so a collapsed week doesn't spring back open.
+    // New weeks honor an incoming `expanded` hint, otherwise default to open.
+    const priorExpanded = new Map(this.videoWeeks().map(w => [w.weekLabel, w.expanded]));
+    const expandableWeeks = value.map(week => {
+      const prior = priorExpanded.get(week.weekLabel);
+      return {
+        ...week,
+        expanded: prior !== undefined ? prior : ((week as ExpandableVideoWeek).expanded ?? true)
+      };
+    });
     this.videoWeeks.set(expandableWeeks);
 
     // Manually trigger change detection for OnPush strategy
@@ -323,6 +329,15 @@ export class CascadeComponent {
         this.initialized = true;
       }
     }, { allowSignalWrites: true });
+  }
+
+  ngOnDestroy(): void {
+    // Tear down the marquee-drag machinery so a component destroyed mid-drag
+    // (e.g. navigating away) doesn't leak the auto-scroll interval or the
+    // document-level mouse listeners.
+    this.stopAutoScroll();
+    document.removeEventListener('mousemove', this.onDragSelectMove);
+    document.removeEventListener('mouseup', this.onDragSelectEnd);
   }
 
   // Context menu actions - computed based on selection
@@ -930,7 +945,10 @@ export class CascadeComponent {
    */
   private getSelectedVideos(): VideoItem[] {
     const selectedItemIds = this.selectedVideos();
-    const allItems = this.virtualItems().filter(item => item.type === 'video') as Array<{ type: 'video'; video: VideoItem; weekLabel: string; itemId: string }>;
+    // Resolve against the collapse-inclusive list so selections inside collapsed
+    // weeks are still returned — virtualItems() only contains expanded weeks, so
+    // bulk actions would otherwise silently skip them despite the count.
+    const allItems = this.allVideosInOrder();
 
     // Get unique videos (a video might be selected in multiple sections)
     const videoMap = new Map<string, VideoItem>();
@@ -976,16 +994,22 @@ export class CascadeComponent {
             // suggestions. A manual rename means the user has made their
             // decision. webPageTitle (MHTML page title) is untouched because
             // it's not an AI suggestion.
-            video.name = response.newFilename || newFilename;
-            video.suggestedFilename = undefined;
-            video.suggestedTitle = undefined;
             this.libraryService.clearSuggestedTitle(video.id).subscribe({
               next: () => console.log('Suggested title cleared from database'),
               error: (err) => console.warn('Failed to clear suggested title:', err)
             });
 
-            // Update display
-            this.videoWeeks.set([...this.videoWeeks()]);
+            // Immutable replace instead of mutating the @Input-owned object in place.
+            const newName = response.newFilename || newFilename;
+            const updatedWeeks = this.videoWeeks().map(week => ({
+              ...week,
+              videos: week.videos.map(v =>
+                v.id === video.id
+                  ? { ...v, name: newName, suggestedFilename: undefined, suggestedTitle: undefined }
+                  : v
+              )
+            }));
+            this.videoWeeks.set(updatedWeeks);
           } else {
             console.error('Failed to rename file:', response.error);
             this.notificationService.error('Rename Failed', response.error || 'Failed to rename file');
@@ -1030,11 +1054,17 @@ export class CascadeComponent {
         next: (response: any) => {
           if (response.success) {
             console.log('Suggested title accepted, file renamed:', video.id, newTitle);
-            // Update local state - change name and clear suggested title
-            video.name = response.newFilename || newTitle;
-            video.suggestedTitle = undefined;
-            // Update display
-            this.videoWeeks.set([...this.videoWeeks()]);
+            // Immutable replace instead of mutating the @Input-owned object in place.
+            const acceptedName = response.newFilename || newTitle;
+            const updatedWeeks = this.videoWeeks().map(week => ({
+              ...week,
+              videos: week.videos.map(v =>
+                v.id === video.id
+                  ? { ...v, name: acceptedName, suggestedTitle: undefined }
+                  : v
+              )
+            }));
+            this.videoWeeks.set(updatedWeeks);
           } else {
             console.error('Failed to accept suggested title:', response.error);
             this.notificationService.error('Rename Failed', response.error || 'Failed to rename file');
@@ -1500,9 +1530,10 @@ export class CascadeComponent {
 
     // If current item doesn't exist in list, start from beginning or end
     if (currentIndex === -1) {
-      // Nothing highlighted or highlighted item not in current list
-      // Start from beginning if going down, or end if going up
-      currentIndex = direction === 1 ? -1 : videoItems.length - 1;
+      // Nothing highlighted or highlighted item not in current list.
+      // Seed just past the boundary so the first step lands on the true edge:
+      // down → -1 (then +1 = 0, first item); up → length (then -1 = last item).
+      currentIndex = direction === 1 ? -1 : videoItems.length;
       console.log(`[NAV] No current item found, starting at index: ${currentIndex}`);
     }
 

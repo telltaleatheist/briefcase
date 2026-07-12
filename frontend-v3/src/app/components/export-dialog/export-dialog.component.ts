@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, OnInit, signal, inject } from '@angular/core';
+import { Component, Input, Output, EventEmitter, OnInit, OnDestroy, signal, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
@@ -62,7 +62,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   templateUrl: './export-dialog.component.html',
   styleUrls: ['./export-dialog.component.scss']
 })
-export class ExportDialogComponent implements OnInit {
+export class ExportDialogComponent implements OnInit, OnDestroy {
   @Input() data!: ExportDialogData;
   @Output() close = new EventEmitter<{ exported: boolean; navigateToQueue?: boolean }>();
 
@@ -119,6 +119,9 @@ export class ExportDialogComponent implements OnInit {
   private tourService = inject(TourService);
   private http = inject(HttpClient);
   private notificationService = inject(NotificationService);
+
+  // Pending tour-start timer, cleared on destroy.
+  private tourTimeout?: ReturnType<typeof setTimeout>;
 
 
   ngOnInit() {
@@ -186,9 +189,16 @@ export class ExportDialogComponent implements OnInit {
     this.muteSections = this.data.muteSections || [];
 
     // Start the export dialog tour
-    setTimeout(() => {
+    this.tourTimeout = setTimeout(() => {
       this.tourService.tryAutoStartTour('export-dialog', 500);
     }, 300);
+  }
+
+  ngOnDestroy() {
+    // Clear the pending tour timer so it can't fire against a torn-down DOM.
+    if (this.tourTimeout) {
+      clearTimeout(this.tourTimeout);
+    }
   }
 
   /**
@@ -450,7 +460,12 @@ export class ExportDialogComponent implements OnInit {
 
   getSelectedDuration(): string {
     const totalSeconds = this.getSelectedSections().reduce(
-      (total, section) => total + (section.endSeconds - section.startSeconds),
+      (total, section) => {
+        // The full-video sentinel has no real end (endSeconds = MAX_SAFE_INTEGER);
+        // adding its span would render a badge of trillions of hours. Skip it.
+        if (section.id === '__full_video__') return total;
+        return total + (section.endSeconds - section.startSeconds);
+      },
       0
     );
     return this.formatTime(totalSeconds);

@@ -135,7 +135,7 @@ export class TabsTabComponent {
             name: v.filename,
             suggestedFilename: v.suggested_title || undefined,
             suggestedTitle: v.suggested_title || undefined,
-            duration: v.duration_seconds ? `${Math.floor(v.duration_seconds / 3600)}:${String(Math.floor((v.duration_seconds % 3600) / 60)).padStart(2, '0')}:${String(Math.floor(v.duration_seconds % 60)).padStart(2, '0')}` : undefined,
+            duration: v.duration_seconds ? `${String(Math.floor(v.duration_seconds / 3600)).padStart(2, '0')}:${String(Math.floor((v.duration_seconds % 3600) / 60)).padStart(2, '0')}:${String(Math.floor(v.duration_seconds % 60)).padStart(2, '0')}` : undefined,
             size: v.file_size_bytes || undefined,
             uploadDate: v.upload_date ? new Date(v.upload_date) : undefined,
             downloadDate: v.download_date ? new Date(v.download_date) : undefined,
@@ -354,7 +354,7 @@ export class TabsTabComponent {
             name: v.filename,
             suggestedFilename: v.suggested_title || undefined,
             suggestedTitle: v.suggested_title || undefined,
-            duration: v.duration_seconds ? `${Math.floor(v.duration_seconds / 3600)}:${String(Math.floor((v.duration_seconds % 3600) / 60)).padStart(2, '0')}:${String(Math.floor(v.duration_seconds % 60)).padStart(2, '0')}` : undefined,
+            duration: v.duration_seconds ? `${String(Math.floor(v.duration_seconds / 3600)).padStart(2, '0')}:${String(Math.floor((v.duration_seconds % 3600) / 60)).padStart(2, '0')}:${String(Math.floor(v.duration_seconds % 60)).padStart(2, '0')}` : undefined,
             size: v.file_size_bytes || undefined,
             uploadDate: v.upload_date ? new Date(v.upload_date) : undefined,
             downloadDate: v.download_date ? new Date(v.download_date) : undefined,
@@ -392,29 +392,29 @@ export class TabsTabComponent {
     try {
       if (videoIds.length === 0) return;
 
-      // Find which tab(s) these videos belong to by checking the tabWeeks
+      // Remove only from the collection in view — never from every collection a
+      // video happens to belong to. In the scoped single-collection view that's
+      // the active collection; in the all-collections view there is no single
+      // target, so we scope to the first collection the video is shown under
+      // (its topmost week) rather than stripping it from all of them.
+      const active = this.activeCollection();
       const weeks = this.tabWeeks();
-      const videoTabMap = new Map<string, string[]>(); // videoId -> tabIds
+      const videoTabMap = new Map<string, string>(); // videoId -> single target tabId
 
-      weeks.forEach(week => {
+      for (const week of weeks) {
         const tab = this.allTabs().find(t => t.name === week.weekLabel);
-        if (tab) {
-          week.videos.forEach(video => {
-            if (videoIds.includes(video.id)) {
-              if (!videoTabMap.has(video.id)) {
-                videoTabMap.set(video.id, []);
-              }
-              videoTabMap.get(video.id)!.push(tab.id);
-            }
-          });
+        if (!tab) continue;
+        if (active && tab.id !== active.id) continue;
+        for (const video of week.videos) {
+          if (videoIds.includes(video.id) && !videoTabMap.has(video.id)) {
+            videoTabMap.set(video.id, tab.id);
+          }
         }
-      });
+      }
 
-      // Remove videos from their tabs
-      for (const [videoId, tabIds] of videoTabMap.entries()) {
-        for (const tabId of tabIds) {
-          await firstValueFrom(this.tabsService.removeVideoFromTab(tabId, videoId));
-        }
+      // Remove each video from its single scoped collection
+      for (const [videoId, tabId] of videoTabMap.entries()) {
+        await firstValueFrom(this.tabsService.removeVideoFromTab(tabId, videoId));
       }
 
       // Clear the current tabs to force reactivity
@@ -451,13 +451,15 @@ export class TabsTabComponent {
         return;
       }
 
+      // Add to the target FIRST — if this fails the videos are still safe in the
+      // source. Only once the add succeeds do we remove them from the source, so
+      // a partial failure can never drop the videos from both collections.
+      await firstValueFrom(this.tabsService.addVideosToTab(targetTab.id, videoIds));
+
       // Remove videos from source tab
       for (const videoId of videoIds) {
         await firstValueFrom(this.tabsService.removeVideoFromTab(sourceTab.id, videoId));
       }
-
-      // Add videos to target tab
-      await firstValueFrom(this.tabsService.addVideosToTab(targetTab.id, videoIds));
 
       // Reload tabs data
       await this.loadTabsData();

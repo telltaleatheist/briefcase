@@ -158,7 +158,7 @@ export class WebsocketService implements OnDestroy {
   private componentDownloadCancelledCallbacks: ((event: ComponentDownloadCancelled) => void)[] = [];
 
   connect(): void {
-    if (this.socket?.connected) {
+    if (this.socket) {
       return;
     }
 

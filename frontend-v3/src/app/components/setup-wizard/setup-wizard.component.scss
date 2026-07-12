@@ -123,6 +123,7 @@
   border-radius: 50%; animation: dockspin 0.8s linear infinite;
 }
 .done-check { font-size: 2.5rem; color: var(--success); line-height: 1; }
+.done-check.error { color: var(--status-error, #ef4444); font-weight: 700; }
 @keyframes dockspin { to { transform: rotate(360deg); } }
 
 .setup-card-foot {

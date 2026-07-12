@@ -574,7 +574,7 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
       const rect = this.timelineElement.nativeElement.getBoundingClientRect();
       const x = event.clientX - rect.left;
       const time = this.pixelsToTime(x);
-      this.seek.emit(Math.max(0, Math.min(this.duration, time)));
+      this.emitSeek(time);
       return;
     }
 
@@ -703,7 +703,7 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
       const rect = this.timelineElement.nativeElement.getBoundingClientRect();
       const x = event.clientX - rect.left;
       const time = this.pixelsToTime(x);
-      this.seek.emit(Math.max(0, Math.min(this.duration, time)));
+      this.emitSeek(time);
       return;
     }
 
@@ -817,13 +817,18 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
 
     event.preventDefault();
 
+    // Accumulate against any pending (not-yet-committed) values so multiple
+    // wheel deltas within a single animation frame don't collapse to one step.
+    const currentZoom = this.pendingZoomLevel ?? this.zoomLevel;
+    const currentOffset = this.pendingZoomOffset ?? this.zoomOffset;
+
     // If shift key is held, do horizontal panning instead of zooming
     if (event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
-      if (this.zoomLevel > 1) {
-        const visibleDuration = this.duration / this.zoomLevel;
+      if (currentZoom > 1) {
+        const visibleDuration = this.duration / currentZoom;
         // Pan by 10% of visible duration per scroll tick
         const panAmount = (visibleDuration * 0.1) * (event.deltaY > 0 || event.deltaX > 0 ? 1 : -1);
-        let newOffset = this.zoomOffset + panAmount;
+        let newOffset = currentOffset + panAmount;
 
         // Clamp offset to valid range
         newOffset = Math.max(0, Math.min(this.duration - visibleDuration, newOffset));
@@ -837,13 +842,13 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
     // Adjust zoom level with acceleration - zoom faster at higher zoom levels
     // deltaY < 0 = scroll up = zoom in, deltaY > 0 = scroll down = zoom out
     const baseZoomDelta = event.deltaY < 0 ? 1 : -1;
-    const zoomDelta = baseZoomDelta * this.calculateZoomIncrement(this.zoomLevel);
-    const newZoomLevel = Math.max(1, Math.min(200, this.zoomLevel + zoomDelta));
+    const zoomDelta = baseZoomDelta * this.calculateZoomIncrement(currentZoom);
+    const newZoomLevel = Math.max(1, Math.min(200, currentZoom + zoomDelta));
 
-    if (newZoomLevel !== this.zoomLevel) {
+    if (newZoomLevel !== currentZoom) {
       // Get the current visible start and duration BEFORE the zoom
-      const oldVisibleStart = this.zoomOffset;
-      const oldVisibleDuration = this.duration / this.zoomLevel;
+      const oldVisibleStart = currentOffset;
+      const oldVisibleDuration = this.duration / currentZoom;
 
       // Calculate what time the mouse is pointing at in the OLD zoom level
       const mouseX = event.clientX - rect.left;
@@ -1007,7 +1012,9 @@ export class VideoTimelineComponent implements OnInit, OnDestroy, OnChanges {
    * Emit seek event
    */
   emitSeek(time: number) {
-    this.seek.emit(Math.max(0, Math.min(this.duration, time)));
+    this.ngZone.run(() => {
+      this.seek.emit(Math.max(0, Math.min(this.duration, time)));
+    });
   }
 
   /**

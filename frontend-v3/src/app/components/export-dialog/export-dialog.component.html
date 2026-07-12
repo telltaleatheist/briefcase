@@ -198,9 +198,9 @@
           <label class="checkbox-option" [class.disabled]="isExporting || reEncodeRequired">
             <input
               type="checkbox"
-              [(ngModel)]="reEncode"
-              [disabled]="isExporting || reEncodeRequired"
-              [checked]="reEncode || reEncodeRequired">
+              [ngModel]="reEncode || reEncodeRequired"
+              (ngModelChange)="reEncode = $event"
+              [disabled]="isExporting || reEncodeRequired">
             <span class="checkmark"></span>
             <span class="option-label">Re-encode</span>
             @if (reEncodeRequired) {

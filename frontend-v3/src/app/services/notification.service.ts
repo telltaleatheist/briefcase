@@ -1,5 +1,6 @@
 import { Injectable } from '@angular/core';
 import { BehaviorSubject, Observable, Subject } from 'rxjs';
+import { map } from 'rxjs/operators';
 import { ErrorParser } from './error-parser';
 
 export type NotificationType = 'success' | 'error' | 'info' | 'warning';
@@ -79,8 +80,8 @@ export class NotificationService {
 
     console.log('addNotification() - Adding to array:', notification);
 
-    // Add to beginning of array
-    this.notifications.unshift(notification);
+    // Add to beginning of array (new reference so OnPush consumers re-render)
+    this.notifications = [notification, ...this.notifications];
     console.log('addNotification() - Notifications array length:', this.notifications.length);
 
     // Keep only last 100 notifications
@@ -103,7 +104,7 @@ export class NotificationService {
     if (existingIndex !== -1) {
       // Update existing notification
       console.log('updateNotificationByKey() - Updating existing notification at index:', existingIndex);
-      this.notifications[existingIndex] = {
+      const updatedNotification: Notification = {
         ...this.notifications[existingIndex],
         type,
         title,
@@ -112,11 +113,12 @@ export class NotificationService {
         read: false, // Mark as unread again
         action // Update action if provided
       };
+      this.notifications = this.notifications.map((n, i) => i === existingIndex ? updatedNotification : n);
 
       this.saveNotifications();
       this.notificationsSubject.next(this.notifications);
-      console.log('updateNotificationByKey() - Updated notification:', this.notifications[existingIndex]);
-      return this.notifications[existingIndex];
+      console.log('updateNotificationByKey() - Updated notification:', updatedNotification);
+      return updatedNotification;
     }
 
     console.log('updateNotificationByKey() - No existing notification found');
@@ -165,20 +167,24 @@ export class NotificationService {
   markAsRead(notificationId: string): void {
     const notification = this.notifications.find(n => n.id === notificationId);
     if (notification) {
-      notification.read = true;
+      this.notifications = this.notifications.map(n =>
+        n.id === notificationId ? { ...n, read: true } : n
+      );
       this.saveNotifications();
       this.notificationsSubject.next(this.notifications);
     }
   }
 
   markAllAsRead(): void {
-    this.notifications.forEach(n => n.read = true);
+    this.notifications = this.notifications.map(n => n.read ? n : { ...n, read: true });
     this.saveNotifications();
     this.notificationsSubject.next(this.notifications);
   }
 
   getUnreadCount(): Observable<number> {
-    return new BehaviorSubject(this.notifications.filter(n => !n.read).length).asObservable();
+    return this.notificationsSubject.pipe(
+      map(notifications => notifications.filter(n => !n.read).length)
+    );
   }
 
   getUnreadCountSync(): number {
@@ -194,7 +200,7 @@ export class NotificationService {
   deleteNotification(notificationId: string): void {
     const index = this.notifications.findIndex(n => n.id === notificationId);
     if (index !== -1) {
-      this.notifications.splice(index, 1);
+      this.notifications = this.notifications.filter(n => n.id !== notificationId);
       this.saveNotifications();
       this.notificationsSubject.next(this.notifications);
     }

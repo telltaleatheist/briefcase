@@ -106,6 +106,7 @@
             (durationChange)="onVideoDurationChange($event)"
             (playStateChange)="onVideoPlayStateChange($event)"
             (ended)="onVideoEnded()"
+            (error)="onVideoError($event)"
             (doubleClick)="toggleFullscreen()">
           </app-media-display>
         </div>

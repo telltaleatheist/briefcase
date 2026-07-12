@@ -136,7 +136,9 @@ export class OnboardingComponent implements OnInit {
       const response = await firstValueFrom(this.libraryService.createLibrary(newLibrary));
       if (response.success) {
         this.libraryReady.set(true);
-        this.completeOnboarding();
+        // Advance to the AI setup step (skippable) rather than finishing here,
+        // so the AI step is actually reachable (FC-23).
+        this.goToAiStep();
       } else {
         this.error.set('Failed to create library');
       }
@@ -161,7 +163,9 @@ export class OnboardingComponent implements OnInit {
       const response = await firstValueFrom(this.libraryService.openLibrary(this.openLibraryPath()));
       if (response.success) {
         this.libraryReady.set(true);
-        this.completeOnboarding();
+        // Advance to the AI setup step (skippable) rather than finishing here,
+        // so the AI step is actually reachable (FC-23).
+        this.goToAiStep();
       } else {
         this.error.set('Failed to open library');
       }
@@ -187,7 +191,9 @@ export class OnboardingComponent implements OnInit {
       const response = await firstValueFrom(this.libraryService.switchLibrary(library.id));
       if (response.success) {
         this.libraryReady.set(true);
-        this.completeOnboarding();
+        // Advance to the AI setup step (skippable) rather than finishing here,
+        // so the AI step is actually reachable (FC-23).
+        this.goToAiStep();
       } else {
         this.error.set('Failed to switch to library');
       }
