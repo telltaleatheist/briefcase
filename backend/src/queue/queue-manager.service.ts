@@ -28,6 +28,10 @@ export interface ActiveTask {
   taskIndex: number;
   type: string;
   pool: 'main' | 'ai';
+  libraryId?: string;    // Resolved library this task operates on. The scheduler
+                         // refuses to start a task for a different library while
+                         // any task is in flight, so the shared DB connection is
+                         // never switched out from under a running task.
   progress: number;
   message: string;
   startedAt: Date;
@@ -554,11 +558,41 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
   }
 
   /**
+   * The library all in-flight tasks (both pools) currently operate on, or
+   * undefined when nothing is running. Every in-flight task shares one library
+   * because canStartJobLibrary refuses to start a task for a different one.
+   */
+  private getInFlightLibraryId(): string | undefined {
+    const first = this.mainPool.values().next().value as ActiveTask | undefined;
+    if (first) return first.libraryId;
+    return this.aiPool?.libraryId;
+  }
+
+  /**
+   * Whether a job may start now without switching the shared DB connection out
+   * from under a task already running against a different library. When nothing
+   * is running, any library is safe to switch to. Otherwise the job must target
+   * the in-flight library (the common single-library case always passes); a job
+   * for another library waits until both pools drain.
+   */
+  private canStartJobLibrary(job: QueueJob): boolean {
+    if (this.mainPool.size === 0 && !this.aiPool) {
+      return true;
+    }
+    const target = job.libraryId ?? this.libraryManager.getActiveLibrary()?.id;
+    return target === this.getInFlightLibraryId();
+  }
+
+  /**
    * Get next non-AI task from any job
    */
   private getNextMainTask(): { task: Task; job: QueueJob } | null {
     for (const job of this.jobQueue.values()) {
       if (job.status !== 'pending' && job.status !== 'processing') continue;
+
+      // Don't start a task that would switch the shared DB connection out from
+      // under a task already running against a different library.
+      if (!this.canStartJobLibrary(job)) continue;
 
       const currentTask = job.tasks[job.currentTaskIndex];
       if (!currentTask) {
@@ -597,6 +631,10 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
     this.logger.debug(`getNextAITask: Checking ${this.jobQueue.size} jobs`);
     for (const job of this.jobQueue.values()) {
       if (job.status !== 'pending' && job.status !== 'processing') continue;
+
+      // Don't start a task that would switch the shared DB connection out from
+      // under a task already running against a different library.
+      if (!this.canStartJobLibrary(job)) continue;
 
       const currentTask = job.tasks[job.currentTaskIndex];
       this.logger.debug(`getNextAITask: Job ${job.id} currentTaskIndex=${job.currentTaskIndex}, task=${currentTask?.type}`);
@@ -671,6 +709,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       taskIndex: job.currentTaskIndex,
       type: task.type,
       pool,
+      libraryId: job.libraryId ?? this.libraryManager.getActiveLibrary()?.id,
       progress: 0,
       message: 'Starting...',
       startedAt: now,
