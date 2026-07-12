@@ -10,6 +10,7 @@ import { YtDlpManager } from './yt-dlp-manager';
 import { SharedConfigService } from '../config/shared-config.service';
 import { MediaEventService } from '../media/media-event.service';
 import { FilenameDateUtil } from '../common/utils/filename-date.util';
+import { UniquePathUtil } from '../common/utils/unique-path.util';
 import { DatabaseService } from '../database/database.service';
 
 @Injectable()
@@ -559,8 +560,12 @@ export class DownloaderService implements OnModuleInit {
         const displayNameWithDate = uploadDate
           ? `${uploadDate} ${sanitizedName}`
           : sanitizedName;
-        outputTemplate = path.join(downloadFolder, `${displayNameWithDate}.%(ext)s`);
-        this.logger.log(`Using sanitized displayName for output: ${displayNameWithDate}`);
+        // Resolve to a non-colliding base name BEFORE the download starts so yt-dlp
+        // (whose extension we can't know yet) never writes over a DIFFERENT video
+        // already present with the same date + title. Data-loss guard for Bug 4.
+        const uniqueDisplayName = UniquePathUtil.resolveUniqueBaseName(downloadFolder, displayNameWithDate);
+        outputTemplate = path.join(downloadFolder, `${uniqueDisplayName}.%(ext)s`);
+        this.logger.log(`Using sanitized displayName for output: ${uniqueDisplayName}`);
       } else {
         // Fallback to yt-dlp's dynamic title extraction.
         // Prefer yt-dlp's upload_date metadata for the prefix here. If it's missing, the prefix
@@ -587,11 +592,15 @@ export class DownloaderService implements OnModuleInit {
       }
   
       // Add common options
+      // NOTE: '--force-overwrites' intentionally omitted. It forced yt-dlp to clobber a
+      // pre-existing complete file with the same name (data loss, Bug 4). Resume/continue
+      // of partial downloads relies on '.part' files + '--continue', NOT force-overwrites,
+      // so removing it does not affect retries. The output template is separately resolved
+      // to a unique path above so distinct videos never target the same filename.
       ytDlpManager.addOption('--verbose')
                   .addOption('--no-check-certificates')
                   .addOption('--no-playlist')
-                  .addOption('--playlist-items', '1')  // Only download first video if multiple found
-                  .addOption('--force-overwrites');
+                  .addOption('--playlist-items', '1');  // Only download first video if multiple found
       
       if (options.convertToMp4) {
         ytDlpManager.addOption('--merge-output-format', 'mp4');
@@ -1520,7 +1529,9 @@ export class DownloaderService implements OnModuleInit {
     // Build filename with date prefix (YYYY-MM-DD Title.mp4)
     const sanitizedTitle = FilenameDateUtil.sanitizeFilename(videoInfo.title || 'Reddit Video');
     const filename = FilenameDateUtil.ensureDatePrefix(sanitizedTitle + '.mp4', videoInfo.uploadDate);
-    const outputFile = path.join(downloadFolder, filename);
+    // Resolve to a non-colliding path so the ffmpeg mux ('-y') / rename below never
+    // overwrites a DIFFERENT video already present with the same name (Bug 4).
+    const outputFile = UniquePathUtil.resolveUniquePath(path.join(downloadFolder, filename));
     const ts = Date.now();
     // Random suffix so concurrent same-millisecond Reddit downloads don't collide.
     const rand = require('crypto').randomBytes(4).toString('hex');
@@ -1956,8 +1967,9 @@ export class DownloaderService implements OnModuleInit {
         // Strip query params before extracting the extension (e.g. .jpg?width=640).
         const ext = path.extname(imageUrl.split('?')[0]).toLowerCase() || '.jpeg';
         const filename = `${date} ${safeTitle}${ext}`;
-        const outputPath = path.join(downloadFolder, filename);
-        
+        // Never overwrite a DIFFERENT image already saved with the same name (Bug 4).
+        const outputPath = UniquePathUtil.resolveUniquePath(path.join(downloadFolder, filename));
+
         this.logger.log(`Downloading Reddit image: ${imageUrl} to ${outputPath}`);
         this.eventService.emitDownloadProgress(0, 'Downloading Image', jobId);
         
@@ -2149,7 +2161,8 @@ export class DownloaderService implements OnModuleInit {
         }
 
         const filename = `${date} ${safeTitle}${ext}`;
-        const outputPath = path.join(downloadFolder, filename);
+        // Never overwrite a DIFFERENT image already saved with the same name (Bug 4).
+        const outputPath = UniquePathUtil.resolveUniquePath(path.join(downloadFolder, filename));
 
         this.logger.log(`Downloading Twitter image: ${imageUrl} to ${outputPath}`);
         this.eventService.emitDownloadProgress(0, 'Downloading Image', jobId);
@@ -2267,9 +2280,10 @@ export class DownloaderService implements OnModuleInit {
 
       // Only rename if the filename changed
       if (newFilename !== filename) {
-        const newPath = path.join(directory, newFilename);
+        // Never overwrite a DIFFERENT existing file at the dated destination (Bug 4).
+        const newPath = UniquePathUtil.resolveUniquePath(path.join(directory, newFilename));
         fs.renameSync(filePath, newPath);
-        this.logger.log(`Processed filename: ${filename} -> ${newFilename}`);
+        this.logger.log(`Processed filename: ${filename} -> ${path.basename(newPath)}`);
         return newPath;
       }
 

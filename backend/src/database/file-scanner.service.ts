@@ -6,6 +6,7 @@ import { IgnoreService } from './ignore.service';
 import { FfmpegService } from '../ffmpeg/ffmpeg.service';
 import { MediaEventService } from '../media/media-event.service';
 import { FilenameDateUtil } from '../common/utils/filename-date.util';
+import { UniquePathUtil } from '../common/utils/unique-path.util';
 import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -789,7 +790,9 @@ export class FileScannerService {
               this.logger.log(`Created weekly folder: ${weekFolderPath}`);
             }
 
-            destinationPath = path.join(weekFolderPath, filename);
+            // Content dedup already ran above (findVideoByHash), so a name collision
+            // here means a DIFFERENT video — uniquify rather than overwrite it (Bug 4).
+            destinationPath = UniquePathUtil.resolveUniquePath(path.join(weekFolderPath, filename));
 
             // Move the file to the week folder
             fs.renameSync(fullPath, destinationPath);
@@ -811,7 +814,9 @@ export class FileScannerService {
             this.logger.log(`Created weekly folder: ${weekFolderPath}`);
           }
 
-          destinationPath = path.join(weekFolderPath, filename);
+          // Content dedup already ran above (findVideoByHash), so a name collision
+          // here means a DIFFERENT video — uniquify rather than overwrite it (Bug 4).
+          destinationPath = UniquePathUtil.resolveUniquePath(path.join(weekFolderPath, filename));
 
           // Use streaming copy to avoid loading entire file into memory
           await this.streamCopyFile(fullPath, destinationPath);
@@ -835,11 +840,14 @@ export class FileScannerService {
           downloadDateYMD,
         );
         if (datedFilename !== finalFilename) {
-          const newDestinationPath = path.join(path.dirname(destinationPath), datedFilename);
+          // Never overwrite a DIFFERENT existing file at the dated destination (Bug 4).
+          const newDestinationPath = UniquePathUtil.resolveUniquePath(
+            path.join(path.dirname(destinationPath), datedFilename),
+          );
           fs.renameSync(destinationPath, newDestinationPath);
-          this.logger.log(`Added date prefix to imported file: ${finalFilename} -> ${datedFilename}`);
+          this.logger.log(`Added date prefix to imported file: ${finalFilename} -> ${path.basename(newDestinationPath)}`);
           destinationPath = newDestinationPath;
-          finalFilename = datedFilename;
+          finalFilename = path.basename(newDestinationPath);
         }
 
         // Create new video entry
