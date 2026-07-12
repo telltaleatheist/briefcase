@@ -115,6 +115,9 @@ export class VideoPreviewComponent implements OnInit, AfterViewInit, OnDestroy {
   // Document-level mouse event handlers for fullscreen
   private boundDocumentMouseMove: any = null;
   private boundDocumentMouseEnter: any = null;
+  // Single bound document 'fullscreenchange' handler, created once and reused so
+  // re-initializing the player doesn't stack listeners and none survive destroy.
+  private boundFullscreenChange: any = null;
 
   // Track if opened as dialog or route
   isDialogMode = false;
@@ -401,6 +404,39 @@ export class VideoPreviewComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   /**
+   * Handle native document 'fullscreenchange' events (backup to video.js events).
+   * Extracted so it can be stored as a single bound reference and removed cleanly.
+   */
+  private onDocumentFullscreenChange() {
+    this.ngZone.run(() => {
+      this.isFullscreen = !!document.fullscreenElement;
+
+      // Attach/detach document-level mouse listeners for fullscreen
+      if (this.isFullscreen) {
+        this.attachFullscreenMouseListeners();
+        // Assume mouse is over player when entering fullscreen
+        // This ensures controls show immediately
+        this.isMouseOverPlayer = true;
+      } else {
+        this.detachFullscreenMouseListeners();
+        this.isMouseOverPlayer = false;
+      }
+
+      this.updateFullscreenControlsVisibility();
+    });
+  }
+
+  /**
+   * Remove the document-level 'fullscreenchange' listener if one is attached.
+   * Safe to call repeatedly; used on re-init and on teardown.
+   */
+  private removeFullscreenChangeListener() {
+    if (this.boundFullscreenChange) {
+      document.removeEventListener('fullscreenchange', this.boundFullscreenChange);
+    }
+  }
+
+  /**
    * Update visibility of controls in fullscreen mode
    * Controls show when: paused OR hovering
    */
@@ -427,6 +463,11 @@ export class VideoPreviewComponent implements OnInit, AfterViewInit, OnDestroy {
 
     // Remove document-level mouse listeners if they exist
     this.detachFullscreenMouseListeners();
+
+    // Remove the document-level fullscreenchange listener so the leaked handler
+    // can't fire and touch a destroyed view.
+    this.removeFullscreenChangeListener();
+    this.boundFullscreenChange = null;
 
     // Clear cached media element
     this.cachedMediaElement = undefined;
@@ -466,6 +507,10 @@ export class VideoPreviewComponent implements OnInit, AfterViewInit, OnDestroy {
    */
   private cleanupVideoResources() {
     console.log('[cleanupVideoResources] Cleaning up old resources');
+
+    // Remove the document-level fullscreenchange listener so it can't stack on
+    // re-init or fire against disposed resources.
+    this.removeFullscreenChangeListener();
 
     // Clear cached media element
     this.cachedMediaElement = undefined;
@@ -781,25 +826,14 @@ export class VideoPreviewComponent implements OnInit, AfterViewInit, OnDestroy {
         });
       });
 
-      // Also listen to native fullscreen events as backup
-      document.addEventListener('fullscreenchange', () => {
-        this.ngZone.run(() => {
-          this.isFullscreen = !!document.fullscreenElement;
-
-          // Attach/detach document-level mouse listeners for fullscreen
-          if (this.isFullscreen) {
-            this.attachFullscreenMouseListeners();
-            // Assume mouse is over player when entering fullscreen
-            // This ensures controls show immediately
-            this.isMouseOverPlayer = true;
-          } else {
-            this.detachFullscreenMouseListeners();
-            this.isMouseOverPlayer = false;
-          }
-
-          this.updateFullscreenControlsVisibility();
-        });
-      });
+      // Also listen to native fullscreen events as backup. Use a single bound
+      // handler and remove any existing one first so repeated initializePlayer()
+      // calls (relink/load) don't stack duplicate document listeners.
+      if (!this.boundFullscreenChange) {
+        this.boundFullscreenChange = this.onDocumentFullscreenChange.bind(this);
+      }
+      this.removeFullscreenChangeListener();
+      document.addEventListener('fullscreenchange', this.boundFullscreenChange);
 
       // Add mouse movement tracking for fullscreen controls
       const playerEl = this.player.el();

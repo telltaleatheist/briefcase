@@ -34,6 +34,14 @@ export class SetupDownloadService {
   private draining = false;
   private resolveCurrent: (() => void) | null = null;
 
+  // Stall watchdog: if the in-flight item goes silent for this long (no progress
+  // events and no terminal 'component.download.*' WS event, e.g. a backend crash
+  // or a lost terminal event), fail it and move on so the queue can't hang
+  // forever. It resets on every progress tick, so a legitimately slow large
+  // download stays alive as long as bytes keep flowing.
+  private static readonly WATCHDOG_MS = 10 * 60 * 1000; // 10 min of silence
+  private watchdogTimer: ReturnType<typeof setTimeout> | null = null;
+
   readonly running = computed(() =>
     this.order().some((id) => !this.doneIds().has(id) && !this.failed()[id]),
   );
@@ -59,6 +67,10 @@ export class SetupDownloadService {
         ...p,
         [e.componentId]: { phase: e.phase, pct: e.progress, speed: e.speed, eta: e.eta },
       }));
+      // Progress is flowing, so keep the stall watchdog from firing.
+      if (this.currentId() === e.componentId) {
+        this.armWatchdog(e.componentId);
+      }
     });
     this.ws.onComponentDownloadComplete((e) => {
       this.doneIds.update((s) => new Set(s).add(e.componentId));
@@ -148,10 +160,31 @@ export class SetupDownloadService {
 
   private finishCurrent(componentId: string): void {
     if (this.currentId() === componentId && this.resolveCurrent) {
+      this.clearWatchdog();
       const r = this.resolveCurrent;
       this.resolveCurrent = null;
       this.currentId.set(null);
       r();
+    }
+  }
+
+  /** (Re)start the stall watchdog for the given in-flight item. */
+  private armWatchdog(componentId: string): void {
+    this.clearWatchdog();
+    this.watchdogTimer = setTimeout(() => {
+      if (this.currentId() !== componentId) return;
+      this.failed.update((f) => ({
+        ...f,
+        [componentId]: f[componentId] || 'Timed out waiting for download to finish',
+      }));
+      this.finishCurrent(componentId);
+    }, SetupDownloadService.WATCHDOG_MS);
+  }
+
+  private clearWatchdog(): void {
+    if (this.watchdogTimer) {
+      clearTimeout(this.watchdogTimer);
+      this.watchdogTimer = null;
     }
   }
 
@@ -164,7 +197,22 @@ export class SetupDownloadService {
         this.currentId.set(id);
         await new Promise<void>((resolve) => {
           this.resolveCurrent = resolve;
+          // Guard against a terminal WS event that never arrives.
+          this.armWatchdog(id as string);
           this.components.installComponent(id as string).subscribe({
+            next: (res) => {
+              // HTTP 200 with success:false (unsupported platform, "already
+              // downloading", backend refusal) is neither an HTTP error nor a
+              // WS terminal event, so nothing else would ever resolve this item.
+              // Fail it here so the queue keeps draining.
+              if (!res?.success) {
+                this.failed.update((f) => ({
+                  ...f,
+                  [id as string]: res?.message || 'Install failed',
+                }));
+                this.finishCurrent(id as string);
+              }
+            },
             error: (err) => {
               this.failed.update((f) => ({ ...f, [id as string]: err?.message || 'Install failed' }));
               this.finishCurrent(id as string);
