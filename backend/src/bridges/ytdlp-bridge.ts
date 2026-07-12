@@ -194,7 +194,16 @@ export class YtDlpBridge extends EventEmitter {
       this.logger.log(`[${processId}] Starting download: ${url}`);
       this.logger.log(`[${processId}] Args: ${args.join(' ')}`);
 
-      const proc = spawn(this.binaryPath, args);
+      // On POSIX, put yt-dlp in its own process group (detached) so abort() can
+      // signal the whole group and reap the ffmpeg merge child yt-dlp spawns
+      // during post-processing. We deliberately do NOT unref() — the parent must
+      // keep tracking the process. win32 is left unchanged (abort() there uses
+      // taskkill /T for tree-kill).
+      const proc = spawn(
+        this.binaryPath,
+        args,
+        process.platform === 'win32' ? {} : { detached: true },
+      );
       const startTime = Date.now();
 
       const processInfo: YtDlpProcessInfo = {
@@ -482,14 +491,29 @@ export class YtDlpBridge extends EventEmitter {
       }
     } else {
       const proc = processInfo.process;
-      proc.kill('SIGTERM');
+      const pid = proc.pid;
+      // yt-dlp was spawned detached (its own process group), so signal the whole
+      // group via -pid to also kill the ffmpeg merge child spawned during the
+      // post-process phase — otherwise it's orphaned and keeps writing a partial
+      // file. Fall back to signalling just the yt-dlp pid if the group send fails
+      // (e.g. the group is already gone).
+      const killGroup = (signal: NodeJS.Signals) => {
+        if (typeof pid !== 'number') return;
+        try {
+          process.kill(-pid, signal);
+        } catch {
+          try { proc.kill(signal); } catch { /* already exited */ }
+        }
+      };
+
+      killGroup('SIGTERM');
       // Escalate to SIGKILL if the process hasn't exited shortly after SIGTERM.
       // The 'close' handler removes it from activeProcesses on exit, so a still
       // present entry means it's hung.
       setTimeout(() => {
         if (this.activeProcesses.has(processId)) {
           this.logger.warn(`[${processId}] Still running after SIGTERM; sending SIGKILL`);
-          try { proc.kill('SIGKILL'); } catch { /* already exited */ }
+          killGroup('SIGKILL');
         }
       }, 5000).unref();
     }

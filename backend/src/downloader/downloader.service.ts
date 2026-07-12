@@ -329,6 +329,59 @@ export class DownloaderService implements OnModuleInit {
   }
 
   /**
+   * Conservative variant of extractVimeoEmbedUrl() used ONLY for PRE-download
+   * detection (before yt-dlp has even tried the original URL).
+   *
+   * The permissive extractVimeoEmbedUrl() matches ANY player.vimeo.com or
+   * vimeo.com/ID string anywhere on the page (sidebars, related videos, JSON
+   * blobs, comments). Using it pre-emptively could hijack the download to the
+   * WRONG video (Bug 18). This variant only reports an embed when it is
+   * unambiguously the page's PRIMARY media:
+   *   - it appears as a real <iframe src="player.vimeo.com/video/ID"> (not a
+   *     stray reference in JSON/comments/related links), and
+   *   - exactly ONE distinct Vimeo video is embedded that way (more than one
+   *     means we cannot tell which is primary, so we refuse to guess).
+   *
+   * When this returns null the original URL is downloaded unchanged; yt-dlp's
+   * own extractor plus the existing post-failure Vimeo embed fallback still
+   * handle legitimately-embedded single videos, so we don't regress real
+   * primary-embed downloads.
+   *
+   * LIMITATION: "primary" is approximated by iframe uniqueness, not DOM
+   * position; a lone player iframe that is genuinely secondary content would
+   * still be substituted. In practice a single player iframe is the main media.
+   */
+  private async extractPrimaryVimeoEmbedUrl(pageUrl: string): Promise<{ playerUrl: string; referer: string } | null> {
+    try {
+      const pageContent = await this.fetchPageContent(pageUrl);
+
+      // Only trust actual player iframes, not bare vimeo URLs elsewhere on the page.
+      const iframeRegex = /<iframe[^>]*\bsrc=["']?(https?:\/\/player\.vimeo\.com\/video\/(\d+)[^"'\s>]*)/gi;
+      const matches = [...pageContent.matchAll(iframeRegex)];
+      if (matches.length === 0) {
+        return null;
+      }
+
+      // Ambiguous when more than one distinct video is embedded — don't guess.
+      const distinctIds = new Set(matches.map(m => m[2]));
+      if (distinctIds.size !== 1) {
+        this.logger.warn(
+          `Vimeo pre-detection: ${distinctIds.size} distinct player embeds on ${pageUrl}; ` +
+          `not substituting the download target (ambiguous which is primary)`,
+        );
+        return null;
+      }
+
+      const playerUrl = matches[0][1].replace(/&amp;/g, '&');
+      this.logger.log(`Vimeo pre-detection: single primary player embed found: ${playerUrl}`);
+      return { playerUrl, referer: pageUrl };
+    } catch (error) {
+      this.logger.error(`Failed to extract primary Vimeo embed URL: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      return null;
+    }
+  }
+
+  /**
    * Create a yt-dlp manager configured for Vimeo embed downloads.
    * Uses the player URL with referer for authentication.
    */
@@ -381,12 +434,19 @@ export class DownloaderService implements OnModuleInit {
       // Transform ABC News URLs if needed
       options.url = await this.transformAbcNewsUrl(options.url);
 
-      // Pre-detect Vimeo embeds on non-Vimeo pages so the Vimeo-specific handler is used
+      // Pre-detect Vimeo embeds on non-Vimeo pages so the Vimeo-specific handler
+      // is used. Use the CONSERVATIVE detector (single, unambiguous primary
+      // player iframe) so we don't hijack the download to an unrelated embed in a
+      // sidebar/related/comment section (Bug 18).
+      // NOTE: when a primary embed IS found we still overwrite options.url so the
+      // dedup lookup, download and history all key off the same (player) URL — a
+      // documented limitation, but consistent for a given page since detection is
+      // now deterministic.
       if (!options.url.includes('vimeo.com')) {
         try {
-          const embedInfo = await this.extractVimeoEmbedUrl(options.url);
+          const embedInfo = await this.extractPrimaryVimeoEmbedUrl(options.url);
           if (embedInfo) {
-            this.logger.log(`Detected Vimeo embed on page: ${options.url} → ${embedInfo.playerUrl}`);
+            this.logger.log(`Detected primary Vimeo embed on page: ${options.url} → ${embedInfo.playerUrl}`);
             options.url = embedInfo.playerUrl;
             options.referer = embedInfo.referer;
           }
@@ -424,7 +484,7 @@ export class DownloaderService implements OnModuleInit {
       let uploadDate: string | undefined;
       let isLive = false;
       try {
-        const videoInfo = await this.getVideoInfo(options.url);
+        const videoInfo = await this.getVideoInfo(options.url, jobId);
         if (videoInfo && videoInfo.uploadDate) {
           // uploadDate from getVideoInfo() is already formatted as YYYY-MM-DD
           uploadDate = videoInfo.uploadDate;
@@ -438,6 +498,11 @@ export class DownloaderService implements OnModuleInit {
           this.logger.log(`Video info: isLive=${videoInfo.isLive}, title="${videoInfo.title}"`);
         }
       } catch (error) {
+        // A cancel that landed during the metadata fetch must abort the whole
+        // download, not be swallowed as a missing-upload-date warning.
+        if (this.isDownloadCancelled(jobId) || (error instanceof Error && error.message.includes('cancelled'))) {
+          throw error instanceof Error ? error : new Error('Download was cancelled');
+        }
         const message = `Upload date unavailable for ${options.url} (${error instanceof Error ? error.message : 'Unknown error'}) — the video will be grouped by download date instead of upload date`;
         this.logger.warn(message);
         downloadWarnings.push(message);
@@ -466,6 +531,11 @@ export class DownloaderService implements OnModuleInit {
       if (options.url.includes('reddit.com')) {
         const maxDirectAttempts = 2;
         for (let attempt = 1; attempt <= maxDirectAttempts; attempt++) {
+          // A cancel can land before/between attempts, when no manager is
+          // registered for abort — stop the whole Reddit fast path here.
+          if (this.isDownloadCancelled(jobId)) {
+            throw new Error('Download was cancelled');
+          }
           try {
             const videoInfo = await this.getRedditVideoUrlFromJson(options.url);
             if (videoInfo) {
@@ -490,11 +560,19 @@ export class DownloaderService implements OnModuleInit {
             }
           } catch (error) {
             const errorMessage = error instanceof Error ? (error as Error).message : 'Unknown error';
+            // A cancellation must not be treated as a retryable failure.
+            if (this.isDownloadCancelled(jobId) || errorMessage.includes('cancelled')) {
+              throw error instanceof Error ? error : new Error(errorMessage);
+            }
             this.logger.warn(`Reddit direct download attempt ${attempt} failed: ${errorMessage}`);
           }
 
           // If first attempt failed, wait before retrying (rate-limit cooldown)
           if (attempt < maxDirectAttempts) {
+            // Don't sleep-then-retry a download the user already cancelled.
+            if (this.isDownloadCancelled(jobId)) {
+              throw new Error('Download was cancelled');
+            }
             this.logger.log(`Reddit: waiting 3s before retry attempt ${attempt + 1}...`);
             await new Promise(r => setTimeout(r, 3000));
           }
@@ -1305,30 +1383,35 @@ export class DownloaderService implements OnModuleInit {
       }
 
       const candidates = files
-        .filter(file => {
+        .map(file => {
           // Filter out hidden files, system files, and macOS metadata files
-          if (file.startsWith('.') || file.startsWith('._')) return false;
+          if (file.startsWith('.') || file.startsWith('._')) return null;
 
           // Filter for valid media extensions
           const ext = path.extname(file).toLowerCase();
-          if (!validExtensions.includes(ext)) return false;
+          if (!validExtensions.includes(ext)) return null;
 
           // Scope to this job's output name when we have a reliable prefix.
-          if (namePrefix && !file.startsWith(namePrefix)) return false;
+          if (namePrefix && !file.startsWith(namePrefix)) return null;
+
+          // A concurrent download's temp/.part file can be deleted between the
+          // readdir above and this stat. A vanished entry must be SKIPPED, not
+          // allowed to throw ENOENT and unwind the whole scan — otherwise THIS
+          // download is reported failed even though its own output exists.
+          const filePath = path.join(downloadFolder, file);
+          let fileStats: fs.Stats;
+          try {
+            fileStats = fs.statSync(filePath);
+          } catch {
+            return null;
+          }
 
           // CRITICAL: Only consider files created AFTER download started
-          const filePath = path.join(downloadFolder, file);
-          const fileStats = fs.statSync(filePath);
-          const fileModTime = fileStats.mtime.getTime();
+          if (fileStats.mtime.getTime() < downloadStartTime) return null;
 
-          // File must have been modified after we started the download
-          return fileModTime >= downloadStartTime;
+          return { file, path: filePath, mtime: fileStats.mtime };
         })
-        .map(file => ({
-          file,
-          path: path.join(downloadFolder, file),
-          mtime: fs.statSync(path.join(downloadFolder, file)).mtime
-        }))
+        .filter((c): c is { file: string; path: string; mtime: Date } => c !== null)
         .sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
 
       // Without a job-specific name prefix, a guess is only safe when it
@@ -1505,6 +1588,11 @@ export class DownloaderService implements OnModuleInit {
     const https = require('https');
     const { execFileSync } = require('child_process');
 
+    // Bail out early if the job was already cancelled.
+    if (this.isDownloadCancelled(jobId)) {
+      throw new Error('Download was cancelled');
+    }
+
     // Step 1: Get video info from JSON API
     const videoInfo = await this.getRedditVideoUrlFromJson(url);
     if (!videoInfo) {
@@ -1599,6 +1687,10 @@ export class DownloaderService implements OnModuleInit {
       let videoOk = false;
       let usedQuality = '';
       for (const q of qualities) {
+        // Cancellation lands between HTTP attempts — stop before the next one.
+        if (this.isDownloadCancelled(jobId)) {
+          throw new Error('Download was cancelled');
+        }
         const videoMp4Url = `${baseUrl}/CMAF_${q}.mp4`;
         this.logger.log(`Reddit direct download: trying quality ${q}p — ${videoMp4Url}`);
         videoOk = await downloadFile(videoMp4Url, tempVideo);
@@ -1612,6 +1704,9 @@ export class DownloaderService implements OnModuleInit {
 
       // Also try the HLS fallback URL from the JSON API if all CMAF qualities failed
       if (!videoOk && videoUrl.includes('.m3u8')) {
+        if (this.isDownloadCancelled(jobId)) {
+          throw new Error('Download was cancelled');
+        }
         this.logger.log('Reddit direct download: all CMAF qualities failed, trying HLS via ffmpeg');
         try {
           const ffmpegPath = this.sharedConfigService.getFfmpegPath() || 'ffmpeg';
@@ -1639,6 +1734,14 @@ export class DownloaderService implements OnModuleInit {
 
       // Download audio (non-blocking — video without audio is still usable)
       const audioOk = await downloadFile(audioMp4Url, tempAudio);
+
+      // Last chance to bail before the (synchronous, up-to-60s) ffmpeg mux.
+      // The execFileSync mux itself is not abortable mid-run, so cancellation is
+      // checked at each step boundary — a cancel stops the pipeline between steps
+      // and the catch below cleans up the partial temp files.
+      if (this.isDownloadCancelled(jobId)) {
+        throw new Error('Download was cancelled');
+      }
 
       if (jobId) {
         this.eventService.emitDownloadProgress(70, `Muxing Reddit video (${usedQuality}p)...`, jobId, {});
@@ -2375,8 +2478,17 @@ export class DownloaderService implements OnModuleInit {
   /**
    * Get detailed video information
    */
-  async getVideoInfo(url: string): Promise<any> {
+  async getVideoInfo(url: string, jobId?: string): Promise<any> {
+    // The yt-dlp manager we register under jobId so cancelDownload() can abort
+    // the in-flight --dump-json process (Bug 14) — not just flag it after it
+    // returns. Tracked here so the finally can clean it out of activeDownloads.
+    let metadataManager: YtDlpManager | null = null;
     try {
+      // Honor a cancel that landed before the metadata fetch even started.
+      if (this.isDownloadCancelled(jobId)) {
+        throw new Error('Download was cancelled');
+      }
+
       // For Reddit URLs, use JSON API directly to avoid rate-limited API calls
       if (url.includes('reddit.com')) {
         const redditVideo = await this.getRedditVideoUrlFromJson(url);
@@ -2413,13 +2525,16 @@ export class DownloaderService implements OnModuleInit {
       // Transform ABC News URLs if needed
       url = await this.transformAbcNewsUrl(url);
 
-      // Pre-detect Vimeo embeds on non-Vimeo pages
+      // Pre-detect Vimeo embeds on non-Vimeo pages. Use the CONSERVATIVE detector
+      // (single, unambiguous primary player iframe) so metadata isn't fetched for
+      // an unrelated sidebar/related embed (Bug 18) — must match the download-path
+      // pre-detection so info and download stay in sync.
       let referer: string | undefined;
       if (!url.includes('vimeo.com')) {
         try {
-          const embedInfo = await this.extractVimeoEmbedUrl(url);
+          const embedInfo = await this.extractPrimaryVimeoEmbedUrl(url);
           if (embedInfo) {
-            this.logger.log(`[getVideoInfo] Detected Vimeo embed: ${url} → ${embedInfo.playerUrl}`);
+            this.logger.log(`[getVideoInfo] Detected primary Vimeo embed: ${url} → ${embedInfo.playerUrl}`);
             referer = embedInfo.referer;
             url = embedInfo.playerUrl;
           }
@@ -2479,6 +2594,14 @@ export class DownloaderService implements OnModuleInit {
       const beforeRun = Date.now();
       this.logger.log(`[TIMING] Setup took ${beforeRun - startTime}ms, about to call ytDlpManager.run()`);
 
+      // Register under the jobId so cancelDownload() can abort this in-flight
+      // metadata fetch (previously nothing tracked it, so a cancel during a slow
+      // fetch left the process running to completion).
+      if (jobId) {
+        this.activeDownloads.set(jobId, ytDlpManager);
+        metadataManager = ytDlpManager;
+      }
+
       // Execute the command and get output
       let output: string;
       try {
@@ -2509,6 +2632,11 @@ export class DownloaderService implements OnModuleInit {
               .addOption('--referer', embedInfo.referer)
               .addOption('--cookies-from-browser', 'chrome');
 
+            // Keep the registered manager current so a cancel aborts this retry.
+            if (jobId) {
+              this.activeDownloads.set(jobId, retryManager);
+              metadataManager = retryManager;
+            }
             output = await retryManager.run();
           } else {
             throw runError;
@@ -2589,6 +2717,13 @@ export class DownloaderService implements OnModuleInit {
     } catch (error) {
       this.logger.error(`Error in getVideoInfo: ${error instanceof Error ? (error as Error).message : 'Unknown error'}`);
       throw error;
+    } finally {
+      // Remove our metadata manager so it doesn't linger in activeDownloads.
+      // Guard by identity so we never delete a manager a later download phase
+      // registered under the same jobId.
+      if (jobId && metadataManager && this.activeDownloads.get(jobId) === metadataManager) {
+        this.activeDownloads.delete(jobId);
+      }
     }
   }
 
