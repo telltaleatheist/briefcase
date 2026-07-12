@@ -203,7 +203,9 @@ export class AiSetupWizardComponent implements OnInit, OnDestroy {
 
   selectProvider(provider: 'ollama' | 'claude' | 'openai') {
     this.currentStep.set(provider);
-    // Trigger provider-specific tour after DOM updates
+    // Trigger provider-specific tour after DOM updates.
+    // Clear any previously scheduled timer so rapid step changes don't leak it.
+    clearTimeout(this.tourTimeout);
     this.tourTimeout = setTimeout(() => {
       this.tourService.tryAutoStartTour(`ai-wizard-${provider}`, 300);
     }, 100);
@@ -214,7 +216,9 @@ export class AiSetupWizardComponent implements OnInit, OnDestroy {
     await this.loadSystemInfo();
     await this.loadLocalModels();
     this.currentStep.set('local-models');
-    // Trigger local models tour after DOM updates
+    // Trigger local models tour after DOM updates.
+    // Clear any previously scheduled timer so rapid step changes don't leak it.
+    clearTimeout(this.tourTimeout);
     this.tourTimeout = setTimeout(() => {
       this.tourService.tryAutoStartTour('ai-wizard-local', 300);
     }, 100);
