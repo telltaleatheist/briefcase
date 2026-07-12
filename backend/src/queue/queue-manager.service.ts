@@ -811,6 +811,15 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       const thumbnailRegenTasks = ['fix-aspect-ratio', 'strip-black-bars', 'normalize-audio', 'process-video'];
       if (job.videoId && thumbnailRegenTasks.includes(task.type) && job.videoPath) {
         await this.mediaOps.regenerateThumbnail(job.videoId, job.videoPath);
+        // Re-probe and update stored width/height/fps after a file-modifying task.
+        // fix-aspect-ratio / strip-black-bars change the dimensions; without this
+        // the DB keeps the pre-processing geometry and the geometry-based
+        // aspect-ratio skip would re-process a genuinely-fixed video every time.
+        try {
+          await this.mediaOps.refreshVideoDimensions(job.videoId, job.videoPath, taskId);
+        } catch (err) {
+          this.logger.warn(`[${taskId}] Failed to refresh video dimensions after ${task.type}: ${err}`);
+        }
       }
 
       // Emit task completed event
@@ -1027,13 +1036,28 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
             error: 'No video ID or path available for fix-aspect-ratio task',
           };
         }
-        // Skip if already fixed (duplicate detection)
+        // Skip ONLY when the video is already ~16:9 by its actual dimensions.
+        // The aspect_ratio_fixed flag alone is NOT trustworthy: videos were found
+        // flagged=1 while still vertical (a past run set the flag without the file
+        // being converted, or the file was later re-downloaded). Trusting the flag
+        // permanently blocked the fix ("instantly finished, no change"). Decide by
+        // geometry, matching the HTTP /fix-aspect-ratio endpoint. Stored dimensions
+        // are refreshed after every file-modifying task (see post-task hook), so a
+        // genuinely fixed video reads as 16:9 here and is correctly skipped.
         if (job.videoId) {
-          const videoForAR = this.databaseService.findVideoById(job.videoId);
-          if (videoForAR && videoForAR.aspect_ratio_fixed) {
-            this.logger.log(`[${taskId}] Skipping fix-aspect-ratio - already fixed (id: ${job.videoId})`);
-            result = { success: true, data: { skipped: true } };
-            break;
+          const videoForAR = this.databaseService.findVideoById(job.videoId) as any;
+          if (videoForAR) {
+            const w = Number(videoForAR.width);
+            const h = Number(videoForAR.height);
+            const isSixteenNine = w > 0 && h > 0 && Math.abs(w / h - 16 / 9) <= 0.01;
+            if (isSixteenNine) {
+              this.logger.log(`[${taskId}] Skipping fix-aspect-ratio - already 16:9 (${w}x${h}, id: ${job.videoId})`);
+              result = { success: true, data: { skipped: true } };
+              break;
+            }
+            if (videoForAR.aspect_ratio_fixed) {
+              this.logger.warn(`[${taskId}] aspect_ratio_fixed=1 but dimensions are ${w}x${h} (not 16:9) — stale flag, re-processing (id: ${job.videoId})`);
+            }
           }
         }
         result = await this.mediaOps.fixAspectRatio(

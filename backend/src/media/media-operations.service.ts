@@ -1004,6 +1004,22 @@ export class MediaOperationsService {
   }
 
   /**
+   * Re-probe the file and update the stored width/height/fps/duration to match
+   * the actual media. Call after any file-modifying task (fix-aspect-ratio,
+   * strip-black-bars, ...) so the DB geometry reflects reality — otherwise
+   * dimension-based logic (e.g. the aspect-ratio skip) acts on stale
+   * pre-processing values and would either re-process a fixed video forever or
+   * skip an unfixed one. Never throws (verifyVideoMetadata swallows probe errors).
+   */
+  async refreshVideoDimensions(videoId: string, videoPath: string, jobId?: string): Promise<void> {
+    const current = this.databaseService.getVideoById(videoId) as
+      | { duration_seconds: number | null; width?: number | null; height?: number | null; fps?: number | null }
+      | undefined;
+    if (!current) return;
+    await this.verifyVideoMetadata(videoId, videoPath, current, jobId);
+  }
+
+  /**
    * Parse SRT content into segments for AI analysis
    */
   private parseSrtToSegments(srtContent: string): any[] {
