@@ -83,7 +83,7 @@ export class UpdateService {
       log.info(`[Updates] Update available: ${info?.version ?? 'unknown version'}`);
       this.consecutiveCheckFailures = 0;
       const mainWindow = this.windowService.getMainWindow();
-      if (mainWindow) {
+      if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('update-available');
       }
     });
@@ -97,7 +97,7 @@ export class UpdateService {
     autoUpdater.on('update-downloaded', (info) => {
       log.info(`[Updates] Update downloaded: ${info?.version ?? 'unknown version'}`);
       const mainWindow = this.windowService.getMainWindow();
-      if (mainWindow) {
+      if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('update-downloaded');
       }
     });

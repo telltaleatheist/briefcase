@@ -85,9 +85,12 @@ export class WebCaptureService {
       webPreferences.javascript = false;
     }
 
-    // Create a partition so capture sessions don't leak cookies
-    const partitionName = `capture-${Date.now()}`;
-    const captureSession = session.fromPartition(partitionName, { cache: false });
+    // Reuse a single ephemeral (in-memory, non-persisted) partition instead of
+    // minting a new one per capture. session.fromPartition caches a Session
+    // object per name for the process lifetime, so a fresh `capture-${Date.now()}`
+    // each time leaked one Session per capture. Request hooks and cookies are
+    // reset in the finally block below so each capture still starts clean.
+    const captureSession = session.fromPartition('briefcase-capture', { cache: false });
 
     const win = new BrowserWindow({
       width: 1280,
@@ -136,6 +139,14 @@ export class WebCaptureService {
       return { success: true, filePath: savePath, pageTitle };
     } finally {
       win.destroy();
+      // Reset the referer hook and wipe cookies/storage so the reused
+      // partition starts clean for the next capture and nothing accumulates.
+      captureSession.webRequest.onBeforeSendHeaders(null as any);
+      try {
+        await captureSession.clearStorageData();
+      } catch (err) {
+        log.warn(`[WebCapture] Failed to clear capture session storage: ${(err as Error).message}`);
+      }
     }
   }
 

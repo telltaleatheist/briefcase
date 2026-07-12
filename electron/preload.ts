@@ -33,6 +33,7 @@ interface ElectronAPI {
   openInBrowser: (filePath: string) => Promise<{ success: boolean; error?: string }>;
   openMultipleFiles: (filePaths: string[]) => Promise<{ success: boolean; error?: string }>;
   showInFolder: (filePath: string) => Promise<void>;
+  openExternal: (url: string) => Promise<{ success: boolean; error?: string }>;
   copyFilesToClipboard: (filePaths: string[]) => Promise<{ success: boolean; error?: string }>;
   openInQuickTime: (filePath: string) => Promise<{ success: boolean; error?: string }>;
   installUpdate: () => Promise<void>;
@@ -125,6 +126,7 @@ contextBridge.exposeInMainWorld('electron', {
   openInBrowser: (filePath: string) => ipcRenderer.invoke('open-in-browser', filePath),
   openMultipleFiles: (filePaths: string[]) => ipcRenderer.invoke('open-files', filePaths),
   showInFolder: (filePath: string) => ipcRenderer.invoke('show-in-folder', filePath),
+  openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
   copyFilesToClipboard: (filePaths: string[]) => ipcRenderer.invoke('copy-files-to-clipboard', filePaths),
   openInQuickTime: (filePath: string) => ipcRenderer.invoke('open-in-quicktime', filePath),
   installUpdate: () => ipcRenderer.invoke('install-update'),

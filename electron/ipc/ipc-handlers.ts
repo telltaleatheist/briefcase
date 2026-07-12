@@ -44,7 +44,8 @@ let windowServiceRef: WindowService;
  */
 export function setupIpcHandlers(
   windowService: WindowService,
-  backendService: BackendService
+  backendService: BackendService,
+  update: UpdateService
 ): void {
   // Store references for use in handlers
   backendServiceRef = backendService;
@@ -52,7 +53,10 @@ export function setupIpcHandlers(
 
   // Create services
   downloadService = new DownloadService(windowService);
-  updateService = new UpdateService(windowService);
+  // Reuse the single UpdateService constructed in main.ts — constructing a
+  // second one here would register duplicate autoUpdater listeners and fire
+  // every update event twice.
+  updateService = update;
   webCaptureService = new WebCaptureService();
 
   // Register handlers
@@ -110,6 +114,23 @@ function setupFileSystemHandlers(): void {
     }
   });
 
+  // Open an external URL in the default browser. Only http/https is allowed —
+  // refuse file:, javascript:, and other schemes that could be abused.
+  ipcMain.handle('open-external', async (_, url: string) => {
+    try {
+      const protocol = new URL(url).protocol;
+      if (protocol !== 'http:' && protocol !== 'https:') {
+        log.warn(`Refusing to open non-http(s) external URL: ${url}`);
+        return { success: false, error: 'Only http and https URLs can be opened' };
+      }
+      await shell.openExternal(url);
+      return { success: true };
+    } catch (error) {
+      log.error('Error opening external URL:', error);
+      return { success: false, error: (error as Error).message };
+    }
+  });
+
   // Show file in folder
   ipcMain.handle('show-in-folder', (_, filePath) => {
     return shell.showItemInFolder(filePath);
@@ -134,9 +155,9 @@ function setupFileSystemHandlers(): void {
   ipcMain.handle('open-in-quicktime', async (_, filePath: string) => {
     try {
       if (process.platform === 'darwin') {
-        const { exec } = require('child_process');
+        const { execFile } = require('child_process');
         return new Promise((resolve, reject) => {
-          exec(`open -a "QuickTime Player" "${filePath}"`, (error: any) => {
+          execFile('open', ['-a', 'QuickTime Player', filePath], (error: any) => {
             if (error) {
               log.error('Error opening file in QuickTime:', error);
               reject(error);
@@ -166,12 +187,10 @@ function setupFileSystemHandlers(): void {
       if (process.platform === 'darwin') {
         // On macOS, use 'open' command with all files at once
         // This will open them as tabs in QuickTime if user has tab preference enabled
-        const { exec } = require('child_process');
-        const escapedPaths = filePaths.map(p => `"${p}"`).join(' ');
-        const command = `open ${escapedPaths}`;
+        const { execFile } = require('child_process');
 
         return new Promise((resolve, reject) => {
-          exec(command, (error: any) => {
+          execFile('open', filePaths, (error: any) => {
             if (error) {
               log.error('Error opening files:', error);
               reject(error);
@@ -333,6 +352,11 @@ function setupFileSystemHandlers(): void {
   // Get downloads path
   ipcMain.handle('get-downloads-path', () => {
     return require('electron').app.getPath('downloads');
+  });
+
+  // Get app version (exposed via preload as getAppVersion)
+  ipcMain.handle('get-app-version', () => {
+    return app.getVersion();
   });
   
   // Check if file exists

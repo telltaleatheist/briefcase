@@ -138,6 +138,13 @@ process.on('uncaughtException', (error) => {
   void gracefulExit(1);
 });
 
+// Fire-and-forget async rejections must go through the same graceful exit as
+// uncaught exceptions rather than terminating uncleanly (orphaning the backend).
+process.on('unhandledRejection', (reason) => {
+  log.error('Unhandled promise rejection:', reason);
+  void gracefulExit(1);
+});
+
 // Single instance lock - must be called before app.whenReady()
 // Wrap in try-catch to handle cases where app object isn't ready
 let gotTheLock = false;
@@ -192,8 +199,9 @@ app.whenReady().then(async () => {
     trayService = new TrayService(windowService);
     updateService = new UpdateService(windowService);
 
-    // Set up IPC handlers
-    setupIpcHandlers(windowService, backendService);
+    // Set up IPC handlers — pass the single UpdateService so it isn't
+    // constructed twice (which would register duplicate autoUpdater listeners).
+    setupIpcHandlers(windowService, backendService, updateService);
 
     // Start backend server with retry logic for first-time installs
     let backendStarted = await backendService.startBackendServer();

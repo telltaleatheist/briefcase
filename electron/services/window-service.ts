@@ -476,11 +476,14 @@ export class WindowService {
     // Load the HTML content
     errorWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(errorHtml)}`);
     
-    // Handle window closed
+    // Handle window closed — route through app.quit() (which the main process
+    // turns into a graceful, backend-terminating shutdown) rather than
+    // process.exit(0), which would orphan the backend child.
     errorWindow.on('closed', () => {
-      process.exit(0);
+      log.info('Backend error window closed, quitting application');
+      app.quit();
     });
-    
+
     return errorWindow;
   }
   
@@ -623,9 +626,13 @@ export class WindowService {
 
     // Once loaded, send the full tab data to restore state
     editorWindow.webContents.once('did-finish-load', () => {
-      // Small delay to ensure Angular is ready
+      // Small delay to ensure Angular is ready. Guard against the window being
+      // closed within the delay — sending to a destroyed webContents throws
+      // "Object has been destroyed", which would bubble to uncaughtException.
       setTimeout(() => {
-        editorWindow.webContents.send('restore-tab-state', tabData);
+        if (!editorWindow.isDestroyed()) {
+          editorWindow.webContents.send('restore-tab-state', tabData);
+        }
       }, 500);
     });
 
