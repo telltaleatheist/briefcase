@@ -132,9 +132,125 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Collapse to icon-only labels on narrow widths; the popover handles mobile add */
+/* Collapse to icon-only labels on narrow widths; the modal handles mobile add */
 @media (max-width: 900px) {
   .action-btn:not(.primary) {
     padding: 7px 9px;
   }
+}
+
+/* ==================== ADD MODAL ====================
+   The "+ Add" flow is a proper centered backdrop modal (was a CDK anchored
+   popover). The modal container supplies the frame; the embedded
+   <app-add-popover> fills it, so its own standalone card chrome is dropped
+   to avoid a double border/shadow. Follows the house modal pattern
+   (library-manager-modal): fixed blurred backdrop, centered container,
+   header + × close, Escape/backdrop-click to close. */
+.add-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: add-modal-fade 160ms ease-out;
+}
+
+@keyframes add-modal-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.add-modal-container {
+  display: flex;
+  flex-direction: column;
+  width: 90%;
+  max-width: 560px;
+  max-height: 85vh;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  box-shadow: 0 16px 48px var(--shadow-color);
+  overflow: hidden;
+  animation: add-modal-rise 200ms ease-out;
+}
+
+@keyframes add-modal-rise {
+  from { opacity: 0; transform: translateY(16px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .add-modal-backdrop,
+  .add-modal-container {
+    animation: none;
+  }
+}
+
+.add-modal-header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 13px 18px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-elevated);
+
+  h2 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+
+  .close-btn {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    padding-bottom: 2px; // optical centering of the × glyph
+    border: 1px solid var(--border-color);
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 18px;
+    line-height: 0;
+    cursor: pointer;
+    transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+
+    &:hover {
+      background: var(--bg-input);
+      color: var(--text-primary);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--primary-orange);
+      outline-offset: 1px;
+    }
+  }
+}
+
+// The Add form fills the modal body; the modal container now owns the frame,
+// so strip the popover's standalone card chrome (fixed width, border, radius,
+// shadow) to avoid a double shell. Its internal scroll region + pinned footer
+// are preserved.
+.add-modal-container app-add-popover {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+
+.add-modal-container ::ng-deep .add-popover {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  max-width: none;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
 }

@@ -72,6 +72,16 @@ textarea {
   }
 }
 
+// Subtle live count of valid URLs detected in the textarea (multi-URL entry).
+.url-count {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
 .quality-row {
   display: flex;
   align-items: center;

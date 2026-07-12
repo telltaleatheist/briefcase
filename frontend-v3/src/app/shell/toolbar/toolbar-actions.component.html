@@ -2,8 +2,6 @@
   <button
     type="button"
     class="action-btn primary"
-    cdkOverlayOrigin
-    #addTrigger="cdkOverlayOrigin"
     (click)="toggleAdd()"
     [attr.aria-expanded]="addOpen()"
     title="Add media — paste URLs or import files">
@@ -48,26 +46,23 @@
   </button>
 </div>
 
-<ng-template
-  cdkConnectedOverlay
-  [cdkConnectedOverlayOrigin]="addTrigger"
-  [cdkConnectedOverlayOpen]="addOpen()"
-  [cdkConnectedOverlayHasBackdrop]="true"
-  cdkConnectedOverlayBackdropClass="cdk-overlay-transparent-backdrop"
-  [cdkConnectedOverlayOffsetY]="8"
-  [cdkConnectedOverlayPush]="true"
-  [cdkConnectedOverlayFlexibleDimensions]="true"
-  [cdkConnectedOverlayGrowAfterOpen]="true"
-  (backdropClick)="closeAdd()"
-  (detach)="closeAdd()">
-  <app-add-popover
-    [aiReady]="aiReady()"
-    [aiCheckFailed]="aiCheckFailed()"
-    (submitAdd)="onSubmitAdd($event)"
-    (importFiles)="onImportFiles()"
-    (openAdvanced)="onOpenAdvanced()"
-    (setupAi)="onSetupAi()"
-    (retryAi)="onRetryAi()"
-    (openComponents)="onOpenComponents()"
-    (dismissed)="closeAdd()" />
-</ng-template>
+@if (addOpen()) {
+  <div class="add-modal-backdrop" (click)="onAddBackdropClick($event)">
+    <div class="add-modal-container" (click)="$event.stopPropagation()" role="dialog" aria-modal="true" aria-label="Add media">
+      <div class="add-modal-header">
+        <h2>Add media</h2>
+        <button type="button" class="close-btn" (click)="closeAdd()" title="Close">×</button>
+      </div>
+      <app-add-popover
+        [aiReady]="aiReady()"
+        [aiCheckFailed]="aiCheckFailed()"
+        (submitAdd)="onSubmitAdd($event)"
+        (importFiles)="onImportFiles()"
+        (openAdvanced)="onOpenAdvanced()"
+        (setupAi)="onSetupAi()"
+        (retryAi)="onRetryAi()"
+        (openComponents)="onOpenComponents()"
+        (dismissed)="closeAdd()" />
+    </div>
+  </div>
+}

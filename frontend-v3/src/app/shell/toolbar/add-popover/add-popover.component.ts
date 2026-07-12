@@ -167,14 +167,4 @@ export class AddPopoverComponent {
     this.urlText.set('');
   }
 
-  onTextareaEnter(event: Event): void {
-    // Plain Enter submits when there's a single valid URL (paste → Enter);
-    // Shift+Enter inserts a newline for multi-URL entry.
-    const keyboard = event as KeyboardEvent;
-    if (!keyboard.shiftKey && this.canSubmit()) {
-      event.preventDefault();
-      this.onSubmit();
-    }
-  }
-
 }

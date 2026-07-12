@@ -1,11 +1,10 @@
-import { ChangeDetectionStrategy, Component, input, output, signal } from '@angular/core';
-import { OverlayModule } from '@angular/cdk/overlay';
+import { ChangeDetectionStrategy, Component, HostListener, input, output, signal } from '@angular/core';
 import { AddDownloadsPayload } from '../../core/stores/workspace-actions.service';
 import { AddPopoverComponent } from './add-popover/add-popover.component';
 
 /**
  * Contextual toolbar actions (projected into the shell toolbar's slot):
- * "+ Add" (always available; opens the one-shot Add popover) and the
+ * "+ Add" (always available; opens the one-shot Add modal) and the
  * selection actions — Process / Scout / Info — which enable only when the
  * workspace has a selection.
  *
@@ -16,7 +15,7 @@ import { AddPopoverComponent } from './add-popover/add-popover.component';
 @Component({
   selector: 'app-toolbar-actions',
   standalone: true,
-  imports: [OverlayModule, AddPopoverComponent],
+  imports: [AddPopoverComponent],
   templateUrl: './toolbar-actions.component.html',
   styleUrls: ['./toolbar-actions.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush
@@ -50,6 +49,21 @@ export class ToolbarActionsComponent {
 
   closeAdd(): void {
     this.addOpen.set(false);
+  }
+
+  // Close only on a click of the backdrop itself — not clicks that bubble up
+  // from the modal content (which stops propagation anyway).
+  onAddBackdropClick(event: MouseEvent): void {
+    if ((event.target as HTMLElement).classList.contains('add-modal-backdrop')) {
+      this.closeAdd();
+    }
+  }
+
+  @HostListener('document:keydown.escape')
+  onEscapeKey(): void {
+    if (this.addOpen()) {
+      this.closeAdd();
+    }
   }
 
   onSubmitAdd(payload: AddDownloadsPayload): void {

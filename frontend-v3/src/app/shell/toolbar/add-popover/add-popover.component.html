@@ -7,11 +7,13 @@
       id="add-popover-urls"
       [ngModel]="urlText()"
       (ngModelChange)="urlText.set($event)"
-      (keydown.enter)="onTextareaEnter($event)"
       placeholder="https://youtube.com/watch?v=…"
       rows="3"
       autocomplete="off"
       spellcheck="false"></textarea>
+    @if (urls().length > 0) {
+      <span class="url-count">{{ urls().length }} URL{{ urls().length === 1 ? '' : 's' }} detected</span>
+    }
 
     <div class="quality-row">
       <label class="field-label inline" for="add-popover-quality">Quality</label>
