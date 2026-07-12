@@ -91,7 +91,12 @@ export class WindowService {
     const host = ServerConfig.config.electronServer.host === '0.0.0.0' ? 'localhost' : ServerConfig.config.electronServer.host;
     const frontendUrl = `http://${host}:${this.frontendPort}`;
     log.info(`Loading frontend from: ${frontendUrl}`);
-    this.mainWindow.loadURL(frontendUrl);
+    // An aborted navigation (ERR_ABORTED -3) — e.g. Cmd+R or a slow
+    // external-volume startup race — rejects this promise. Swallow it so it
+    // never becomes an unhandledRejection; it is not fatal.
+    this.mainWindow.loadURL(frontendUrl).catch((err) =>
+      log.warn(`Main window navigation failed/aborted: ${err.message}`)
+    );
 
     // Intercept window close event to hide instead of quit
     this.mainWindow.on('close', (event) => {
@@ -199,7 +204,13 @@ export class WindowService {
 
     log.info(`Opening editor window: ${editorUrl}`);
     this.attachEditorFailureHandlers(editorWindow);
-    editorWindow.loadURL(editorUrl);
+    // Closing an editor before it finishes loading rejects with ERR_ABORTED
+    // (-3). Genuine failures are still surfaced by attachEditorFailureHandlers /
+    // did-fail-load; here we only prevent the abort from bubbling up as an
+    // unhandledRejection.
+    editorWindow.loadURL(editorUrl).catch((err) =>
+      log.warn(`Editor window navigation failed/aborted: ${err.message}`)
+    );
 
     // Store reference and assign group number
     this.editorWindows.set(windowId, editorWindow);
@@ -617,7 +628,13 @@ export class WindowService {
     const editorUrl = `http://${host}:${this.frontendPort}/editor?${params.toString()}`;
 
     this.attachEditorFailureHandlers(editorWindow);
-    editorWindow.loadURL(editorUrl);
+    // Closing an editor before it finishes loading rejects with ERR_ABORTED
+    // (-3). Genuine failures are still surfaced by attachEditorFailureHandlers /
+    // did-fail-load; here we only prevent the abort from bubbling up as an
+    // unhandledRejection.
+    editorWindow.loadURL(editorUrl).catch((err) =>
+      log.warn(`Editor window navigation failed/aborted: ${err.message}`)
+    );
 
     // Store reference and assign group number
     this.editorWindows.set(windowId, editorWindow);
