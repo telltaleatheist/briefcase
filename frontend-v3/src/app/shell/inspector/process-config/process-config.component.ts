@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, effect, inject, input, output, signal, untracked } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom } from 'rxjs';
@@ -50,6 +51,7 @@ interface InstructionHistoryItem {
 @Component({
   selector: 'app-process-config',
   standalone: true,
+  imports: [FormsModule],
   templateUrl: './process-config.component.html',
   styleUrls: ['./process-config.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -564,8 +566,7 @@ export class ProcessConfigComponent {
    * suppressions stand; this isn't job config). Seeding never routes through
    * here, so only real user picks are remembered.
    */
-  onAiModelChange(event: Event): void {
-    const value = (event.target as HTMLSelectElement).value;
+  onAiModelValue(value: string): void {
     this.setOption('ai-analyze', 'aiModel', value);
     this.presetsService.rememberAiModel(value);
   }

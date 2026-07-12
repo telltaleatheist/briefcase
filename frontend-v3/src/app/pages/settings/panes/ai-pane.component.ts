@@ -124,6 +124,15 @@ export class AiPaneComponent {
     () => this.userSelectedModel() ?? this.preferredSeedModel() ?? ''
   );
 
+  /** The selected value isn't among the loaded options — render it as "(unavailable)" so the native select still reflects it instead of dropping to the first option. Null while there are genuinely no models (the "No models available" guidance covers that). */
+  readonly missingSelectedModel = computed<string | null>(() => {
+    const current = this.selectedModel();
+    if (!current) return null;
+    const models = this.availableModels();
+    if (models.length === 0) return null;
+    return models.some(m => m.value === current) ? null : current;
+  });
+
   /**
    * Preferred value to seed the picker, in order: the model the user last chose
    * in ANY picker (if it's still an installed option) → the configured
@@ -272,8 +281,7 @@ export class AiPaneComponent {
     this.availableModels.set(models);
   }
 
-  async saveDefaultModel(event: Event): Promise<void> {
-    const value = (event.target as HTMLSelectElement).value;
+  async onDefaultModelChange(value: string): Promise<void> {
     if (!value) return;
     const [provider, ...rest] = value.split(':');
     try {

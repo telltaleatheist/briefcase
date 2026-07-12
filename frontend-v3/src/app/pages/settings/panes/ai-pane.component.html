@@ -43,14 +43,17 @@
   <select
     id="default-model"
     class="select"
-    [value]="selectedModel()"
+    [ngModel]="selectedModel()"
     [disabled]="availableModels().length === 0"
-    (change)="saveDefaultModel($event)">
+    (ngModelChange)="onDefaultModelChange($event)">
     <option value="" disabled>
       {{ availableModels().length === 0 ? 'No models available' : 'Select a model…' }}
     </option>
     @for (model of availableModels(); track model.value) {
       <option [value]="model.value">{{ model.label }}</option>
+    }
+    @if (missingSelectedModel(); as missing) {
+      <option [value]="missing">{{ missing }} (unavailable)</option>
     }
   </select>
   @if (savedFlash()) {

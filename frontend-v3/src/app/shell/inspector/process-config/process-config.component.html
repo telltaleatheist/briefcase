@@ -151,9 +151,9 @@
                   <label class="opt">
                     <span>Model</span>
                     <select
-                      [value]="config(def.type)['model']"
+                      [ngModel]="config(def.type)['model']"
                       [disabled]="whisperModelsLoading()"
-                      (change)="onSelectOption(def.type, 'model', $event)">
+                      (ngModelChange)="setOption(def.type, 'model', $event)">
                       @if (whisperModelsLoading()) {
                         <option [value]="config(def.type)['model']">Loading installed models…</option>
                       } @else {
@@ -262,9 +262,9 @@
                     <label class="opt">
                       <span>Model</span>
                       <select
-                        [value]="config(def.type)['aiModel']"
+                        [ngModel]="config(def.type)['aiModel']"
                         [disabled]="aiModelsLoading()"
-                        (change)="onAiModelChange($event)">
+                        (ngModelChange)="onAiModelValue($event)">
                         @if (aiModelsLoading()) {
                           <option [value]="config(def.type)['aiModel']">Loading models…</option>
                         } @else {
