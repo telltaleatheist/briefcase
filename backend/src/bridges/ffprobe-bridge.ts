@@ -162,14 +162,18 @@ export class FfprobeBridge {
     const videoStream = result.streams.find(s => s.codec_type === 'video');
     const audioStream = result.streams.find(s => s.codec_type === 'audio');
 
-    // Parse duration from format or stream
+    // Parse duration from format, then video/audio stream. ffprobe can report
+    // the literal string "N/A", which parseFloat turns into NaN; accept a
+    // source only when it yields a finite, positive number, otherwise fall
+    // through to the next (defaulting to 0 if none are valid).
     let duration = 0;
-    if (result.format.duration) {
-      duration = parseFloat(result.format.duration);
-    } else if (videoStream?.duration) {
-      duration = parseFloat(videoStream.duration);
-    } else if (audioStream?.duration) {
-      duration = parseFloat(audioStream.duration);
+    for (const candidate of [result.format.duration, videoStream?.duration, audioStream?.duration]) {
+      if (!candidate) continue;
+      const d = parseFloat(candidate);
+      if (Number.isFinite(d) && d > 0) {
+        duration = d;
+        break;
+      }
     }
 
     // Parse frame rate

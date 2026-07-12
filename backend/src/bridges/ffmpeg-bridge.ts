@@ -412,32 +412,40 @@ export class FfmpegBridge extends EventEmitter {
           return;
         }
 
-        // Look for silence_end markers in the output
-        // Format: [silencedetect @ ...] silence_end: 607.123 | silence_duration: 607.123
-        // We want the LAST silence_end with a significant duration
-        const silenceMatches = [...stderrBuffer.matchAll(/silence_end:\s*([\d.]+)\s*\|\s*silence_duration:\s*([\d.]+)/g)];
+        // silencedetect emits paired markers, e.g.:
+        //   [silencedetect @ ...] silence_start: 0
+        //   [silencedetect @ ...] silence_end: 45.2 | silence_duration: 45.2
+        // We must pair each start with its end so we only skip silence that
+        // actually LEADS the clip. Picking the longest silence anywhere would
+        // start extraction mid-clip and drop real speech before it.
+        const eventMatches = [...stderrBuffer.matchAll(/silence_start:\s*(-?[\d.]+)|silence_end:\s*([\d.]+)\s*\|\s*silence_duration:\s*([\d.]+)/g)];
 
-        if (silenceMatches.length > 0) {
-          // Find the silence with the longest duration (usually the one at the start)
-          let bestMatch = { end: 0, duration: 0 };
-          for (const match of silenceMatches) {
-            const silenceEnd = parseFloat(match[1]);
-            const silenceDuration = parseFloat(match[2]);
-            // Only consider silences that last at least 30 seconds and are within our search window
-            if (silenceDuration > 30 && silenceDuration > bestMatch.duration) {
-              bestMatch = { end: silenceEnd, duration: silenceDuration };
-            }
+        const silences: { start: number; end: number; duration: number }[] = [];
+        let pendingStart: number | null = null;
+        for (const match of eventMatches) {
+          if (match[1] !== undefined) {
+            pendingStart = parseFloat(match[1]);
+          } else if (pendingStart !== null) {
+            silences.push({ start: pendingStart, end: parseFloat(match[2]), duration: parseFloat(match[3]) });
+            pendingStart = null;
           }
+        }
 
-          if (bestMatch.end > 0) {
-            this.logger.log(`Detected ${bestMatch.duration.toFixed(1)}s of silence ending at ${bestMatch.end.toFixed(1)}s`);
-            resolve(bestMatch.end);
-          } else {
-            this.logger.log(`No significant silence detected at start`);
-            resolve(0);
+        // A silence is "leading" only if it starts at (or very near) the
+        // beginning of the clip and lasts past the significant-silence
+        // threshold. If several qualify, prefer the earliest-starting one.
+        let leading = { start: Infinity, end: 0, duration: 0 };
+        for (const silence of silences) {
+          if (silence.start < 1.0 && silence.duration > 30 && silence.start < leading.start) {
+            leading = silence;
           }
+        }
+
+        if (leading.end > 0) {
+          this.logger.log(`Detected ${leading.duration.toFixed(1)}s of leading silence ending at ${leading.end.toFixed(1)}s`);
+          resolve(leading.end);
         } else {
-          // No silence detected at the start, audio starts immediately
+          // No leading silence; audio starts immediately.
           this.logger.log(`No significant silence detected at start`);
           resolve(0);
         }
