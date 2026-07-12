@@ -1,5 +1,7 @@
 import { Controller, Get, Post, Put, Delete, Patch, Logger, Body, Query, Param, Res, Req, HttpException, HttpStatus, NotFoundException, UploadedFiles, UseInterceptors } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { Response, Request } from 'express';
+import { QueueManagerService } from '../queue/queue-manager.service';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -55,7 +57,18 @@ export class DatabaseController {
     private readonly ignoreService: IgnoreService,
     private readonly thumbnailService: ThumbnailService,
     private readonly waveformService: WaveformService,
+    private readonly moduleRef: ModuleRef,
   ) {}
+
+  /**
+   * Resolve the QueueManagerService lazily from the global app container.
+   * DatabaseModule does not (and must not) import QueueModule, so we can't use
+   * constructor injection here — ModuleRef with { strict: false } fetches the
+   * app-wide singleton without creating a circular module dependency.
+   */
+  private getQueueManager(): QueueManagerService {
+    return this.moduleRef.get(QueueManagerService, { strict: false });
+  }
 
   /**
    * Attach an error handler to a read stream so filesystem errors (ENOENT,
@@ -3361,6 +3374,17 @@ export class DatabaseController {
    */
   @Post('libraries/:id/switch')
   async switchLibrary(@Param('id') id: string) {
+    // Switching swaps the shared DB connection. If a queue task is mid-await it
+    // would then write into the wrong library — refuse while tasks are running.
+    const queueManager = this.getQueueManager();
+    if (queueManager.hasActiveTasks()) {
+      const running = queueManager.getMainPool().size + (queueManager.getAIPool() ? 1 : 0);
+      throw new HttpException(
+        `Cannot switch libraries while ${running} task(s) are running — wait for the queue to finish or cancel it`,
+        HttpStatus.CONFLICT,
+      );
+    }
+
     const success = await this.libraryManagerService.switchLibrary(id);
     return {
       success,
@@ -3480,6 +3504,19 @@ export class DatabaseController {
     action: 'move' | 'copy';
     replaceExisting: boolean;
   }) {
+    // Transferring re-inits the shared DB connection (source <-> target). If a
+    // queue task is mid-await it would then write into the wrong library —
+    // refuse while tasks are running. Thrown before the try so the 409 isn't
+    // swallowed and returned as a 200 { success:false }.
+    const queueManager = this.getQueueManager();
+    if (queueManager.hasActiveTasks()) {
+      const running = queueManager.getMainPool().size + (queueManager.getAIPool() ? 1 : 0);
+      throw new HttpException(
+        `Cannot transfer libraries while ${running} task(s) are running — wait for the queue to finish or cancel it`,
+        HttpStatus.CONFLICT,
+      );
+    }
+
     try {
       this.logger.log(
         `Transferring ${body.videoIds?.length || 0} videos to library ${body.targetLibraryId} (${body.action})`,

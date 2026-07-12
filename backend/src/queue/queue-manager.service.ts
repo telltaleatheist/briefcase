@@ -424,6 +424,15 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
   }
 
   /**
+   * True when any task is currently running in either pool. Used to block
+   * external library switch/transfer while a task could be mid-await (which
+   * would swap the shared DB connection out from under it).
+   */
+  hasActiveTasks(): boolean {
+    return this.mainPool.size > 0 || !!this.aiPool;
+  }
+
+  /**
    * Delete a job
    */
   deleteJob(jobId: string): boolean {
@@ -841,6 +850,16 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         setTimeout(() => this.jobQueue.delete(job.id), 5000);
       }
     } catch (error) {
+      // If the throw was caused by a user cancellation (the abort makes the
+      // media op reject), don't report it as a failure. cancelJob already set
+      // status='cancelled' and emitted job.cancelled; just clean up the
+      // cancelled-set entry (avoid a Set leak) and fall through to the finally.
+      if (this.isJobCancelled(job.id)) {
+        this.logger.log(`Job ${job.id} was cancelled during ${task.type} execution (caught abort)`);
+        this.cancelledJobs.delete(job.id);
+        return;
+      }
+
       // If the watchdog already force-failed and finalized this task, don't emit
       // a second failure or clobber state — just fall through to the finally.
       if (activeTask.abandoned) {
@@ -987,6 +1006,17 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         result = await this.mediaOps.importToLibrary(job.videoPath, task.options, taskId);
         if (result.success && result.data) {
           job.videoId = result.data.videoId;
+
+          // Persist the source URL for downloaded videos so future downloads of
+          // the same URL are deduped by findVideoByUrl (the import chain never
+          // sets source_url, so URL-based dedup would otherwise never match).
+          if (job.url && job.videoId) {
+            try {
+              this.databaseService.updateVideoSourceUrl(job.videoId, job.url);
+            } catch (err) {
+              this.logger.warn(`[${taskId}] Failed to persist source_url for video ${job.videoId}: ${err}`);
+            }
+          }
         }
         break;
 

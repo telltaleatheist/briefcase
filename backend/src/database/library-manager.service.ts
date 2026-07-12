@@ -832,7 +832,7 @@ export class LibraryManagerService implements OnModuleInit {
             );
           } else {
             // Insert new video record
-            this.databaseService.insertVideo({
+            const insertResult = this.databaseService.insertVideo({
               id: targetVideoId,
               filename: video.filename as string,
               fileHash: video.file_hash as string,
@@ -843,6 +843,47 @@ export class LibraryManagerService implements OnModuleInit {
               fileSizeBytes: video.file_size_bytes as number | undefined,
               sourceUrl: video.source_url as string | undefined,
             });
+
+            // insertVideo returns { inserted:false, existingId } WITHOUT creating a
+            // row when the target library already holds byte-identical content
+            // (hash dedup) under a different filename. In that case targetVideoId is
+            // a phantom id: attaching transcript/analysis/tags to it would orphan
+            // them, and a "move" would then destroy the source with nothing new on
+            // the target side. Treat this as a skip — keep the source intact and
+            // remove the duplicate copy we just made under the new name.
+            if (!insertResult.inserted) {
+              result.skipped++;
+              this.logger.warn(
+                `Skipping ${video.filename} - target library already has identical content ` +
+                  `(existing id: ${insertResult.existingId}); source left intact`,
+              );
+
+              try {
+                const existingTarget = insertResult.existingId
+                  ? this.databaseService.findVideoById(insertResult.existingId)
+                  : null;
+                const existingPath = existingTarget?.current_path as string | undefined;
+                const isSameAsSource =
+                  path.resolve(targetVideoPath) === path.resolve(sourceVideoPath);
+                const isSameAsExisting =
+                  !!existingPath &&
+                  path.resolve(targetVideoPath) === path.resolve(existingPath);
+                if (
+                  fs.existsSync(targetVideoPath) &&
+                  !isSameAsSource &&
+                  !isSameAsExisting
+                ) {
+                  fs.unlinkSync(targetVideoPath);
+                }
+              } catch (cleanupErr: any) {
+                this.logger.warn(
+                  `Failed to remove orphaned copy at ${targetVideoPath}: ${cleanupErr.message}`,
+                );
+              }
+
+              // Skip metadata copy and any source deletion for this video.
+              continue;
+            }
           }
 
           // Copy transcript if exists
