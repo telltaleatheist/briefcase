@@ -238,8 +238,12 @@ function attemptJsonRepair(jsonStr: string): string {
   // Fix trailing commas before closing braces/brackets
   fixed = fixed.replace(/,\s*([\]}])/g, '$1');
 
-  // Fix unquoted keys (simple cases)
-  fixed = fixed.replace(/([{,]\s*)(\w+)(\s*:)/g, '$1"$2"$3');
+  // NO unquoted-key quoting: the naive /([{,]\s*)(\w+)(\s*:)/ regex also matches
+  // `word:` sequences INSIDE string values (e.g. a summary containing
+  // ", note: see above"), rewriting them and producing JSON that parses into
+  // semantically WRONG data — fabricated-but-passable content, which violates
+  // this file's "fail, don't fabricate" policy. A genuinely unquoted key is rare
+  // from cloud models; let such a response fall through to retry / recordFailure.
 
   // Fix single quotes to double quotes (careful with apostrophes in text)
   // Only do this for key-value patterns

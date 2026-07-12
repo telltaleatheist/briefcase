@@ -226,8 +226,10 @@ export class AIProviderService {
       });
     }
 
-    // o1-family models reject `max_tokens` (400) and require `max_completion_tokens`.
-    const isO1Family = config.model.startsWith('o1');
+    // OpenAI reasoning models (o1/o3/o4/…) reject `max_tokens` (400) and require
+    // `max_completion_tokens`. Match the whole `o<digit>` family, not just o1.
+    // gpt-* models are unaffected and keep using `max_tokens`.
+    const isReasoningModel = /^o\d/.test(config.model);
 
     try {
       const completion = await this.openai.chat.completions.create({
@@ -238,7 +240,7 @@ export class AIProviderService {
             content: prompt,
           },
         ],
-        ...(isO1Family ? { max_completion_tokens: 4096 } : { max_tokens: 4096 }),
+        ...(isReasoningModel ? { max_completion_tokens: 4096 } : { max_tokens: 4096 }),
         // No temperature — omitted for all cloud providers.
       });
 
