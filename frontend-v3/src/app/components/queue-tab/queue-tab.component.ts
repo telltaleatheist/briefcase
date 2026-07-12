@@ -320,12 +320,14 @@ export class QueueTabComponent {
         break;
 
       case 'viewTranscript':
-        // For completed items, emit viewAnalysis with real video ID (parent handles navigation)
-        const transcriptVideos = videos
-          .filter((v: VideoItem) => v.videoId);
-        if (transcriptVideos.length === 1) {
+        // For completed items, emit viewAnalysis with the stripped JOB id
+        // (parent looks the item up by job id, not videoId).
+        const transcriptIds = videos
+          .filter((v: VideoItem) => v.id.startsWith('completed-'))
+          .map((v: VideoItem) => v.id.replace('completed-', ''));
+        if (transcriptIds.length === 1) {
           // Emit as a videoAction to parent so it can navigate
-          this.viewAnalysis.emit(transcriptVideos[0].videoId!);
+          this.viewAnalysis.emit(transcriptIds[0]);
         }
         break;
 

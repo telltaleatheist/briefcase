@@ -1675,9 +1675,11 @@ export class CascadeComponent implements OnDestroy {
 
     this.videoWeeks.set(updatedWeeks);
 
-    // Clear selection for deleted videos
-    const selected = new Set(this.selectedVideos());
-    videoIds.forEach(id => selected.delete(id));
+    // Clear selection for deleted videos. Selection keys are `${weekLabel}|${video.id}`
+    // (see itemId in virtualItems ~:281), so match on the id suffix, not the raw id.
+    const selected = new Set(
+      [...this.selectedVideos()].filter(itemKey => !idsToRemove.has(itemKey.split('|')[1]))
+    );
     this.selectedVideos.set(selected);
   }
 

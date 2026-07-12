@@ -157,6 +157,22 @@ export class WebsocketService implements OnDestroy {
   private componentDownloadErrorCallbacks: ((event: ComponentDownloadError) => void)[] = [];
   private componentDownloadCancelledCallbacks: ((event: ComponentDownloadCancelled) => void)[] = [];
 
+  /**
+   * Guarded dispatch to a list of subscriber callbacks. Each callback runs in
+   * its own try/catch so one throwing consumer can't abort the forEach and
+   * starve the remaining subscribers (or bubble the exception into socket.io's
+   * event dispatch, which would freeze queue updates).
+   */
+  private dispatch<T>(callbacks: ((event: T) => void)[], event: T): void {
+    callbacks.forEach(cb => {
+      try {
+        cb(event);
+      } catch (error) {
+        console.error('[WebsocketService] Subscriber callback threw:', error);
+      }
+    });
+  }
+
   connect(): void {
     if (this.socket) {
       return;
@@ -165,8 +181,9 @@ export class WebsocketService implements OnDestroy {
     this.socket = io(this.SOCKET_URL, {
       transports: ['websocket', 'polling'],
       reconnection: true,
-      reconnectionAttempts: 3,
+      reconnectionAttempts: Infinity,
       reconnectionDelay: 2000,
+      reconnectionDelayMax: 10000,
       timeout: 5000
     });
 
@@ -184,6 +201,16 @@ export class WebsocketService implements OnDestroy {
       console.error('❌ WebSocket connection error:', error);
     });
 
+    // Belt-and-suspenders: if socket.io ever gives up reconnecting, tear down
+    // the dead socket and schedule a fresh connect so recovery is always possible.
+    this.socket.on('reconnect_failed', () => {
+      console.error('❌ WebSocket reconnect failed — scheduling fresh connect');
+      this.connected.set(false);
+      this.socket?.close();
+      this.socket = null;
+      setTimeout(() => this.connect(), 5000);
+    });
+
     // Connection confirmation from server
     this.socket.on('connected', (data) => {
       console.log('✅ Server confirmed connection:', data);
@@ -192,12 +219,12 @@ export class WebsocketService implements OnDestroy {
     // Task events
     this.socket.on('task.started', (event: TaskStarted) => {
       console.log('WS task.started received:', event);
-      this.taskStartedCallbacks.forEach(cb => cb(event));
+      this.dispatch(this.taskStartedCallbacks, event);
     });
 
     this.socket.on('task.progress', (event: TaskProgress) => {
       console.log('WS task.progress received:', event);
-      this.taskProgressCallbacks.forEach(cb => cb(event));
+      this.dispatch(this.taskProgressCallbacks, event);
     });
 
     // Also listen for legacy 'task-progress' event (with hyphen)
@@ -212,17 +239,17 @@ export class WebsocketService implements OnDestroy {
         elapsedMs: event.elapsedMs,
         taskLabel: event.taskLabel
       };
-      this.taskProgressCallbacks.forEach(cb => cb(progress));
+      this.dispatch(this.taskProgressCallbacks, progress);
     });
 
     this.socket.on('task.completed', (event: TaskCompleted) => {
       console.log('WS task.completed received:', event);
-      this.taskCompletedCallbacks.forEach(cb => cb(event));
+      this.dispatch(this.taskCompletedCallbacks, event);
     });
 
     this.socket.on('task.failed', (event: TaskFailed) => {
       console.log('WS task.failed received:', event);
-      this.taskFailedCallbacks.forEach(cb => cb(event));
+      this.dispatch(this.taskFailedCallbacks, event);
     });
 
     // System status
@@ -233,24 +260,24 @@ export class WebsocketService implements OnDestroy {
     // Video events
     this.socket.on('video-renamed', (event: VideoRenamed) => {
       console.log('WS video-renamed received:', event);
-      this.videoRenamedCallbacks.forEach(cb => cb(event));
+      this.dispatch(this.videoRenamedCallbacks, event);
     });
 
     this.socket.on('video-path-updated', (event: VideoPathUpdated) => {
       console.log('WS video-path-updated received:', event);
-      this.videoPathUpdatedCallbacks.forEach(cb => cb(event));
+      this.dispatch(this.videoPathUpdatedCallbacks, event);
     });
 
     // Analysis events
     this.socket.on('analysis-completed', (event: AnalysisCompleted) => {
       console.log('WS analysis-completed received:', event);
-      this.analysisCompletedCallbacks.forEach(cb => cb(event));
+      this.dispatch(this.analysisCompletedCallbacks, event);
     });
 
     // Suggestion events
     this.socket.on('suggestion-rejected', (event: SuggestionRejected) => {
       console.log('WS suggestion-rejected received:', event);
-      this.suggestionRejectedCallbacks.forEach(cb => cb(event));
+      this.dispatch(this.suggestionRejectedCallbacks, event);
     });
 
 
@@ -259,47 +286,47 @@ export class WebsocketService implements OnDestroy {
     // Library/Video events
     this.socket.on('video-added', (event: VideoAdded) => {
       console.log('WS video-added received:', event);
-      this.videoAddedCallbacks.forEach(cb => cb(event));
+      this.dispatch(this.videoAddedCallbacks, event);
     });
 
     // Model download events
     this.socket.on('model.download.progress', (event: ModelDownloadProgress) => {
-      this.modelDownloadProgressCallbacks.forEach(cb => cb(event));
+      this.dispatch(this.modelDownloadProgressCallbacks, event);
     });
 
     this.socket.on('model.download.complete', (event: ModelDownloadComplete) => {
       console.log('WS model.download.complete received:', event);
-      this.modelDownloadCompleteCallbacks.forEach(cb => cb(event));
+      this.dispatch(this.modelDownloadCompleteCallbacks, event);
     });
 
     this.socket.on('model.download.error', (event: ModelDownloadError) => {
       console.log('WS model.download.error received:', event);
-      this.modelDownloadErrorCallbacks.forEach(cb => cb(event));
+      this.dispatch(this.modelDownloadErrorCallbacks, event);
     });
 
     this.socket.on('model.download.cancelled', (event: ModelDownloadCancelled) => {
       console.log('WS model.download.cancelled received:', event);
-      this.modelDownloadCancelledCallbacks.forEach(cb => cb(event));
+      this.dispatch(this.modelDownloadCancelledCallbacks, event);
     });
 
     // Component (binary/model) download events
     this.socket.on('component.download.progress', (event: ComponentDownloadProgress) => {
-      this.componentDownloadProgressCallbacks.forEach(cb => cb(event));
+      this.dispatch(this.componentDownloadProgressCallbacks, event);
     });
 
     this.socket.on('component.download.complete', (event: ComponentDownloadComplete) => {
       console.log('WS component.download.complete received:', event);
-      this.componentDownloadCompleteCallbacks.forEach(cb => cb(event));
+      this.dispatch(this.componentDownloadCompleteCallbacks, event);
     });
 
     this.socket.on('component.download.error', (event: ComponentDownloadError) => {
       console.log('WS component.download.error received:', event);
-      this.componentDownloadErrorCallbacks.forEach(cb => cb(event));
+      this.dispatch(this.componentDownloadErrorCallbacks, event);
     });
 
     this.socket.on('component.download.cancelled', (event: ComponentDownloadCancelled) => {
       console.log('WS component.download.cancelled received:', event);
-      this.componentDownloadCancelledCallbacks.forEach(cb => cb(event));
+      this.dispatch(this.componentDownloadCancelledCallbacks, event);
     });
 
     // Legacy events for backward compatibility
@@ -311,7 +338,7 @@ export class WebsocketService implements OnDestroy {
         message: event.status || event.message,
         type: 'analyze'
       };
-      this.taskProgressCallbacks.forEach(cb => cb(progress));
+      this.dispatch(this.taskProgressCallbacks, progress);
     });
   }
 

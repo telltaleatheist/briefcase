@@ -84,10 +84,14 @@ export class WhisperService {
       manager.cancel();
     }
 
-    // The audio-extraction phase runs on the shared ffmpeg bridge before a
-    // WhisperManager exists — abort it so cancelling during extraction works.
+    // The audio-extraction phase AND the pre-extraction volume/silence probes
+    // run on the shared ffmpeg bridge before a WhisperManager exists — abort
+    // them (all keyed on this jobId) so cancelling during that window kills any
+    // running ffmpeg child. abort() is a no-op if the id isn't active.
     if (this.ffmpeg) {
       this.ffmpeg.abort(`audio-extract-${jobId}`);
+      this.ffmpeg.abort(`volumedetect-${jobId}`);
+      this.ffmpeg.abort(`silencedetect-${jobId}`);
     }
   }
 
@@ -127,7 +131,7 @@ export class WhisperService {
 
       try {
         this.eventService.emitTaskProgress(jobId || '', 'transcribe', 2, 'Checking audio levels...');
-        const startVolume = await this.ffmpeg.getVolumeLevel(videoFile, 0, 10);
+        const startVolume = await this.ffmpeg.getVolumeLevel(videoFile, 0, 10, `volumedetect-${jobId || 'standalone'}`);
         this.logger.log(`First 10s volume: mean=${startVolume.mean.toFixed(1)}dB, max=${startVolume.max.toFixed(1)}dB`);
 
         // If very quiet (< -40dB), run silence detection to skip leading silence
@@ -137,6 +141,7 @@ export class WhisperService {
             silenceThreshold: -45,
             minSilenceDuration: 2,
             maxSearchDuration: 300, // Only search first 5 minutes (faster)
+            processId: `silencedetect-${jobId || 'standalone'}`,
           });
           if (silenceOffset > 5) {
             this.logger.log(`Detected ${silenceOffset.toFixed(1)}s of silence at start, will skip`);
@@ -262,26 +267,22 @@ export class WhisperService {
         this.logger.log(`Transcription completed: ${srtFile}`);
         this.eventService.emitTranscriptionCompleted(srtFile, jobId);
 
-        // Clean up the temporary directory (including extracted audio)
+        // Move the SRT out of the per-job temp dir to a standalone temp file,
+        // then remove the whole dir (extracted audio + any leftovers included).
+        // The caller consumes and unlinks the returned path, so relocating the
+        // SRT lets us delete outputDir here instead of leaking an empty (or
+        // SRT-holding) whisper-<hash> directory in os.tmpdir() every run.
+        const standaloneSrt = path.join(os.tmpdir(), `${path.basename(outputDir)}.srt`);
         try {
-          // Delete the extracted audio file
-          if (audioFile && fs.existsSync(audioFile)) {
-            fs.unlinkSync(audioFile);
-            this.logger.log(`Cleaned up audio file: ${audioFile}`);
-          }
-
-          // Delete any other temp files except the SRT
-          const files = fs.readdirSync(outputDir);
-          for (const file of files) {
-            if (file !== path.basename(srtFile)) {
-              fs.unlinkSync(path.join(outputDir, file));
-            }
-          }
+          fs.copyFileSync(srtFile, standaloneSrt);
+          fs.rmSync(outputDir, { recursive: true, force: true });
+          return standaloneSrt;
         } catch (cleanupError) {
-          this.logger.warn(`Failed to clean up temp directory: ${cleanupError}`);
+          this.logger.warn(`Failed to relocate SRT / clean up temp directory: ${cleanupError}`);
+          // Relocation failed — return the original in-dir SRT so analysis can
+          // still proceed (the dir may linger, but correctness wins).
+          return srtFile;
         }
-
-        return srtFile;
       } else {
         throw new Error('Transcription failed - no SRT file generated');
       }

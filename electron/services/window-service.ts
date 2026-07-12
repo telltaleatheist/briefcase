@@ -54,6 +54,39 @@ export class WindowService {
   }
 
   /**
+   * Update the stored frontend port and, if the main window is already open on
+   * a DIFFERENT port, reload it to the new origin.
+   *
+   * A backend auto-restart can bind a new port via findAvailablePort(). Calling
+   * setFrontendPort() alone only affects future createMainWindow() calls — the
+   * existing renderer keeps its old origin and is stranded on the dead port with
+   * no recovery until a manual reload. When the port actually changes, reload
+   * the live window so it reconnects to the new backend.
+   */
+  reloadMainWindowForPort(port: number): void {
+    const portChanged = port !== this.frontendPort;
+    this.frontendPort = port;
+
+    // No change → don't reload (avoids a pointless flash).
+    if (!portChanged) {
+      return;
+    }
+
+    if (!this.mainWindow || this.mainWindow.isDestroyed()) {
+      return;
+    }
+
+    const host = ServerConfig.config.electronServer.host === '0.0.0.0' ? 'localhost' : ServerConfig.config.electronServer.host;
+    const frontendUrl = `http://${host}:${port}`;
+    log.info(`Reloading main window to new backend port: ${frontendUrl}`);
+    // As with the initial load, an aborted navigation rejects this promise —
+    // swallow it so it never surfaces as an unhandledRejection.
+    this.mainWindow.loadURL(frontendUrl).catch((err) =>
+      log.warn(`Main window reload after backend restart failed/aborted: ${err.message}`)
+    );
+  }
+
+  /**
    * Create the main application window
    */
   createMainWindow(): BrowserWindow {
@@ -91,7 +124,12 @@ export class WindowService {
     const host = ServerConfig.config.electronServer.host === '0.0.0.0' ? 'localhost' : ServerConfig.config.electronServer.host;
     const frontendUrl = `http://${host}:${this.frontendPort}`;
     log.info(`Loading frontend from: ${frontendUrl}`);
-    this.mainWindow.loadURL(frontendUrl);
+    // An aborted navigation (ERR_ABORTED -3) — e.g. Cmd+R or a slow
+    // external-volume startup race — rejects this promise. Swallow it so it
+    // never becomes an unhandledRejection; it is not fatal.
+    this.mainWindow.loadURL(frontendUrl).catch((err) =>
+      log.warn(`Main window navigation failed/aborted: ${err.message}`)
+    );
 
     // Intercept window close event to hide instead of quit
     this.mainWindow.on('close', (event) => {
@@ -199,7 +237,13 @@ export class WindowService {
 
     log.info(`Opening editor window: ${editorUrl}`);
     this.attachEditorFailureHandlers(editorWindow);
-    editorWindow.loadURL(editorUrl);
+    // Closing an editor before it finishes loading rejects with ERR_ABORTED
+    // (-3). Genuine failures are still surfaced by attachEditorFailureHandlers /
+    // did-fail-load; here we only prevent the abort from bubbling up as an
+    // unhandledRejection.
+    editorWindow.loadURL(editorUrl).catch((err) =>
+      log.warn(`Editor window navigation failed/aborted: ${err.message}`)
+    );
 
     // Store reference and assign group number
     this.editorWindows.set(windowId, editorWindow);
@@ -617,7 +661,13 @@ export class WindowService {
     const editorUrl = `http://${host}:${this.frontendPort}/editor?${params.toString()}`;
 
     this.attachEditorFailureHandlers(editorWindow);
-    editorWindow.loadURL(editorUrl);
+    // Closing an editor before it finishes loading rejects with ERR_ABORTED
+    // (-3). Genuine failures are still surfaced by attachEditorFailureHandlers /
+    // did-fail-load; here we only prevent the abort from bubbling up as an
+    // unhandledRejection.
+    editorWindow.loadURL(editorUrl).catch((err) =>
+      log.warn(`Editor window navigation failed/aborted: ${err.message}`)
+    );
 
     // Store reference and assign group number
     this.editorWindows.set(windowId, editorWindow);

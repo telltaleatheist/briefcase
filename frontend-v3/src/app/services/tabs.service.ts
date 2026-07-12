@@ -1,7 +1,7 @@
 import { Injectable, signal, computed } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable } from 'rxjs';
-import { map } from 'rxjs/operators';
+import { Observable, of } from 'rxjs';
+import { map, tap, catchError } from 'rxjs/operators';
 import { getApiBase } from '../core/runtime-url';
 
 export interface VideoTab {
@@ -58,6 +58,11 @@ export class TabsService {
         // Also refresh tabbed video IDs on subscription, alongside the tabs fetch
         this.refreshTabbedVideoIds();
         return tabs;
+      }),
+      catchError(err => {
+        // Don't let a failed reload kill the stream; log and emit a safe no-op.
+        console.error('Failed to load tabs:', err);
+        return of<VideoTab[]>([]);
       })
     );
   }
@@ -101,10 +106,11 @@ export class TabsService {
    */
   createTab(name: string): Observable<{ id: string; name: string }> {
     return this.http.post<{ id: string; name: string }>(`${this.baseUrl}/tabs`, { name }).pipe(
-      map(result => {
-        // Reload tabs to update cache
-        this.loadTabs().subscribe();
-        return result;
+      tap(() => {
+        // Reload tabs to update cache (side effect belongs in tap, not map)
+        this.loadTabs().subscribe({
+          error: (err) => console.error('Failed to reload tabs after createTab:', err)
+        });
       })
     );
   }
@@ -114,10 +120,11 @@ export class TabsService {
    */
   updateTab(id: string, name: string): Observable<{ success: boolean }> {
     return this.http.patch<{ success: boolean }>(`${this.baseUrl}/tabs/${id}`, { name }).pipe(
-      map(result => {
-        // Reload tabs to update cache
-        this.loadTabs().subscribe();
-        return result;
+      tap(() => {
+        // Reload tabs to update cache (side effect belongs in tap, not map)
+        this.loadTabs().subscribe({
+          error: (err) => console.error('Failed to reload tabs after updateTab:', err)
+        });
       })
     );
   }
@@ -127,10 +134,11 @@ export class TabsService {
    */
   deleteTab(id: string): Observable<{ success: boolean }> {
     return this.http.delete<{ success: boolean }>(`${this.baseUrl}/tabs/${id}`).pipe(
-      map(result => {
-        // Reload tabs to update cache
-        this.loadTabs().subscribe();
-        return result;
+      tap(() => {
+        // Reload tabs to update cache (side effect belongs in tap, not map)
+        this.loadTabs().subscribe({
+          error: (err) => console.error('Failed to reload tabs after deleteTab:', err)
+        });
       })
     );
   }
@@ -149,10 +157,11 @@ export class TabsService {
     return this.http.post<AddVideoToTabResponse>(`${this.baseUrl}/tabs/${tabId}/videos`, {
       videoId: videoIds
     }).pipe(
-      map(result => {
-        // Reload tabs to update video counts
-        this.loadTabs().subscribe();
-        return result;
+      tap(() => {
+        // Reload tabs to update video counts (side effect belongs in tap, not map)
+        this.loadTabs().subscribe({
+          error: (err) => console.error('Failed to reload tabs after addVideosToTab:', err)
+        });
       })
     );
   }
@@ -162,10 +171,11 @@ export class TabsService {
    */
   removeVideoFromTab(tabId: string, videoId: string): Observable<{ success: boolean }> {
     return this.http.delete<{ success: boolean }>(`${this.baseUrl}/tabs/${tabId}/videos/${videoId}`).pipe(
-      map(result => {
-        // Reload tabs to update video counts
-        this.loadTabs().subscribe();
-        return result;
+      tap(() => {
+        // Reload tabs to update video counts (side effect belongs in tap, not map)
+        this.loadTabs().subscribe({
+          error: (err) => console.error('Failed to reload tabs after removeVideoFromTab:', err)
+        });
       })
     );
   }

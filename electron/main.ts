@@ -138,11 +138,17 @@ process.on('uncaughtException', (error) => {
   void gracefulExit(1);
 });
 
-// Fire-and-forget async rejections must go through the same graceful exit as
-// uncaught exceptions rather than terminating uncleanly (orphaning the backend).
+// An unhandled promise rejection must NOT tear down the app. In a long-running
+// desktop app used for constant downloads, a routine rejection (e.g. a
+// BrowserWindow.loadURL aborted by ERR_ABORTED on window close, Cmd+R, or a
+// slow-mount startup race) would otherwise force a full gracefulExit — killing
+// the backend and every in-flight download. Match Node's default: log it (and
+// count it for diagnostics) but keep running. Genuinely fatal synchronous
+// faults are still handled by the uncaughtException handler above.
+let unhandledRejectionCount = 0;
 process.on('unhandledRejection', (reason) => {
-  log.error('Unhandled promise rejection:', reason);
-  void gracefulExit(1);
+  unhandledRejectionCount++;
+  log.error(`Unhandled promise rejection (#${unhandledRejectionCount}):`, reason);
 });
 
 // Single instance lock - must be called before app.whenReady()
@@ -250,7 +256,10 @@ app.whenReady().then(async () => {
           const restarted = await backendService.startBackendServer();
           if (restarted) {
             log.info('Backend restarted successfully after unexpected exit');
-            windowService.setFrontendPort(backendService.getBackendPort());
+            // The restart may have bound a NEW port. Reload the existing main
+            // window to the new origin if it changed — otherwise the renderer
+            // is stranded on the dead old port. No-op (no flash) if unchanged.
+            windowService.reloadMainWindowForPort(backendService.getBackendPort());
             trayService.setBackendPort(backendService.getBackendPort());
             for (const win of BrowserWindow.getAllWindows()) {
               if (!win.isDestroyed()) {

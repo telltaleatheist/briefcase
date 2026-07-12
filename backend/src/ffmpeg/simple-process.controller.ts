@@ -11,7 +11,6 @@ import { FfmpegService } from './ffmpeg.service';
 import { MediaEventService } from '../media/media-event.service';
 import { DatabaseService } from '../database/database.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { spawn } from 'child_process';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
@@ -162,44 +161,16 @@ export class SimpleProcessController implements OnModuleInit {
   }
 
   private async getAspectRatio(filePath: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const ffprobe = spawn('ffprobe', [
-        '-v', 'error',
-        '-select_streams', 'v:0',
-        '-show_entries', 'stream=width,height',
-        '-of', 'json',
-        filePath,
-      ]);
-
-      let output = '';
-      ffprobe.stdout.on('data', (data) => {
-        output += data.toString();
-      });
-
-      ffprobe.on('close', (code) => {
-        if (code === 0) {
-          try {
-            const data = JSON.parse(output);
-            const stream = data.streams[0];
-            if (stream && stream.width && stream.height) {
-              const width = stream.width;
-              const height = stream.height;
-              const aspectRatio = width / height;
-              // Return as decimal string with 4 decimal places
-              resolve(aspectRatio.toFixed(4));
-            } else {
-              reject(new Error('Could not determine video dimensions'));
-            }
-          } catch (error) {
-            reject(new Error(`Failed to parse ffprobe output: ${error}`));
-          }
-        } else {
-          reject(new Error(`ffprobe exited with code ${code}`));
-        }
-      });
-
-      ffprobe.on('error', reject);
-    });
+    // Use FfmpegService, which probes with the BUNDLED ffprobe (via FfprobeBridge /
+    // getRuntimePaths). Installed users ship no system binaries, so spawning a bare
+    // 'ffprobe' ENOENTs and 500s the endpoint (Bug 8).
+    const metadata = await this.ffmpegService.getVideoMetadata(filePath);
+    if (!metadata.width || !metadata.height) {
+      throw new Error('Could not determine video dimensions');
+    }
+    const aspectRatio = metadata.width / metadata.height;
+    // Return as decimal string with 4 decimal places
+    return aspectRatio.toFixed(4);
   }
 
   private async runProcessing(videoId: string, filePath: string, jobId: string): Promise<void> {
