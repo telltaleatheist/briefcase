@@ -1,5 +1,6 @@
 // backend/src/media/whisper.service.ts
 import { Injectable, Logger } from '@nestjs/common';
+import { OnEvent } from '@nestjs/event-emitter';
 import { MediaEventService } from './media-event.service';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -9,6 +10,7 @@ import {
   FfprobeBridge,
   getRuntimePaths,
   verifyBinary,
+  type FfmpegProgress,
 } from '../bridges';
 
 @Injectable()
@@ -18,6 +20,8 @@ export class WhisperService {
   private ffprobe: FfprobeBridge;
   /** Resolved ffmpeg path the current bridges were built for; gates lazy rebuild. */
   private ffmpegBinaryPath?: string;
+  /** Active transcriptions keyed by jobId, so a cancelled job aborts its child. */
+  private activeTranscriptions: Map<string, WhisperManager> = new Map();
 
   constructor(
     private readonly eventService: MediaEventService,
@@ -62,6 +66,29 @@ export class WhisperService {
     this.ffmpeg = new FfmpegBridge(ffmpeg);
     this.ffprobe = new FfprobeBridge(ffprobe);
     this.ffmpegBinaryPath = ffmpeg;
+  }
+
+  /**
+   * Abort the transcription for a cancelled/abandoned job. Idempotent and safe
+   * if nothing is running for this jobId (aborts the WhisperManager and the
+   * audio-extraction ffmpeg step, which runs before the manager exists).
+   */
+  @OnEvent('job.cancel-requested')
+  handleJobCancelRequested(payload: { jobId?: string }): void {
+    const jobId = payload?.jobId;
+    if (!jobId) return;
+
+    const manager = this.activeTranscriptions.get(jobId);
+    if (manager) {
+      this.logger.log(`Cancelling transcription for job ${jobId}`);
+      manager.cancel();
+    }
+
+    // The audio-extraction phase runs on the shared ffmpeg bridge before a
+    // WhisperManager exists — abort it so cancelling during extraction works.
+    if (this.ffmpeg) {
+      this.ffmpeg.abort(`audio-extract-${jobId}`);
+    }
   }
 
   async transcribeVideo(videoFile: string, jobId?: string, model?: string, translate?: boolean): Promise<string | null> {
@@ -138,9 +165,13 @@ export class WhisperService {
       const extractMessage = 'Extracting audio...';
       this.eventService.emitTaskProgress(jobId || '', 'transcribe', 5, extractMessage);
 
-      // Set up progress tracking for extraction (5% to 12% range)
+      // Set up progress tracking for extraction (5% to 12% range).
+      // Filter on this job's extraction processId so concurrent transcriptions
+      // sharing the singleton FfmpegBridge don't cross-update each other.
+      const extractProcessId = `audio-extract-${jobId || 'standalone'}`;
       let lastExtractProgress = 5;
-      const extractProgressHandler = (progress: { percent: number }) => {
+      const extractProgressHandler = (progress: FfmpegProgress) => {
+        if (progress.processId !== extractProcessId) return;
         // Map FFmpeg progress (0-100) to our range (5-12)
         const mappedProgress = 5 + Math.round((progress.percent / 100) * 7);
         // Only emit if progress increased (prevent bouncing)
@@ -171,6 +202,9 @@ export class WhisperService {
       this.eventService.emitTaskProgress(jobId || '', 'transcribe', 15, 'Starting transcription...');
 
       const whisperManager = new WhisperManager();
+      if (jobId) {
+        this.activeTranscriptions.set(jobId, whisperManager);
+      }
 
       // Track start time for ETA calculation
       const transcriptionStartTime = Date.now();
@@ -278,6 +312,10 @@ export class WhisperService {
       }
 
       return null;
+    } finally {
+      if (jobId) {
+        this.activeTranscriptions.delete(jobId);
+      }
     }
   }
 

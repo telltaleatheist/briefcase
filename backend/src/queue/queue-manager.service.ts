@@ -145,17 +145,36 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
   }
 
   /**
+   * Abort the running child process behind an active task. Routed by jobId via
+   * the 'job.cancel-requested' event: the downloader, ffmpeg and whisper
+   * services each own their processes and ignore the signal unless they hold one
+   * for this jobId. Aborting is idempotent and safe if the process already
+   * finished (each service no-ops on an unknown jobId/processId).
+   */
+  private abortActiveTask(active: ActiveTask): void {
+    try {
+      this.eventEmitter.emit('job.cancel-requested', {
+        jobId: active.jobId,
+        type: active.type,
+      });
+    } catch (err) {
+      this.logger.warn(`Failed to signal abort for job ${active.jobId}: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+
+  /**
    * Force-fail a task the watchdog has determined is stuck. Mirrors the failure
-   * path in executeTask: mark the job failed, free the pool slot, emit task.failed
-   * on both buses, schedule removal, and kick the queue so waiting work proceeds.
-   *
-   * The underlying subprocess is not force-killed here (this layer holds no kill
-   * handle — cancellation in this codebase is cooperative), but freeing the slot
-   * is what unblocks the queue. `abandoned` guards executeTask from double-emitting
-   * if its promise ever settles later.
+   * path in executeTask: kill the child, mark the job failed, free the pool slot,
+   * emit task.failed on both buses, schedule removal, and kick the queue so
+   * waiting work proceeds. `abandoned` guards executeTask from double-emitting if
+   * its promise ever settles later.
    */
   private failStuckTask(active: ActiveTask, pool: 'main' | 'ai', reason: string): void {
     active.abandoned = true;
+
+    // Kill the stuck child so it stops consuming CPU/network instead of only
+    // freeing the slot and letting it run on orphaned.
+    this.abortActiveTask(active);
 
     const job = this.jobQueue.get(active.jobId);
     if (job && job.status !== 'completed' && job.status !== 'failed' && job.status !== 'cancelled') {
@@ -422,6 +441,14 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
 
     // Add to cancelled set so running tasks can check
     this.cancelledJobs.add(jobId);
+
+    // Abort the running child process (download/transcode/transcription) so it
+    // stops immediately instead of running to completion. Look the active task
+    // up BEFORE freeing the slot below so we still know it's ours to abort.
+    const active = this.mainPool.get(jobId) ?? (this.aiPool?.jobId === jobId ? this.aiPool : undefined);
+    if (active) {
+      this.abortActiveTask(active);
+    }
 
     job.status = 'cancelled';
     job.error = 'Cancelled by user';

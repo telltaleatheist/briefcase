@@ -1,5 +1,6 @@
 // Briefcase/backend/src/downloader/downloader.service.ts
 import { Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
+import { OnEvent } from '@nestjs/event-emitter';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -17,6 +18,10 @@ export class DownloaderService implements OnModuleInit {
   private downloadHistory: HistoryItem[] = [];
   private historyFilePath: string;
   private activeDownloads: Map<string, YtDlpManager> = new Map();
+  // Persistent per-job cancellation flags. Survives across fallback attempts
+  // (each attempt spawns a fresh YtDlpManager) so a cancel that lands between
+  // attempts still stops the chain instead of spawning the next process.
+  private cancelledDownloads: Set<string> = new Set();
 
   constructor(
     private readonly pathService: PathService,
@@ -367,6 +372,10 @@ export class DownloaderService implements OnModuleInit {
    * Main method to download a video from a URL with automatic retry on different clients
    */
   async downloadVideo(options: DownloadOptions, jobId?: string): Promise<DownloadResult> {
+    // Clear any stale cancellation flag from a previous use of this jobId.
+    if (jobId) {
+      this.cancelledDownloads.delete(jobId);
+    }
     try {
       // Transform ABC News URLs if needed
       options.url = await this.transformAbcNewsUrl(options.url);
@@ -759,6 +768,12 @@ export class DownloaderService implements OnModuleInit {
           let lastError: Error | null = null;
 
           for (const clientType of clientMethods) {
+            // Stop before spawning the next client if the job was cancelled
+            // (a cancel can land between attempts, when no manager is registered).
+            if (this.isDownloadCancelled(jobId)) {
+              this.logger.log(`Download cancelled — stopping YouTube client fallback for job ${jobId}`);
+              throw new Error('Download was cancelled');
+            }
             try {
               this.logger.log(`Attempting YouTube download with ${clientType} client...`);
 
@@ -823,6 +838,12 @@ export class DownloaderService implements OnModuleInit {
               lastError = error as Error;
               this.logger.warn(`✗ ${clientType} client failed: ${lastError.message}`);
 
+              // A cancellation must not fall through to the next client — that
+              // would spawn a fresh process right after the user cancelled.
+              if (this.isDownloadCancelled(jobId) || lastError.message.includes('cancelled')) {
+                throw lastError;
+              }
+
               // Continue to next client method
               if (clientType !== clientMethods[clientMethods.length - 1]) {
                 this.logger.log(`Trying next client method...`);
@@ -846,7 +867,7 @@ export class DownloaderService implements OnModuleInit {
             // Each fallback attempts to set outputFile. If all fail, throw original error.
 
             // Fallback 0: Reddit direct download (bypasses yt-dlp entirely)
-            if (!outputFile && options.url.includes('reddit.com')) {
+            if (!outputFile && !this.isDownloadCancelled(jobId) && options.url.includes('reddit.com')) {
               try {
                 this.logger.warn('Reddit yt-dlp failed, waiting 3s then trying direct download via JSON API...');
                 await new Promise(r => setTimeout(r, 3000)); // Let rate-limits cool down
@@ -862,7 +883,7 @@ export class DownloaderService implements OnModuleInit {
 
             // Fallback 1: Vimeo embed extraction (for pages embedding Vimeo players)
             // Triggers on: auth errors, 403 (embed-only videos), format mismatches with vimeo context
-            if (!outputFile) {
+            if (!outputFile && !this.isDownloadCancelled(jobId)) {
               const isVimeoRelated = errorMsg.includes('web client only works when logged-in')
                 || errorMsg.includes('HTTP Error 403')
                 || (errorMsg.includes('Requested format') && errorMsg.toLowerCase().includes('vimeo'));
@@ -910,7 +931,7 @@ export class DownloaderService implements OnModuleInit {
             }
 
             // Fallback 2: m3u8 stream extraction (HLS-based sites)
-            if (!outputFile) {
+            if (!outputFile && !this.isDownloadCancelled(jobId)) {
               try {
                 const m3u8Url = await this.extractM3u8FromPage(options.url);
                 if (m3u8Url) {
@@ -961,7 +982,7 @@ export class DownloaderService implements OnModuleInit {
             }
 
             // Fallback 3: Retry original URL with browser cookies (bypasses CloudFlare/403)
-            if (!outputFile && errorMsg.includes('403')) {
+            if (!outputFile && !this.isDownloadCancelled(jobId) && errorMsg.includes('403')) {
               try {
                 this.logger.log('Got 403 — retrying with browser cookies to bypass site protection...');
 
@@ -1010,7 +1031,7 @@ export class DownloaderService implements OnModuleInit {
             }
 
             // Fallback 4: Generic extractor (last resort — scrapes page for any video/audio)
-            if (!outputFile) {
+            if (!outputFile && !this.isDownloadCancelled(jobId)) {
               try {
                 this.logger.log('All specific fallbacks failed, trying yt-dlp generic extractor...');
 
@@ -1056,6 +1077,12 @@ export class DownloaderService implements OnModuleInit {
               } catch (genericErr) {
                 this.logger.warn(`Generic extractor fallback failed: ${genericErr instanceof Error ? genericErr.message : String(genericErr)}`);
               }
+            }
+
+            // If the job was cancelled mid-chain, propagate the cancellation
+            // rather than a generic download error.
+            if (!outputFile && this.isDownloadCancelled(jobId)) {
+              throw new Error('Download was cancelled');
             }
 
             // If no fallback succeeded, surface a clear error.
@@ -1132,35 +1159,61 @@ export class DownloaderService implements OnModuleInit {
     } catch (error) {
       this.logger.error('Error in downloadVideo:', error);
       const errorMsg = error instanceof Error ? (error as Error).message : 'Unknown error';
-      
+
       this.eventService.emitDownloadFailed(options.url, errorMsg, jobId);
-      
+
       // Clean up active downloads
       if (jobId) {
         this.activeDownloads.delete(jobId);
       }
-      
+
       return {
         success: false,
         error: errorMsg
       };
+    } finally {
+      // Release the per-job cancellation flag once the download has fully
+      // unwound, whatever the outcome.
+      if (jobId) {
+        this.cancelledDownloads.delete(jobId);
+      }
     }
+  }
+
+  /**
+   * Route a queue cancellation to the active download. Idempotent and safe if no
+   * download is running for this jobId.
+   */
+  @OnEvent('job.cancel-requested')
+  handleJobCancelRequested(payload: { jobId?: string }): void {
+    if (payload?.jobId) {
+      this.cancelDownload(payload.jobId);
+    }
+  }
+
+  /** True once this job has been cancelled (persists across fallback attempts). */
+  private isDownloadCancelled(jobId?: string): boolean {
+    return !!jobId && this.cancelledDownloads.has(jobId);
   }
 
   /**
    * Cancel an active download
    */
   cancelDownload(jobId: string): boolean {
+    // Mark cancelled FIRST so the fallback chain breaks out even if the cancel
+    // lands between attempts (when no manager is currently registered).
+    this.cancelledDownloads.add(jobId);
+
     const manager = this.activeDownloads.get(jobId);
-    
+
     if (manager) {
       this.logger.log(`Cancelling download for job ${jobId}`);
       manager.cancel();
       this.activeDownloads.delete(jobId);
-      
+
       return true;
     }
-    
+
     return false;
   }
   
@@ -1435,7 +1488,7 @@ export class DownloaderService implements OnModuleInit {
     jobId?: string,
   ): Promise<string | null> {
     const https = require('https');
-    const { execSync } = require('child_process');
+    const { execFileSync } = require('child_process');
 
     // Step 1: Get video info from JSON API
     const videoInfo = await this.getRedditVideoUrlFromJson(url);
@@ -1463,8 +1516,10 @@ export class DownloaderService implements OnModuleInit {
     const filename = FilenameDateUtil.ensureDatePrefix(sanitizedTitle + '.mp4', videoInfo.uploadDate);
     const outputFile = path.join(downloadFolder, filename);
     const ts = Date.now();
-    const tempVideo = path.join(downloadFolder, `.reddit_video_${ts}.mp4`);
-    const tempAudio = path.join(downloadFolder, `.reddit_audio_${ts}.m4a`);
+    // Random suffix so concurrent same-millisecond Reddit downloads don't collide.
+    const rand = require('crypto').randomBytes(4).toString('hex');
+    const tempVideo = path.join(downloadFolder, `.reddit_video_${ts}_${rand}.mp4`);
+    const tempAudio = path.join(downloadFolder, `.reddit_audio_${ts}_${rand}.m4a`);
 
     this.logger.log(`Reddit direct download: base=${baseUrl}, audio=${audioMp4Url}`);
 
@@ -1543,9 +1598,12 @@ export class DownloaderService implements OnModuleInit {
         this.logger.log('Reddit direct download: all CMAF qualities failed, trying HLS via ffmpeg');
         try {
           const ffmpegPath = this.sharedConfigService.getFfmpegPath() || 'ffmpeg';
-          execSync(
-            `"${ffmpegPath}" -y -i "${videoUrl}" -c copy "${tempVideo}"`,
-            { timeout: 120000, stdio: 'pipe' },
+          // argv form (no shell): avoids quoting/injection issues with paths that
+          // contain " $ ` and the 1MB-maxBuffer ENOBUFS on long muxes.
+          execFileSync(
+            ffmpegPath,
+            ['-y', '-i', videoUrl, '-c', 'copy', tempVideo],
+            { timeout: 120000, stdio: 'pipe', maxBuffer: 64 * 1024 * 1024 },
           );
           if (fs.existsSync(tempVideo) && fs.statSync(tempVideo).size > 0) {
             videoOk = true;
@@ -1573,10 +1631,12 @@ export class DownloaderService implements OnModuleInit {
       const ffmpegPath = this.sharedConfigService.getFfmpegPath() || 'ffmpeg';
 
       if (audioOk) {
-        // Mux video + audio
-        execSync(
-          `"${ffmpegPath}" -y -i "${tempVideo}" -i "${tempAudio}" -c copy -movflags +faststart "${outputFile}"`,
-          { timeout: 60000, stdio: 'pipe' },
+        // Mux video + audio. argv form (no shell): avoids quoting/injection
+        // issues with paths containing " $ ` and the 1MB-maxBuffer ENOBUFS.
+        execFileSync(
+          ffmpegPath,
+          ['-y', '-i', tempVideo, '-i', tempAudio, '-c', 'copy', '-movflags', '+faststart', outputFile],
+          { timeout: 60000, stdio: 'pipe', maxBuffer: 64 * 1024 * 1024 },
         );
       } else {
         // No audio track — just rename video
@@ -1879,15 +1939,16 @@ export class DownloaderService implements OnModuleInit {
   /**
    * Download an image from Reddit directly
    */
-  private async downloadRedditImage(imageUrl: string, title: string, downloadFolder: string, jobId?: string): Promise<DownloadResult> {
+  private async downloadRedditImage(imageUrl: string, title: string, downloadFolder: string, jobId?: string, maxRedirects: number = 5): Promise<DownloadResult> {
     return new Promise((resolve, reject) => {
       try {
         // Create a safe filename from the title using comprehensive sanitizer
         const safeTitle = FilenameDateUtil.sanitizeFilename(title);
-        
+
         // Prepare a filename with current date like the video naming convention
         const date = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-        const ext = path.extname(imageUrl).toLowerCase() || '.jpeg'; // Ensure we have an extension
+        // Strip query params before extracting the extension (e.g. .jpg?width=640).
+        const ext = path.extname(imageUrl.split('?')[0]).toLowerCase() || '.jpeg';
         const filename = `${date} ${safeTitle}${ext}`;
         const outputPath = path.join(downloadFolder, filename);
         
@@ -1907,21 +1968,32 @@ export class DownloaderService implements OnModuleInit {
           // Handle redirects
           if (response.statusCode === 301 || response.statusCode === 302) {
             const redirectUrl = response.headers.location;
-            this.logger.log(`Following redirect to: ${redirectUrl}`);
             file.close();
-            
-            // Try again with the new URL
-            this.downloadRedditImage(redirectUrl, title, downloadFolder, jobId)
+            try { fs.unlinkSync(outputPath); } catch {}
+            response.resume(); // drain the redirect body so the socket frees
+
+            if (!redirectUrl || maxRedirects <= 0) {
+              const errorMsg = redirectUrl ? 'Too many redirects' : 'Redirect with no location header';
+              this.logger.error(`Reddit image redirect failed: ${errorMsg}`);
+              this.eventService.emitDownloadFailed(imageUrl, errorMsg, jobId);
+              reject({ success: false, error: errorMsg });
+              return;
+            }
+
+            // Try again with the new URL (decrementing the redirect budget)
+            this.logger.log(`Following redirect to: ${redirectUrl}`);
+            this.downloadRedditImage(redirectUrl, title, downloadFolder, jobId, maxRedirects - 1)
               .then(resolve)
               .catch(reject);
             return;
           }
-          
+
           // Check if we got a successful response
           if (response.statusCode !== 200) {
             file.close();
             fs.unlinkSync(outputPath); // Clean up the empty file
-            
+            response.resume(); // drain the undelivered body so the socket frees
+
             const errorMsg = `HTTP error: ${response.statusCode} ${response.statusMessage}`;
             this.logger.error(errorMsg);
             this.eventService.emitDownloadFailed(imageUrl, errorMsg, jobId);
@@ -2050,7 +2122,7 @@ export class DownloaderService implements OnModuleInit {
   /**
    * Download an image from Twitter/X directly
    */
-  private async downloadTwitterImage(imageUrl: string, title: string, downloadFolder: string, jobId?: string): Promise<DownloadResult> {
+  private async downloadTwitterImage(imageUrl: string, title: string, downloadFolder: string, jobId?: string, maxRedirects: number = 5): Promise<DownloadResult> {
     return new Promise((resolve, reject) => {
       try {
         // Create a safe filename from the title using comprehensive sanitizer
@@ -2089,11 +2161,21 @@ export class DownloaderService implements OnModuleInit {
           // Handle redirects
           if (response.statusCode === 301 || response.statusCode === 302) {
             const redirectUrl = response.headers.location;
-            this.logger.log(`Following redirect to: ${redirectUrl}`);
             file.close();
+            try { fs.unlinkSync(outputPath); } catch {}
+            response.resume(); // drain the redirect body so the socket frees
 
-            // Try again with the new URL
-            this.downloadTwitterImage(redirectUrl, title, downloadFolder, jobId)
+            if (!redirectUrl || maxRedirects <= 0) {
+              const errorMsg = redirectUrl ? 'Too many redirects' : 'Redirect with no location header';
+              this.logger.error(`Twitter image redirect failed: ${errorMsg}`);
+              this.eventService.emitDownloadFailed(imageUrl, errorMsg, jobId);
+              reject({ success: false, error: errorMsg });
+              return;
+            }
+
+            // Try again with the new URL (decrementing the redirect budget)
+            this.logger.log(`Following redirect to: ${redirectUrl}`);
+            this.downloadTwitterImage(redirectUrl, title, downloadFolder, jobId, maxRedirects - 1)
               .then(resolve)
               .catch(reject);
             return;
@@ -2103,6 +2185,7 @@ export class DownloaderService implements OnModuleInit {
           if (response.statusCode !== 200) {
             file.close();
             fs.unlinkSync(outputPath); // Clean up the empty file
+            response.resume(); // drain the undelivered body so the socket frees
 
             const errorMsg = `HTTP error: ${response.statusCode} ${response.statusMessage}`;
             this.logger.error(errorMsg);

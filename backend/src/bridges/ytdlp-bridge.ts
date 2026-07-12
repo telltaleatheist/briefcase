@@ -211,13 +211,18 @@ export class YtDlpBridge extends EventEmitter {
 
       let stdoutBuffer = '';
       let stderrBuffer = '';
+      let stdoutLineBuffer = '';
 
-      // Process stdout for progress
+      // Process stdout for progress. Carry the partial trailing line across
+      // chunks so a progress line split mid-buffer isn't parsed (and dropped)
+      // as two broken halves.
       proc.stdout?.on('data', (data: Buffer) => {
         const chunk = data.toString();
         stdoutBuffer += chunk;
 
-        const lines = chunk.split('\n');
+        stdoutLineBuffer += chunk;
+        const lines = stdoutLineBuffer.split('\n');
+        stdoutLineBuffer = lines.pop() ?? '';
         for (const line of lines) {
           if (line.trim()) {
             this.parseProgress(processId, line);
@@ -476,7 +481,17 @@ export class YtDlpBridge extends EventEmitter {
         processInfo.process.kill('SIGKILL');
       }
     } else {
-      processInfo.process.kill('SIGTERM');
+      const proc = processInfo.process;
+      proc.kill('SIGTERM');
+      // Escalate to SIGKILL if the process hasn't exited shortly after SIGTERM.
+      // The 'close' handler removes it from activeProcesses on exit, so a still
+      // present entry means it's hung.
+      setTimeout(() => {
+        if (this.activeProcesses.has(processId)) {
+          this.logger.warn(`[${processId}] Still running after SIGTERM; sending SIGKILL`);
+          try { proc.kill('SIGKILL'); } catch { /* already exited */ }
+        }
+      }, 5000).unref();
     }
 
     return true;

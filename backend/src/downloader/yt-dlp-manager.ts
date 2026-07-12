@@ -159,8 +159,8 @@ export class YtDlpManager extends EventEmitter {
       throw new Error('No input URL specified.');
     }
 
-    // Reset abort flag
-    this.aborted = false;
+    // Do NOT reset the abort flag here: once cancel() sets it, a retry/fallback
+    // must stay cancelled. It is cleared only by reset() (fresh reuse).
 
     // Build additional args from options
     const additionalArgs: string[] = [];
@@ -221,8 +221,8 @@ export class YtDlpManager extends EventEmitter {
       throw new Error('No input URL specified.');
     }
 
-    // Reset abort flag
-    this.aborted = false;
+    // Do NOT reset the abort flag here: once cancel() sets it, a retry/fallback
+    // must stay cancelled. It is cleared only by reset() (fresh reuse).
 
     // Build additional args from options
     const additionalArgs: string[] = [];

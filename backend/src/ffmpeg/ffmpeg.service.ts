@@ -1,6 +1,6 @@
 // Briefcase/backend/src/ffmpeg/ffmpeg.service.ts
 import { Injectable, Logger } from '@nestjs/common';
-import { EventEmitter2 } from '@nestjs/event-emitter';
+import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import * as path from 'path';
 import * as fs from 'fs';
 import { VideoMetadata } from '../common/interfaces/download.interface';
@@ -25,6 +25,8 @@ import {
 @Injectable()
 export class FfmpegService {
   private lastReportedProgress: Map<string, number> = new Map();
+  /** Active encode processIds keyed by jobId, so a cancelled job aborts its child. */
+  private activeJobProcesses: Map<string, string> = new Map();
   private readonly logger = new Logger(FfmpegService.name);
   private ffmpeg: FfmpegBridge;
   private ffprobe: FfprobeBridge;
@@ -84,6 +86,21 @@ export class FfmpegService {
     this.ffmpegBinaryPath = ffmpeg;
     this.logger.log(`FFmpeg path: ${ffmpeg}`);
     this.logger.log(`FFprobe path: ${ffprobe}`);
+  }
+
+  /**
+   * Abort the encode for a cancelled/abandoned job. Idempotent and safe if no
+   * encode is running for this jobId (the bridge no-ops on an unknown process).
+   */
+  @OnEvent('job.cancel-requested')
+  handleJobCancelRequested(payload: { jobId?: string }): void {
+    const jobId = payload?.jobId;
+    if (!jobId) return;
+    const processId = this.activeJobProcesses.get(jobId);
+    if (processId && this.ffmpeg) {
+      this.logger.log(`Aborting ffmpeg process ${processId} for cancelled job ${jobId}`);
+      this.ffmpeg.abort(processId);
+    }
   }
 
   async getVideoMetadata(videoPath: string): Promise<VideoMetadata> {
@@ -162,6 +179,7 @@ export class FfmpegService {
     const fileName = path.basename(videoFile);
     let tempInputFile: string | undefined;
     let tempOutputFile: string | undefined;
+    let progressKey = '';
 
     try {
       this.ensureFfmpegReady();
@@ -197,6 +215,7 @@ export class FfmpegService {
 
       // STEP 2: Probe the temp file for metadata
       const metadata = await this.ffprobe.probe(tempInputFile);
+      const hasAudio = !!metadata.streams?.some((s) => s.codec_type === 'audio');
       const videoAnalysis = this.analyzeVideoMetadata(metadata);
 
       if (!videoAnalysis.isValid) {
@@ -215,14 +234,14 @@ export class FfmpegService {
       // Create output path in temp directory
       const fileBase = path.parse(fileName).name;
       tempOutputFile = `${tempInputFile}_reencoded.mov`;
-      const progressKey = tempOutputFile;
+      progressKey = tempOutputFile;
 
       this.lastReportedProgress.set(progressKey, 0);
 
       this.logger.log(`ASPECT RATIO FIX: requested=${options?.fixAspectRatio}, videoNeeds=${needsAspectRatioFix}, will apply=${options?.fixAspectRatio}`);
 
       // Build args using temp files
-      const args = this.buildFfmpegArgs(tempInputFile, tempOutputFile, needsAspectRatioFix, selectedEncoder, options);
+      const args = this.buildFfmpegArgs(tempInputFile, tempOutputFile, needsAspectRatioFix, selectedEncoder, options, hasAudio);
 
       if (taskType && jobId) {
         this.eventService.emitTaskProgress(jobId, taskType, 5, 'Starting video re-encoding...');
@@ -262,6 +281,9 @@ export class FfmpegService {
       };
 
       this.ffmpeg.on('progress', progressHandler);
+      if (jobId) {
+        this.activeJobProcesses.set(jobId, processId);
+      }
 
       try {
         const result = await this.ffmpeg.run(args, { duration, processId });
@@ -339,6 +361,13 @@ export class FfmpegService {
         this.eventService.emitTaskProgress(jobId, taskType, -1, `Unexpected error: ${error.message}`);
       }
       return null;
+    } finally {
+      if (jobId) {
+        this.activeJobProcesses.delete(jobId);
+      }
+      if (progressKey) {
+        this.lastReportedProgress.delete(progressKey);
+      }
     }
   }
 
@@ -399,7 +428,8 @@ export class FfmpegService {
       rmsNormalizationLevel?: number,
       useCompression?: boolean,
       compressionLevel?: number
-    }
+    },
+    hasAudio: boolean = true
   ): string[] {
     let filterComplex = '';
 
@@ -414,7 +444,11 @@ export class FfmpegService {
 
     const mapOptions = ['-map', '[v]'];
 
-    if (options?.useRmsNormalization || options?.useCompression) {
+    // Only build the audio filtergraph when the source actually has an audio
+    // stream — referencing [0:a] on a video with no audio aborts ffmpeg at
+    // filtergraph configuration. With no audio we fall through to the optional
+    // `-map 0:a?` below, which is a no-op when absent.
+    if ((options?.useRmsNormalization || options?.useCompression) && hasAudio) {
       let audioFilter = '';
 
       if (options?.useRmsNormalization) {
@@ -764,6 +798,9 @@ export class FfmpegService {
       };
 
       this.ffmpeg.on('progress', progressHandler);
+      if (jobId) {
+        this.activeJobProcesses.set(jobId, processId);
+      }
 
       try {
         const result = await this.ffmpeg.run(args, { duration, processId });
@@ -777,6 +814,9 @@ export class FfmpegService {
         }
       } finally {
         this.ffmpeg.off('progress', progressHandler);
+        if (jobId) {
+          this.activeJobProcesses.delete(jobId);
+        }
       }
 
       this.logger.log(`FFmpeg completed, verifying output: ${tempOutputFile}`);
