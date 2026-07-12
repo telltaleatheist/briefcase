@@ -165,8 +165,9 @@ export class WebsocketService implements OnDestroy {
     this.socket = io(this.SOCKET_URL, {
       transports: ['websocket', 'polling'],
       reconnection: true,
-      reconnectionAttempts: 3,
+      reconnectionAttempts: Infinity,
       reconnectionDelay: 2000,
+      reconnectionDelayMax: 10000,
       timeout: 5000
     });
 
@@ -182,6 +183,16 @@ export class WebsocketService implements OnDestroy {
 
     this.socket.on('connect_error', (error) => {
       console.error('❌ WebSocket connection error:', error);
+    });
+
+    // Belt-and-suspenders: if socket.io ever gives up reconnecting, tear down
+    // the dead socket and schedule a fresh connect so recovery is always possible.
+    this.socket.on('reconnect_failed', () => {
+      console.error('❌ WebSocket reconnect failed — scheduling fresh connect');
+      this.connected.set(false);
+      this.socket?.close();
+      this.socket = null;
+      setTimeout(() => this.connect(), 5000);
     });
 
     // Connection confirmation from server
