@@ -679,8 +679,8 @@ export class LibraryManagerService implements OnModuleInit {
 
   /**
    * Whether two files are byte-identical for transfer purposes: same size AND
-   * same content hash (matching DatabaseService.hashFile's first-1MB SHA-256,
-   * the identity notion this app already uses for dedup). Returns false if
+   * same content hash (DatabaseService.hashFile, the app's canonical file_hash
+   * used for dedup). Returns false if
    * either file is missing or unreadable — callers must treat "not identical"
    * as "do the copy / don't delete the source".
    */

@@ -1018,47 +1018,12 @@ export class FileScannerService {
   }
 
   /**
-   * Quick hash using file size + samples from beginning/middle/end
-   * Much faster and memory-efficient than hashing entire file
+   * Quick hash using file size + samples from beginning/middle/end.
+   * Delegates to DatabaseService.hashFile, the single canonical file_hash
+   * algorithm, so every write/compare of file_hash stays consistent.
    */
   public async quickHashFile(filePath: string, fileSize: number): Promise<string> {
-    const hash = crypto.createHash('sha256');
-
-    // Add file size to hash
-    hash.update(fileSize.toString());
-
-    // Sample from beginning, middle, and end of file
-    const sampleSize = Math.min(this.HASH_SAMPLE_SIZE, Math.floor(fileSize / 3));
-
-    if (fileSize <= this.HASH_SAMPLE_SIZE * 3) {
-      // Small file - just hash the whole thing
-      const buffer = fs.readFileSync(filePath);
-      hash.update(buffer);
-    } else {
-      // Large file - sample three sections
-      const fd = fs.openSync(filePath, 'r');
-      try {
-        const buffer = Buffer.allocUnsafe(sampleSize);
-
-        // Beginning
-        fs.readSync(fd, buffer, 0, sampleSize, 0);
-        hash.update(buffer);
-
-        // Middle
-        const middlePos = Math.floor(fileSize / 2) - Math.floor(sampleSize / 2);
-        fs.readSync(fd, buffer, 0, sampleSize, middlePos);
-        hash.update(buffer);
-
-        // End
-        const endPos = fileSize - sampleSize;
-        fs.readSync(fd, buffer, 0, sampleSize, endPos);
-        hash.update(buffer);
-      } finally {
-        fs.closeSync(fd);
-      }
-    }
-
-    return hash.digest('hex');
+    return this.databaseService.hashFile(filePath, fileSize);
   }
 
   /**

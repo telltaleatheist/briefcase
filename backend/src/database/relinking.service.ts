@@ -351,46 +351,12 @@ export class RelinkingService {
   }
 
   /**
-   * Quick hash using file size + samples from beginning/middle/end
-   * MUST match FileScannerService.quickHashFile() algorithm exactly
-   * This is critical for matching existing database entries created during import
+   * Quick hash using file size + samples from beginning/middle/end.
+   * Delegates to DatabaseService.hashFile, the single canonical file_hash
+   * algorithm, so relink matching stays consistent with import/scan.
    */
   private async quickHashFile(filePath: string, fileSize: number): Promise<string> {
-    const hash = crypto.createHash('sha256');
-
-    // Add file size to hash (CRITICAL - matches import algorithm)
-    hash.update(fileSize.toString());
-
-    // Sample from beginning, middle, and end of file
-    const sampleSize = Math.min(this.HASH_SAMPLE_SIZE, Math.floor(fileSize / 3));
-
-    if (fileSize <= this.HASH_SAMPLE_SIZE * 3) {
-      // Small file - just hash the whole thing
-      const buffer = fs.readFileSync(filePath);
-      hash.update(buffer);
-    } else {
-      // Large file - sample three sections
-      const fd = fs.openSync(filePath, 'r');
-      try {
-        const buffer = Buffer.allocUnsafe(sampleSize);
-
-        // Beginning
-        fs.readSync(fd, buffer, 0, sampleSize, 0);
-        hash.update(buffer);
-
-        // Middle
-        fs.readSync(fd, buffer, 0, sampleSize, Math.floor(fileSize / 2) - Math.floor(sampleSize / 2));
-        hash.update(buffer);
-
-        // End
-        fs.readSync(fd, buffer, 0, sampleSize, fileSize - sampleSize);
-        hash.update(buffer);
-      } finally {
-        fs.closeSync(fd);
-      }
-    }
-
-    return hash.digest('hex');
+    return this.databaseService.hashFile(filePath, fileSize);
   }
 
   /**

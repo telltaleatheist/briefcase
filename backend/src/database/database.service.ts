@@ -2699,24 +2699,44 @@ export class DatabaseService {
   }
 
   /**
-   * Generate SHA-256 hash of first 1MB of a file
-   * Used for video file identification (handles renames, detects duplicates)
+   * Canonical file_hash: SHA-256 of the file size plus 1MB samples taken from
+   * the beginning, middle, and end (whole file when it is small). This is the
+   * single algorithm used everywhere file_hash is written or compared —
+   * FileScannerService.quickHashFile and RelinkingService.quickHashFile
+   * delegate here so scan-added and import-added videos share one identity.
    *
-   * @param filePath - Absolute path to the video file
+   * @param filePath - Absolute path to the media file
+   * @param fileSize - Optional pre-computed size; stat'd from disk when omitted
    * @returns SHA-256 hash string
    */
-  async hashFile(filePath: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const hash = crypto.createHash('sha256');
-      const stream = fs.createReadStream(filePath, {
-        start: 0,
-        end: 1024 * 1024, // First 1MB only
-      });
+  async hashFile(filePath: string, fileSize?: number): Promise<string> {
+    const size = fileSize ?? fs.statSync(filePath).size;
+    const SAMPLE_SIZE = 1024 * 1024; // 1MB sample
+    const hash = crypto.createHash('sha256');
 
-      stream.on('data', (chunk) => hash.update(chunk));
-      stream.on('end', () => resolve(hash.digest('hex')));
-      stream.on('error', reject);
-    });
+    hash.update(size.toString());
+
+    if (size <= SAMPLE_SIZE * 3) {
+      // Small file - hash the whole thing
+      hash.update(fs.readFileSync(filePath));
+    } else {
+      // Large file - sample beginning, middle, and end
+      const sampleSize = Math.min(SAMPLE_SIZE, Math.floor(size / 3));
+      const fd = fs.openSync(filePath, 'r');
+      try {
+        const buffer = Buffer.allocUnsafe(sampleSize);
+        fs.readSync(fd, buffer, 0, sampleSize, 0);
+        hash.update(buffer);
+        fs.readSync(fd, buffer, 0, sampleSize, Math.floor(size / 2) - Math.floor(sampleSize / 2));
+        hash.update(buffer);
+        fs.readSync(fd, buffer, 0, sampleSize, size - sampleSize);
+        hash.update(buffer);
+      } finally {
+        fs.closeSync(fd);
+      }
+    }
+
+    return hash.digest('hex');
   }
 
   /**
