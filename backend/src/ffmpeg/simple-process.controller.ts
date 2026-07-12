@@ -192,10 +192,13 @@ export class SimpleProcessController implements OnModuleInit {
         this.databaseService.updateVideoPath(videoId, outputFile);
         this.databaseService.updateVideoFilename(videoId, newFilename);
         this.logger.log(`Updated database path for ${videoId}: ${outputFile}`);
-
-        // Emit event so frontend knows the video was updated
-        this.mediaEventService.emitVideoPathUpdated(videoId, outputFile, filePath);
       }
+
+      // Emit event so frontend knows the video was updated. Fire even when the path
+      // is unchanged (in-place reencode) — the file's bytes changed on disk, and the
+      // handler cache-busts the stream URL by videoId, so an open player reloads the
+      // new content instead of showing the stale bytes until a full page reload.
+      this.mediaEventService.emitVideoPathUpdated(videoId, outputFile, filePath);
 
       // Emit completion event via WebSocket
       this.mediaEventService.emitProcessingProgress(100, 'Video processing completed', jobId);
@@ -225,10 +228,13 @@ export class SimpleProcessController implements OnModuleInit {
         this.databaseService.updateVideoPath(videoId, outputFile);
         this.databaseService.updateVideoFilename(videoId, newFilename);
         this.logger.log(`Updated database path for ${videoId}: ${outputFile}`);
-
-        // Emit event so frontend knows the video was updated
-        this.mediaEventService.emitVideoPathUpdated(videoId, outputFile, filePath);
       }
+
+      // Emit event so frontend knows the video was updated. Fire even when the path
+      // is unchanged (in-place reencode) — the file's bytes changed on disk, and the
+      // handler cache-busts the stream URL by videoId, so an open player reloads the
+      // new content instead of showing the stale bytes until a full page reload.
+      this.mediaEventService.emitVideoPathUpdated(videoId, outputFile, filePath);
 
       // Emit completion event via WebSocket
       this.mediaEventService.emitProcessingProgress(100, 'Audio normalization completed', jobId);
