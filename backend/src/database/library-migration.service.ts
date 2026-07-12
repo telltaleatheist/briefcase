@@ -55,13 +55,28 @@ export class LibraryMigrationService {
     this.logger.log(`Creating backup: ${backupPath}`);
     fs.copyFileSync(oldDatabasePath, backupPath);
 
-    // Copy database to new location
-    this.logger.log(`Copying database to: ${newDatabasePath}`);
-    fs.copyFileSync(oldDatabasePath, newDatabasePath);
+    // Copy + convert into a temp file, then atomically rename into place. If
+    // anything fails mid-conversion the final path is never created, so the
+    // needsMigration/existsSync guard can never mistake a half-converted DB for
+    // a completed migration.
+    const tempDatabasePath = `${newDatabasePath}.migrating-${Date.now()}`;
+    this.logger.log(`Copying database to temp location: ${tempDatabasePath}`);
+    fs.copyFileSync(oldDatabasePath, tempDatabasePath);
 
-    // Convert paths from absolute to relative
-    this.logger.log(`Converting paths to relative...`);
-    await this.convertPathsToRelative(newDatabasePath, clipsFolderPath);
+    try {
+      // Convert paths from absolute to relative
+      this.logger.log(`Converting paths to relative...`);
+      await this.convertPathsToRelative(tempDatabasePath, clipsFolderPath);
+
+      // Atomically move the fully-converted DB into place (same directory, so
+      // rename is atomic on the target filesystem).
+      fs.renameSync(tempDatabasePath, newDatabasePath);
+    } catch (error) {
+      try {
+        fs.unlinkSync(tempDatabasePath);
+      } catch {}
+      throw error;
+    }
 
     this.logger.log(`Migration complete for library ${libraryId}`);
     this.logger.log(`  New DB: ${newDatabasePath}`);
@@ -96,78 +111,85 @@ export class LibraryMigrationService {
 
       const updateStmt = db.prepare('UPDATE videos SET current_path = ? WHERE id = ?');
 
-      // Process each video
-      for (const video of videos) {
-        const currentPath = video.current_path;
+      // Apply every path rewrite (videos + saved_links) in one transaction so a
+      // failure part-way can never leave the DB with a mix of relative and
+      // absolute paths.
+      const applyConversions = db.transaction(() => {
+        // Process each video
+        for (const video of videos) {
+          const currentPath = video.current_path;
 
-        // Skip if already relative
-        if (!path.isAbsolute(currentPath)) {
-          alreadyRelativeCount++;
-          continue;
-        }
-
-        // Convert to relative path
-        const normalizedAbsolute = path.normalize(currentPath);
-        const normalizedClipsFolder = path.normalize(clipsFolderPath);
-
-        // Check if path is inside clips folder
-        if (normalizedAbsolute.startsWith(normalizedClipsFolder)) {
-          const relativePath = path.relative(normalizedClipsFolder, normalizedAbsolute);
-          updateStmt.run(relativePath, video.id);
-          convertedCount++;
-
-          if (convertedCount <= 5) {
-            this.logger.log(`  Converted: ${currentPath} -> ${relativePath}`);
+          // Skip if already relative
+          if (!path.isAbsolute(currentPath)) {
+            alreadyRelativeCount++;
+            continue;
           }
-        } else {
-          // Path is outside clips folder - keep as absolute (shouldn't happen normally)
-          this.logger.warn(`  Path outside clips folder (keeping absolute): ${currentPath}`);
-          outsideClipsFolderCount++;
-        }
-      }
 
-      // Also convert paths in saved_links table if it exists
-      try {
-        const savedLinks = db.prepare('SELECT id, download_path, thumbnail_path FROM saved_links').all() as Array<{
-          id: string;
-          download_path: string | null;
-          thumbnail_path: string | null;
-        }>;
+          // Convert to relative path
+          const normalizedAbsolute = path.normalize(currentPath);
+          const normalizedClipsFolder = path.normalize(clipsFolderPath);
 
-        const updateLinkStmt = db.prepare(
-          'UPDATE saved_links SET download_path = ?, thumbnail_path = ? WHERE id = ?'
-        );
+          // Check if path is inside clips folder
+          if (normalizedAbsolute.startsWith(normalizedClipsFolder)) {
+            const relativePath = path.relative(normalizedClipsFolder, normalizedAbsolute);
+            updateStmt.run(relativePath, video.id);
+            convertedCount++;
 
-        for (const link of savedLinks) {
-          let downloadPath = link.download_path;
-          let thumbnailPath = link.thumbnail_path;
-
-          // Convert download_path if absolute
-          if (downloadPath && path.isAbsolute(downloadPath)) {
-            const normalizedAbsolute = path.normalize(downloadPath);
-            const normalizedClipsFolder = path.normalize(clipsFolderPath);
-            if (normalizedAbsolute.startsWith(normalizedClipsFolder)) {
-              downloadPath = path.relative(normalizedClipsFolder, normalizedAbsolute);
+            if (convertedCount <= 5) {
+              this.logger.log(`  Converted: ${currentPath} -> ${relativePath}`);
             }
+          } else {
+            // Path is outside clips folder - keep as absolute (shouldn't happen normally)
+            this.logger.warn(`  Path outside clips folder (keeping absolute): ${currentPath}`);
+            outsideClipsFolderCount++;
           }
-
-          // Convert thumbnail_path if absolute
-          if (thumbnailPath && path.isAbsolute(thumbnailPath)) {
-            const normalizedAbsolute = path.normalize(thumbnailPath);
-            const normalizedClipsFolder = path.normalize(clipsFolderPath);
-            if (normalizedAbsolute.startsWith(normalizedClipsFolder)) {
-              thumbnailPath = path.relative(normalizedClipsFolder, normalizedAbsolute);
-            }
-          }
-
-          updateLinkStmt.run(downloadPath, thumbnailPath, link.id);
         }
 
-        this.logger.log(`Converted paths in ${savedLinks.length} saved links`);
-      } catch (error) {
-        // saved_links table might not exist in older databases
-        this.logger.log('No saved_links table found (this is OK for older databases)');
-      }
+        // Also convert paths in saved_links table if it exists. A missing table
+        // is caught here so it does not abort (roll back) the video conversions.
+        try {
+          const savedLinks = db.prepare('SELECT id, download_path, thumbnail_path FROM saved_links').all() as Array<{
+            id: string;
+            download_path: string | null;
+            thumbnail_path: string | null;
+          }>;
+
+          const updateLinkStmt = db.prepare(
+            'UPDATE saved_links SET download_path = ?, thumbnail_path = ? WHERE id = ?'
+          );
+
+          for (const link of savedLinks) {
+            let downloadPath = link.download_path;
+            let thumbnailPath = link.thumbnail_path;
+
+            // Convert download_path if absolute
+            if (downloadPath && path.isAbsolute(downloadPath)) {
+              const normalizedAbsolute = path.normalize(downloadPath);
+              const normalizedClipsFolder = path.normalize(clipsFolderPath);
+              if (normalizedAbsolute.startsWith(normalizedClipsFolder)) {
+                downloadPath = path.relative(normalizedClipsFolder, normalizedAbsolute);
+              }
+            }
+
+            // Convert thumbnail_path if absolute
+            if (thumbnailPath && path.isAbsolute(thumbnailPath)) {
+              const normalizedAbsolute = path.normalize(thumbnailPath);
+              const normalizedClipsFolder = path.normalize(clipsFolderPath);
+              if (normalizedAbsolute.startsWith(normalizedClipsFolder)) {
+                thumbnailPath = path.relative(normalizedClipsFolder, normalizedAbsolute);
+              }
+            }
+
+            updateLinkStmt.run(downloadPath, thumbnailPath, link.id);
+          }
+
+          this.logger.log(`Converted paths in ${savedLinks.length} saved links`);
+        } catch (error) {
+          // saved_links table might not exist in older databases
+          this.logger.log('No saved_links table found (this is OK for older databases)');
+        }
+      });
+      applyConversions();
 
       this.logger.log(`Path conversion complete:`);
       this.logger.log(`  - Converted: ${convertedCount}`);

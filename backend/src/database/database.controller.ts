@@ -501,10 +501,14 @@ export class DatabaseController {
       const totalCount = videos.length;
 
       // Apply pagination if limit/offset provided
-      const limitNum = limit ? parseInt(limit, 10) : undefined;
-      const offsetNum = offset ? parseInt(offset, 10) : 0;
+      const parsedLimit = limit ? parseInt(limit, 10) : undefined;
+      const limitNum = parsedLimit !== undefined && Number.isFinite(parsedLimit) && parsedLimit > 0
+        ? parsedLimit
+        : undefined;
+      const parsedOffset = offset ? parseInt(offset, 10) : 0;
+      const offsetNum = Number.isFinite(parsedOffset) && parsedOffset > 0 ? parsedOffset : 0;
 
-      if (limitNum !== undefined && limitNum > 0) {
+      if (limitNum !== undefined) {
         videos = videos.slice(offsetNum, offsetNum + limitNum);
       }
 
@@ -546,7 +550,8 @@ export class DatabaseController {
     }
 
     try {
-      const limitNum = limit ? parseInt(limit, 10) : 1000;
+      const parsedLimit = limit ? parseInt(limit, 10) : 1000;
+      const limitNum = Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 1000;
       const searchOptions = {
         useSoundex: useSoundex === 'true',
         usePhraseSearch: usePhraseSearch === 'true',
@@ -1336,8 +1341,42 @@ export class DatabaseController {
       if (range) {
         // Handle range request for seeking
         const parts = range.replace(/bytes=/, '').split('-');
-        const start = parseInt(parts[0], 10);
-        const end = parts[1] ? parseInt(parts[1], 10) : Math.min(start + 10 * 1024 * 1024, fileSize - 1);
+        const startStr = parts[0];
+        const endStr = parts[1];
+
+        let start: number;
+        let end: number;
+
+        if (startStr === '') {
+          // Suffix range (bytes=-N): the last N bytes of the file
+          const suffixLength = parseInt(endStr, 10);
+          if (!Number.isFinite(suffixLength) || suffixLength <= 0) {
+            res.writeHead(416, { 'Content-Range': `bytes */${fileSize}` });
+            res.end();
+            return;
+          }
+          start = Math.max(fileSize - suffixLength, 0);
+          end = fileSize - 1;
+        } else {
+          start = parseInt(startStr, 10);
+          if (!Number.isFinite(start) || start >= fileSize) {
+            res.writeHead(416, { 'Content-Range': `bytes */${fileSize}` });
+            res.end();
+            return;
+          }
+          end = endStr ? parseInt(endStr, 10) : Math.min(start + 10 * 1024 * 1024, fileSize - 1);
+          if (!Number.isFinite(end)) {
+            end = Math.min(start + 10 * 1024 * 1024, fileSize - 1);
+          }
+          end = Math.min(end, fileSize - 1);
+        }
+
+        if (end < start) {
+          res.writeHead(416, { 'Content-Range': `bytes */${fileSize}` });
+          res.end();
+          return;
+        }
+
         const chunkSize = end - start + 1;
 
         const stream = createReadStream(videoPath, { start, end, highWaterMark: 256 * 1024 });
@@ -1406,7 +1445,10 @@ export class DatabaseController {
         throw new HttpException('Video file not found on disk', HttpStatus.NOT_FOUND);
       }
 
-      const samplesCount = samples ? parseInt(samples, 10) : 1000;
+      const parsedSamples = samples ? parseInt(samples, 10) : 1000;
+      const samplesCount = Number.isFinite(parsedSamples) && parsedSamples > 0
+        ? Math.min(parsedSamples, 100000)
+        : 1000;
       const useProgressive = progressive === 'true';
 
       this.logger.log(`Generating waveform for video ${videoId}: ${video.filename} with ${samplesCount} samples (progressive: ${useProgressive})`);
@@ -1619,9 +1661,13 @@ export class DatabaseController {
             await fs.rename(oldPath, newPath);
             this.logger.log(`Renamed file for upload date change: ${oldPath} -> ${newPath}`);
 
-            // Update database with new filename and path
-            this.databaseService.updateVideoFilename(videoId, newFilename);
-            this.databaseService.updateVideoPath(videoId, newPath);
+            // Update database with new filename and path atomically so the two
+            // can never disagree if one write fails.
+            const db = this.databaseService['ensureInitialized']();
+            db.transaction(() => {
+              this.databaseService.updateVideoFilename(videoId, newFilename);
+              this.databaseService.updateVideoPath(videoId, newPath);
+            })();
 
             // Emit WebSocket event
             this.mediaEventService.emitVideoRenamed(videoId, oldFilename, newFilename, newPath);
@@ -1779,13 +1825,16 @@ export class DatabaseController {
         };
       }
 
-      // Update database with new filename, path, and upload date
-      this.databaseService.updateVideoFilename(videoId, newFilename);
-      this.databaseService.updateVideoPath(videoId, newPath);
-      this.databaseService.updateVideoUploadDate(videoId, finalUploadDate);
-
-      // Clear AI suggested title since user manually renamed the file
-      this.databaseService.updateVideoSuggestedTitle(videoId, null);
+      // Update database with new filename, path, and upload date atomically so
+      // filename and current_path can never disagree if one write fails.
+      const db = this.databaseService['ensureInitialized']();
+      db.transaction(() => {
+        this.databaseService.updateVideoFilename(videoId, newFilename);
+        this.databaseService.updateVideoPath(videoId, newPath);
+        this.databaseService.updateVideoUploadDate(videoId, finalUploadDate);
+        // Clear AI suggested title since user manually renamed the file
+        this.databaseService.updateVideoSuggestedTitle(videoId, null);
+      })();
 
       this.logger.log(`Updated filename for video ${videoId}: ${newFilename}, upload_date: ${finalUploadDate}, cleared AI suggestion`);
 
@@ -1964,13 +2013,16 @@ export class DatabaseController {
         };
       }
 
-      // Update database with new filename, path, and upload date
-      this.databaseService.updateVideoFilename(videoId, newFilename);
-      this.databaseService.updateVideoPath(videoId, newPath);
-      this.databaseService.updateVideoUploadDate(videoId, finalUploadDate);
-
-      // Clear the suggested_title since it's been accepted
-      this.databaseService.updateVideoSuggestedTitle(videoId, null);
+      // Update database with new filename, path, and upload date atomically so
+      // filename and current_path can never disagree if one write fails.
+      const db = this.databaseService['ensureInitialized']();
+      db.transaction(() => {
+        this.databaseService.updateVideoFilename(videoId, newFilename);
+        this.databaseService.updateVideoPath(videoId, newPath);
+        this.databaseService.updateVideoUploadDate(videoId, finalUploadDate);
+        // Clear the suggested_title since it's been accepted
+        this.databaseService.updateVideoSuggestedTitle(videoId, null);
+      })();
 
       this.logger.log(`Accepted suggested title for video ${videoId}: ${newFilename}, upload_date: ${finalUploadDate}`);
 
@@ -2550,9 +2602,18 @@ export class DatabaseController {
         // Get full video data before deletion for undo
         const video = this.databaseService.getVideoById(videoId);
         if (video) {
-          // Get related data (transcript, tags, etc.)
+          // Capture every related row deleteVideo cascades away so undo can
+          // fully restore the record, not just its core metadata.
           const transcript = this.databaseService.getTranscript(videoId);
           const tags = this.databaseService.getTags(videoId);
+          const analysis = this.databaseService.getAnalysis(videoId);
+          const aiSections = this.databaseService
+            .getAnalysisSections(videoId)
+            .filter((s: any) => (s.source ?? 'ai') === 'ai');
+          const customMarkers = this.databaseService.getCustomMarkers(videoId);
+          const muteSections = this.databaseService.getMuteSections(videoId);
+          const chapters = this.databaseService.getChapters(videoId);
+          const relationships = this.databaseService.getRelatedMedia(videoId);
 
           // Store for undo
           this.undoStack.push({
@@ -2562,6 +2623,12 @@ export class DatabaseController {
               video,
               transcript,
               tags,
+              analysis,
+              aiSections,
+              customMarkers,
+              muteSections,
+              chapters,
+              relationships,
             },
             timestamp: new Date(),
             description: `Deleted: ${video.filename}`,
@@ -2642,7 +2709,7 @@ export class DatabaseController {
 
     try {
       if (entry.type === 'video') {
-        const { video, transcript, tags } = entry.data;
+        const { video, transcript, tags, analysis, aiSections, customMarkers, muteSections, chapters, relationships } = entry.data;
 
         // Re-insert the video with only supported fields
         this.databaseService.insertVideo({
@@ -2696,6 +2763,122 @@ export class DatabaseController {
               });
             } catch (e) {
               // Ignore tag errors (might already exist)
+            }
+          }
+        }
+
+        // Re-insert AI analysis
+        if (analysis) {
+          try {
+            this.databaseService.insertAnalysis({
+              videoId: video.id,
+              aiAnalysis: analysis.ai_analysis,
+              summary: analysis.summary ?? undefined,
+              sectionsCount: analysis.sections_count ?? undefined,
+              aiModel: analysis.ai_model,
+              aiProvider: analysis.ai_provider ?? undefined,
+              analysisTimeSeconds: analysis.analysis_time_seconds ?? undefined,
+              inputTokens: analysis.input_tokens ?? undefined,
+              outputTokens: analysis.output_tokens ?? undefined,
+              totalTokens: analysis.total_tokens ?? undefined,
+              estimatedCost: analysis.estimated_cost ?? undefined,
+              apiCalls: analysis.api_calls ?? undefined,
+            });
+          } catch (e) {
+            // Ignore analysis errors
+          }
+        }
+
+        // Re-insert AI-generated analysis sections
+        if (aiSections && aiSections.length > 0) {
+          for (const s of aiSections) {
+            try {
+              this.databaseService.insertAnalysisSection({
+                id: s.id,
+                videoId: video.id,
+                startSeconds: s.start_seconds,
+                endSeconds: s.end_seconds,
+                timestampText: s.timestamp_text ?? undefined,
+                title: s.title ?? undefined,
+                description: s.description ?? undefined,
+                category: s.category ?? undefined,
+                source: 'ai',
+              });
+            } catch (e) {
+              // Ignore section errors
+            }
+          }
+        }
+
+        // Re-insert user custom markers
+        if (customMarkers && customMarkers.length > 0) {
+          for (const m of customMarkers) {
+            try {
+              this.databaseService.insertCustomMarker({
+                id: m.id,
+                videoId: video.id,
+                startSeconds: m.start_seconds,
+                endSeconds: m.end_seconds,
+                timestampText: m.timestamp_text ?? undefined,
+                title: m.title ?? undefined,
+                description: m.description ?? undefined,
+                category: m.category ?? undefined,
+              });
+            } catch (e) {
+              // Ignore marker errors
+            }
+          }
+        }
+
+        // Re-insert mute sections
+        if (muteSections && muteSections.length > 0) {
+          for (const ms of muteSections) {
+            try {
+              this.databaseService.insertMuteSection({
+                id: ms.id,
+                videoId: video.id,
+                startSeconds: ms.start_seconds,
+                endSeconds: ms.end_seconds,
+              });
+            } catch (e) {
+              // Ignore mute section errors
+            }
+          }
+        }
+
+        // Re-insert chapters
+        if (chapters && chapters.length > 0) {
+          for (const c of chapters) {
+            try {
+              this.databaseService.insertChapter({
+                id: c.id,
+                videoId: video.id,
+                sequence: c.sequence,
+                startSeconds: c.start_seconds,
+                endSeconds: c.end_seconds,
+                title: c.title,
+                description: c.description ?? undefined,
+                source: c.source,
+              });
+            } catch (e) {
+              // Ignore chapter errors
+            }
+          }
+        }
+
+        // Re-insert media relationships (connections). The other endpoint may
+        // no longer exist, so tolerate per-row failures.
+        if (relationships && relationships.length > 0) {
+          for (const r of relationships) {
+            try {
+              this.databaseService.insertMediaRelationship({
+                id: r.id,
+                primaryMediaId: r.primary_media_id,
+                relatedMediaId: r.related_media_id,
+                relationshipType: r.relationship_type,
+              });
+            } catch (e) {
+              // Ignore relationship errors (other endpoint may be gone)
             }
           }
         }

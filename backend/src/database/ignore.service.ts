@@ -9,6 +9,33 @@ export class IgnoreService {
   private ignorePatterns: string[] = [];
   private ignoreFilePath: string | null = null;
 
+  // Cache invalidated by file mtime so shouldIgnore() doesn't re-read/re-parse
+  // the ignore file for every scanned media file.
+  private cachedPatterns: string[] | null = null;
+  private cachedMtimeMs: number | null = null;
+  private cachedFilePath: string | null = null;
+
+  // Safe fallback used when the ignore file exists but can't be read/parsed.
+  // Returning [] there would let junk (.DS_Store, *.db, ._*) get imported.
+  private static readonly DEFAULT_IGNORE_PATTERNS: string[] = [
+    '._*',
+    '.DS_Store',
+    'Thumbs.db',
+    '*.db',
+    '*.db-journal',
+    '*.db-shm',
+    '*.db-wal',
+    '.thumbnails/*',
+    '*-thumb.jpg',
+    '*-thumb.png',
+    '*-thumbnail.jpg',
+    '*-thumbnail.png',
+    '*_thumb.jpg',
+    '*_thumb.png',
+    '*_thumbnail.jpg',
+    '*_thumbnail.png',
+  ];
+
   constructor(private libraryManager: LibraryManagerService) {}
 
   /**
@@ -88,6 +115,17 @@ export class IgnoreService {
         this.logger.log(`Created default .briefcaseignore file at: ${this.ignoreFilePath}`);
       }
 
+      // Serve cached patterns when the file is unchanged since last parse.
+      const mtimeMs = fs.statSync(this.ignoreFilePath).mtimeMs;
+      if (
+        this.cachedPatterns !== null &&
+        this.cachedFilePath === this.ignoreFilePath &&
+        this.cachedMtimeMs === mtimeMs
+      ) {
+        this.ignorePatterns = this.cachedPatterns;
+        return this.ignorePatterns;
+      }
+
       const content = fs.readFileSync(this.ignoreFilePath, 'utf-8');
 
       // Parse patterns: ignore comments and empty lines
@@ -96,10 +134,17 @@ export class IgnoreService {
         .map(line => line.trim())
         .filter(line => line && !line.startsWith('#'));
 
+      this.cachedPatterns = this.ignorePatterns;
+      this.cachedMtimeMs = mtimeMs;
+      this.cachedFilePath = this.ignoreFilePath;
+
       return this.ignorePatterns;
     } catch (error: any) {
+      // Read/parse FAILURE (not a genuinely empty file): fall back to the safe
+      // built-in defaults so system/junk files stay ignored rather than imported.
       this.logger.error(`Failed to load ignore patterns: ${error.message}`);
-      return [];
+      this.ignorePatterns = [...IgnoreService.DEFAULT_IGNORE_PATTERNS];
+      return this.ignorePatterns;
     }
   }
 
@@ -119,13 +164,14 @@ export class IgnoreService {
     for (const pattern of this.ignorePatterns) {
       // If pattern contains a slash, match against relative path
       if (pattern.includes('/') || pattern.includes('\\')) {
-        // Get relative path from clips folder
+        // Get relative path from clips folder. Use path.relative (not a raw
+        // prefix match) so a sibling like "/a/clips-extra" isn't treated as
+        // being inside "/a/clips".
         let relativePath = filePath;
-        if (clipsFolder && filePath.startsWith(clipsFolder)) {
-          relativePath = filePath.substring(clipsFolder.length);
-          // Remove leading slash
-          if (relativePath.startsWith('/') || relativePath.startsWith('\\')) {
-            relativePath = relativePath.substring(1);
+        if (clipsFolder) {
+          const rel = path.relative(clipsFolder, filePath);
+          if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) {
+            relativePath = rel;
           }
         }
 
@@ -227,7 +273,8 @@ export class IgnoreService {
       fs.writeFileSync(this.ignoreFilePath, content, 'utf-8');
       this.logger.log('Updated .briefcaseignore file');
 
-      // Reload patterns
+      // Force a fresh parse (mtime may collide within the same tick)
+      this.cachedPatterns = null;
       this.loadIgnorePatterns();
 
       return true;
@@ -265,7 +312,8 @@ export class IgnoreService {
       fs.writeFileSync(this.ignoreFilePath, newContent, 'utf-8');
       this.logger.log(`Added pattern to .briefcaseignore: ${pattern}`);
 
-      // Reload patterns
+      // Force a fresh parse (mtime may collide within the same tick)
+      this.cachedPatterns = null;
       this.loadIgnorePatterns();
 
       return true;

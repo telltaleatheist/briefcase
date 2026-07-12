@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import * as fs from 'fs/promises';
 import { existsSync } from 'fs';
 import * as path from 'path';
+import { randomUUID } from 'crypto';
 import {
   FfmpegBridge,
   FfprobeBridge,
@@ -311,13 +312,21 @@ export class ClipExtractorService {
         // 2. Scale cropped to fill 16:9 width, blur, crop height → background
         // 3. Keep cropped at native size → sharp foreground
         // 4. Overlay fg centered on bg
-        stripBarsFilter = [
+        const stripChain = [
           '[0:v]crop=ih*9/16:ih[cropped]',
           '[cropped]split=2[cr1][cr2]',
           '[cr1]scale=ih*16/9:-2:flags=lanczos,crop=iw:iw*9/16,gblur=sigma=50[bg]',
           '[cr2]scale=-2:ih[fg]',
-          '[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[vout]',
-        ].join(';');
+        ];
+        if (scaleFilter) {
+          // Strip black bars first, THEN chain the requested scale/zoom so it
+          // isn't silently dropped when stripBlackBars is also set.
+          stripChain.push('[bg][fg]overlay=(W-w)/2:(H-h)/2[stripped]');
+          stripChain.push(`[stripped]${scaleFilter},format=yuv420p[vout]`);
+        } else {
+          stripChain.push('[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[vout]');
+        }
+        stripBarsFilter = stripChain.join(';');
       }
 
       if (stripBarsFilter && hasMutes) {
@@ -386,7 +395,9 @@ export class ClipExtractorService {
 
     this.logger.log(`FFmpeg command: ${this.ffmpeg.path} ${args.join(' ')}`);
 
-    const processId = `clip-extract-${Date.now()}`;
+    // randomUUID keeps the id unique for two extractions started in the same ms,
+    // so the progress guard can't cross-wire their callbacks.
+    const processId = `clip-extract-${Date.now()}-${randomUUID()}`;
 
     // Set up progress listener if callback provided
     let progressHandler: ((progress: FfmpegProgress) => void) | null = null;

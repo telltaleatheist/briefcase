@@ -294,6 +294,15 @@ export class DatabaseService {
 
     this.logger.log(`Initializing database at: ${this.dbPath}`);
 
+    // Refuse to auto-create a library into an unmounted external volume.
+    // On macOS external volumes live under /Volumes/<name>; if that mount root
+    // is absent the volume is not mounted and mkdir would silently recreate the
+    // tree on the boot disk and open an empty database.
+    const volumesMatch = this.dbPath.match(/^(\/Volumes\/[^/]+)(?:\/|$)/);
+    if (volumesMatch && !fs.existsSync(volumesMatch[1])) {
+      throw new Error(`Library volume not mounted: ${volumesMatch[1]}`);
+    }
+
     // Ensure parent directory exists
     const parentDir = path.dirname(this.dbPath);
     if (!fs.existsSync(parentDir)) {
@@ -302,6 +311,11 @@ export class DatabaseService {
 
     // Create or open database (better-sqlite3 handles this automatically)
     const isNew = !fs.existsSync(this.dbPath);
+    if (this.db) {
+      try {
+        this.db.close();
+      } catch {}
+    }
     this.db = new Database(this.dbPath);
 
     if (isNew) {
@@ -903,9 +917,11 @@ export class DatabaseService {
         }
       }
     } catch (error: any) {
-      // Table might not exist yet (new installation) - silently ignore
+      // Table might not exist yet (new installation) - silently ignore.
+      // Any other error (including an aborted migration re-thrown above) must
+      // propagate so startup fails loudly instead of running on a broken schema.
       if (!error.message || !error.message.includes('no such table')) {
-        this.logger.warn(`Migration check failed: ${error?.message || 'Unknown error'}`);
+        throw error;
       }
     }
 
@@ -956,7 +972,8 @@ export class DatabaseService {
           // Apply updates
           const updateStmt = db.prepare('UPDATE videos SET file_extension = ? WHERE id = ?');
           for (const row of rows) {
-            const ext = row.filename.substring(row.filename.lastIndexOf('.')).toLowerCase();
+            const dotIndex = row.filename.lastIndexOf('.');
+            const ext = dotIndex === -1 ? null : row.filename.substring(dotIndex).toLowerCase();
             updateStmt.run(ext, row.id);
           }
 
@@ -1405,7 +1422,11 @@ export class DatabaseService {
       if (tableInfo && tableInfo.sql && tableInfo.sql.includes('video_id TEXT NOT NULL')) {
         this.logger.log('Running migration: Recreating video_tab_items to support multiple item types');
         try {
-          db.exec(`
+          // Destructive (DROPs video_tab_items partway through), so it must be
+          // atomic: on any failure better-sqlite3 rolls back and leaves the
+          // original table intact.
+          const rebuildTabItemsTable = db.transaction(() => {
+            db.exec(`
             -- Create new table with correct schema
             CREATE TABLE video_tab_items_new (
               id TEXT PRIMARY KEY,
@@ -1439,6 +1460,8 @@ export class DatabaseService {
             CREATE INDEX IF NOT EXISTS idx_video_tab_items_saved_link ON video_tab_items(saved_link_id);
             CREATE INDEX IF NOT EXISTS idx_video_tab_items_display_order ON video_tab_items(display_order);
           `);
+          });
+          rebuildTabItemsTable();
           this.saveDatabase();
           this.logger.log('Migration complete: video_tab_items now supports multiple item types');
         } catch (migrationError: any) {
@@ -1476,7 +1499,38 @@ export class DatabaseService {
         }
       }
     } catch (error: any) {
-      this.logger.error(`Error checking video_tab_items schema: ${error?.message}`);
+      // A brand-new library without the table yet is benign; anything else
+      // (including an aborted migration re-thrown above) must propagate.
+      if (error.message && error.message.includes('no such table')) {
+        this.logger.error(`Error checking video_tab_items schema: ${error?.message}`);
+      } else {
+        throw error;
+      }
+    }
+
+    // Migration: Enforce one row per (tab_id, video_id) so addVideoToTab's
+    // UNIQUE-constraint dedup actually fires. Dedup any pre-existing rows first,
+    // then create the partial unique index (video_id is NULL for link items).
+    try {
+      const dedupeTabItems = db.transaction(() => {
+        db.exec(`
+          DELETE FROM video_tab_items
+          WHERE video_id IS NOT NULL
+            AND rowid NOT IN (
+              SELECT MIN(rowid) FROM video_tab_items
+              WHERE video_id IS NOT NULL
+              GROUP BY tab_id, video_id
+            );
+          CREATE UNIQUE INDEX IF NOT EXISTS idx_video_tab_items_unique
+            ON video_tab_items(tab_id, video_id)
+            WHERE video_id IS NOT NULL;
+        `);
+      });
+      dedupeTabItems();
+    } catch (error: any) {
+      if (!error.message || !error.message.includes('no such table')) {
+        throw error;
+      }
     }
 
     // Migration 20: Add width, height, fps columns to videos table
@@ -2629,6 +2683,22 @@ export class DatabaseService {
   }
 
   /**
+   * Flush any pending WAL frames into the main database file so an external
+   * file-copy backup captures a consistent, fully-checkpointed database.
+   * No-op when the DB is closed or not in WAL journal mode.
+   */
+  checkpointWal(): void {
+    if (!this.db) {
+      return;
+    }
+    try {
+      this.db.pragma('wal_checkpoint(TRUNCATE)');
+    } catch (error: any) {
+      this.logger.warn(`WAL checkpoint failed: ${error?.message || 'Unknown error'}`);
+    }
+  }
+
+  /**
    * Generate SHA-256 hash of first 1MB of a file
    * Used for video file identification (handles renames, detects duplicates)
    *
@@ -2674,28 +2744,6 @@ export class DatabaseService {
     const now = new Date().toISOString();
     const downloadDate = video.downloadDate || now;
 
-    // Check for existing video by hash (most reliable - same content)
-    if (video.fileHash) {
-      const existingByHash = db.prepare(
-        `SELECT id FROM videos WHERE file_hash = ? LIMIT 1`
-      ).get(video.fileHash) as { id: string } | undefined;
-
-      if (existingByHash) {
-        this.logger.warn(`Duplicate detected by hash: ${video.filename} matches existing ${existingByHash.id}`);
-        return { inserted: false, existingId: existingByHash.id };
-      }
-    }
-
-    // Check for existing video by filename (fallback)
-    const existingByFilename = db.prepare(
-      `SELECT id FROM videos WHERE filename = ? LIMIT 1`
-    ).get(video.filename) as { id: string } | undefined;
-
-    if (existingByFilename) {
-      this.logger.warn(`Duplicate detected by filename: ${video.filename} matches existing ${existingByFilename.id}`);
-      return { inserted: false, existingId: existingByFilename.id };
-    }
-
     // Convert to relative path for cross-platform compatibility
     const clipsFolder = this.getClipsFolderPath();
     const pathToStore = clipsFolder ? this.toRelativePath(video.currentPath, clipsFolder) : video.currentPath;
@@ -2705,50 +2753,81 @@ export class DatabaseService {
     let fileExtension = video.fileExtension;
 
     if (!fileExtension && video.filename) {
-      fileExtension = video.filename.substring(video.filename.lastIndexOf('.')).toLowerCase();
+      const dotIndex = video.filename.lastIndexOf('.');
+      fileExtension = dotIndex === -1 ? undefined : video.filename.substring(dotIndex).toLowerCase();
     }
 
     if (!mediaType && fileExtension) {
       mediaType = this.getMediaTypeFromExtension(fileExtension);
     }
 
-    db.prepare(
-      `INSERT OR REPLACE INTO videos (
-        id, filename, file_hash, current_path, upload_date,
-        duration_seconds, file_size_bytes, source_url, media_type, file_extension,
-        download_date, last_verified, added_at, is_linked, width, height, fps,
-        needs_metadata
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`
-    ).run(
-      video.id,
-      video.filename,
-      video.fileHash,
-      pathToStore,
-      video.uploadDate || null,
-      video.durationSeconds || null,
-      video.fileSizeBytes || null,
-      video.sourceUrl || null,
-      mediaType || 'video',
-      fileExtension || null,
-      downloadDate, // File's creation timestamp (when you downloaded it)
-      now, // last_verified
-      now, // added_at (when database entry was created)
-      video.width || null,
-      video.height || null,
-      video.fps || null,
-      video.needsMetadata ? 1 : 0
-    );
+    // The dedup check and the insert run inside one synchronous transaction so
+    // concurrent imports of the same file can never both pass the "not in DB"
+    // check and double-insert.
+    const insertVideoTxn = db.transaction((): { inserted: boolean; existingId?: string } => {
+      // Check for existing video by hash (most reliable - same content)
+      if (video.fileHash) {
+        const existingByHash = db.prepare(
+          `SELECT id FROM videos WHERE file_hash = ? LIMIT 1`
+        ).get(video.fileHash) as { id: string } | undefined;
 
-    // Insert/update FTS5 table for video search
-    // Delete existing entry first (if any)
-    db.prepare(`DELETE FROM videos_fts WHERE video_id = ?`).run(video.id);
-    // Insert new entry
-    db.prepare(
-      `INSERT INTO videos_fts (video_id, filename, current_path, ai_description) VALUES (?, ?, ?, ?)`
-    ).run(video.id, video.filename, video.currentPath || '', ''); // ai_description is empty initially, updated later
+        if (existingByHash) {
+          this.logger.warn(`Duplicate detected by hash: ${video.filename} matches existing ${existingByHash.id}`);
+          return { inserted: false, existingId: existingByHash.id };
+        }
+      }
+
+      // Check for existing video by filename (fallback)
+      const existingByFilename = db.prepare(
+        `SELECT id FROM videos WHERE filename = ? LIMIT 1`
+      ).get(video.filename) as { id: string } | undefined;
+
+      if (existingByFilename) {
+        this.logger.warn(`Duplicate detected by filename: ${video.filename} matches existing ${existingByFilename.id}`);
+        return { inserted: false, existingId: existingByFilename.id };
+      }
+
+      db.prepare(
+        `INSERT OR REPLACE INTO videos (
+          id, filename, file_hash, current_path, upload_date,
+          duration_seconds, file_size_bytes, source_url, media_type, file_extension,
+          download_date, last_verified, added_at, is_linked, width, height, fps,
+          needs_metadata
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`
+      ).run(
+        video.id,
+        video.filename,
+        video.fileHash,
+        pathToStore,
+        video.uploadDate || null,
+        video.durationSeconds || null,
+        video.fileSizeBytes || null,
+        video.sourceUrl || null,
+        mediaType || 'video',
+        fileExtension || null,
+        downloadDate, // File's creation timestamp (when you downloaded it)
+        now, // last_verified
+        now, // added_at (when database entry was created)
+        video.width || null,
+        video.height || null,
+        video.fps || null,
+        video.needsMetadata ? 1 : 0
+      );
+
+      // Insert/update FTS5 table for video search
+      // Delete existing entry first (if any)
+      db.prepare(`DELETE FROM videos_fts WHERE video_id = ?`).run(video.id);
+      // Insert new entry
+      db.prepare(
+        `INSERT INTO videos_fts (video_id, filename, current_path, ai_description) VALUES (?, ?, ?, ?)`
+      ).run(video.id, video.filename, video.currentPath || '', ''); // ai_description is empty initially, updated later
+
+      return { inserted: true };
+    });
+    const result = insertVideoTxn();
 
     this.saveDatabase();
-    return { inserted: true };
+    return result;
   }
 
   /**
@@ -2838,11 +2917,11 @@ export class DatabaseService {
     db.prepare(
       `UPDATE videos
        SET current_path = ?,
-           upload_date = ?,
+           upload_date = COALESCE(?, upload_date),
            last_verified = ?,
            is_linked = 1
        WHERE id = ?`
-    ).run(relativePath, uploadDate || null, new Date().toISOString(), id);
+    ).run(relativePath, uploadDate ?? null, new Date().toISOString(), id);
 
     this.saveDatabase();
   }
@@ -3150,9 +3229,6 @@ export class DatabaseService {
 
     this.logger.log(`Deleting video ${id} and all related data`);
 
-    // Delete associated thumbnail
-    this.thumbnailService.deleteThumbnail(id);
-
     // Deleting the video row cascades to transcripts/analyses/tags/sections via
     // FK ON DELETE CASCADE, but the FTS5 mirror tables are hand-maintained (no
     // triggers) so their rows would be left orphaned. Delete every FTS row this
@@ -3169,6 +3245,10 @@ export class DatabaseService {
     deleteVideoTxn(id);
 
     this.saveDatabase();
+
+    // Delete associated thumbnail only after the row delete has committed, so a
+    // rolled-back transaction never leaves a live row with a missing thumbnail.
+    this.thumbnailService.deleteThumbnail(id);
 
     return video;
   }
@@ -3193,9 +3273,7 @@ export class DatabaseService {
 
     this.logger.log(`Pruning ${unlinkedVideos.length} orphaned videos from database`);
 
-    // Delete thumbnails for all unlinked videos
     const videoIds = unlinkedVideos.map(v => v.id);
-    this.thumbnailService.deleteThumbnails(videoIds);
 
     // Delete all unlinked videos (CASCADE will handle related base-table records)
     // plus their hand-maintained FTS5 mirror rows, in one transaction so the
@@ -3218,6 +3296,9 @@ export class DatabaseService {
     pruneTxn(videoIds);
 
     this.saveDatabase();
+
+    // Delete thumbnails only after the row deletes have committed.
+    this.thumbnailService.deleteThumbnails(videoIds);
 
     return {
       deletedCount: unlinkedVideos.length,
@@ -3345,6 +3426,9 @@ export class DatabaseService {
     if (options?.limit) {
       query += ' LIMIT ?';
       params.push(options.limit);
+    } else if (options?.offset) {
+      // SQLite requires a LIMIT when OFFSET is present; -1 means "no limit".
+      query += ' LIMIT -1';
     }
 
     if (options?.offset) {
@@ -3385,8 +3469,8 @@ export class DatabaseService {
       for (const child of children) {
         results.push({
           ...child,
-          has_transcript: 0,
-          has_analysis: 0,
+          has_transcript: (child as any).has_transcript ?? 0,
+          has_analysis: (child as any).has_analysis ?? 0,
           has_children: 0,
           has_connections: 0,
           isParent: false,
@@ -3415,39 +3499,42 @@ export class DatabaseService {
     // Compute soundex content for phonetic search
     const soundexContent = this.textToSoundex(transcript.plainText);
 
-    db.prepare(
-      `INSERT OR REPLACE INTO transcripts (
-        video_id, plain_text, srt_format, whisper_model, language, transcribed_at, transcription_time_seconds, soundex_content
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      transcript.videoId,
-      transcript.plainText,
-      transcript.srtFormat,
-      transcript.whisperModel || null,
-      transcript.language || null,
-      new Date().toISOString(),
-      transcript.transcriptionTimeSeconds || null,
-      soundexContent,
-    );
+    const insertTranscriptTxn = db.transaction(() => {
+      db.prepare(
+        `INSERT OR REPLACE INTO transcripts (
+          video_id, plain_text, srt_format, whisper_model, language, transcribed_at, transcription_time_seconds, soundex_content
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        transcript.videoId,
+        transcript.plainText,
+        transcript.srtFormat,
+        transcript.whisperModel || null,
+        transcript.language || null,
+        new Date().toISOString(),
+        transcript.transcriptionTimeSeconds || null,
+        soundexContent,
+      );
 
-    // Update FTS5 table for transcript search
-    // Delete existing entry first (if any)
-    db.prepare(`DELETE FROM transcripts_fts WHERE video_id = ?`).run(transcript.videoId);
-    // Insert new entry
-    db.prepare(
-      `INSERT INTO transcripts_fts (video_id, content) VALUES (?, ?)`
-    ).run(transcript.videoId, transcript.plainText);
+      // Update FTS5 table for transcript search
+      // Delete existing entry first (if any)
+      db.prepare(`DELETE FROM transcripts_fts WHERE video_id = ?`).run(transcript.videoId);
+      // Insert new entry
+      db.prepare(
+        `INSERT INTO transcripts_fts (video_id, content) VALUES (?, ?)`
+      ).run(transcript.videoId, transcript.plainText);
 
-    // Update soundex FTS5 table for phonetic search
-    db.prepare(`DELETE FROM transcripts_soundex_fts WHERE video_id = ?`).run(transcript.videoId);
-    db.prepare(
-      `INSERT INTO transcripts_soundex_fts (video_id, soundex_content) VALUES (?, ?)`
-    ).run(transcript.videoId, soundexContent);
+      // Update soundex FTS5 table for phonetic search
+      db.prepare(`DELETE FROM transcripts_soundex_fts WHERE video_id = ?`).run(transcript.videoId);
+      db.prepare(
+        `INSERT INTO transcripts_soundex_fts (video_id, soundex_content) VALUES (?, ?)`
+      ).run(transcript.videoId, soundexContent);
 
-    // Update has_transcript flag in videos table
-    db.prepare(
-      `UPDATE videos SET has_transcript = 1 WHERE id = ?`
-    ).run(transcript.videoId);
+      // Update has_transcript flag in videos table
+      db.prepare(
+        `UPDATE videos SET has_transcript = 1 WHERE id = ?`
+      ).run(transcript.videoId);
+    });
+    insertTranscriptTxn();
 
     this.saveDatabase();
     this.logger.log(`Set has_transcript flag for video ${transcript.videoId}`);
@@ -3482,40 +3569,45 @@ export class DatabaseService {
   }) {
     const db = this.ensureInitialized();
 
-    db.prepare(
-      `INSERT OR REPLACE INTO analyses (
-        video_id, ai_analysis, summary, sections_count, ai_model, ai_provider, analyzed_at, analysis_time_seconds,
-        input_tokens, output_tokens, total_tokens, estimated_cost, api_calls
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      analysis.videoId,
-      analysis.aiAnalysis,
-      analysis.summary || null,
-      analysis.sectionsCount || null,
-      analysis.aiModel,
-      analysis.aiProvider || null,
-      new Date().toISOString(),
-      analysis.analysisTimeSeconds || null,
-      analysis.inputTokens || null,
-      analysis.outputTokens || null,
-      analysis.totalTokens || null,
-      analysis.estimatedCost || null,
-      analysis.apiCalls || null,
-    );
-
-    // Update FTS5 table for analysis search
-    // Delete existing entry first (if any)
-    db.prepare(`DELETE FROM analyses_fts WHERE video_id = ?`).run(analysis.videoId);
-    // Insert new entry (combine analysis and summary for better search)
+    // Combine analysis and summary for better search
     const contentForSearch = [analysis.aiAnalysis, analysis.summary].filter(Boolean).join(' ');
-    db.prepare(
-      `INSERT INTO analyses_fts (video_id, content) VALUES (?, ?)`
-    ).run(analysis.videoId, contentForSearch);
 
-    // Update has_analysis flag in videos table
-    db.prepare(
-      `UPDATE videos SET has_analysis = 1 WHERE id = ?`
-    ).run(analysis.videoId);
+    const insertAnalysisTxn = db.transaction(() => {
+      db.prepare(
+        `INSERT OR REPLACE INTO analyses (
+          video_id, ai_analysis, summary, sections_count, ai_model, ai_provider, analyzed_at, analysis_time_seconds,
+          input_tokens, output_tokens, total_tokens, estimated_cost, api_calls
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        analysis.videoId,
+        analysis.aiAnalysis,
+        analysis.summary || null,
+        analysis.sectionsCount || null,
+        analysis.aiModel,
+        analysis.aiProvider || null,
+        new Date().toISOString(),
+        analysis.analysisTimeSeconds || null,
+        analysis.inputTokens || null,
+        analysis.outputTokens || null,
+        analysis.totalTokens || null,
+        analysis.estimatedCost || null,
+        analysis.apiCalls || null,
+      );
+
+      // Update FTS5 table for analysis search
+      // Delete existing entry first (if any)
+      db.prepare(`DELETE FROM analyses_fts WHERE video_id = ?`).run(analysis.videoId);
+      // Insert new entry
+      db.prepare(
+        `INSERT INTO analyses_fts (video_id, content) VALUES (?, ?)`
+      ).run(analysis.videoId, contentForSearch);
+
+      // Update has_analysis flag in videos table
+      db.prepare(
+        `UPDATE videos SET has_analysis = 1 WHERE id = ?`
+      ).run(analysis.videoId);
+    });
+    insertAnalysisTxn();
 
     this.saveDatabase();
     this.logger.log(`Set has_analysis flag for video ${analysis.videoId}`);

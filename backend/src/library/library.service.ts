@@ -100,6 +100,51 @@ export class LibraryService {
   }
 
   /**
+   * Acquire the exclusive library-file lock (proper-lockfile).
+   * proper-lockfile is not reentrant, so the same lock must never be nested.
+   */
+  private async acquireLock(): Promise<() => Promise<void>> {
+    return lockfile.lock(this.libraryPath, {
+      retries: {
+        retries: 5,
+        minTimeout: 100,
+        maxTimeout: 1000,
+      },
+      realpath: false,
+      fs: {
+        ...fsSync,
+      } as any,
+    });
+  }
+
+  /**
+   * Write the in-memory library to disk atomically.
+   * Caller MUST already hold the library lock.
+   */
+  private async persistLibrary(): Promise<void> {
+    if (!this.library) {
+      throw new Error('Library not initialized');
+    }
+
+    // Create backup
+    if (fsSync.existsSync(this.libraryPath)) {
+      await fs.copyFile(this.libraryPath, `${this.libraryPath}.backup`);
+    }
+
+    // Update lastUpdated
+    this.library.lastUpdated = new Date().toISOString();
+
+    // Write to temp file first
+    const tempPath = `${this.libraryPath}.tmp`;
+    await fs.writeFile(tempPath, JSON.stringify(this.library, null, 2), 'utf-8');
+
+    // Atomic rename
+    await fs.rename(tempPath, this.libraryPath);
+
+    this.logger.log('Library saved successfully');
+  }
+
+  /**
    * Save library to disk with atomic write and locking
    */
   private async saveLibrary(): Promise<void> {
@@ -107,44 +152,14 @@ export class LibraryService {
       throw new Error('Library not initialized');
     }
 
-    // Use lockfile to ensure atomic writes
     let release: () => Promise<void>;
-
     try {
-      // Acquire lock
-      release = await lockfile.lock(this.libraryPath, {
-        retries: {
-          retries: 5,
-          minTimeout: 100,
-          maxTimeout: 1000,
-        },
-        realpath: false,
-        fs: {
-          ...fsSync,
-        } as any,
-      });
-
-      // Create backup
-      if (fsSync.existsSync(this.libraryPath)) {
-        await fs.copyFile(this.libraryPath, `${this.libraryPath}.backup`);
-      }
-
-      // Update lastUpdated
-      this.library.lastUpdated = new Date().toISOString();
-
-      // Write to temp file first
-      const tempPath = `${this.libraryPath}.tmp`;
-      await fs.writeFile(tempPath, JSON.stringify(this.library, null, 2), 'utf-8');
-
-      // Atomic rename
-      await fs.rename(tempPath, this.libraryPath);
-
-      this.logger.log('Library saved successfully');
+      release = await this.acquireLock();
+      await this.persistLibrary();
     } catch (error) {
       this.logger.error(`Failed to save library: ${(error as Error).message}`);
       throw error;
     } finally {
-      // Release lock
       if (release!) {
         await release();
       }
@@ -152,23 +167,37 @@ export class LibraryService {
   }
 
   /**
-   * Update library with a modification function
+   * Update library with a modification function.
+   * The read-modify-write runs under a single lock so a concurrent update
+   * can't clobber this one (lost update).
    */
   private async updateLibrary(
     updateFn: (library: Library) => Library
   ): Promise<void> {
-    // Reload from disk to get latest version
-    await this.loadLibrary();
+    let release: () => Promise<void>;
+    try {
+      release = await this.acquireLock();
 
-    if (!this.library) {
-      throw new Error('Library not initialized');
+      // Reload from disk to get latest version (inside the lock)
+      await this.loadLibrary();
+
+      if (!this.library) {
+        throw new Error('Library not initialized');
+      }
+
+      // Apply modification
+      this.library = updateFn(this.library);
+
+      // Persist while still holding the same lock
+      await this.persistLibrary();
+    } catch (error) {
+      this.logger.error(`Failed to update library: ${(error as Error).message}`);
+      throw error;
+    } finally {
+      if (release!) {
+        await release();
+      }
     }
-
-    // Apply modification
-    this.library = updateFn(this.library);
-
-    // Save
-    await this.saveLibrary();
   }
 
   /**

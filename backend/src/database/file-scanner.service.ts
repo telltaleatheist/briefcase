@@ -481,6 +481,12 @@ export class FileScannerService {
 
     const videosToUpdate = stmt.all() as Array<{ id: string; filename: string; current_path: string; media_type: string }>;
 
+    // current_path is stored relative to the clips folder; the raw SELECT
+    // bypasses resolveVideoPaths, so resolve to an absolute path before touching
+    // the filesystem (otherwise it resolves against process.cwd() and misses).
+    const activeLibrary = this.libraryManagerService.getActiveLibrary();
+    const clipsFolder = activeLibrary?.clipsFolderPath ?? '';
+
     const result = {
       total: videosToUpdate.length,
       updated: 0,
@@ -492,16 +498,18 @@ export class FileScannerService {
 
     for (const video of videosToUpdate) {
       try {
+        const absolutePath = this.databaseService.toAbsolutePath(video.current_path, clipsFolder);
+
         // Check if file exists
-        if (!fs.existsSync(video.current_path)) {
-          this.logger.warn(`File not found: ${video.current_path}`);
+        if (!fs.existsSync(absolutePath)) {
+          this.logger.warn(`File not found: ${absolutePath}`);
           result.failed++;
           result.errors.push(`${video.filename}: File not found`);
           continue;
         }
 
         // Extract duration using ffprobe
-        const metadata = await this.ffmpegService.getVideoMetadata(video.current_path);
+        const metadata = await this.ffmpegService.getVideoMetadata(absolutePath);
 
         if (metadata.duration) {
           // Update database with duration and video metadata
@@ -558,6 +566,12 @@ export class FileScannerService {
 
     const videosToUpdate = stmt.all() as Array<{ id: string; filename: string; current_path: string; media_type: string }>;
 
+    // current_path is stored relative to the clips folder; the raw SELECT
+    // bypasses resolveVideoPaths, so resolve to an absolute path before touching
+    // the filesystem (otherwise it resolves against process.cwd() and misses).
+    const activeLibrary = this.libraryManagerService.getActiveLibrary();
+    const clipsFolder = activeLibrary?.clipsFolderPath ?? '';
+
     const result = {
       total: videosToUpdate.length,
       updated: 0,
@@ -569,16 +583,18 @@ export class FileScannerService {
 
     for (const video of videosToUpdate) {
       try {
+        const absolutePath = this.databaseService.toAbsolutePath(video.current_path, clipsFolder);
+
         // Check if file exists
-        if (!fs.existsSync(video.current_path)) {
-          this.logger.warn(`File not found: ${video.current_path}`);
+        if (!fs.existsSync(absolutePath)) {
+          this.logger.warn(`File not found: ${absolutePath}`);
           result.failed++;
           result.errors.push(`${video.filename}: File not found`);
           continue;
         }
 
         // Extract metadata using ffprobe
-        const metadata = await this.ffmpegService.getVideoMetadata(video.current_path);
+        const metadata = await this.ffmpegService.getVideoMetadata(absolutePath);
 
         if (metadata.width && metadata.height) {
           // Update database with resolution info

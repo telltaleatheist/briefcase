@@ -4,6 +4,7 @@ import * as fs from 'fs/promises';
 import * as fsSync from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import * as crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 
 /**
@@ -274,11 +275,21 @@ export class MigrationService {
         if (parsedMetadata?.sections) {
           for (const section of parsedMetadata.sections) {
             try {
+              const endSeconds = section.endSeconds || section.startSeconds + 10; // Default 10 sec if no end
+              // Deterministic id so re-running an interrupted migration (the
+              // completion marker is only written after the whole loop) can
+              // never create duplicate section rows.
+              const sectionId = crypto
+                .createHash('sha256')
+                .update(`${videoId}|${section.startSeconds}|${endSeconds}|${section.category || ''}|${section.description || ''}`)
+                .digest('hex')
+                .slice(0, 32);
+
               this.databaseService.insertAnalysisSection({
-                id: uuidv4(),
+                id: sectionId,
                 videoId,
                 startSeconds: section.startSeconds,
-                endSeconds: section.endSeconds || section.startSeconds + 10, // Default 10 sec if no end
+                endSeconds,
                 timestampText: section.timeRange,
                 title: section.category,
                 description: section.description,

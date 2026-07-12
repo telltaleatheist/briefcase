@@ -144,11 +144,21 @@ export class RelinkingService {
         let matchedFile = hashMap[videoHash];
         let matchMethod = 'hash';
 
-        // If no hash match, try filename fallback
+        // If no hash match, try filename fallback — but only accept it when the
+        // basename is unambiguous (ambiguous ones were dropped from the map) AND
+        // the candidate file size matches, so we never relink to a wrong file.
         if (!matchedFile && filenameMap[video.filename]) {
-          matchedFile = filenameMap[video.filename];
-          matchMethod = 'filename';
-          this.logger.warn(`No hash match for ${video.filename}, using filename fallback`);
+          const candidate = filenameMap[video.filename];
+          if (video.file_size_bytes != null && candidate.size === video.file_size_bytes) {
+            matchedFile = candidate;
+            matchMethod = 'filename';
+            this.logger.warn(`No hash match for ${video.filename}, using verified filename+size fallback`);
+          } else {
+            this.logger.warn(
+              `Filename match for ${video.filename} rejected (size mismatch or unknown size): ` +
+              `db=${video.file_size_bytes ?? 'unknown'} file=${candidate.size}`,
+            );
+          }
         }
 
         if (matchedFile) {
@@ -258,6 +268,7 @@ export class RelinkingService {
   ): Promise<{ hashMap: FileHashMap; filenameMap: FileNameMap }> {
     const hashMap: FileHashMap = {};
     const filenameMap: FileNameMap = {};
+    const ambiguousFilenames = new Set<string>();
     const files: string[] = [];
 
     // Recursively find all video files
@@ -300,14 +311,20 @@ export class RelinkingService {
           filename,
         };
 
-        // Build filename map
-        filenameMap[filename] = {
-          relativePath,
-          fullPath: filePath,
-          size: stats.size,
-          hash,
-          filename,
-        };
+        // Build filename map (keyed on basename). Basenames are not unique, so
+        // record collisions and drop them afterwards — a filename-only relink
+        // must never guess between two different files sharing a name.
+        if (filenameMap[filename]) {
+          ambiguousFilenames.add(filename);
+        } else {
+          filenameMap[filename] = {
+            relativePath,
+            fullPath: filePath,
+            size: stats.size,
+            hash,
+            filename,
+          };
+        }
 
         // Emit progress every 10 files
         if (i % 10 === 0 || i === files.length - 1) {
@@ -321,6 +338,13 @@ export class RelinkingService {
       } catch (err: any) {
         this.logger.error(`Failed to hash ${filePath}: ${err.message}`);
       }
+    }
+
+    // Drop every basename that appeared more than once so it can never be used
+    // for an ambiguous filename-only match.
+    for (const name of ambiguousFilenames) {
+      delete filenameMap[name];
+      this.logger.warn(`Ambiguous basename skipped for filename relink: ${name}`);
     }
 
     return { hashMap, filenameMap };
@@ -409,6 +433,9 @@ export class RelinkingService {
     const dbDir = path.dirname(dbPath);
     const backupFilename = `library_backup_${timestamp}.db`;
     const backupPath = path.join(dbDir, backupFilename);
+
+    // Flush pending WAL frames into the main file so the copy is consistent
+    this.databaseService.checkpointWal();
 
     // Copy database file
     fs.copyFileSync(dbPath, backupPath);

@@ -179,11 +179,15 @@ export class RelinkService {
       // Calculate week folder from path if in clips collection
       const clipsBasePath = this.getClipsBasePath();
       let weekFolder = analysis.video.clipsWeekFolder;
-      if (clipsBasePath && newVideoPath.startsWith(clipsBasePath)) {
+      if (clipsBasePath) {
+        // path.relative (not a raw startsWith prefix) so a sibling like
+        // "/a/clips-extra" isn't treated as being inside "/a/clips".
         const relativePath = path.relative(clipsBasePath, newVideoPath);
-        const parts = relativePath.split(path.sep);
-        if (parts.length > 0 && /^\d{4}-\d{2}-\d{2}$/.test(parts[0])) {
-          weekFolder = parts[0];
+        if (relativePath && !relativePath.startsWith('..') && !path.isAbsolute(relativePath)) {
+          const parts = relativePath.split(path.sep);
+          if (parts.length > 0 && /^\d{4}-\d{2}-\d{2}$/.test(parts[0])) {
+            weekFolder = parts[0];
+          }
         }
       }
 
@@ -269,6 +273,10 @@ export class RelinkService {
     // Normalize strings
     const norm1 = this.normalizeString(str1);
     const norm2 = this.normalizeString(str2);
+
+    // An empty normalized string carries no signal: '' .includes('') is true,
+    // which would otherwise yield a false 0.9 high-confidence match.
+    if (!norm1 || !norm2) return 0;
 
     // Exact match
     if (norm1 === norm2) return 1.0;

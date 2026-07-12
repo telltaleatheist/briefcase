@@ -175,6 +175,12 @@ export class LibraryManagerService implements OnModuleInit {
         }
       }
 
+      // If this is the currently-open library, flush its WAL first so the
+      // file-copy captures a fully-checkpointed, consistent database.
+      if (this.databaseService.getCurrentDbPath() === dbPath) {
+        this.databaseService.checkpointWal();
+      }
+
       // Copy the database file (overwrites existing backup)
       fs.copyFileSync(dbPath, backupPath);
 

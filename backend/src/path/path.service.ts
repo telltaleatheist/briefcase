@@ -3,10 +3,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 @Injectable()
 export class PathService {
@@ -133,15 +133,18 @@ export class PathService {
     }
 
     try {
+      // Pass the path as an argv entry (no shell) so filenames derived from
+      // YouTube titles can't inject shell commands.
       if (platform === 'darwin') {
         // macOS - Use 'open' command with -R to reveal in Finder
-        await execAsync(`open -R "${filePath}"`);
+        await execFileAsync('open', ['-R', filePath]);
       } else if (platform === 'win32') {
-        // Windows - Use 'explorer' with /select to select the file
-        await execAsync(`explorer /select,"${filePath}"`);
+        // Windows - 'explorer /select,<path>' must be a single token; explorer
+        // treats a separate "/select," and path as two args and won't select.
+        await execFileAsync('explorer', ['/select,' + filePath]);
       } else {
         // Linux - Try xdg-open to open the directory
-        await execAsync(`xdg-open "${dir}"`);
+        await execFileAsync('xdg-open', [dir]);
       }
 
       this.logger.log(`Opened file location: ${filePath}`);
