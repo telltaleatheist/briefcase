@@ -1,4 +1,4 @@
-import { Injectable, signal, OnDestroy } from '@angular/core';
+import { Injectable, signal, OnDestroy, NgZone } from '@angular/core';
 import { io, Socket } from 'socket.io-client';
 import { getBackendOrigin } from '../core/runtime-url';
 
@@ -157,19 +157,28 @@ export class WebsocketService implements OnDestroy {
   private componentDownloadErrorCallbacks: ((event: ComponentDownloadError) => void)[] = [];
   private componentDownloadCancelledCallbacks: ((event: ComponentDownloadCancelled) => void)[] = [];
 
+  constructor(private ngZone: NgZone) {}
+
   /**
    * Guarded dispatch to a list of subscriber callbacks. Each callback runs in
    * its own try/catch so one throwing consumer can't abort the forEach and
    * starve the remaining subscribers (or bubble the exception into socket.io's
    * event dispatch, which would freeze queue updates).
+   *
+   * The whole forEach runs inside NgZone.run so any state a subscriber updates
+   * re-enters Angular's zone and triggers change detection — socket.io callbacks
+   * fire outside the zone, so without this the UI would stay stale until the
+   * next click or a full reload.
    */
   private dispatch<T>(callbacks: ((event: T) => void)[], event: T): void {
-    callbacks.forEach(cb => {
-      try {
-        cb(event);
-      } catch (error) {
-        console.error('[WebsocketService] Subscriber callback threw:', error);
-      }
+    this.ngZone.run(() => {
+      callbacks.forEach(cb => {
+        try {
+          cb(event);
+        } catch (error) {
+          console.error('[WebsocketService] Subscriber callback threw:', error);
+        }
+      });
     });
   }
 
@@ -188,13 +197,17 @@ export class WebsocketService implements OnDestroy {
     });
 
     this.socket.on('connect', () => {
-      console.log('✅ WebSocket connected to', this.SOCKET_URL);
-      this.connected.set(true);
+      this.ngZone.run(() => {
+        console.log('✅ WebSocket connected to', this.SOCKET_URL);
+        this.connected.set(true);
+      });
     });
 
     this.socket.on('disconnect', () => {
-      console.log('❌ WebSocket disconnected');
-      this.connected.set(false);
+      this.ngZone.run(() => {
+        console.log('❌ WebSocket disconnected');
+        this.connected.set(false);
+      });
     });
 
     this.socket.on('connect_error', (error) => {
@@ -204,11 +217,13 @@ export class WebsocketService implements OnDestroy {
     // Belt-and-suspenders: if socket.io ever gives up reconnecting, tear down
     // the dead socket and schedule a fresh connect so recovery is always possible.
     this.socket.on('reconnect_failed', () => {
-      console.error('❌ WebSocket reconnect failed — scheduling fresh connect');
-      this.connected.set(false);
-      this.socket?.close();
-      this.socket = null;
-      setTimeout(() => this.connect(), 5000);
+      this.ngZone.run(() => {
+        console.error('❌ WebSocket reconnect failed — scheduling fresh connect');
+        this.connected.set(false);
+        this.socket?.close();
+        this.socket = null;
+        setTimeout(() => this.connect(), 5000);
+      });
     });
 
     // Connection confirmation from server
@@ -254,7 +269,9 @@ export class WebsocketService implements OnDestroy {
 
     // System status
     this.socket.on('system.status', (status: SystemStatus) => {
-      this.systemStatus.set(status);
+      this.ngZone.run(() => {
+        this.systemStatus.set(status);
+      });
     });
 
     // Video events

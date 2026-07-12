@@ -7,8 +7,10 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { RelinkingService, RelinkOptions, RelinkProgress } from './relinking.service';
 import { LibraryManagerService } from './library-manager.service';
+import { QueueManagerService } from '../queue/queue-manager.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 
 @Controller('database/relink')
@@ -20,7 +22,19 @@ export class RelinkingController {
     private relinkingService: RelinkingService,
     private libraryManagerService: LibraryManagerService,
     private eventEmitter: EventEmitter2,
+    private readonly moduleRef: ModuleRef,
   ) {}
+
+  /**
+   * Resolve the QueueManagerService lazily from the global app container.
+   * DatabaseModule does not import QueueModule, so we can't use constructor
+   * injection here — ModuleRef with { strict: false } fetches the app-wide
+   * singleton without creating a circular module dependency (same pattern as
+   * DatabaseController).
+   */
+  private getQueueManager(): QueueManagerService {
+    return this.moduleRef.get(QueueManagerService, { strict: false });
+  }
 
   /**
    * Get current relinking status
@@ -52,7 +66,18 @@ export class RelinkingController {
    */
   @Post('preview')
   async preview(@Body() body: { targetPath: string; copyMissingFiles?: boolean }) {
-    if (this.relinkingInProgress) {
+    // A relink runs on the shared DB connection but is NOT a queue task, so it
+    // would race a running queue task into the wrong library — refuse to start.
+    const queueManager = this.getQueueManager();
+    if (queueManager.hasActiveTasks()) {
+      const running = queueManager.getMainPool().size + (queueManager.getAIPool() ? 1 : 0);
+      throw new HttpException(
+        `Cannot relink while ${running} task(s) are running — wait for the queue to finish or cancel it`,
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    if (this.relinkingInProgress || this.relinkingService.isRelinkInProgress()) {
       throw new HttpException(
         'Relinking already in progress',
         HttpStatus.CONFLICT
@@ -119,7 +144,18 @@ export class RelinkingController {
    */
   @Post('run')
   async relink(@Body() body: { targetPath: string; updateLibraryPath?: boolean; copyMissingFiles?: boolean }) {
-    if (this.relinkingInProgress) {
+    // A relink runs on the shared DB connection but is NOT a queue task, so it
+    // would race a running queue task into the wrong library — refuse to start.
+    const queueManager = this.getQueueManager();
+    if (queueManager.hasActiveTasks()) {
+      const running = queueManager.getMainPool().size + (queueManager.getAIPool() ? 1 : 0);
+      throw new HttpException(
+        `Cannot relink while ${running} task(s) are running — wait for the queue to finish or cancel it`,
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    if (this.relinkingInProgress || this.relinkingService.isRelinkInProgress()) {
       throw new HttpException(
         'Relinking already in progress',
         HttpStatus.CONFLICT

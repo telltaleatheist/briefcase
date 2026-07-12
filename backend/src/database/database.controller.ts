@@ -7,6 +7,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { createReadStream, statSync } from 'fs';
 import { DatabaseService } from './database.service';
+import { RelinkingService } from './relinking.service';
 import { FileScannerService } from './file-scanner.service';
 import { MigrationService } from './migration.service';
 import { AnalysisService } from '../analysis/analysis.service';
@@ -68,6 +69,17 @@ export class DatabaseController {
    */
   private getQueueManager(): QueueManagerService {
     return this.moduleRef.get(QueueManagerService, { strict: false });
+  }
+
+  /**
+   * Resolve the shared RelinkingService lazily, mirroring getQueueManager().
+   * We use it to (a) mark the shared connection busy during the orphan-relink
+   * endpoint (which bypasses relinkByHash) and (b) let switch/transfer refuse
+   * while any relink is in progress. Resolved via ModuleRef with { strict:
+   * false } to match the existing lazy-resolution style in this controller.
+   */
+  private getRelinkingService(): RelinkingService {
+    return this.moduleRef.get(RelinkingService, { strict: false });
   }
 
   /**
@@ -2940,6 +2952,33 @@ export class DatabaseController {
     const folder = body.searchFolder || body.newFolder;
     this.logger.log(`Attempting to relink ${body.videoIds?.length || 0} orphaned videos (autoScan: ${body.autoScan}, folder: ${folder})`);
 
+    // A relink mutates the shared DB connection but is NOT a queue task, so
+    // hasActiveTasks() stays false during it. If a queue task is mid-await, this
+    // relink would race the shared connection into the wrong library — refuse.
+    const queueManager = this.getQueueManager();
+    if (queueManager.hasActiveTasks()) {
+      const running = queueManager.getMainPool().size + (queueManager.getAIPool() ? 1 : 0);
+      throw new HttpException(
+        `Cannot relink while ${running} task(s) are running — wait for the queue to finish or cancel it`,
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    // This endpoint does its own path-search relink WITHOUT going through
+    // relinkingService.relinkByHash, so mark the shared connection busy for the
+    // whole operation here. A switch/transfer arriving mid-relink then sees
+    // isRelinkInProgress() === true and refuses; a second relink is refused too.
+    const relinkingService = this.getRelinkingService();
+    try {
+      relinkingService.beginRelink();
+    } catch {
+      throw new HttpException(
+        'A relink is already in progress — wait for it to finish',
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    try {
     if (!body.videoIds || !Array.isArray(body.videoIds) || body.videoIds.length === 0) {
       return {
         success: false,
@@ -3109,6 +3148,11 @@ export class DatabaseController {
         ? `Relinked ${relinkedCount} video${relinkedCount > 1 ? 's' : ''}${failedCount > 0 ? `, ${failedCount} failed` : ''}`
         : `Could not find videos in ${body.autoScan ? 'library' : 'selected folder'}`
     };
+    } finally {
+      // Always clear the busy flag, even on early return/throw, so the shared
+      // connection is never left permanently marked as relinking.
+      relinkingService.endRelink();
+    }
   }
 
   /**
@@ -3374,13 +3418,14 @@ export class DatabaseController {
    */
   @Post('libraries/:id/switch')
   async switchLibrary(@Param('id') id: string) {
-    // Switching swaps the shared DB connection. If a queue task is mid-await it
-    // would then write into the wrong library — refuse while tasks are running.
+    // Switching swaps the shared DB connection. If a queue task is mid-await, or
+    // a (non-queue) relink is running on the shared connection, it would then
+    // read/write the wrong library — refuse while either is in progress.
     const queueManager = this.getQueueManager();
-    if (queueManager.hasActiveTasks()) {
+    if (queueManager.hasActiveTasks() || this.getRelinkingService().isRelinkInProgress()) {
       const running = queueManager.getMainPool().size + (queueManager.getAIPool() ? 1 : 0);
       throw new HttpException(
-        `Cannot switch libraries while ${running} task(s) are running — wait for the queue to finish or cancel it`,
+        `Cannot switch libraries while ${running} task(s) are running or a relink is in progress — wait for them to finish or cancel`,
         HttpStatus.CONFLICT,
       );
     }
@@ -3505,14 +3550,15 @@ export class DatabaseController {
     replaceExisting: boolean;
   }) {
     // Transferring re-inits the shared DB connection (source <-> target). If a
-    // queue task is mid-await it would then write into the wrong library —
-    // refuse while tasks are running. Thrown before the try so the 409 isn't
-    // swallowed and returned as a 200 { success:false }.
+    // queue task is mid-await, or a (non-queue) relink is running on the shared
+    // connection, it would then write into the wrong library — refuse while
+    // either is in progress. Thrown before the try so the 409 isn't swallowed
+    // and returned as a 200 { success:false }.
     const queueManager = this.getQueueManager();
-    if (queueManager.hasActiveTasks()) {
+    if (queueManager.hasActiveTasks() || this.getRelinkingService().isRelinkInProgress()) {
       const running = queueManager.getMainPool().size + (queueManager.getAIPool() ? 1 : 0);
       throw new HttpException(
-        `Cannot transfer libraries while ${running} task(s) are running — wait for the queue to finish or cancel it`,
+        `Cannot transfer libraries while ${running} task(s) are running or a relink is in progress — wait for them to finish or cancel`,
         HttpStatus.CONFLICT,
       );
     }
