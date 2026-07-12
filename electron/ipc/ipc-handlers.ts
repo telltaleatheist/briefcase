@@ -445,7 +445,7 @@ function setupSettingsHandlers(): void {
       const path = await import('path');
 
       // Save to app logs directory
-      const logsDir = log.transports.file.getFile().path.replace(/[^/]+$/, '');
+      const logsDir = path.dirname(log.transports.file.getFile().path);
       const logPath = path.join(logsDir, filename);
 
       await fs.writeFile(logPath, content, 'utf-8');

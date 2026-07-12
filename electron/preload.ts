@@ -14,15 +14,8 @@ interface ElectronAPI {
   openDirectoryPicker: () => Promise<{ canceled: boolean; filePaths: string[] }>;
   showOpenDialog: (options: any) => Promise<any>; // Use 'any' for now to avoid type conflicts
   isDirectory: (filePath: string) => Promise<boolean>;
-  scanDirectoryForMedia: (directoryPath: string) => Promise<string[]>;
+  scanDirectoryForMedia: (directoryPath: string) => Promise<{ files: string[]; errors: { path: string; message: string }[] }>;
   getAppVersion: () => Promise<string>;
-  getBinaryPaths: () => Promise<{
-    ytDlpPath: string;
-    ffmpegPath: string;
-    ffprobePath: string;
-    resourcesPath: string;
-    isDevelopment: boolean;
-  }>;
   environment: {
     isDevelopment: boolean;
     resourcesPath: string;
@@ -86,7 +79,6 @@ contextBridge.exposeInMainWorld('electron', {
   isDirectory: (filePath: string) => ipcRenderer.invoke('is-directory', filePath),
   scanDirectoryForMedia: (directoryPath: string) => ipcRenderer.invoke('scan-directory-for-media', directoryPath),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
-  getBinaryPaths: () => ipcRenderer.invoke('get-binary-paths'),
   environment: {
     isDevelopment,
     resourcesPath,
@@ -101,24 +93,6 @@ contextBridge.exposeInMainWorld('electron', {
         // In production, binaries are in the resources/bin directory
         return path.join(resourcesPath, 'bin', executable);
       }
-    },
-    checkPathConfig: () => {
-      return ipcRenderer.invoke('check-path-config');
-    },
-
-    // Notify about missing executables
-    showPathConfigDialog: () => {
-      return ipcRenderer.invoke('show-path-config-dialog');
-    },
-
-    // Get current configuration
-    getPathConfig: () => {
-      return ipcRenderer.invoke('get-path-config');
-    },
-
-    // Update configuration programmatically
-    updatePathConfig: (config: any) => {
-      return ipcRenderer.invoke('update-path-config', config);
     },
   },
   // Add all your other IPC handlers here
