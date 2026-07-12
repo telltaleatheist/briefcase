@@ -55,7 +55,39 @@ export class RelinkingService {
   private readonly logger = new Logger(RelinkingService.name);
   private readonly HASH_SAMPLE_SIZE = 1024 * 1024; // 1MB sample for quick hash
 
+  /**
+   * True while any relink is running against the shared DB connection. A relink
+   * is a LONG operation that mutates the single shared connection but is NOT a
+   * queue task, so `QueueManagerService.hasActiveTasks()` is false during it.
+   * Anything that swaps the shared connection (library switch/transfer) must
+   * check this so a switch can't corrupt across libraries mid-relink.
+   */
+  private relinkInProgress = false;
+
   constructor(private databaseService: DatabaseService) {}
+
+  /** Whether a relink is currently mutating the shared DB connection. */
+  isRelinkInProgress(): boolean {
+    return this.relinkInProgress;
+  }
+
+  /**
+   * Claim the relink busy flag. Throws if a relink is already running so a
+   * second concurrent relink is refused. Callers MUST pair this with
+   * endRelink() in a `finally`. Used both by relinkByHash and by out-of-service
+   * relink paths (the orphan-relink endpoint) that mutate paths directly.
+   */
+  beginRelink(): void {
+    if (this.relinkInProgress) {
+      throw new Error('A relink operation is already in progress');
+    }
+    this.relinkInProgress = true;
+  }
+
+  /** Release the relink busy flag. Safe to call even if it was never set. */
+  endRelink(): void {
+    this.relinkInProgress = false;
+  }
 
   /**
    * Relink videos by scanning target folder and matching by hash
@@ -64,6 +96,10 @@ export class RelinkingService {
     options: RelinkOptions,
     progressCallback?: (progress: RelinkProgress) => void
   ): Promise<RelinkResult> {
+    // Refuse a second concurrent relink and mark the shared connection busy for
+    // the whole operation so a library switch/transfer refuses while we run.
+    this.beginRelink();
+
     const result: RelinkResult = {
       success: false,
       stats: {
@@ -256,6 +292,10 @@ export class RelinkingService {
       result.success = false;
       result.stats.errors.push(`Fatal error: ${error.message}`);
       return result;
+    } finally {
+      // Always clear the busy flag, even on error/throw, so the shared
+      // connection is never left permanently marked as relinking.
+      this.endRelink();
     }
   }
 
