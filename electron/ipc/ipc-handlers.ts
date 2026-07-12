@@ -1,6 +1,7 @@
 // Briefcase/electron/ipc/ipc-handlers.ts
 // SIMPLIFIED: Removed ConfigManager and PathValidator - using bundled binaries
 import { ipcMain, dialog, shell, app } from 'electron';
+import { pathToFileURL } from 'url';
 import * as log from 'electron-log';
 import { autoUpdater } from 'electron-updater';
 import Store from 'electron-store';
@@ -100,12 +101,10 @@ function setupFileSystemHandlers(): void {
   // Open a local file in the default web browser (reliable for MHTML/HTML)
   ipcMain.handle('open-in-browser', async (_, filePath: string) => {
     try {
-      // Encode path segments but keep slashes to produce a valid file:// URL
-      const encodedPath = filePath
-        .split('/')
-        .map(segment => encodeURIComponent(segment))
-        .join('/');
-      const url = `file://${encodedPath}`;
+      // Use Node's pathToFileURL so the file:// URL is valid on every platform.
+      // Manual '/'-based encoding breaks on Windows, where paths use '\' and
+      // would collapse into a single percent-encoded segment.
+      const url = pathToFileURL(filePath).href;
       await shell.openExternal(url);
       return { success: true };
     } catch (error) {

@@ -256,7 +256,10 @@ app.whenReady().then(async () => {
           const restarted = await backendService.startBackendServer();
           if (restarted) {
             log.info('Backend restarted successfully after unexpected exit');
-            windowService.setFrontendPort(backendService.getBackendPort());
+            // The restart may have bound a NEW port. Reload the existing main
+            // window to the new origin if it changed — otherwise the renderer
+            // is stranded on the dead old port. No-op (no flash) if unchanged.
+            windowService.reloadMainWindowForPort(backendService.getBackendPort());
             trayService.setBackendPort(backendService.getBackendPort());
             for (const win of BrowserWindow.getAllWindows()) {
               if (!win.isDestroyed()) {

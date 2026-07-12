@@ -54,6 +54,39 @@ export class WindowService {
   }
 
   /**
+   * Update the stored frontend port and, if the main window is already open on
+   * a DIFFERENT port, reload it to the new origin.
+   *
+   * A backend auto-restart can bind a new port via findAvailablePort(). Calling
+   * setFrontendPort() alone only affects future createMainWindow() calls — the
+   * existing renderer keeps its old origin and is stranded on the dead port with
+   * no recovery until a manual reload. When the port actually changes, reload
+   * the live window so it reconnects to the new backend.
+   */
+  reloadMainWindowForPort(port: number): void {
+    const portChanged = port !== this.frontendPort;
+    this.frontendPort = port;
+
+    // No change → don't reload (avoids a pointless flash).
+    if (!portChanged) {
+      return;
+    }
+
+    if (!this.mainWindow || this.mainWindow.isDestroyed()) {
+      return;
+    }
+
+    const host = ServerConfig.config.electronServer.host === '0.0.0.0' ? 'localhost' : ServerConfig.config.electronServer.host;
+    const frontendUrl = `http://${host}:${port}`;
+    log.info(`Reloading main window to new backend port: ${frontendUrl}`);
+    // As with the initial load, an aborted navigation rejects this promise —
+    // swallow it so it never surfaces as an unhandledRejection.
+    this.mainWindow.loadURL(frontendUrl).catch((err) =>
+      log.warn(`Main window reload after backend restart failed/aborted: ${err.message}`)
+    );
+  }
+
+  /**
    * Create the main application window
    */
   createMainWindow(): BrowserWindow {
