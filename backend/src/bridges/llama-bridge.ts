@@ -246,11 +246,13 @@ export class LlamaBridge extends EventEmitter {
           this.emitProgress('loading', 20, 'Loading AI model into memory...');
         }
 
-        // Look for "server is listening" or ready indicator
+        // Look for "server is listening" or ready indicator. Match against the
+        // ACCUMULATED buffer, not just this chunk, so a marker split across two
+        // reads still triggers instead of hanging to the startup timeout.
         if (
-          text.includes('server is listening') ||
-          text.includes('HTTP server listening') ||
-          text.includes('llama server listening')
+          startupBuffer.includes('server is listening') ||
+          startupBuffer.includes('HTTP server listening') ||
+          startupBuffer.includes('llama server listening')
         ) {
           if (!resolved) {
             resolved = true;
@@ -330,13 +332,18 @@ export class LlamaBridge extends EventEmitter {
           this.serverProcess.kill('SIGKILL');
         }
       } else {
-        this.serverProcess.kill('SIGTERM');
-        // Force kill after 5 seconds if still running
-        setTimeout(() => {
-          if (this.serverProcess) {
-            this.serverProcess.kill('SIGKILL');
+        // Capture the process locally: this.serverProcess is nulled synchronously
+        // below (and may point at a freshly respawned server by the time the timer
+        // fires), so the fallback SIGKILL must target THIS process, and the timer
+        // must be cancelled once it exits.
+        const proc = this.serverProcess;
+        proc.kill('SIGTERM');
+        const killTimer = setTimeout(() => {
+          if (proc.exitCode === null && proc.signalCode === null) {
+            proc.kill('SIGKILL');
           }
         }, 5000);
+        proc.once('exit', () => clearTimeout(killTimer));
       }
 
       this.serverProcess = null;
@@ -359,6 +366,18 @@ export class LlamaBridge extends EventEmitter {
   }
 
   /**
+   * Suspend the idle timer while a request is in flight. The idle timeout equals
+   * the request timeout, so without this the idle timer could fire mid-generation
+   * and tear the server down underneath an active request. Re-armed on completion.
+   */
+  private suspendIdleTimer(): void {
+    if (this.idleTimeout) {
+      clearTimeout(this.idleTimeout);
+      this.idleTimeout = null;
+    }
+  }
+
+  /**
    * Generate text using the server's OpenAI-compatible API
    */
   async generateText(prompt: string, options?: LlamaGenerateOptions): Promise<LlamaGenerateResult> {
@@ -367,7 +386,9 @@ export class LlamaBridge extends EventEmitter {
       await this.startServer();
     }
 
-    this.resetIdleTimer();
+    // Suspend the idle shutdown for the duration of the request (re-armed in the
+    // finally below) so it can't fire mid-generation.
+    this.suspendIdleTimer();
     this.emitProgress('generating', 50, 'Generating response...');
 
     // Report the model actually loaded, not a hardcoded name. The OpenAI-compat
@@ -429,6 +450,9 @@ export class LlamaBridge extends EventEmitter {
       }
 
       throw error;
+    } finally {
+      // Re-arm the idle shutdown now that the request has finished.
+      this.resetIdleTimer();
     }
   }
 

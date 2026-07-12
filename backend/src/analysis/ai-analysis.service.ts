@@ -189,12 +189,30 @@ function extractJsonFromResponse(response: string): string | null {
     // Extract the portion that looks like JSON
     let jsonCandidate = text.substring(firstBrace, lastBrace + 1);
 
-    // Try to balance braces if needed
+    // Try to balance braces if needed — ignore braces that appear inside quoted
+    // string values (tracking string/escape state) so a `{`/`}` in the text
+    // can't truncate otherwise-valid JSON.
     let braceCount = 0;
     let endIndex = -1;
+    let inString = false;
+    let escaped = false;
     for (let i = 0; i < jsonCandidate.length; i++) {
-      if (jsonCandidate[i] === '{') braceCount++;
-      if (jsonCandidate[i] === '}') braceCount--;
+      const ch = jsonCandidate[i];
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (inString) continue;
+      if (ch === '{') braceCount++;
+      if (ch === '}') braceCount--;
       if (braceCount === 0) {
         endIndex = i;
         break;
@@ -1708,10 +1726,9 @@ export class AIAnalysisService {
           suggestedTitle = suggestedTitle.slice(1, -1);
         }
 
-        // Remove file extension
-        if (suggestedTitle.includes('.')) {
-          suggestedTitle = suggestedTitle.split('.')[0];
-        }
+        // Strip only a trailing file extension (e.g. ".mp4"), not mid-title dots
+        // like "$3.5 million".
+        suggestedTitle = suggestedTitle.replace(/\.[A-Za-z0-9]{1,5}$/, '');
 
         // Remove date prefix
         suggestedTitle = suggestedTitle.replace(/^\d{4}-\d{2}-\d{2}[-\s]*/, '');
@@ -1807,10 +1824,9 @@ export class AIAnalysisService {
         suggestedTitle = suggestedTitle.slice(1, -1);
       }
 
-      // Strip file extension
-      if (suggestedTitle.includes('.')) {
-        suggestedTitle = suggestedTitle.split('.')[0];
-      }
+      // Strip only a trailing file extension (e.g. ".mp4"), not mid-title dots
+      // like "$3.5 million".
+      suggestedTitle = suggestedTitle.replace(/\.[A-Za-z0-9]{1,5}$/, '');
 
       // Remove leading date prefix
       suggestedTitle = suggestedTitle.replace(/^\d{4}-\d{2}-\d{2}[-\s]*/, '');

@@ -196,9 +196,13 @@ export class FilenameDateUtil {
     // Check standard format YYYY-MM-DD
     if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
       const [year, month, day] = dateStr.split('-').map(Number);
-      return year >= 1900 && year <= 2100 &&
-             month >= 1 && month <= 12 &&
-             day >= 1 && day <= 31;
+      if (year < 1900 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31) {
+        return false;
+      }
+      // Reject impossible calendar dates (e.g. 2025-02-30, 2025-04-31) by
+      // round-tripping through a real Date.
+      const d = new Date(year, month - 1, day);
+      return d.getFullYear() === year && d.getMonth() === month - 1 && d.getDate() === day;
     }
 
     // Check trimester format YYYY-MM-T[1-3]
@@ -359,16 +363,22 @@ export class FilenameDateUtil {
    * Get file extension including the dot
    */
   private static getExtension(filename: string): string {
-    const lastDot = filename.lastIndexOf('.');
-    return lastDot > 0 ? filename.substring(lastDot) : '';
+    // Only a short, space-free trailing token counts as a real extension. This
+    // keeps titles like "Top 10.5 Moments" (which has no extension) intact
+    // instead of dropping everything after a mid-title dot.
+    const match = filename.match(/\.[A-Za-z0-9]{1,5}$/);
+    return match ? match[0] : '';
   }
 
   /**
-   * Format an upload date from yt-dlp format (YYYYMMDD) to YYYY-MM-DD
+   * Format an upload date from yt-dlp format (YYYYMMDD) to YYYY-MM-DD.
+   * Returns null when the input is absent/malformed rather than silently
+   * substituting today's date (which would mis-date the download); callers
+   * decide how to handle a missing date.
    */
-  static formatUploadDate(ytDlpDate: string): string {
+  static formatUploadDate(ytDlpDate: string): string | null {
     if (!ytDlpDate || ytDlpDate.length !== 8) {
-      return this.getCurrentDate();
+      return null;
     }
 
     const year = ytDlpDate.substring(0, 4);

@@ -6,6 +6,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import * as crypto from 'crypto';
 import { Logger } from '@nestjs/common';
 
 const logger = new Logger('TempFileUtil');
@@ -64,7 +65,10 @@ export async function copyToTemp(
 
   const tempDir = getTempDir();
   const fileName = path.basename(sourcePath);
-  const tempPath = path.join(tempDir, `${Date.now()}-${fileName}`);
+  // Timestamp alone collides when two jobs start in the same millisecond; add a
+  // random token. Keep the file suffixed with `-<fileName>` so cleanupTempFiles
+  // can still match it per job.
+  const tempPath = path.join(tempDir, `${Date.now()}-${crypto.randomBytes(4).toString('hex')}-${fileName}`);
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
@@ -265,12 +269,21 @@ export function atomicReplaceFile(sourceTempPath: string, destPath: string): voi
  * Clean up temp files for a given source file
  */
 export function cleanupTempFiles(sourceFileName: string): void {
+  // An empty name would substring-match EVERY temp file below, wiping other
+  // jobs' work — refuse it outright.
+  if (!sourceFileName) {
+    return;
+  }
+
   const tempDir = getTempDir();
 
   try {
     const files = fs.readdirSync(tempDir);
     for (const file of files) {
-      if (file.includes(sourceFileName)) {
+      // copyToTemp names files `<timestamp>-<random>-<sourceFileName>`. Match that
+      // exact per-job suffix (or the bare name) instead of a loose substring, so
+      // one job's cleanup can't delete another job's temp files.
+      if (file === sourceFileName || file.endsWith(`-${sourceFileName}`)) {
         const filePath = path.join(tempDir, file);
         try {
           fs.unlinkSync(filePath);

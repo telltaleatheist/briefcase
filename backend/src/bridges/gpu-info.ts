@@ -16,6 +16,36 @@ export interface DetectedGpu {
 }
 
 /**
+ * Read the true (64-bit) GPU VRAM size on Windows from the display-adapter class
+ * registry key (HardwareInformation.qwMemorySize). WMIC's AdapterRAM is a 32-bit
+ * field capped at ~4GB that WRAPS for larger cards, so it can't be trusted to
+ * size VRAM. Returns the largest adapter's byte count, or null if unavailable.
+ */
+function readWindowsGpuVramBytes(): number | null {
+  const base =
+    'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}';
+  let best = 0;
+  for (let i = 0; i < 8; i++) {
+    const key = `${base}\\${String(i).padStart(4, '0')}`;
+    try {
+      const out = execSync(`reg query "${key}" /v HardwareInformation.qwMemorySize`, {
+        encoding: 'utf8',
+        timeout: 5000,
+        windowsHide: true,
+      });
+      const m = out.match(/HardwareInformation\.qwMemorySize\s+REG_QWORD\s+0x([0-9a-fA-F]+)/);
+      if (m) {
+        const bytes = parseInt(m[1], 16);
+        if (bytes > best) best = bytes;
+      }
+    } catch {
+      // Subkey may not exist / not a GPU — keep scanning.
+    }
+  }
+  return best > 0 ? best : null;
+}
+
+/**
  * Detect the primary GPU and its VRAM. On Apple Silicon, VRAM is reported as
  * total system RAM (unified memory). Returns null when no suitable GPU is found.
  */
@@ -49,16 +79,21 @@ export function detectGpuVram(): DetectedGpu | null {
           timeout: 5000,
           windowsHide: true,
         }).trim();
+        // Prefer the trustworthy 64-bit registry size; never gate GPU capability
+        // on WMIC's wrapping AdapterRAM.
+        const regBytes = readWindowsGpuVramBytes();
         const lines = wmic.split('\n').filter((l) => l.trim() && !l.includes('Node,'));
         for (const line of lines) {
           const parts = line.split(',');
           if (parts.length >= 3) {
             const adapterRAM = parseInt(parts[1], 10);
             const name = parts[2]?.trim();
-            if (adapterRAM > 0 && name && !name.toLowerCase().includes('microsoft basic')) {
-              const vramGB = Math.round((adapterRAM / 1024 ** 3) * 10) / 10;
-              if (vramGB >= 2) return { name, vramGB };
-            }
+            if (!name || name.toLowerCase().includes('microsoft basic')) continue;
+            const bytes = regBytes ?? (adapterRAM > 0 ? adapterRAM : 0);
+            // Real discrete adapter but no trustworthy byte count → assume it's
+            // usable for offload (>=4GB) rather than falling back to CPU-only.
+            const vramGB = bytes > 0 ? Math.round((bytes / 1024 ** 3) * 10) / 10 : 4;
+            return { name, vramGB };
           }
         }
       } catch {

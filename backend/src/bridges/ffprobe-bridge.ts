@@ -95,6 +95,17 @@ export class FfprobeBridge {
       const proc = spawn(this.binaryPath, args);
       let stdout = '';
       let stderr = '';
+      let settled = false;
+
+      // Corrupt/unreadable input can make ffprobe hang forever — kill and reject.
+      const TIMEOUT_MS = 60000;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        proc.kill('SIGKILL');
+        this.logger.error(`ffprobe timed out after ${TIMEOUT_MS}ms: ${filePath}`);
+        reject(new Error(`ffprobe timed out after ${TIMEOUT_MS}ms for ${filePath}`));
+      }, TIMEOUT_MS);
 
       proc.stdout.on('data', (data) => {
         stdout += data.toString();
@@ -105,6 +116,10 @@ export class FfprobeBridge {
       });
 
       proc.on('close', (code) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+
         if (code !== 0) {
           this.logger.error(`Failed with code ${code}: ${stderr}`);
           reject(new Error(`ffprobe exited with code ${code}: ${stderr}`));
@@ -122,6 +137,9 @@ export class FfprobeBridge {
       });
 
       proc.on('error', (err) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
         this.logger.error(`Spawn error: ${err.message}`);
 
         if (err.message.includes('bad CPU type') || err.message.includes('ENOEXEC')) {

@@ -166,8 +166,15 @@ export class LlamaManager extends EventEmitter implements OnModuleDestroy {
     }
 
     const model = COGITO_MODELS.find((m) => m.filename === filename);
-    const sizeGB = model?.sizeGB ?? 0;
-    const layers = model?.layers ?? 0;
+    if (!model) {
+      // Unknown GGUF (not in the catalog): we already know there's a usable GPU
+      // (>=4GB, checked above) but have no size/layer data to size a partial
+      // offload. Default to full offload rather than CPU-only.
+      this.logger.log(`Unknown model ${filename} — defaulting to full GPU offload`);
+      return FULL;
+    }
+    const sizeGB = model.sizeGB ?? 0;
+    const layers = model.layers ?? 0;
     const HEADROOM_GB = 1.5; // KV cache + compute buffers + display
     const budget = vram - HEADROOM_GB;
 

@@ -280,7 +280,12 @@ export class ModelManagerService implements OnModuleInit {
       throw new Error(`Unknown model: ${modelId}`);
     }
 
-    if (this.activeDownload && this.activeDownload.modelId !== modelId) {
+    // Only the initial (external) call enforces the single-download guard, and it
+    // rejects if ANY download is active — including the same id — so a
+    // double-click can't open a second concurrent stream to the same file.
+    // Retries (retryCount > 0) reuse the same activeDownload slot, kept marked
+    // active across the retry sleep below.
+    if (retryCount === 0 && this.activeDownload) {
       throw new Error(`Download already in progress: ${this.activeDownload.modelId}`);
     }
 
@@ -319,6 +324,14 @@ export class ModelManagerService implements OnModuleInit {
         maxRedirects: 5,
         headers,
       });
+
+      // If we asked to resume (Range) but the server sent a full 200 body (not
+      // 206 Partial Content), appending would corrupt the file — restart from
+      // byte 0 and truncate.
+      if (resumeFromByte > 0 && response.status !== 206) {
+        this.logger.warn(`Server ignored Range (status ${response.status}); restarting download from 0`);
+        resumeFromByte = 0;
+      }
 
       // Handle content-length for both full and partial responses
       const contentLength = parseInt(response.headers['content-length'] || '0', 10);
@@ -410,6 +423,14 @@ export class ModelManagerService implements OnModuleInit {
         });
       });
 
+      // Reject a truncated/short download instead of accepting it as success.
+      if (totalBytes > 0) {
+        const finalSize = fs.statSync(tempPath).size;
+        if (finalSize !== totalBytes) {
+          throw new Error(`Downloaded ${finalSize} bytes but expected ${totalBytes} for ${model.name}`);
+        }
+      }
+
       // Rename temp file to final name
       fs.renameSync(tempPath, destPath);
 
@@ -469,7 +490,9 @@ export class ModelManagerService implements OnModuleInit {
 
       if (isRetryable && retryCount < MAX_RETRIES) {
         this.logger.log(`Retrying download in 5 seconds... (attempt ${retryCount + 1}/${MAX_RETRIES})`);
-        this.activeDownload = null;
+        // Keep activeDownload marked active across the retry sleep so a concurrent
+        // double-click can't start a second stream to the same file. The recursive
+        // call re-assigns the slot with a fresh controller.
 
         // Wait before retrying
         await new Promise(resolve => setTimeout(resolve, 5000));

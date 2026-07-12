@@ -572,15 +572,16 @@ export class AnalysisController {
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
       }
-      fs.writeFileSync(categoriesPath, JSON.stringify(DEFAULT_CATEGORIES, null, 2), 'utf-8');
+      // Persist the { categories: [...] } shape that loadCategories() reads.
+      fs.writeFileSync(categoriesPath, JSON.stringify({ categories: DEFAULT_CATEGORIES }, null, 2), 'utf-8');
       return DEFAULT_CATEGORIES;
     }
 
-    // Read from file
+    // Read from file — tolerate both the object shape and a legacy bare array.
     const data = fs.readFileSync(categoriesPath, 'utf-8');
-    const categories = JSON.parse(data);
+    const parsed = JSON.parse(data);
 
-    return categories;
+    return Array.isArray(parsed) ? parsed : (parsed.categories || []);
   }
 
   /**
@@ -598,8 +599,8 @@ export class AnalysisController {
         fs.mkdirSync(dir, { recursive: true });
       }
 
-      // Write to file
-      fs.writeFileSync(categoriesPath, JSON.stringify(body.categories, null, 2), 'utf-8');
+      // Write to file in the { categories: [...] } shape that loadCategories() reads.
+      fs.writeFileSync(categoriesPath, JSON.stringify({ categories: body.categories }, null, 2), 'utf-8');
 
       return {
         success: true,
@@ -628,8 +629,8 @@ export class AnalysisController {
         fs.mkdirSync(dir, { recursive: true });
       }
 
-      // Write defaults to file
-      fs.writeFileSync(categoriesPath, JSON.stringify(DEFAULT_CATEGORIES, null, 2), 'utf-8');
+      // Write defaults in the { categories: [...] } shape that loadCategories() reads.
+      fs.writeFileSync(categoriesPath, JSON.stringify({ categories: DEFAULT_CATEGORIES }, null, 2), 'utf-8');
 
       return DEFAULT_CATEGORIES;
     } catch (error: any) {

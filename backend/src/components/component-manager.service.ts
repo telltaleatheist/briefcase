@@ -17,7 +17,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as crypto from 'crypto';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import axios from 'axios';
 import {
   Manifest,
@@ -244,7 +244,10 @@ export class ComponentManagerService implements OnModuleInit {
     const artifact = this.pickArtifact(component);
     if (!artifact) throw new Error(`Component ${id} is not available for ${process.platform}/${process.arch}`);
 
-    if (this.activeDownload && this.activeDownload.componentId !== id) {
+    // Reject if ANY download is active, including the same id — a double-click
+    // would otherwise open a second concurrent stream to the same file and
+    // corrupt it.
+    if (this.activeDownload) {
       throw new Error(`Download already in progress: ${this.activeDownload.componentId}`);
     }
 
@@ -329,7 +332,9 @@ export class ComponentManagerService implements OnModuleInit {
     fs.mkdirSync(extractDir, { recursive: true });
     // bsdtar (macOS/Windows) and gnu tar (Linux) both auto-detect gzip; bsdtar also reads .zip.
     // Our (platform, archive) pairs are always tar.gz on darwin/linux and .zip on win32.
-    execSync(`tar -xf "${archivePath}" -C "${extractDir}"`, { stdio: 'pipe' });
+    // execFileSync (argv array) — never a shell string — so a hostile manifest
+    // filename can't inject shell commands.
+    execFileSync('tar', ['-xf', archivePath, '-C', extractDir], { stdio: 'pipe' });
 
     this.emitProgress(id, 'install', artifact.bytes, artifact.bytes);
     const finalDir = path.join(this.componentsDir, id);
@@ -340,7 +345,7 @@ export class ComponentManagerService implements OnModuleInit {
       this.chmodRecursive(finalDir);
       if (process.platform === 'darwin') {
         try {
-          execSync(`xattr -cr "${finalDir}"`, { stdio: 'pipe' });
+          execFileSync('xattr', ['-cr', finalDir], { stdio: 'pipe' });
         } catch {
           // best-effort quarantine clear
         }
@@ -497,6 +502,14 @@ export class ComponentManagerService implements OnModuleInit {
         headers,
       });
 
+      // If we asked to resume (Range) but the server replied 200 (full body,
+      // not 206 Partial Content), appending would corrupt the file. Restart from
+      // byte 0 and truncate.
+      if (resumeFromByte > 0 && response.status !== 206) {
+        this.logger.warn(`${componentId}: server ignored Range (status ${response.status}); restarting from 0`);
+        resumeFromByte = 0;
+      }
+
       const contentLength = parseInt(response.headers['content-length'] || '0', 10);
       const totalBytes = resumeFromByte + contentLength;
       let downloadedBytes = resumeFromByte;
@@ -517,8 +530,12 @@ export class ComponentManagerService implements OnModuleInit {
         if (elapsed >= 1000) {
           const bps = ((downloadedBytes - lastBytes) / elapsed) * 1000;
           speed = `${(bps / (1024 * 1024)).toFixed(1)} MB/s`;
-          const remaining = (totalBytes - downloadedBytes) / bps;
-          eta = remaining < 60 ? `${Math.ceil(remaining)}s` : remaining < 3600 ? `${Math.ceil(remaining / 60)}m` : `${Math.ceil(remaining / 3600)}h`;
+          // Only compute an ETA when we know the total and are making progress,
+          // otherwise a missing content-length / stalled second yields "Infinityh".
+          if (totalBytes > 0 && bps > 0) {
+            const remaining = (totalBytes - downloadedBytes) / bps;
+            eta = remaining < 60 ? `${Math.ceil(remaining)}s` : remaining < 3600 ? `${Math.ceil(remaining / 60)}m` : `${Math.ceil(remaining / 3600)}h`;
+          }
           lastTime = now;
           lastBytes = downloadedBytes;
         }
@@ -543,6 +560,14 @@ export class ComponentManagerService implements OnModuleInit {
           reject(new Error('aborted'));
         });
       });
+
+      // Reject a truncated/short download instead of accepting it as success.
+      if (totalBytes > 0) {
+        const finalSize = fs.statSync(destPath).size;
+        if (finalSize !== totalBytes) {
+          throw new Error(`${componentId}: downloaded ${finalSize} bytes but expected ${totalBytes}`);
+        }
+      }
     } catch (error: any) {
       const isCancelled =
         axios.isCancel(error) ||

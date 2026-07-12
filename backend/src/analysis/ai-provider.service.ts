@@ -226,6 +226,9 @@ export class AIProviderService {
       });
     }
 
+    // o1-family models reject `max_tokens` (400) and require `max_completion_tokens`.
+    const isO1Family = config.model.startsWith('o1');
+
     try {
       const completion = await this.openai.chat.completions.create({
         model: config.model,
@@ -235,7 +238,7 @@ export class AIProviderService {
             content: prompt,
           },
         ],
-        max_tokens: 4096,
+        ...(isO1Family ? { max_completion_tokens: 4096 } : { max_tokens: 4096 }),
         // No temperature — omitted for all cloud providers.
       });
 
@@ -303,6 +306,8 @@ export class AIProviderService {
         headers: {
           'Content-Type': 'application/json',
         },
+        // A wedged Ollama must not block the serialized pipeline forever.
+        signal: AbortSignal.timeout(300000),
         body: JSON.stringify({
           model: config.model,
           prompt: prompt,

@@ -99,8 +99,9 @@ export class SimpleTranscribeController {
       // Emit start event
       this.mediaEventService.emitTranscriptionProgress(0, 'Starting transcription...', jobId);
 
-      // Use WhisperService which handles everything
-      const srtPath = await this.whisperService.transcribeVideo(videoPath, jobId);
+      // Use WhisperService which handles everything — pass the selected model so
+      // the requested whisper model is actually used (not silently defaulted).
+      const srtPath = await this.whisperService.transcribeVideo(videoPath, jobId, whisperModel);
 
       if (!srtPath) {
         throw new Error('Transcription failed - no SRT file generated');

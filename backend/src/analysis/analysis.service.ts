@@ -110,13 +110,16 @@ export class AnalysisService implements OnModuleInit {
     }
 
     const parsed = JSON.parse(fsSync.readFileSync(categoriesPath, 'utf8'));
-    if (!parsed.categories || parsed.categories.length === 0) {
+    // Tolerate both the correct { categories: [...] } shape and a legacy
+    // bare-array file so existing installs don't break.
+    const categories = Array.isArray(parsed) ? parsed : parsed?.categories;
+    if (!categories || categories.length === 0) {
       throw new Error(
         `No analysis categories configured in ${categoriesPath}. Configure categories before analyzing.`,
       );
     }
 
-    return parsed.categories;
+    return categories;
   }
 
   constructor(
@@ -468,11 +471,10 @@ export class AnalysisService implements OnModuleInit {
         setImmediate(() => this.processNextInQueue());
       }
     } catch (error: any) {
-      // Release resources on error
-      if (phase === 'download' || phase === 'transcribe' || phase === 'analyze' || phase === 'process' || phase === 'normalize-audio') {
-        this.activeJobs--;
-      }
-
+      // Do NOT decrement activeJobs here — the caller's `.catch` in
+      // processNextInQueue owns the slot release on failure, so decrementing in
+      // both places would double-decrement and break the concurrency invariant.
+      // (The success paths above decrement inline exactly once.)
       this.logger.error(`Job ${jobId} failed at phase '${phase}': ${(error as Error).message || 'Unknown error'}`);
       throw error;
     }
@@ -1239,7 +1241,7 @@ export class AnalysisService implements OnModuleInit {
                 startSeconds,
                 endSeconds,
                 title: chapter.title,
-                description: chapter.description,
+                description: chapter.summary,
                 source: 'ai',
               });
 
@@ -1756,10 +1758,11 @@ export class AnalysisService implements OnModuleInit {
           fsSync.mkdirSync(configDir, { recursive: true });
         }
 
-        // Write default categories
+        // Write default categories in the { categories: [...] } shape that
+        // loadCategories() and config.controller expect.
         fsSync.writeFileSync(
           categoriesPath,
-          JSON.stringify(DEFAULT_CATEGORIES, null, 2),
+          JSON.stringify({ categories: DEFAULT_CATEGORIES }, null, 2),
           'utf-8'
         );
 
