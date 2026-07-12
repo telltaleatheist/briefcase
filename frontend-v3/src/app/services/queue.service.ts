@@ -109,6 +109,24 @@ export class QueueService implements OnDestroy {
     // Restore processing jobs from backend on init
     this.restoreFromBackend();
 
+    // Reconcile queue state whenever the WebSocket RE-connects. socket.io does
+    // not replay events emitted while disconnected, so a task.completed fired
+    // during a transient drop (laptop sleep, wifi blip — the backend keeps
+    // running) is lost and the job stays "processing" forever. We watch the
+    // connected signal and, on a false->true transition AFTER the first connect,
+    // refresh from the backend to pick up anything missed. The initial connect
+    // is skipped (restoreFromBackend already ran above).
+    let hasConnectedOnce = false;
+    effect(() => {
+      const isConnected = this.websocketService.connected();
+      if (!isConnected) return;
+      if (hasConnectedOnce) {
+        console.log('[QueueService] WebSocket reconnected — reconciling queue state from backend');
+        this.refreshFromBackend();
+      }
+      hasConnectedOnce = true;
+    });
+
     // Persist on any change
     effect(() => {
       const currentJobs = this.jobs();
@@ -731,6 +749,15 @@ export class QueueService implements OnDestroy {
             const backendJobId = jobIds[index];
             this.setBackendJobId(job.id, backendJobId);
             frontendToBackend.set(job.id, backendJobId);
+          } else {
+            // Backend accepted fewer job IDs than we submitted. submitJobs()
+            // already moved every job to 'processing', so a job left without a
+            // backendJobId here can never be reconciled (no WS events, no ID to
+            // match) and would stay stuck at processing/0% forever. Revert it to
+            // pending with a clear error so it's visible and re-submittable.
+            console.error(`[QueueService] Backend returned no job ID for job ${job.id} — reverting to pending`);
+            this.updateJobState(job.id, 'pending');
+            this.updateJobError(job.id, 'Backend did not accept this job. Please try again.');
           }
         });
 
