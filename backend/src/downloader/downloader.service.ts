@@ -704,6 +704,12 @@ export class DownloaderService implements OnModuleInit {
       });
       
       try {
+        // Bail out if the job was cancelled during the pre-download metadata
+        // fetch, before any manager was registered for abort.
+        if (this.isDownloadCancelled(jobId)) {
+          throw new Error('Download was cancelled');
+        }
+
         // For live YouTube streams, try livestream download path first (auto-stop at live edge)
         // If it fails (e.g., stream ended), fall through to regular YouTube download
         if (isLive && (options.url.includes('youtube.com') || options.url.includes('youtu.be'))) {
