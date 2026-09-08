@@ -296,18 +296,72 @@ export class DownloaderService implements OnModuleInit {
   }
 
   /**
+   * Does a yt-dlp failure look like Vimeo refusing anonymous access?
+   *
+   * Vimeo has repeatedly changed how it gates its public API, and each change
+   * surfaces as a different yt-dlp error:
+   *   - "web client only works when logged-in" (yt-dlp >= 2026.08, ios/macos
+   *     clients removed; the web client needs account cookies)
+   *   - "HTTP Error 401" while fetching the "macos OAuth token" / "macos API
+   *     JSON" (older yt-dlp, after Vimeo revoked that OAuth client — Sep 2026)
+   *   - "HTTP Error 403" (embed-only videos that need a referer)
+   *   - "Requested format is not available" with Vimeo context
+   * All of them are recoverable by retrying through the player.vimeo.com embed
+   * URL with a referer, which is what the callers do when this returns true.
+   * The message is the tail of yt-dlp's stderr, so with --verbose it may be
+   * the Python traceback (which still names vimeo.py) rather than the ERROR line.
+   */
+  private isVimeoAccessError(errorMsg: string, url: string): boolean {
+    if (errorMsg.includes('web client only works when logged-in') || errorMsg.includes('HTTP Error 403')) {
+      return true;
+    }
+    const vimeoContext = errorMsg.toLowerCase().includes('vimeo') || url.includes('vimeo.com');
+    if (!vimeoContext) {
+      return false;
+    }
+    return errorMsg.includes('HTTP Error 401')
+      || errorMsg.includes('OAuth token')
+      || errorMsg.includes('API JSON')
+      || errorMsg.includes('Requested format');
+  }
+
+  /**
+   * Parse a direct Vimeo video page URL (vimeo.com/ID, vimeo.com/ID/UNLISTEDHASH,
+   * vimeo.com/video/ID, optionally with ?h=HASH). Returns null for anything
+   * else — player embeds, channels, showcases, non-Vimeo pages.
+   */
+  private parseDirectVimeoUrl(url: string): { id: string; hash?: string } | null {
+    const m = url.match(/^https?:\/\/(?:www\.)?vimeo\.com\/(?:video\/)?(\d+)(?:\/([a-f0-9]{6,}))?(?:[/?#]|$)/i);
+    if (!m) {
+      return null;
+    }
+    const hash = m[2] || url.match(/[?&]h=([a-f0-9]+)/i)?.[1];
+    return hash ? { id: m[1], hash } : { id: m[1] };
+  }
+
+  /**
    * Extract Vimeo embed/player URL from a page's HTML content.
-   * Used when yt-dlp fails to access a Vimeo video embedded on another site.
-   * Vimeo embed-only videos require the player URL (with hash token) + referer header.
+   * Used when yt-dlp fails to access a Vimeo video embedded on another site,
+   * and when Vimeo itself refuses anonymous access to a vimeo.com/ID page —
+   * the player URL (with hash token) + referer header works in both cases.
+   *
+   * For a direct vimeo.com/ID URL the page is still scraped first, because the
+   * page carries the `h=` token unlisted videos need; matches are restricted
+   * to that ID so a related-video link can't hijack the download. If the
+   * scrape fails or finds nothing, the player URL is synthesised from the ID.
    */
   private async extractVimeoEmbedUrl(pageUrl: string): Promise<{ playerUrl: string; referer: string } | null> {
+    const direct = this.parseDirectVimeoUrl(pageUrl);
+    const matchesDirectId = (candidate: string): boolean =>
+      !direct || new RegExp(`vimeo\\.com\\/(?:video\\/)?${direct.id}(?:[/?#"']|$)`, 'i').test(candidate);
+
     try {
       this.logger.log(`Fetching page to extract Vimeo embed URL from: ${pageUrl}`);
       const pageContent = await this.fetchPageContent(pageUrl);
 
       // Look for Vimeo player iframe embeds: player.vimeo.com/video/ID?h=HASH...
       const iframeRegex = /(?:src|href)=["']?(https?:\/\/player\.vimeo\.com\/video\/\d+[^"'\s>]*)/gi;
-      const iframeMatches = [...pageContent.matchAll(iframeRegex)];
+      const iframeMatches = [...pageContent.matchAll(iframeRegex)].filter(m => matchesDirectId(m[1]));
 
       if (iframeMatches.length > 0) {
         const playerUrl = iframeMatches[0][1].replace(/&amp;/g, '&');
@@ -317,7 +371,7 @@ export class DownloaderService implements OnModuleInit {
 
       // Also look for Vimeo video URLs in data attributes, JSON config, or script tags
       const vimeoUrlRegex = /["'](https?:\/\/(?:player\.)?vimeo\.com\/(?:video\/)?\d+(?:\?[^"'\s]*)?)["']/gi;
-      const urlMatches = [...pageContent.matchAll(vimeoUrlRegex)];
+      const urlMatches = [...pageContent.matchAll(vimeoUrlRegex)].filter(m => matchesDirectId(m[1]));
 
       if (urlMatches.length > 0) {
         let playerUrl = urlMatches[0][1].replace(/&amp;/g, '&');
@@ -337,11 +391,16 @@ export class DownloaderService implements OnModuleInit {
       }
 
       this.logger.warn('No Vimeo embed URL found in page content');
-      return null;
     } catch (error) {
       this.logger.error(`Failed to extract Vimeo embed URL: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      return null;
     }
+
+    if (direct) {
+      const playerUrl = `https://player.vimeo.com/video/${direct.id}${direct.hash ? `?h=${direct.hash}` : ''}`;
+      this.logger.log(`Direct Vimeo URL — synthesised player URL: ${playerUrl}`);
+      return { playerUrl, referer: pageUrl };
+    }
+    return null;
   }
 
   /**
@@ -982,7 +1041,11 @@ export class DownloaderService implements OnModuleInit {
         } else if (!outputFile) {
           // Non-YouTube download - use standard method with m3u8 fallback
           try {
-            const output = await ytDlpManager.runWithRetry(3, 2000);
+            // A direct vimeo.com/ID link that Vimeo refuses anonymously fails
+            // deterministically (401/"logged-in" — see isVimeoAccessError), so
+            // don't burn three attempts with backoff before the embed fallback.
+            const primaryAttempts = this.parseDirectVimeoUrl(options.url) ? 1 : 3;
+            const output = await ytDlpManager.runWithRetry(primaryAttempts, 2000);
             outputFile = await this.determineOutputFile(output, downloadFolder, downloadStartTime, outputTemplate);
           } catch (initialError) {
             const errorMsg = initialError instanceof Error ? initialError.message : String(initialError);
@@ -1009,11 +1072,7 @@ export class DownloaderService implements OnModuleInit {
             // Fallback 1: Vimeo embed extraction (for pages embedding Vimeo players)
             // Triggers on: auth errors, 403 (embed-only videos), format mismatches with vimeo context
             if (!outputFile && !this.isDownloadCancelled(jobId)) {
-              const isVimeoRelated = errorMsg.includes('web client only works when logged-in')
-                || errorMsg.includes('HTTP Error 403')
-                || (errorMsg.includes('Requested format') && errorMsg.toLowerCase().includes('vimeo'));
-
-              if (isVimeoRelated) {
+              if (this.isVimeoAccessError(errorMsg, options.url)) {
                 try {
                   const embedInfo = await this.extractVimeoEmbedUrl(options.url);
                   if (embedInfo) {
@@ -2846,9 +2905,7 @@ export class DownloaderService implements OnModuleInit {
         const runErrorMsg = runError instanceof Error ? runError.message : String(runError);
 
         // If Vimeo auth/access error, try extracting the embed URL from the page and retry
-        if (runErrorMsg.includes('web client only works when logged-in') ||
-            runErrorMsg.includes('HTTP Error 403') ||
-            (runErrorMsg.toLowerCase().includes('vimeo') && runErrorMsg.includes('Requested format is not available'))) {
+        if (this.isVimeoAccessError(runErrorMsg, url)) {
           this.logger.log('Vimeo auth/format error in getVideoInfo, trying embed URL extraction...');
 
           const embedInfo = await this.extractVimeoEmbedUrl(url);
