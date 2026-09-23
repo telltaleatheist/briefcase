@@ -112,6 +112,8 @@ export class ScorerServerService implements OnModuleDestroy {
   private engine: ScorerEngine | null = null;
   private deciderPromise: Promise<ScorerDecider> | null = null;
   private startPromise: Promise<ScorerEngine> | null = null;
+  /** An in-flight stop: the old process may still be exiting after state was cleared. */
+  private stopping: Promise<void> | null = null;
   private logTail = '';
   private buildInfo: string | null = null;
 
@@ -206,24 +208,47 @@ export class ScorerServerService implements OnModuleDestroy {
     }
   }
 
-  /** Stop the server (idempotent). Resolves when the process has exited or been SIGKILLed. */
+  /**
+   * Stop the server (idempotent). Resolves when the process has exited (or been
+   * SIGKILLed and exited). State is cleared at once, but the old process can
+   * take up to the kill grace to go; `stopping` tracks that so start() waits
+   * for it and there is never more than one 18 GB scorer resident.
+   */
   async stop(): Promise<void> {
     this.clearIdleTimer();
     const proc = this.proc;
     this.resetState();
-    if (!proc || proc.exitCode !== null || proc.signalCode !== null) return;
+    if (proc && proc.exitCode === null && proc.signalCode === null) {
+      const prev = this.stopping;
+      const tracked: Promise<void> = Promise.all([prev, this.killAndWait(proc)]).then(() => {
+        if (this.stopping === tracked) this.stopping = null;
+      });
+      this.stopping = tracked;
+    }
+    if (this.stopping) await this.stopping;
+  }
 
+  async onModuleDestroy(): Promise<void> {
+    await this.stop();
+  }
+
+  /** SIGTERM, SIGKILL after the grace, and resolve once the process has exited. */
+  private killAndWait(proc: ChildProcess): Promise<void> {
     this.logger.log(`Stopping scorer llama-server (pid ${proc.pid})`);
-    await new Promise<void>((resolve) => {
+    return new Promise<void>((resolve) => {
+      let killTimer: NodeJS.Timeout | null = null;
+      let giveUpTimer: NodeJS.Timeout | null = null;
       const done = () => {
-        clearTimeout(killTimer);
+        if (killTimer) clearTimeout(killTimer);
+        if (giveUpTimer) clearTimeout(giveUpTimer);
         resolve();
       };
       proc.once('exit', done);
-      const killTimer = setTimeout(() => {
+      killTimer = setTimeout(() => {
         if (proc.exitCode === null && proc.signalCode === null) proc.kill('SIGKILL');
-        resolve();
-      }, STOP_GRACE_MS);
+        // SIGKILL cannot be ignored, but never hang a stop on a lost 'exit' event.
+        giveUpTimer = setTimeout(done, this.stopGraceMs());
+      }, this.stopGraceMs());
       if (process.platform === 'win32' && proc.pid) {
         try {
           require('child_process').execSync(`taskkill /pid ${proc.pid} /T /F`, { stdio: 'ignore' });
@@ -234,10 +259,6 @@ export class ScorerServerService implements OnModuleDestroy {
         proc.kill('SIGTERM');
       }
     });
-  }
-
-  async onModuleDestroy(): Promise<void> {
-    await this.stop();
   }
 
   // ------------------------------------------------------------------ overridable seams (tests)
@@ -274,6 +295,10 @@ export class ScorerServerService implements OnModuleDestroy {
 
   protected startupTimeoutMs(): number {
     return STARTUP_TIMEOUT_MS;
+  }
+
+  protected stopGraceMs(): number {
+    return STOP_GRACE_MS;
   }
 
   // ------------------------------------------------------------------ internals
@@ -339,7 +364,9 @@ export class ScorerServerService implements OnModuleDestroy {
   }
 
   private async start(): Promise<ScorerEngine> {
-    if (this.proc) await this.stop();
+    // Also covers the idle timer's un-awaited stop(): its process can still be
+    // exiting (up to the kill grace), and spawning now would put two scorers in memory.
+    if (this.proc || this.stopping) await this.stop();
 
     const config = this.loadConfig();
     this.config = config;

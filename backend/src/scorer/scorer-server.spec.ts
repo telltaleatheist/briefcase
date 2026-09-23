@@ -400,6 +400,39 @@ describe('ScorerServerService lifecycle', () => {
     await svc.stop();
   });
 
+  it('a start during the idle stop kill grace waits for the old process to exit (never two scorers)', async () => {
+    // The idle timer calls stop() without awaiting it; state clears at once but
+    // the 18 GB process takes a while to exit. A job arriving then must not
+    // spawn a second server alongside it.
+    const svc = new TestScorerServer(configWithModel({ idleTimeoutMs: 10 }));
+    await svc.ensureReady();
+    const first = svc.spawned[0].proc;
+    let firstExited = false;
+    first.kill = (sig: NodeJS.Signals = 'SIGTERM') => {
+      first.kills.push(sig);
+      setTimeout(() => {
+        first.signalCode = sig;
+        firstExited = true;
+        first.emit('exit', null, sig);
+      }, 60);
+      return true;
+    };
+    await new Promise((r) => setTimeout(r, 30)); // idle timeout fires, SIGTERM sent
+    expect(first.kills).toEqual(['SIGTERM']);
+    expect(firstExited).toBe(false);
+
+    let aliveAtSecondSpawn: boolean | null = null;
+    const origSpawn = svc['spawnServer'].bind(svc);
+    (svc as any).spawnServer = (b: ScorerBinary, a: string[]) => {
+      aliveAtSecondSpawn = !firstExited;
+      return origSpawn(b, a);
+    };
+    await svc.ensureReady();
+    expect(svc.spawned).toHaveLength(2);
+    expect(aliveAtSecondSpawn).toBe(false);
+    await svc.stop();
+  });
+
   it('refuses to start without the model file, naming the path', async () => {
     const svc = new TestScorerServer({ ...configWithModel(), modelPath: path.join(tmp, 'models', 'absent.gguf') });
     await expect(svc.ensureReady()).rejects.toThrow(/absent\.gguf/);
