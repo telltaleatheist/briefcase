@@ -206,6 +206,18 @@ export class WebSocketService {
     this.emit(WebSocketEvent.CRUCIBLE_SERVERS_CHANGED, payload);
   }
 
+  emitCrucibleInstallProgress(payload: WebSocketEventMap[WebSocketEvent.CRUCIBLE_INSTALL_PROGRESS]): void {
+    this.emit(WebSocketEvent.CRUCIBLE_INSTALL_PROGRESS, payload);
+  }
+
+  emitCrucibleInstallDoor(payload: WebSocketEventMap[WebSocketEvent.CRUCIBLE_INSTALL_DOOR]): void {
+    this.emit(WebSocketEvent.CRUCIBLE_INSTALL_DOOR, payload);
+  }
+
+  emitCrucibleCoordination(payload: WebSocketEventMap[WebSocketEvent.CRUCIBLE_COORDINATION]): void {
+    this.emit(WebSocketEvent.CRUCIBLE_COORDINATION, payload);
+  }
+
   /**
    * Advanced Methods for Future Use
    */

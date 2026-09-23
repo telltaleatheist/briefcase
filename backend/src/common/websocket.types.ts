@@ -1,4 +1,7 @@
 import type { CrucibleServersChangedPayload } from '../crucible/wire/settings-wire';
+import type { CrucibleCoordinationState } from '../crucible/wire/coordinate-wire';
+import type { CrucibleInstallProgress } from '../crucible/wire/install-wire';
+import type { CrucibleInstallDoorEvent } from '../crucible/wire/install-door-wire';
 
 // WebSocket Event Type Definitions
 // Centralized registry of all WebSocket events and their payloads
@@ -197,6 +200,12 @@ export enum WebSocketEvent {
 
   // Crucible server registry / routing changed (Settings › Crucible Servers)
   CRUCIBLE_SERVERS_CHANGED = 'crucible.servers-changed',
+  // A local Crucible install's progress (the setup wizard, Settings › Crucible Servers)
+  CRUCIBLE_INSTALL_PROGRESS = 'crucible.install-progress',
+  // The Windows host's own engine move (WSL), as its install door reports it
+  CRUCIBLE_INSTALL_DOOR = 'crucible.install-door',
+  // Coordination: does a server have what Briefcase needs, and where preparing it got to
+  CRUCIBLE_COORDINATION = 'crucible.coordination',
 
   // Connection Management
   CONNECTION = 'connection',
@@ -269,4 +278,7 @@ export interface WebSocketEventMap {
 
   // Crucible
   [WebSocketEvent.CRUCIBLE_SERVERS_CHANGED]: CrucibleServersChangedPayload;
+  [WebSocketEvent.CRUCIBLE_INSTALL_PROGRESS]: CrucibleInstallProgress;
+  [WebSocketEvent.CRUCIBLE_INSTALL_DOOR]: CrucibleInstallDoorEvent;
+  [WebSocketEvent.CRUCIBLE_COORDINATION]: CrucibleCoordinationState;
 }
