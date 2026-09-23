@@ -4,6 +4,7 @@ import { Subscription, timer } from 'rxjs';
 import { CrucibleService, type CrucibleRefusal } from '../../../services/crucible.service';
 import { WebsocketService } from '../../../services/websocket.service';
 import { UiButtonComponent } from '../../../ui';
+import { CrucibleDoorsComponent } from '../../../components/crucible-doors/crucible-doors.component';
 import type { ConnectCodeReading, CruciblePairingPrompt } from '@crucible-wire/connect-wire';
 import type {
   CapabilityFact,
@@ -50,7 +51,7 @@ const CAPABILITY_WORDS: Record<CapabilityFact['capability'], string> = {
 @Component({
   selector: 'app-crucible-pane',
   standalone: true,
-  imports: [FormsModule, UiButtonComponent],
+  imports: [FormsModule, UiButtonComponent, CrucibleDoorsComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styleUrls: ['./panes-shared.scss', './crucible-pane.component.scss'],
   templateUrl: './crucible-pane.component.html',

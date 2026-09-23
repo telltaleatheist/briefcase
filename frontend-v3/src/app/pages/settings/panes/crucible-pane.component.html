@@ -146,6 +146,11 @@
 </div>
 
 <div class="pane-section">
+  <p class="section-label">Crucible on this computer</p>
+  <app-crucible-doors mode="settings" (changed)="reload()" />
+</div>
+
+<div class="pane-section">
   <p class="section-label">Connect another Crucible</p>
   <div class="cru-modes" role="radiogroup" aria-label="How to connect">
     <label class="cru-mode" [class.on]="addMode() === 'pair'">

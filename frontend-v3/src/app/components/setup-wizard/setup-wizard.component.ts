@@ -6,19 +6,28 @@ import { SetupDownloadService } from '../../services/setup-download.service';
 import { AiSetupService, SystemInfo } from '../../services/ai-setup.service';
 import { ElectronService } from '../../services/electron.service';
 import { isChatModelComponent } from '../../models/chat-model-component';
+import { CrucibleService } from '../../services/crucible.service';
+import { CrucibleDoorsComponent } from '../crucible-doors/crucible-doors.component';
 
-type Step = 'welcome' | 'tools' | 'models' | 'ai' | 'review' | 'finishing';
+type Step = 'welcome' | 'tools' | 'engine' | 'models' | 'ai' | 'review' | 'finishing';
 
 /**
  * Minutes-style paginated setup wizard for download-on-demand components
  * (binaries + whisper models). Selections are queued through SetupDownloadService,
  * which also drives the bottom-right download dock. The existing AI-provider
  * wizard (app-ai-setup-wizard) remains separate for engine/API-key config.
+ *
+ * The `engine` step (Crucible, migration plan §5.1) comes before the AI step:
+ * it finds the Crucible on this computer, adopts one another app installed,
+ * installs one where this computer can hold it, or connects one elsewhere.
+ * Skipping it is Next: AI is optional. In first-run mode the wizard holds
+ * Crucible's coordination while it is open, so nothing is downloaded before the
+ * user has chosen, and releases it when it closes.
  */
 @Component({
   selector: 'app-setup-wizard',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, CrucibleDoorsComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="setup-overlay">
@@ -79,6 +88,14 @@ type Step = 'welcome' | 'tools' | 'models' | 'ai' | 'review' | 'finishing';
                   <p class="hint">Skip it and flag detection still works — it falls back to a per-chapter AI pass, which is slower and finds fewer flags. You can add it later from Settings.</p>
                 }
               </div>
+            }
+
+            @case ('engine') {
+              <div class="step-head">
+                <h3>AI engine</h3>
+                <p class="sub">Briefcase's AI features (chapters, flags, titles) run on Crucible, a shared engine that also serves BookForge and Foundry. It can run on this computer or on another one you connect. You can skip this: your library, downloads and the editor work without it.</p>
+              </div>
+              <app-crucible-doors mode="probing" />
             }
 
             @case ('models') {
@@ -266,10 +283,11 @@ export class SetupWizardComponent implements OnInit {
   private componentService = inject(ComponentService);
   private aiSetup = inject(AiSetupService);
   private electron = inject(ElectronService);
+  private crucible = inject(CrucibleService);
   dl = inject(SetupDownloadService);
 
-  readonly NUMBERED = 5; // welcome, tools, models, ai, review
-  readonly dotIndexes = [0, 1, 2, 3, 4];
+  readonly NUMBERED = 6; // welcome, tools, engine, models, ai, review
+  readonly dotIndexes = [0, 1, 2, 3, 4, 5];
 
   readonly step = signal<Step>('welcome');
   readonly all = signal<ComponentStatus[]>([]);
@@ -282,7 +300,7 @@ export class SetupWizardComponent implements OnInit {
   readonly openaiSaved = signal(false);
   readonly savingKey = signal(false);
 
-  private order: Step[] = ['welcome', 'tools', 'models', 'ai', 'review', 'finishing'];
+  private order: Step[] = ['welcome', 'tools', 'engine', 'models', 'ai', 'review', 'finishing'];
 
   readonly stepIndex = computed(() => Math.min(this.order.indexOf(this.step()), this.NUMBERED - 1));
   readonly requiredTools = computed(() => this.all().filter((c) => c.kind === 'binary' && c.required && c.supported));
@@ -339,6 +357,9 @@ export class SetupWizardComponent implements OnInit {
   });
 
   async ngOnInit() {
+    // First run: hold Crucible's coordination until the user has chosen, so no
+    // model download starts under an open wizard. Released in finish().
+    if (this.mode === 'setup') this.crucible.holdFirstRun().subscribe({ error: () => undefined });
     this.componentService.listComponents().subscribe((components) => {
       this.all.set(components);
       // Pre-select required, not-yet-installed tools.
@@ -454,7 +475,13 @@ export class SetupWizardComponent implements OnInit {
   }
 
   finish(): void {
+    this.releaseCrucible();
     this.completed.emit();
+  }
+
+  /** Release the first-run hold: Crucible prepares what Briefcase needs in the background. */
+  private releaseCrucible(): void {
+    if (this.mode === 'setup') this.crucible.finishFirstRun().subscribe({ error: () => undefined });
   }
 
   fmtSize(bytes: number): string {
