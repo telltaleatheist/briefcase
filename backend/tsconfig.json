@@ -23,6 +23,7 @@
     "strict": true,
     "noImplicitAny": true,
     "strictNullChecks": true,
+    "resolveJsonModule": true,
     "types": ["node"],
     "typeRoots": ["./node_modules/@types"]
   },

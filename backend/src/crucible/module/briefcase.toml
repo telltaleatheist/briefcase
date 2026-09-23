@@ -1,0 +1,49 @@
+# What Briefcase needs from a Crucible. PHASE13-OPERATOR.md section 5.4.
+#
+# DRAFT FOR THE CRUCIBLE REPO. This file belongs at `modules/briefcase.toml` in
+# github.com/telltaleatheist/crucible, beside bookforge.toml and foundry.toml.
+# It lives here only until that PR lands (migration plan §3.4, §12 A6).
+#
+# How the vendored JSON beside it was made, and how it must be made from now on:
+#
+#   1. Land this file as `modules/briefcase.toml` in the crucible repo.
+#   2. There: `python scripts/gen-modules.py` writes `modules/briefcase.module.json`;
+#      `--check` and tests/test_modules.py then guard it in CI.
+#   3. Here: after the next Crucible cut, `node tools/adopt-crucible-release.mjs <ver>`,
+#      then copy `modules/briefcase.module.json` over `briefcase.module.json` in
+#      this directory, byte for byte. Never edit the JSON by hand: its `version`
+#      is a hash of its own content, and test/crucible/module-file.spec.ts checks it.
+#
+# The copy here was produced by the crucible repo's OWN generator at b95ac38
+# (Cut 1.0.23), run against this file in a scratch directory
+# (`gen-modules.py --directory <scratch>`), so it is what step 2 will write.
+
+[module]
+name = "briefcase"
+
+[[job_types]]
+type = "llm"
+
+[[job_types]]
+type = "asr"
+
+# Chapters, flags, descriptions, tags and titles: one class. The SERVER resolves
+# it per machine (PHASE15-HOST.md 5.3a), so no model id is typed here.
+#
+# A `decide` class (snap chapters and flags through /v1/decide) is added here
+# once the decide door is released and PHASE22 §7.2 rules on its class name.
+[[needs]]
+class = "analysis"
+
+# The transcriber: large-v3 on both backends (Briefcase, 2026-09-23). Two
+# entries for one choice, because the id depends on the backend: CTranslate2
+# has no Metal backend, so faster-whisper is cuda-linux only and mlx-whisper is
+# mlx-darwin only. The generator scopes each to the backends that declare it,
+# and Briefcase strips `backends` and filters to the server's own before posting.
+[[subjects]]
+kind = "model"
+id = "faster-whisper-large-v3"
+
+[[subjects]]
+kind = "model"
+id = "mlx-whisper-large-v3"

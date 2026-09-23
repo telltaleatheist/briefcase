@@ -1,0 +1,42 @@
+{
+  "name": "briefcase",
+  "version": "1.0.23+3ca493b96a2e",
+  "job_types": [
+    {
+      "type": "llm",
+      "backends": [
+        "cuda-linux",
+        "llama-windows",
+        "mlx-darwin"
+      ]
+    },
+    {
+      "type": "asr",
+      "backends": [
+        "cuda-linux",
+        "mlx-darwin"
+      ]
+    }
+  ],
+  "needs": [
+    {
+      "class": "analysis"
+    }
+  ],
+  "subjects": [
+    {
+      "kind": "model",
+      "id": "faster-whisper-large-v3",
+      "backends": [
+        "cuda-linux"
+      ]
+    },
+    {
+      "kind": "model",
+      "id": "mlx-whisper-large-v3",
+      "backends": [
+        "mlx-darwin"
+      ]
+    }
+  ]
+}
