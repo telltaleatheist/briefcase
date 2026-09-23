@@ -7,3 +7,4 @@ export * from './flag-units';
 export * from './flag-questions';
 export * from './flag-spans';
 export * from './snap-flag-ranker.service';
+export * from './flag-integration';

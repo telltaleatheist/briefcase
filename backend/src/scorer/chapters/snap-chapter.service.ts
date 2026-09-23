@@ -12,8 +12,9 @@
  *               a rejected stretch is re-segmented without the ad option.
  *
  * Transcripts over ~16k tokens are chunked with overlap and stitched
- * (chunks.ts). Not wired into ai-analysis yet: `toAnalysisChapters` gives the
- * existing `Chapter` shape for the integration phase.
+ * (chunks.ts). In the analysis pipeline this runs through SnapAnalysisService
+ * (one scorer lease with the flag pass, on a shared unit list and chunk plan),
+ * behind the analysisEngine setting.
  */
 
 import { Injectable, Logger } from '@nestjs/common';

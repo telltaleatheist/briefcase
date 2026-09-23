@@ -4,7 +4,8 @@ import { SnapChapterService } from './snap-chapter.service';
 
 /**
  * Snap chaptering. ScorerModule is @Global, so ScorerServerService injects
- * without importing it here. Not yet imported by AppModule (integration phase).
+ * without importing it here. The analysis pipeline uses SnapAnalysisModule
+ * (scorer/snap-analysis.module.ts) instead; this module is for standalone use.
  */
 @Module({
   providers: [SnapChapterService],

@@ -17,6 +17,7 @@ import { DatabaseModule } from '../database/database.module';
 import { MediaModule } from '../media/media.module';
 import { QueueModule } from '../queue/queue.module';
 import { ApiKeysModule } from '../config/config.module';
+import { SnapAnalysisModule } from '../scorer/snap-analysis.module';
 
 @Module({
   imports: [
@@ -29,6 +30,9 @@ import { ApiKeysModule } from '../config/config.module';
     forwardRef(() => MediaModule),
     forwardRef(() => QueueModule),
     ApiKeysModule,
+    // The snap engine's scorer stage. Injected @Optional into AIAnalysisService
+    // and used only when analysisEngine selects 'snap'.
+    SnapAnalysisModule,
   ],
   controllers: [
     AnalysisController,

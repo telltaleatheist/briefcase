@@ -45,6 +45,10 @@ import {
   TITLE_FROM_WEBPAGE_PROMPT,
   AnalysisCategory,
 } from './prompts/analysis-prompts';
+import { SnapAnalysisService, SnapStageResult } from '../scorer/snap-analysis.service';
+import { resolveAnalysisEngine, snapFallbackMessage, wantsScorer } from '../scorer/analysis-engine';
+import type { SnapFlagRankResult } from '../scorer/flags/snap-flag-ranker.service';
+import { mergeSpanSubPassages, promoteCachedOverflow } from '../scorer/flags/flag-integration';
 import {
   buildChapterLines,
   buildHashtags,
@@ -563,6 +567,13 @@ export class AIAnalysisService {
      * an analysis cannot run.
      */
     @Optional() private readonly databaseService?: DatabaseService,
+    /**
+     * The snap engine's scorer stage (chapters + flag ranking on the scorer).
+     * OPTIONAL like the database: the classic pipeline never needs it, and a
+     * missing service with analysisEngine 'snap' is a warned fallback, not an
+     * error (see the engine selection in analyzeTranscript).
+     */
+    @Optional() private readonly snapAnalysis?: SnapAnalysisService,
   ) {}
 
   // ===========================================================================
@@ -1143,33 +1154,92 @@ export class AIAnalysisService {
       );
 
       // =========================================================================
+      // ENGINE SELECTION: classic (default) or snap (scorer/analysis-engine.ts)
+      // =========================================================================
+      // 'snap' is a preference, never a requirement. The scorer stage runs
+      // BEFORE every LLM stage (both passes in one scorer lease), and any stage
+      // it could not produce falls back to its classic path with a job warning,
+      // the same channel the NLI-missing fallback uses. A cancel inside it
+      // propagates as a cancellation and never falls back into more work.
+      const engine = resolveAnalysisEngine();
+      if (engine.ignored) {
+        this.logger.warn(`[Engine] Ignoring unrecognised analysis engine setting: ${engine.ignored}`);
+      }
+      const engineWarnings: string[] = [];
+      let snap: SnapStageResult | null = null;
+      if (wantsScorer(engine)) {
+        const stages = (['chapters', 'flags'] as const).filter((st) => engine[st] === 'snap');
+        const availability = this.snapAnalysis
+          ? this.snapAnalysis.availability()
+          : { available: false as const, reason: 'the snap analysis service is not registered' };
+        if (!availability.available) {
+          this.logger.warn(`[Engine] snap selected (${engine.source}) but unavailable: ${availability.reason} — classic for ${stages.join(' + ')}`);
+          engineWarnings.push(snapFallbackMessage([...stages], availability.reason));
+        } else {
+          this.logger.log(`[Engine] snap engine (${engine.source}) for ${stages.join(' + ')}`);
+          sendProgress('analysis', 3, 'Starting the analysis engine...');
+          snap = await this.snapAnalysis!.run({
+            segments,
+            categories: categories || [],
+            chapters: engine.chapters === 'snap',
+            flags: engine.flags === 'snap',
+            signal,
+            // The scorer stage owns 3%-15%; chapter placement (when it still
+            // runs) keeps the rest of Pass 1's band.
+            onProgress: (p) => sendProgress('analysis', 3 + Math.round(p.fraction * 12), p.message),
+          });
+          // One warning per distinct reason, naming the stages it cost.
+          const failed: Array<{ stage: 'chapters' | 'flags'; reason: string }> = [];
+          if (engine.chapters === 'snap' && !snap.chapters) failed.push({ stage: 'chapters', reason: snap.chaptersError || 'no chapters' });
+          if (engine.flags === 'snap' && !snap.flags) failed.push({ stage: 'flags', reason: snap.flagsError || 'no ranking' });
+          for (const reason of [...new Set(failed.map((f) => f.reason))]) {
+            engineWarnings.push(snapFallbackMessage(failed.filter((f) => f.reason === reason).map((f) => f.stage), reason));
+          }
+        }
+      } else {
+        this.logger.log(`[Engine] classic engine (${engine.source})`);
+      }
+      const snapChapters = snap?.chapters && snap.chapters.chapters.length > 0 ? snap.chapters.chapters : null;
+
+      // =========================================================================
       // PASS 1: Detect chapter boundaries
       // =========================================================================
-      sendProgress('analysis', 5, 'Detecting chapter boundaries...');
       // Pass 1 is no longer an LLM reading the transcript for boundaries — that
       // prompt returned a PREFIX of the boundaries (1-3) and stopped, missing
       // e.g. a mid-video ad break entirely. Boundaries are now SCORED from
-      // embeddings and only PLACED by the model (see chapter-detection.service).
+      // embeddings and only PLACED by the model (see chapter-detection.service),
+      // or, on the snap engine, come from the scorer's outline + Viterbi path
+      // with the outline labels as titles.
       const pass1StartTime = Date.now();
-      const detection = await this.chapterDetectionService.detectBoundaries({
-        segments,
-        boundaryConfig: this.resolveTaskConfig(aiConfig, 'boundary', taskModels),
-        maxChapterSeconds: modelLimits.maxChapterSeconds,
-        videoTitle,
-        ollamaEndpoint,
-        onTokens: trackTokens,
-        // Pass 1 owns the 5%-25% band. Scoring is one early tick (it is seconds
-        // of embedding, not minutes of generation); the rest of the band walks
-        // with the per-boundary placement calls, so the queue sees steady
-        // progress instead of a frozen 5% for the whole pass.
-        onProgress: (current, total, label) => {
-          const pct = 5 + Math.round((current / Math.max(1, total)) * 20);
-          sendProgress('analysis', pct, label);
-        },
-        signal,
-      });
-      const boundaries = detection.boundaries;
-      sendProgress('analysis', 25, `Found ${boundaries.length} chapters (${detection.scorer} scoring)`);
+      let boundaries: number[];
+      let pass1Calls = 0;
+      if (snapChapters) {
+        boundaries = snapChapters.map((c) => c.startSeconds);
+        sendProgress('analysis', 25, `Found ${boundaries.length} chapters (snap engine)`);
+      } else {
+        const band: [number, number] = snap ? [15, 25] : [5, 25];
+        sendProgress('analysis', band[0], 'Detecting chapter boundaries...');
+        const detection = await this.chapterDetectionService.detectBoundaries({
+          segments,
+          boundaryConfig: this.resolveTaskConfig(aiConfig, 'boundary', taskModels),
+          maxChapterSeconds: modelLimits.maxChapterSeconds,
+          videoTitle,
+          ollamaEndpoint,
+          onTokens: trackTokens,
+          // Pass 1 owns the 5%-25% band. Scoring is one early tick (it is seconds
+          // of embedding, not minutes of generation); the rest of the band walks
+          // with the per-boundary placement calls, so the queue sees steady
+          // progress instead of a frozen 5% for the whole pass.
+          onProgress: (current, total, label) => {
+            const pct = band[0] + Math.round((current / Math.max(1, total)) * (band[1] - band[0]));
+            sendProgress('analysis', pct, label);
+          },
+          signal,
+        });
+        boundaries = detection.boundaries;
+        pass1Calls = detection.placeCalls;
+        sendProgress('analysis', 25, `Found ${boundaries.length} chapters (${detection.scorer} scoring)`);
+      }
 
       // Calculate total API calls for accurate progress reporting:
       // chapters + one flag-extraction call each + the FOUR metadata calls
@@ -1187,7 +1257,6 @@ export class AIAnalysisService {
       // the same way. The embedding call is NOT counted — it is one batch
       // request measured in seconds, not a generation call, and counting it
       // would poison the ETA's average-call-time.
-      const pass1Calls = detection.placeCalls;
       let chapterCallCount = boundaries.length;
       // Flag calls are NO LONGER one per chapter. On the default ranked path
       // there is one call per (window, category) pair, a number nothing
@@ -1278,6 +1347,10 @@ export class AIAnalysisService {
           sendProgress('analysis', lastProgress, message);
         },
         signal,
+        {
+          chapterTitles: snapChapters ? snapChapters.map((c) => c.title) : undefined,
+          flagRanking: snap?.flags ?? null,
+        },
       );
       lastProgress = METADATA_BAND[0];
       sendProgress('analysis', lastProgress, `Analyzed ${chapters.length} chapters, found ${flags.length} flags`);
@@ -1430,7 +1503,10 @@ export class AIAnalysisService {
         description,
         suggested_title: suggestedTitle || undefined,
         tokenStats: tokenStats.apiCalls > 0 ? tokenStats : undefined,
-        warnings: flagWarnings && flagWarnings.length > 0 ? flagWarnings : undefined,
+        warnings:
+          engineWarnings.length + (flagWarnings?.length ?? 0) > 0
+            ? [...engineWarnings, ...(flagWarnings ?? [])]
+            : undefined,
       };
     } catch (error) {
       // A cancellation is NOT a failure. It must not be wrapped as one (the
@@ -1772,6 +1848,9 @@ export class AIAnalysisService {
   private buildWindowSections(
     verified: Array<{ window: FlagWindow; categories: WindowCategory[] }>,
     sentences: RankedSentence[],
+    ranker: 'nli' | 'snap-v1' = 'nli',
+    /** 'candidate' for over-budget snap windows the verifier never saw (same shape, never a finding). */
+    verdict: 'flag' | 'candidate' = 'flag',
   ): AnalyzedSection[] {
     const sections: AnalyzedSection[] = [];
 
@@ -1797,8 +1876,9 @@ export class AIAnalysisService {
         start_time: this.formatDisplayTime(sentences[from].start),
         end_time: this.formatDisplayTime(sentences[to].end),
         quotes: [{ timestamp: this.formatDisplayTime(sentences[from].start), text }],
-        verdict: 'flag',
+        verdict,
         nli_score: primary.score,
+        ranker,
       });
     }
 
@@ -1835,6 +1915,7 @@ export class AIAnalysisService {
   private buildSkipSections(
     rejected: Array<{ window: FlagWindow; category: WindowCategory }>,
     sentences: RankedSentence[],
+    ranker: 'nli' | 'snap-v1' = 'nli',
   ): AnalyzedSection[] {
     const sections: AnalyzedSection[] = [];
 
@@ -1859,6 +1940,7 @@ export class AIAnalysisService {
         quotes: [{ timestamp: this.formatDisplayTime(sentences[from].start), text }],
         verdict: 'skip',
         nli_score: category.score,
+        ranker,
       });
     }
 
@@ -1951,6 +2033,14 @@ export class AIAnalysisService {
     onFlagProgress?: (current: number, total: number) => void,
     onFlagStatus?: (message: string) => void,
     signal?: AbortSignal,
+    /**
+     * The snap engine's ranking, made by the scorer before any LLM stage ran.
+     * Present: its windows replace the NLI ranker's (same sentence indexing,
+     * same strength-first order), over-budget windows become unverified
+     * 'candidate' rows unless every question is already cached, and accepted
+     * sub-passages of one long span are stored as one section. Absent: NLI.
+     */
+    snapRanking?: SnapFlagRankResult,
   ): Promise<AnalyzedSection[] | null> {
     const sentences = assembleSentences(segments);
     if (sentences.length === 0) {
@@ -1958,19 +2048,51 @@ export class AIAnalysisService {
       return [];
     }
 
+    const ranker: 'nli' | 'snap-v1' = snapRanking ? 'snap-v1' : 'nli';
+    const verifierModel = `${flagConfig.provider}:${flagConfig.model}`;
+    const passageOf = (window: FlagWindow) =>
+      sentences.slice(window.contextFrom, window.contextTo + 1).map((s) => s.text);
+
     let windows: FlagWindow[];
-    try {
-      onFlagStatus?.(`Ranking ${sentences.length} sentences for flag candidates...`);
-      windows = await this.nliRanker.rankWindows(sentences, categories);
-    } catch (error) {
-      if (isCancellation(error)) throw error;
-      // Cancelling STOPS the ranker worker, and the in-flight scoring request
-      // then rejects with "worker exited" — which is not a cancellation error
-      // by type but absolutely is one by cause. Returning null here would fall
-      // through to the DISCOVERY path and issue one fresh LLM call per chapter.
-      ensureNotCancelled(signal, 'the NLI ranking stage');
-      this.logger.warn(`[Pass 2b] NLI ranking failed: ${(error as Error).message}`);
-      return null;
+    // Over-budget snap windows that stay unverified ('candidate' rows).
+    let candidateWindows: FlagWindow[] = [];
+    if (snapRanking) {
+      windows = snapRanking.windows;
+      if (snapRanking.overflow.length > 0) {
+        // Cache hits do not count against the verify budget (plan §5.5): an
+        // over-budget window whose every question is already answered costs
+        // nothing, so it is verified (from the cache) rather than stored blind.
+        // Promoted windows are weaker than every in-budget one, so appending
+        // them keeps the descending verification order.
+        const cacheOpen = this.databaseService?.isInitialized?.() === true;
+        const { promoted, candidates } = promoteCachedOverflow(snapRanking.overflow, (window, category) =>
+          cacheOpen &&
+          this.databaseService!.getFlagVerdict(
+            this.verificationQuestionHash(passageOf(window), category.category, category.proposition, verifierModel),
+          ) !== null,
+        );
+        windows = [...windows, ...promoted];
+        candidateWindows = candidates;
+        this.logger.log(
+          `[Pass 2b] Snap verify budget ${snapRanking.stats.verifyBudget}: ${snapRanking.windows.length} windows in ` +
+          `budget, ${promoted.length} over-budget window(s) fully cached (verified free), ${candidates.length} ` +
+          `stored as unverified candidates`,
+        );
+      }
+    } else {
+      try {
+        onFlagStatus?.(`Ranking ${sentences.length} sentences for flag candidates...`);
+        windows = await this.nliRanker.rankWindows(sentences, categories);
+      } catch (error) {
+        if (isCancellation(error)) throw error;
+        // Cancelling STOPS the ranker worker, and the in-flight scoring request
+        // then rejects with "worker exited" — which is not a cancellation error
+        // by type but absolutely is one by cause. Returning null here would fall
+        // through to the DISCOVERY path and issue one fresh LLM call per chapter.
+        ensureNotCancelled(signal, 'the NLI ranking stage');
+        this.logger.warn(`[Pass 2b] NLI ranking failed: ${(error as Error).message}`);
+        return null;
+      }
     }
     // Ranking can take tens of seconds; do not walk into the verification loop
     // on a run that was cancelled during it.
@@ -1992,7 +2114,7 @@ export class AIAnalysisService {
       prompt: string;
     }> = [];
     for (const window of windows) {
-      const passage = sentences.slice(window.contextFrom, window.contextTo + 1).map((s) => s.text);
+      const passage = passageOf(window);
       for (const category of window.categories) {
         jobs.push({
           window,
@@ -2003,10 +2125,12 @@ export class AIAnalysisService {
       }
     }
 
-    const verifierModel = `${flagConfig.provider}:${flagConfig.model}`;
     this.logger.log(
-      `[Pass 2b] Ranked ${sentences.length} sentences at the fixed capture threshold ` +
-      `${this.nliRanker.captureThreshold} (rescue floor ${this.nliRanker.rescueFloor}) -> ` +
+      (snapRanking
+        ? `[Pass 2b] Snap-ranked ${sentences.length} sentences (${snapRanking.stats.units} units, ` +
+          `${snapRanking.stats.spans} spans) -> `
+        : `[Pass 2b] Ranked ${sentences.length} sentences at the fixed capture threshold ` +
+          `${this.nliRanker.captureThreshold} (rescue floor ${this.nliRanker.rescueFloor}) -> `) +
       `${windows.length} windows / ${jobs.length} verification calls on ${verifierModel}. ` +
       `Sensitivity is NOT a run input on this path: every candidate is verified and every verdict ` +
       `is stored, and the dial filters that stored record at display time.`,
@@ -2030,7 +2154,13 @@ export class AIAnalysisService {
     // estimate gets corrected — the same mid-run recompute the chapter loop does
     // after long chapters are split.
     onFlagProgress?.(0, jobs.length);
-    if (jobs.length === 0) return [];
+    const candidateSections = this.buildWindowSections(
+      candidateWindows.map((window) => ({ window, categories: window.categories })),
+      sentences,
+      ranker,
+      'candidate',
+    );
+    if (jobs.length === 0) return candidateSections;
 
     // ONE num_ctx for every verification call in the stage, sized from the
     // largest prompt. Ollama fully reloads the model on ANY num_ctx change, and
@@ -2186,26 +2316,32 @@ export class AIAnalysisService {
     }
 
     // Windows in transcript order, so the sections are built in the order the
-    // video plays rather than in noisy-OR order.
-    const verified = windows
-      .filter((window) => verifiedByWindow.has(window))
-      .sort((a, b) => a.contextFrom - b.contextFrom)
-      .map((window) => ({ window, categories: verifiedByWindow.get(window) as WindowCategory[] }));
+    // video plays rather than in noisy-OR order. On the snap path, accepted
+    // sub-passages of ONE long span (split only so the verifier reads <= 40 s)
+    // are stored as one section covering both: no picket fence.
+    const verified = snapRanking
+      ? mergeSpanSubPassages(windows, verifiedByWindow)
+      : windows
+          .filter((window) => verifiedByWindow.has(window))
+          .sort((a, b) => a.contextFrom - b.contextFrom)
+          .map((window) => ({ window, categories: verifiedByWindow.get(window) as WindowCategory[] }));
 
-    const flagSections = this.buildWindowSections(verified, sentences);
-    const skipSections = this.buildSkipSections(rejected, sentences);
-    const sections = [...flagSections, ...skipSections].sort(
+    const flagSections = this.buildWindowSections(verified, sentences, ranker);
+    const skipSections = this.buildSkipSections(rejected, sentences, ranker);
+    // Flags before ghosts at the same timestamp, so a list rendered in stored
+    // order puts the finding above the rejected (then unverified) readings of it.
+    const verdictRank = (v: AnalyzedSection['verdict']) => (v === 'skip' ? 1 : v === 'candidate' ? 2 : 0);
+    const sections = [...flagSections, ...skipSections, ...candidateSections].sort(
       (a, b) =>
         this.parseDisplayTime(a.start_time) - this.parseDisplayTime(b.start_time) ||
-        // Flags before ghosts at the same timestamp, so a list rendered in
-        // stored order puts the finding above the rejected readings of it.
-        (a.verdict === b.verdict ? 0 : a.verdict === 'flag' ? -1 : 1),
+        verdictRank(a.verdict) - verdictRank(b.verdict),
     );
 
     this.logger.log(
       `[Pass 2b] ${flaggedCalls} accepted (window, category) verdicts across ${verified.length} windows ` +
       `-> ${flagSections.length} flag sections; ${skipSections.length} rejected verdicts stored as ` +
-      `ghost sections (visible only at the LOOSE filter position)`,
+      `ghost sections (visible only at the LOOSE filter position)` +
+      (candidateSections.length ? `; ${candidateSections.length} unverified candidates stored` : ''),
     );
     return sections;
   }
@@ -2230,6 +2366,17 @@ export class AIAnalysisService {
     onFlagProgress?: (current: number, total: number) => void,
     onFlagStatus?: (message: string) => void,
     signal?: AbortSignal,
+    /**
+     * Snap engine inputs (both absent on the classic engine):
+     *   chapterTitles  one per boundary, the scorer's outline labels. The LLM
+     *                  chapter call then supplies only the summary (its title is
+     *                  discarded), and long chapters are NOT split: Viterbi's
+     *                  switch cost owns granularity, and a forced split would
+     *                  manufacture chapters at arbitrary times (plan §4.5).
+     *   flagRanking    the snap ranker's windows for the verifier stage, in
+     *                  place of the NLI ranker.
+     */
+    snap: { chapterTitles?: string[]; flagRanking?: SnapFlagRankResult | null } = {},
   ): Promise<{ chapters: Chapter[]; flags: AnalyzedSection[]; warnings?: string[] }> {
     const chapters: Chapter[] = [];
     const warnings: string[] = [];
@@ -2242,8 +2389,11 @@ export class AIAnalysisService {
 
     const videoDuration = segments[segments.length - 1].end;
 
-    // Split any chapters that are too long to prevent truncation issues
-    const adjustedBoundaries = this.splitLongChapters(boundaries, videoDuration, limits);
+    // Split any chapters that are too long to prevent truncation issues —
+    // except snap chapters, whose boundaries and titles come as a set.
+    const presetTitles =
+      snap.chapterTitles && snap.chapterTitles.length === boundaries.length ? snap.chapterTitles : null;
+    const adjustedBoundaries = presetTitles ? boundaries : this.splitLongChapters(boundaries, videoDuration, limits);
     if (adjustedBoundaries.length > boundaries.length) {
       this.logger.log(
         `[Pass 2] Split long chapters: ${boundaries.length} -> ${adjustedBoundaries.length} chapters`,
@@ -2351,12 +2501,13 @@ export class AIAnalysisService {
         endTime,
       });
 
-      // Create chapter entry
+      // Create chapter entry. On the snap engine the title is the outline
+      // label the boundary came from; the LLM call supplied the summary only.
       chapters.push({
         sequence: i + 1,
         start_time: this.formatDisplayTime(startTime),
         end_time: this.formatDisplayTime(endTime),
-        title: result.title,
+        title: presetTitles ? presetTitles[i] : result.title,
         summary: result.summary,
       });
 
@@ -2392,6 +2543,34 @@ export class AIAnalysisService {
     if (pendingFlagWork.length > 0) {
       // The flag stage is the expensive one. Never enter it on a cancelled run.
       ensureNotCancelled(signal, 'the flag stage');
+
+      // SNAP ENGINE: the scorer already ranked the candidates (before any LLM
+      // stage ran); the verifier stage is the same one the NLI path uses. When
+      // the snap ranking is absent (classic engine, or snap failed and the job
+      // already carries that warning) the NLI -> discovery chain below runs.
+      if (snap.flagRanking) {
+        const ranked = await this.runRankedFlagStage(
+          flagConfig,
+          segments,
+          categories,
+          recordFailure,
+          onTokens,
+          onFlagProgress,
+          onFlagStatus,
+          signal,
+          snap.flagRanking,
+        );
+        if (ranked) {
+          this.logger.log(
+            `[Pass 2b] FLAG PATH: ranked + verified (snap scorer ranking, verify budget ` +
+            `${snap.flagRanking.stats.verifyBudget}) — ${ranked.length} sections ` +
+            `(${ranked.filter((r) => r.verdict === 'flag').length} flag, ` +
+            `${ranked.filter((r) => r.verdict === 'skip').length} ghosted rejections, ` +
+            `${ranked.filter((r) => r.verdict === 'candidate').length} unverified candidates)`,
+          );
+          return { chapters, flags: ranked, warnings };
+        }
+      }
 
       let unavailableReason: string | null = FLAGS_DISCOVERY
         ? 'BRIEFCASE_FLAGS_DISCOVERY=1'
