@@ -27,7 +27,13 @@ import {
   InstalledManifest,
   InstalledRecord,
 } from './component.types';
-import { whisperModelComponents, llamaModelComponents, nliEnvComponents } from '../config/model-catalog';
+import {
+  whisperModelComponents,
+  llamaModelComponents,
+  scorerModelComponents,
+  nliEnvComponents,
+  isScorerModelId,
+} from '../config/model-catalog';
 import {
   NLI_COMPONENT_ID,
   NLI_STAGES,
@@ -96,7 +102,13 @@ export class ComponentManagerService implements OnModuleInit {
   private async getAllComponents(): Promise<ManifestComponent[]> {
     const manifest = await this.getManifest();
     const binaries = manifest.components.filter((c) => c.kind === 'binary');
-    return [...binaries, ...whisperModelComponents(), ...llamaModelComponents(), ...nliEnvComponents()];
+    return [
+      ...binaries,
+      ...whisperModelComponents(),
+      ...llamaModelComponents(),
+      ...scorerModelComponents(),
+      ...nliEnvComponents(),
+    ];
   }
 
   // ---------- manifest ----------
@@ -492,7 +504,9 @@ export class ComponentManagerService implements OnModuleInit {
    * Download a local AI (GGUF) model into <configDir>/models — the same flat dir
    * ModelManagerService and LlamaManager read from. After a successful install we
    * adopt it as the default local model if none is set yet, so it's usable
-   * without an app restart.
+   * without an app restart — unless it is a scorer model (the logit decision
+   * engine's weights or projector), which is not a chat model and must never
+   * become defaultLocalModel.
    */
   private async installLlamaModel(id: string, artifact: ComponentArtifact, signal: AbortSignal): Promise<void> {
     if (!fs.existsSync(this.llamaModelsDir)) fs.mkdirSync(this.llamaModelsDir, { recursive: true });
@@ -517,11 +531,14 @@ export class ComponentManagerService implements OnModuleInit {
       bytes: artifact.bytes,
       installedAt: new Date().toISOString(),
     });
-    this.setDefaultLocalModelIfUnset(id);
+    if (!isScorerModelId(id)) {
+      this.setDefaultLocalModelIfUnset(id);
+    }
   }
 
   /** Write defaultLocalModel to app-config.json when one isn't already chosen. */
   private setDefaultLocalModelIfUnset(modelId: string): void {
+    if (isScorerModelId(modelId)) return; // belt and braces: scorer models are never chat defaults
     try {
       const configPath = path.join(this.configDir, 'app-config.json');
       let config: any = {};

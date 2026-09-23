@@ -16,7 +16,7 @@ import {
 } from './llama-bridge';
 import { getRuntimePaths, getLlamaLibraryPath } from './runtime-paths';
 import { detectGpuVram, type DetectedGpu } from './gpu-info';
-import { COGITO_MODELS } from '../config/model-catalog';
+import { COGITO_MODELS, isScorerModelFile } from '../config/model-catalog';
 
 export interface LocalAIProgress {
   percent: number;
@@ -106,18 +106,25 @@ export class LlamaManager extends EventEmitter implements OnModuleDestroy {
   private resolveModel(): boolean {
     if (!fs.existsSync(this.modelsDir)) return false;
 
-    const models = fs.readdirSync(this.modelsDir).filter((f) => f.endsWith('.gguf'));
-    if (models.length === 0) return false;
-
     let defaultModelId: string | null = null;
+    let scorerFiles: Array<string | undefined> = [];
     const configPath = path.join(path.dirname(this.modelsDir), 'app-config.json');
     try {
       if (fs.existsSync(configPath)) {
-        defaultModelId = JSON.parse(fs.readFileSync(configPath, 'utf8')).defaultLocalModel || null;
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        defaultModelId = config.defaultLocalModel || null;
+        scorerFiles = [config.scorerModel, config.scorerMmproj];
       }
     } catch {
       // Ignore config read errors
     }
+
+    // The scorer's weights and projectors share this dir but are not chat models
+    // (and need a newer llama-server than the bundled one): never fall back to one.
+    const models = fs
+      .readdirSync(this.modelsDir)
+      .filter((f) => f.endsWith('.gguf') && !isScorerModelFile(f, scorerFiles));
+    if (models.length === 0) return false;
 
     let modelToUse = models[0]; // Fallback to first model
     if (defaultModelId) {

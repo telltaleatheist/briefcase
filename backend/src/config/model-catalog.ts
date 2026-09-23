@@ -47,6 +47,79 @@ export interface CogitoModelDef {
  */
 export const COGITO_MODELS: CogitoModelDef[] = [];
 
+// ---------------- Scorer (logit decision engine, llama.cpp GGUF) ----------------
+
+/**
+ * Models for the scorer (backend/src/scorer): a SEPARATE llama-server instance
+ * that reads next-token probabilities instead of generating. They are
+ * `llama-model` components so the existing installer puts them in the same flat
+ * <configDir>/models dir, but they are NOT chat models: installing one must
+ * never adopt it as `defaultLocalModel`, and LlamaManager must never pick one
+ * up as its fallback chat model (see isScorerModelFile).
+ *
+ * The file actually used is chosen by app-config `scorerModel` (a filename in
+ * the models dir), defaulting to DEFAULT_SCORER_MODEL_FILE.
+ */
+export interface ScorerModelDef {
+  id: string;
+  name: string;
+  description: string;
+  filename: string;
+  url: string;
+  bytes: number;
+  sha256?: string;
+  /** 'model' = weights; 'mmproj' = vision projector (optional, app-config scorerMmproj). */
+  role: 'model' | 'mmproj';
+}
+
+const HF_QWEN35_9B = 'https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main';
+
+export const DEFAULT_SCORER_MODEL_FILE = 'Qwen3.5-9B-BF16.gguf';
+
+export const SCORER_MODELS: ScorerModelDef[] = [
+  {
+    id: 'scorer-qwen3.5-9b-bf16',
+    name: 'Scorer: Qwen3.5 9B (BF16)',
+    description:
+      'Decision model for chaptering and flag detection. Reads answer probabilities, never generates. ~18 GB.',
+    filename: DEFAULT_SCORER_MODEL_FILE,
+    url: `${HF_QWEN35_9B}/Qwen3.5-9B-BF16.gguf`,
+    // bytes: measured from the local copy; sha256: Hugging Face LFS oid (api/models/.../tree/main).
+    bytes: 17920697312,
+    sha256: 'daebe40eeea7057c1cdf35ac56d13f507d8bf12171bbb7a6b6b0d3f05439159a',
+    role: 'model',
+  },
+  {
+    id: 'scorer-qwen3.5-9b-mmproj-f16',
+    name: 'Scorer: Qwen3.5 9B vision projector (F16)',
+    description: 'Optional. Lets the scorer read images (set app-config scorerMmproj to its filename). ~0.9 GB.',
+    filename: 'mmproj-Qwen3.5-9B-F16.gguf',
+    url: `${HF_QWEN35_9B}/mmproj-F16.gguf`,
+    bytes: 918166080,
+    sha256: 'f70dc3509053962b0d0d3ee8a7eacebf5d60aa560cad78254ae8698516ae029f',
+    role: 'mmproj',
+  },
+];
+
+const SCORER_COMPONENT_IDS = new Set(SCORER_MODELS.map((m) => m.id));
+
+/** True for a scorer component id: never a chat model, never the defaultLocalModel. */
+export function isScorerModelId(id: string): boolean {
+  return SCORER_COMPONENT_IDS.has(id);
+}
+
+/**
+ * True for a GGUF in the models dir that belongs to the scorer (a catalog file,
+ * the configured `scorerModel`/`scorerMmproj`, or any mmproj projector) and so
+ * must not be offered or picked as a chat model.
+ */
+export function isScorerModelFile(filename: string, configured: Array<string | undefined | null> = []): boolean {
+  const base = filename.replace(/\\/g, '/').split('/').pop() || filename;
+  if (SCORER_MODELS.some((m) => m.filename === base)) return true;
+  if (configured.some((c) => !!c && (c.replace(/\\/g, '/').split('/').pop() || c) === base)) return true;
+  return /^mmproj/i.test(base);
+}
+
 // ---------------- Whisper (speech-to-text) ----------------
 
 export interface WhisperModelDef {
@@ -170,6 +243,18 @@ export function llamaModelComponents(): ManifestComponent[] {
       Math.round(m.sizeGB * 1024 * 1024 * 1024),
       m.filename,
     ),
+  }));
+}
+
+/** Scorer models as llama-model components (installed into the same flat models dir). */
+export function scorerModelComponents(): ManifestComponent[] {
+  return SCORER_MODELS.map((m) => ({
+    id: m.id,
+    name: m.name,
+    kind: 'llama-model',
+    required: false,
+    description: m.description,
+    artifacts: universalArtifacts(m.url, m.filename, m.bytes, m.filename, m.sha256),
   }));
 }
 
