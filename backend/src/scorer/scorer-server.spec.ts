@@ -380,6 +380,24 @@ describe('ScorerServerService lifecycle', () => {
     expect(svc.spawned).toHaveLength(0);
   });
 
+  it('availability(): names a missing model, and reports the binary source without spawning', () => {
+    const missing = new TestScorerServer({ ...configWithModel(), modelPath: path.join(tmp, 'models', 'absent.gguf') });
+    const no = missing.availability();
+    expect(no.available).toBe(false);
+    expect(!no.available && no.reason).toMatch(/absent\.gguf/);
+    const ok = new TestScorerServer(configWithModel()).availability();
+    expect(ok).toEqual({ available: true, binarySource: 'homebrew' });
+    class NoBinary extends TestScorerServer {
+      protected resolveBinary(): ScorerBinary {
+        throw new Error('No llama-server for the scorer');
+      }
+    }
+    const nb = new NoBinary(configWithModel()).availability();
+    expect(nb.available).toBe(false);
+    expect(!nb.available && nb.reason).toMatch(/No llama-server/);
+    expect(missing.spawned).toHaveLength(0);
+  });
+
   it('findFreePort returns a bindable port', async () => {
     const port = await findFreePort();
     expect(port).toBeGreaterThan(0);

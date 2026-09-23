@@ -1,9 +1,17 @@
-import { Controller, Post, Body, Get, Delete, Param, OnModuleInit } from '@nestjs/common';
+import { Controller, Post, Body, Get, Delete, Param, OnModuleInit, Optional } from '@nestjs/common';
 import { SharedConfigService } from './shared-config.service';
 import { ApiKeysService } from './api-keys.service';
 import { ModelManagerService } from './model-manager.service';
 import { LlamaManager } from '../bridges';
 import { DEFAULT_PROMPTS, DEFAULT_CATEGORIES, normalizeSensitivity } from '../analysis/prompts/analysis-prompts';
+import {
+  ANALYSIS_ENGINE_CONFIG_KEY,
+  ANALYSIS_ENGINE_ENV,
+  engineLabel,
+  parseAnalysisEngine,
+  resolveAnalysisEngine,
+} from '../scorer/analysis-engine';
+import { ScorerServerService } from '../scorer/scorer-server.service';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -22,6 +30,7 @@ export class ConfigController implements OnModuleInit {
     private readonly apiKeysService: ApiKeysService,
     private readonly llamaManager: LlamaManager,
     private readonly modelManager: ModelManagerService,
+    @Optional() private readonly scorerServer?: ScorerServerService,
   ) {
     const userDataPath = process.env.APPDATA ||
                       (process.platform === 'darwin' ?
@@ -380,6 +389,50 @@ export class ConfigController implements OnModuleInit {
         success: false,
         message: `Failed to save default granularity: ${(error as Error).message}`
       };
+    }
+  }
+
+  /**
+   * The analysis engine (scorer/analysis-engine.ts): 'classic' (default) or
+   * 'snap', per stage, as the next analysis will resolve it, plus whether the
+   * scorer could run. No UI reads this yet; the plan puts the control in
+   * Settings -> Components once the default flips (docs/snap-analysis-plan.md §8).
+   */
+  @Get('analysis-engine')
+  async getAnalysisEngine() {
+    const setting = resolveAnalysisEngine();
+    return {
+      success: true,
+      engine: engineLabel(setting),
+      chapters: setting.chapters,
+      flags: setting.flags,
+      source: setting.source,
+      ignored: setting.ignored ?? null,
+      envOverride: process.env[ANALYSIS_ENGINE_ENV] ?? null,
+      scorer: this.scorerServer
+        ? { ...this.scorerServer.availability(), status: this.scorerServer.getStatus() }
+        : null,
+    };
+  }
+
+  /** Save `analysisEngine`: 'classic' | 'snap' | { chapters, flags }. The env override still wins. */
+  @Post('analysis-engine')
+  async saveAnalysisEngine(@Body() body: { engine: unknown }) {
+    try {
+      const parsed = parseAnalysisEngine(body?.engine);
+      if (!parsed) {
+        return { success: false, message: `analysisEngine must be 'classic', 'snap' or { chapters, flags }` };
+      }
+      const configDir = path.dirname(this.configPath);
+      if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true });
+      let config: any = {};
+      if (fs.existsSync(this.configPath)) config = JSON.parse(fs.readFileSync(this.configPath, 'utf8'));
+      config[ANALYSIS_ENGINE_CONFIG_KEY] = parsed.chapters === parsed.flags ? parsed.chapters : parsed;
+      config.lastUpdated = new Date().toISOString();
+      fs.writeFileSync(this.configPath, JSON.stringify(config, null, 2), 'utf8');
+      return { success: true, engine: config[ANALYSIS_ENGINE_CONFIG_KEY] };
+    } catch (error: any) {
+      return { success: false, message: `Failed to save analysis engine: ${(error as Error).message}` };
     }
   }
 

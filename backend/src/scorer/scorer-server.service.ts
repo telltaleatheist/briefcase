@@ -128,6 +128,26 @@ export class ScorerServerService implements OnModuleDestroy {
     return fs.existsSync(cfg.modelPath);
   }
 
+  /**
+   * Can the scorer be started at all? Checks the configured model file and that
+   * a llama-server binary resolves, WITHOUT starting anything. A binary that is
+   * too old for the model (the bundled b7482) still reports available here and
+   * fails at start, which the caller handles the same way (fall back + warn).
+   */
+  availability(): { available: true; binarySource: ScorerBinary['source'] } | { available: false; reason: string } {
+    try {
+      if (this.proc && this.ready) return { available: true, binarySource: this.binary?.source ?? 'env' };
+      const cfg = this.loadConfig();
+      if (!fs.existsSync(cfg.modelPath)) {
+        return { available: false, reason: `scorer model not found: ${cfg.modelPath}` };
+      }
+      const binary = this.resolveBinary(cfg);
+      return { available: true, binarySource: binary.source };
+    } catch (err) {
+      return { available: false, reason: (err as Error).message };
+    }
+  }
+
   /** Start the server if needed and wait until GET /health answers 200. */
   async ensureReady(): Promise<ScorerEngine> {
     if (this.proc && this.ready && this.engine) return this.engine;
