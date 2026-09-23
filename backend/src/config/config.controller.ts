@@ -395,8 +395,9 @@ export class ConfigController implements OnModuleInit {
   /**
    * The analysis engine (scorer/analysis-engine.ts): 'classic' (default) or
    * 'snap', per stage, as the next analysis will resolve it, plus whether the
-   * scorer could run. No UI reads this yet; the plan puts the control in
-   * Settings -> Components once the default flips (docs/snap-analysis-plan.md §8).
+   * scorer could run. Settings -> Components reads `scorer` for its Analysis
+   * scorer status line; the engine control itself lands there once the default
+   * flips (docs/snap-analysis-plan.md §8).
    */
   @Get('analysis-engine')
   async getAnalysisEngine() {

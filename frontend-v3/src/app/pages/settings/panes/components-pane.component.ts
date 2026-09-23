@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { ComponentService, ComponentStatus } from '../../../services/component.service';
+import { ComponentService, ComponentStatus, ScorerAvailability } from '../../../services/component.service';
+import { isChatModelComponent, isScorerComponent, needsLlamaEngine } from '../../../models/chat-model-component';
 import { ErrorSurface } from '../../../core/error-surface.service';
 import { SetupDownloadService } from '../../../services/setup-download.service';
 import { SetupWizardComponent } from '../../../components/setup-wizard/setup-wizard.component';
@@ -32,7 +33,12 @@ export class ComponentsPaneComponent {
 
   tools = computed(() => this.all().filter(c => c.kind === 'binary' && c.supported));
   whisperModels = computed(() => this.all().filter(c => c.kind === 'whisper-model' && c.supported));
-  llamaModels = computed(() => this.all().filter(c => c.kind === 'llama-model' && c.supported));
+  /** Chat models for local AI analysis. The scorer's files are llama-models too, but not these. */
+  llamaModels = computed(() => this.all().filter(c => isChatModelComponent(c) && c.supported));
+  /** The analysis scorer's model (and projector): its own engine, its own section. */
+  scorerModels = computed(() => this.all().filter(c => isScorerComponent(c) && c.supported));
+  /** Can the scorer start (model file + a llama-server binary)? null = unknown. */
+  scorer = signal<ScorerAvailability | null>(null);
   /**
    * Locally-built Python environments (currently only the NLI flag ranker).
    * Listed apart from the downloads because it is not one: it is constructed
@@ -49,6 +55,22 @@ export class ComponentsPaneComponent {
     this.componentService.listComponents()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(components => this.all.set(components));
+    this.componentService.getScorerAvailability()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(availability => this.scorer.set(availability));
+  }
+
+  /** One line on whether the scorer can run, and on which llama-server. */
+  scorerStatus(a: ScorerAvailability): string {
+    if (!a.available) return a.reason;
+    switch (a.binarySource) {
+      case 'homebrew': return 'Ready — uses the Homebrew llama-server.';
+      case 'env': return 'Ready — uses the llama-server set by BRIEFCASE_SCORER_LLAMA_SERVER.';
+      case 'config': return 'Ready — uses the llama-server set in scorerLlamaServer.';
+      default:
+        return "Only the app's own llama-server was found, which is likely too old to load this model. " +
+          'Install a current llama.cpp (on a Mac: brew install llama.cpp).';
+    }
   }
 
   statusOf(id: string): string {
@@ -67,8 +89,9 @@ export class ComponentsPaneComponent {
   download(component: ComponentStatus): void {
     if (component.installed || this.isBusy(component)) return;
     const ids = [component.id];
-    // A local AI model needs the llama engine binary alongside it.
-    if (component.kind === 'llama-model') {
+    // A local chat model needs the llama engine binary alongside it. The
+    // scorer does not: it runs on its own, newer llama-server.
+    if (needsLlamaEngine(component)) {
       const llama = this.all().find(c => c.id === 'llama' && !c.installed);
       if (llama && !this.isBusy(llama)) ids.unshift('llama');
     }

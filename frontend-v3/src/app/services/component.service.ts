@@ -19,6 +19,14 @@ export interface ComponentStatus {
 }
 
 /**
+ * Whether the analysis scorer could start, from GET /config/analysis-engine
+ * (ScorerServerService.availability). Nothing is started to answer it.
+ */
+export type ScorerAvailability =
+  | { available: true; binarySource: 'env' | 'config' | 'homebrew' | 'bundled' }
+  | { available: false; reason: string };
+
+/**
  * Frontend access to the download-on-demand component system
  * (ComponentManagerService). Mirrors AiSetupService's HTTP style; download
  * progress arrives via WebsocketService 'component.download.*' events.
@@ -108,6 +116,23 @@ export class ComponentService {
         console.error('Error cancelling component:', error);
         throw error;
       }),
+    );
+  }
+
+  /**
+   * Scorer availability, or null when the backend has no scorer module or the
+   * request failed (the pane then shows no status rather than a wrong one).
+   */
+  getScorerAvailability(): Observable<ScorerAvailability | null> {
+    return this.http.get<any>(`${this.API_BASE}/config/analysis-engine`).pipe(
+      map((res) => {
+        const s = res?.scorer;
+        if (!s || typeof s.available !== 'boolean') return null;
+        return s.available
+          ? { available: true as const, binarySource: s.binarySource }
+          : { available: false as const, reason: String(s.reason || 'unavailable') };
+      }),
+      catchError(() => of(null)),
     );
   }
 

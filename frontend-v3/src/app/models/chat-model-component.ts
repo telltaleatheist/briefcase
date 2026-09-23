@@ -12,3 +12,18 @@ export const SCORER_COMPONENT_ID_PREFIX = 'scorer-';
 export function isChatModelComponent(c: { id: string; kind: string }): boolean {
   return c.kind === 'llama-model' && !c.id.startsWith(SCORER_COMPONENT_ID_PREFIX);
 }
+
+/** True for the analysis scorer's own files (model weights, vision projector). */
+export function isScorerComponent(c: { id: string; kind: string }): boolean {
+  return c.kind === 'llama-model' && c.id.startsWith(SCORER_COMPONENT_ID_PREFIX);
+}
+
+/**
+ * Does downloading this component also need the app's llama engine ('llama')?
+ * Only a chat model does. The scorer runs on its own llama-server (Homebrew or
+ * a configured build), and the bundled engine is too old to load its model, so
+ * pulling it alongside a scorer file would be a wasted download.
+ */
+export function needsLlamaEngine(c: { id: string; kind: string }): boolean {
+  return isChatModelComponent(c);
+}

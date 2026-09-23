@@ -116,6 +116,60 @@
 </div>
 
 <div class="pane-section">
+  <p class="section-label">Analysis scorer</p>
+  <p class="hint" style="margin: 0 0 10px;">
+    The model behind the snap analysis engine. It runs on its own llama-server
+    (Homebrew llama.cpp), not the local AI engine above, and is only used when
+    the snap engine is turned on.
+  </p>
+  @if (scorer(); as s) {
+    <div class="row-card">
+      <div class="row-main">
+        <div class="row-name">Scorer engine</div>
+        <div class="row-desc">{{ scorerStatus(s) }}</div>
+      </div>
+      @if (!s.available) {
+        <span class="pill off">Not usable</span>
+      } @else if (s.binarySource === 'bundled') {
+        <span class="pill accent">Engine too old</span>
+      } @else {
+        <span class="pill ok">Ready</span>
+      }
+    </div>
+  }
+  @for (component of scorerModels(); track component.id) {
+    <div class="row-card">
+      <div class="row-main">
+        <div class="row-name">{{ component.name }}</div>
+        @if (component.description) {
+          <div class="row-desc">{{ component.description }}</div>
+        }
+      </div>
+      <span class="row-meta">{{ component.installed ? '' : fmtSize(component.sizeBytes) }}</span>
+      @if (component.installed) {
+        <span class="pill ok">Installed</span>
+        @if (canRemove(component)) {
+          @if (confirmingRemoveId() === component.id) {
+            <ui-button variant="secondary" size="sm" (pressed)="remove(component)">Remove?</ui-button>
+            <ui-button variant="ghost" size="sm" (pressed)="cancelRemove()">Keep</ui-button>
+          } @else {
+            <ui-button variant="ghost" size="sm" (pressed)="remove(component)">
+              {{ removingId() === component.id ? 'Removing…' : 'Remove' }}
+            </ui-button>
+          }
+        }
+      } @else if (isBusy(component)) {
+        <span class="pill accent">{{ statusOf(component.id) === 'downloading' ? pctOf(component.id) + '%' : 'Queued' }}</span>
+      } @else {
+        <ui-button variant="secondary" size="sm" (pressed)="download(component)">Download</ui-button>
+      }
+    </div>
+  } @empty {
+    <p class="hint">No scorer model is listed for this platform.</p>
+  }
+</div>
+
+<div class="pane-section">
   <p class="section-label">Flag detection</p>
   <p class="hint" style="margin: 0 0 10px;">
     Built on this computer from a Python you already have — nothing is downloaded
