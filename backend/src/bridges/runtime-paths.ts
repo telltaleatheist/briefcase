@@ -24,7 +24,7 @@ interface DownloadedRecord {
   kind: string;
 }
 
-function getBriefcaseConfigDir(): string {
+export function getBriefcaseConfigDir(): string {
   const userDataPath =
     process.env.APPDATA ||
     (process.platform === 'darwin'

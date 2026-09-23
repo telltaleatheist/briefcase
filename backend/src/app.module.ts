@@ -21,6 +21,7 @@ import { JobStateManagerModule } from './common/job-state-manager.module';
 import { CommonModule } from './common/common.module';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { BridgesModule } from './bridges';
+import { ScorerModule } from './scorer/scorer.module';
 import { join } from 'path';
 
 @Global()
@@ -42,6 +43,7 @@ import { join } from 'path';
       : []),
     CommonModule,
     BridgesModule,
+    ScorerModule,
     SharedConfigModule,
     ApiKeysModule,
     ComponentManagerModule,
