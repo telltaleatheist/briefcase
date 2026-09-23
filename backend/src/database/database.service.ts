@@ -5,6 +5,7 @@ import * as os from 'os';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { ThumbnailService } from './thumbnail.service';
+import { migrateAnalysisSectionsRanker } from './ranker-migration';
 
 // Type definitions for database records
 export interface VideoRecord {
@@ -1871,41 +1872,21 @@ export class DatabaseService {
     // next load. This comment exists so the next person looking for "where does
     // flag_verdict_cache get created for old libraries" stops here.
 
-    // Migration 26: Add ranker to analysis_sections.
-    //
-    // The flag pipeline has two rankers now (NLI, and the snap scorer behind the
-    // analysisEngine setting), and nli_score means a different scale on each, so
-    // a row has to say which one scored it. Additive and nullable, like
-    // migration 24: the classic path keeps working against an old or new schema.
-    //
-    // BACKFILL IS FACTUAL, unlike migration 24's deliberate no-backfill: before
-    // this migration the NLI ranker was the ONLY writer of nli_score, so every
-    // row with a score IS an NLI row. Rows without one (legacy, discovery)
-    // stay NULL.
+    // Migration 26: Add ranker to analysis_sections, with its backfill, in one
+    // transaction (see ranker-migration.ts for why both matter).
     try {
-      db.exec('SELECT ranker FROM analysis_sections LIMIT 1');
-    } catch (error: any) {
-      if (error?.message && error.message.includes('no such column: ranker')) {
-        this.logger.log('Running migration: Adding ranker column to analysis_sections table');
-        try {
-          db.exec(`
-            ALTER TABLE analysis_sections ADD COLUMN ranker TEXT;
-            UPDATE analysis_sections SET ranker = 'nli' WHERE ranker IS NULL AND nli_score IS NOT NULL;
-          `);
-          this.saveDatabase();
-          this.logger.log('Migration complete: ranker column added to analysis_sections');
-        } catch (migrationError: any) {
-          // Fallback audit #6: a half-migrated schema corrupts every later write
-          // to the missing column. Abort the library load loudly.
-          throw new Error(
-            `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
-            `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
-            `Check that the library volume is mounted and writable, then reopen the library.`,
-          );
-        }
-      } else if (!error?.message || !error.message.includes('no such table')) {
-        throw error;
+      if (migrateAnalysisSectionsRanker(db)) {
+        this.saveDatabase();
+        this.logger.log('Migration complete: ranker column added to analysis_sections');
       }
+    } catch (migrationError: any) {
+      // Fallback audit #6: a half-migrated schema corrupts every later write
+      // to the missing column. Abort the library load loudly.
+      throw new Error(
+        `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
+        `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
+        `Check that the library volume is mounted and writable, then reopen the library.`,
+      );
     }
 
     // Migration: Create transcripts_soundex_fts FTS5 table for phonetic search
