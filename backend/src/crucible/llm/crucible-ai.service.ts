@@ -32,7 +32,7 @@ import type {
   LegacyKeysView,
 } from '../wire/ai-wire';
 import { AI_VIA_ENV, resolveAiVia } from './ai-via';
-import { CrucibleChatService } from './crucible-chat.service';
+import { CrucibleChatService, isTextChatModel } from './crucible-chat.service';
 import type { UpstreamName } from './target';
 
 export const AI_TASKS: readonly AiTaskName[] = ['boundary', 'chapter', 'flags', 'description', 'tags', 'title'];
@@ -126,7 +126,7 @@ export class CrucibleAiService {
 
     try {
       for (const info of await this.chat.modelsOn(server, true)) {
-        if (!info.backendSupported || !info.modalities.includes('text')) continue;
+        if (!info.backendSupported || !isTextChatModel(info)) continue;
         models.push({
           value: `local:${info.id}`,
           label: `${info.id}${info.paramsB ? ` (${info.paramsB}B)` : ''}`,

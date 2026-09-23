@@ -114,7 +114,10 @@ describe('the AI pane\'s model list, from the connected server', () => {
 
   it('local catalog models plus configured upstreams, as Briefcase provider:model values', async () => {
     fake = await startFakeCrucible({
-      models: [{ id: 'qwen3.5-9b', paramsB: 9 }, { id: 'qwen3.8-27b', paramsB: 27, installed: false }, { id: 'cuda-only', paramsB: 7, backendSupported: false }],
+      models: [
+        { id: 'dots-ocr', paramsB: 3, modalities: ['text', 'image'] },
+        { id: 'qwen3.5-9b', paramsB: 9 }, { id: 'qwen3.8-27b', paramsB: 27, installed: false }, { id: 'cuda-only', paramsB: 7, backendSupported: false },
+      ],
       upstreams: { anthropic: { key: 'sk-ant-1234' }, openai: { key: 'sk-oa-5678' } },
       upstreamModels: { anthropic: ['claude-sonnet-5', 'claude-haiku-5'], openai: ['gpt-5.1', 'text-embedding-3-small', 'gpt-4o-realtime-preview', 'o4-mini'] },
     });

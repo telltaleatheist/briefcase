@@ -68,6 +68,15 @@ export const UPSTREAM_TIMEOUT_MS = 600_000;
 export function localTimeoutMs(promptChars: number): number {
   return 120_000 + 5 * promptChars;
 }
+/**
+ * A model Briefcase can give a transcript to: text in, text out. The catalog
+ * also serves page readers (dots-ocr, modalities text+image) through the same
+ * llm door; those are not offered for analysis or picked for placement.
+ */
+export function isTextChatModel(model: Pick<ModelInfo, 'modalities'>): boolean {
+  return model.modalities.includes('text') && !model.modalities.includes('image');
+}
+
 const SETTINGS_CACHE_MS = 30_000;
 const MODELS_CACHE_MS = 15_000;
 

@@ -12,7 +12,7 @@ import {
 import { negotiateOllamaThink, markGradedThinkUnsupported } from './ollama-capabilities';
 import { AnalysisCancelledError, ensureNotCancelled } from './cancellation';
 import { resolveAiVia, type AiVia } from '../crucible/llm/ai-via';
-import { CrucibleChatService, type CrucibleChatResult } from '../crucible/llm/crucible-chat.service';
+import { CrucibleChatService, isTextChatModel, type CrucibleChatResult } from '../crucible/llm/crucible-chat.service';
 import { CrucibleBusyError, CrucibleChatCancelled, CrucibleChatError, CrucibleNoVenueError } from '../crucible/llm/errors';
 import { crucibleTargetOf, type CrucibleTarget } from '../crucible/llm/target';
 
@@ -158,7 +158,7 @@ export class AIProviderService {
       const venue = await this.crucibleChat.venueFor(crucibleTargetOf('local', '_'));
       const models = await this.crucibleChat.modelsOn(venue);
       const small = models
-        .filter((m) => m.backendSupported && m.installed && m.modalities.includes('text') && m.paramsB > 0 && m.paramsB <= maxParamsB)
+        .filter((m) => m.backendSupported && m.installed && isTextChatModel(m) && m.paramsB > 0 && m.paramsB <= maxParamsB)
         .sort((a, b) => a.paramsB - b.paramsB);
       return small.length > 0 ? `local:${small[small.length - 1].id}` : null;
     } catch (error) {

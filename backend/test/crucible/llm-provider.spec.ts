@@ -29,7 +29,8 @@ let provider: AIProviderService;
 beforeEach(async () => {
   process.env = { ...savedEnv, APPDATA: tempDir('ai-appdata-'), [AI_VIA_ENV]: 'crucible', BRIEFCASE_PLACE_MODEL: '' };
   fake = await startFakeCrucible({
-    models: [{ id: 'qwen3.5-9b', paramsB: 9 }, { id: 'qwen3.5-4b', paramsB: 4 }],
+    // dots-ocr is the live Mac catalog's page reader: 3B, text+image. It must never be picked for placement.
+    models: [{ id: 'dots-ocr', paramsB: 3, modalities: ['text', 'image'] }, { id: 'qwen3.5-9b', paramsB: 9 }, { id: 'qwen3.5-4b', paramsB: 4 }],
     upstreams: { anthropic: { key: 'sk-ant-9999' }, openai: { key: 'sk-oa-8888' }, ollama: { url: 'http://127.0.0.1:11434' } },
   });
   h = harness();
