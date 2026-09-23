@@ -18,6 +18,7 @@ import { IgnoreService } from './ignore.service';
 import { ThumbnailService } from './thumbnail.service';
 import { WaveformService } from './waveform.service';
 import { FilenameDateUtil } from '../common/utils/filename-date.util';
+import { sectionScoringFields } from './analysis-section-copy';
 
 /**
  * DatabaseController - REST API endpoints for database operations
@@ -2828,6 +2829,9 @@ export class DatabaseController {
                 description: s.description ?? undefined,
                 category: s.category ?? undefined,
                 source: 'ai',
+                // verdict / nli_score / ranker: without them a 'skip' or
+                // 'candidate' row comes back NULL, which reads as a confirmed flag.
+                ...sectionScoringFields(s),
               });
             } catch (e) {
               // Ignore section errors

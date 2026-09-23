@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { DatabaseService } from './database.service';
 import { LibraryMigrationService } from './library-migration.service';
+import { SectionScoringRow, sectionScoringFields } from './analysis-section-copy';
 
 /**
  * Library configuration stored in settings
@@ -922,6 +923,9 @@ export class LibraryManagerService implements OnModuleInit {
                 description: section.description as string | undefined,
                 category: section.category as string | undefined,
                 source: (section.source as string) || 'ai',
+                // verdict / nli_score / ranker: without them a 'skip' or
+                // 'candidate' row lands NULL, which reads as a confirmed flag.
+                ...sectionScoringFields(section as SectionScoringRow),
               });
             }
           }
