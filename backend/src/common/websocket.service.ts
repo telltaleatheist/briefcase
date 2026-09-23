@@ -200,6 +200,13 @@ export class WebSocketService {
   }
 
   /**
+   * Crucible Events
+   */
+  emitCrucibleServersChanged(payload: WebSocketEventMap[WebSocketEvent.CRUCIBLE_SERVERS_CHANGED]): void {
+    this.emit(WebSocketEvent.CRUCIBLE_SERVERS_CHANGED, payload);
+  }
+
+  /**
    * Advanced Methods for Future Use
    */
 

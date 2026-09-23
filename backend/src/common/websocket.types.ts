@@ -1,3 +1,5 @@
+import type { CrucibleServersChangedPayload } from '../crucible/wire/settings-wire';
+
 // WebSocket Event Type Definitions
 // Centralized registry of all WebSocket events and their payloads
 
@@ -193,6 +195,9 @@ export enum WebSocketEvent {
   COMPONENT_DOWNLOAD_ERROR = 'component.download.error',
   COMPONENT_DOWNLOAD_CANCELLED = 'component.download.cancelled',
 
+  // Crucible server registry / routing changed (Settings › Crucible Servers)
+  CRUCIBLE_SERVERS_CHANGED = 'crucible.servers-changed',
+
   // Connection Management
   CONNECTION = 'connection',
   DISCONNECT = 'disconnect',
@@ -261,4 +266,7 @@ export interface WebSocketEventMap {
   [WebSocketEvent.COMPONENT_DOWNLOAD_COMPLETE]: ComponentDownloadCompletePayload;
   [WebSocketEvent.COMPONENT_DOWNLOAD_ERROR]: ComponentDownloadErrorPayload;
   [WebSocketEvent.COMPONENT_DOWNLOAD_CANCELLED]: ComponentDownloadCancelledPayload;
+
+  // Crucible
+  [WebSocketEvent.CRUCIBLE_SERVERS_CHANGED]: CrucibleServersChangedPayload;
 }
