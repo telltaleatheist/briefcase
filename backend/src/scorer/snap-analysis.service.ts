@@ -96,6 +96,21 @@ export class SnapAnalysisService {
     return a.available ? { available: true } : a;
   }
 
+  /**
+   * Unload the scorer now instead of at its idle timeout, so a LOCAL model the
+   * next stage loads (Ollama, or the app's own llama-server) does not share
+   * memory with 18 GB of idle scorer. Never throws; skipped while another
+   * caller holds the scorer.
+   */
+  async releaseScorer(): Promise<void> {
+    try {
+      const stopped = await this.scorerServer.stopIfIdle();
+      this.logger.log(stopped ? '[Snap] Scorer unloaded ahead of a local model' : '[Snap] Scorer still in use; left running');
+    } catch (err) {
+      this.logger.warn(`[Snap] Could not unload the scorer: ${messageOf(err)}`);
+    }
+  }
+
   /** Run the requested passes in one scorer lease. Throws only AnalysisCancelledError. */
   async run(req: SnapStageRequest): Promise<SnapStageResult> {
     const t0 = Date.now();

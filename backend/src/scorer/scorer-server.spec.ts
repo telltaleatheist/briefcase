@@ -433,6 +433,17 @@ describe('ScorerServerService lifecycle', () => {
     await svc.stop();
   });
 
+  it('stopIfIdle(): stops a server nobody holds, and leaves a held one running', async () => {
+    const svc = new TestScorerServer(configWithModel());
+    await svc.withScorer(async () => {
+      expect(await svc.stopIfIdle()).toBe(false);
+      expect(svc.getStatus().running).toBe(true);
+    });
+    expect(await svc.stopIfIdle()).toBe(true);
+    expect(svc.spawned[0].proc.kills).toEqual(['SIGTERM']);
+    expect(svc.getStatus().running).toBe(false);
+  });
+
   it('refuses to start without the model file, naming the path', async () => {
     const svc = new TestScorerServer({ ...configWithModel(), modelPath: path.join(tmp, 'models', 'absent.gguf') });
     await expect(svc.ensureReady()).rejects.toThrow(/absent\.gguf/);

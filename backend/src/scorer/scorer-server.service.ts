@@ -228,6 +228,18 @@ export class ScorerServerService implements OnModuleDestroy {
     if (this.stopping) await this.stopping;
   }
 
+  /**
+   * Stop the server now unless someone holds it (a lease or an engine call in
+   * flight). For a caller about to load another large local model, which should
+   * not have to share memory with the scorer for the idle window.
+   * Resolves true when nothing is left running.
+   */
+  async stopIfIdle(): Promise<boolean> {
+    if (this.inUse > 0 || this.startPromise) return false;
+    await this.stop();
+    return true;
+  }
+
   async onModuleDestroy(): Promise<void> {
     await this.stop();
   }

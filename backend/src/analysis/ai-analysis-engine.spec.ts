@@ -80,6 +80,7 @@ class Harness {
   detections = 0;
   nliRanks = 0;
   snapRuns: SnapStageRequest[] = [];
+  releases = 0;
   snapAvailable: { available: true } | { available: false; reason: string } = { available: true };
   snapRun: (req: SnapStageRequest) => Promise<SnapStageResult> = async () => snapResult();
 
@@ -115,6 +116,9 @@ class Harness {
       run: (req: SnapStageRequest) => {
         this.snapRuns.push(req);
         return this.snapRun(req);
+      },
+      releaseScorer: async () => {
+        this.releases++;
       },
     };
     return new AIAnalysisService(
@@ -188,6 +192,48 @@ describe('AIAnalysisService: the analysis engine setting', () => {
     const verifications = h.generated.filter((g) => g.task === 'flags');
     expect(verifications).toHaveLength(3); // (w1: 2 categories) + (w2: 1); none for the candidate
     expect(res.warnings).toBeUndefined();
+  });
+
+  it('snap + cloud flag verifier: the scorer stays warm', async () => {
+    process.env.BRIEFCASE_ANALYSIS_ENGINE = 'snap';
+    const h = new Harness();
+    await h.service().analyzeTranscript(options());
+    expect(h.snapRuns).toHaveLength(1);
+    expect(h.releases).toBe(0);
+  });
+
+  it('snap + local flag verifier (ollama or llama local): the scorer is unloaded before any LLM stage', async () => {
+    for (const spec of ['ollama:qwen3.5:9b', 'local:cogito-8b']) {
+      process.env.BRIEFCASE_ANALYSIS_ENGINE = 'snap';
+      fs.mkdirSync(path.join(tmp, 'briefcase'), { recursive: true });
+      fs.writeFileSync(path.join(tmp, 'briefcase', 'app-config.json'), JSON.stringify({ taskModels: { flags: spec } }));
+      const h = new Harness();
+      let llmCallsAtRelease = -1;
+      const svc = h.service();
+      const snap = (svc as any).snapAnalysis;
+      snap.releaseScorer = async () => {
+        h.releases++;
+        llmCallsAtRelease = h.generated.length;
+      };
+      await svc.analyzeTranscript(options());
+      expect(h.releases).toBe(1);
+      expect(llmCallsAtRelease).toBe(0);
+      expect(h.generated.filter((g) => g.task === 'flags').length).toBeGreaterThan(0);
+    }
+  });
+
+  it('a cancel in the scorer stage with a local verifier: cancellation as before, no unload call', async () => {
+    process.env.BRIEFCASE_ANALYSIS_ENGINE = 'snap';
+    fs.mkdirSync(path.join(tmp, 'briefcase'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'briefcase', 'app-config.json'), JSON.stringify({ taskModels: { flags: 'ollama:qwen3.5:9b' } }));
+    const h = new Harness();
+    h.snapRun = async () => {
+      throw new AnalysisCancelledError('Analysis cancelled during snap flag ranking');
+    };
+    const err = await h.service().analyzeTranscript({ ...options(), jobId: 'job-3' }).catch((e) => e);
+    expect(isCancellation(err)).toBe(true);
+    expect(h.releases).toBe(0);
+    expect(h.generated).toHaveLength(0);
   });
 
   it('snap selected but unavailable: classic for both stages, one warning on the job', async () => {

@@ -1195,6 +1195,16 @@ export class AIAnalysisService {
           for (const reason of [...new Set(failed.map((f) => f.reason))]) {
             engineWarnings.push(snapFallbackMessage(failed.filter((f) => f.reason === reason).map((f) => f.stage), reason));
           }
+          // Every scorer stage is done. A LOCAL flag verifier (Ollama or the
+          // app's llama-server) is about to load its own model; it must not sit
+          // beside an idle 18 GB scorer for the idle window. A cloud verifier
+          // needs no local memory, so the scorer stays warm for the next job.
+          // (A cancel never reaches here: run() throws it.)
+          const verifier = this.resolveTaskConfig(aiConfig, 'flags', taskModels);
+          if (verifier.provider === 'ollama' || verifier.provider === 'local') {
+            this.logger.log(`[Engine] flag verifier is local (${verifier.provider}:${verifier.model}) — unloading the scorer first`);
+            await this.snapAnalysis!.releaseScorer();
+          }
         }
       } else {
         this.logger.log(`[Engine] classic engine (${engine.source})`);
