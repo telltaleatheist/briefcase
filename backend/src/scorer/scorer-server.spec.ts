@@ -174,6 +174,10 @@ describe('scorer model catalog', () => {
     expect(isScorerModelFile('Custom-Scorer.gguf', ['/abs/path/Custom-Scorer.gguf'])).toBe(true);
   });
 
+  it("every scorer id starts with 'scorer-' (the frontend's isChatModelComponent keeps them out of the setup wizard by it)", () => {
+    for (const c of scorerModelComponents()) expect(c.id.startsWith('scorer-')).toBe(true);
+  });
+
   it('installing a scorer model never sets defaultLocalModel; a chat model still does', () => {
     const self = { configDir: tmp, logger: { log() {}, warn() {} } };
     const setDefault = (ComponentManagerService.prototype as any).setDefaultLocalModelIfUnset;

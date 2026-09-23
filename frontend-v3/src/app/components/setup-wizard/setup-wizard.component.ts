@@ -5,6 +5,7 @@ import { ComponentService, ComponentStatus } from '../../services/component.serv
 import { SetupDownloadService } from '../../services/setup-download.service';
 import { AiSetupService, SystemInfo } from '../../services/ai-setup.service';
 import { ElectronService } from '../../services/electron.service';
+import { isChatModelComponent } from '../../models/chat-model-component';
 
 type Step = 'welcome' | 'tools' | 'models' | 'ai' | 'review' | 'finishing';
 
@@ -298,7 +299,9 @@ export class SetupWizardComponent implements OnInit {
    */
   readonly pythonEnvs = computed(() => this.all().filter((c) => c.kind === 'python-env' && c.supported));
   readonly models = computed(() => this.all().filter((c) => c.kind === 'whisper-model' && c.supported));
-  readonly llamaModels = computed(() => this.all().filter((c) => c.kind === 'llama-model' && c.supported));
+  // Chat models only: the scorer's files are llama-model components too, but
+  // offering them here would recommend an 18 GB download nothing classic uses.
+  readonly llamaModels = computed(() => this.all().filter((c) => isChatModelComponent(c) && c.supported));
   readonly reviewItems = computed(() => this.all().filter((c) => this.dl.isSelected(c.id) && !c.installed));
   readonly totalBytes = computed(() => this.reviewItems().reduce((s, c) => s + (c.sizeBytes || 0), 0));
 
