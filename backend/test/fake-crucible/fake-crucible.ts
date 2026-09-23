@@ -22,9 +22,17 @@
  *    each `{match: {method?, path?}, times?}`, plus `inject()` for the named
  *    faults the plan lists.
  *
- * Deliberately NOT here yet: uploads, jobs, SSE, chat, tasks and decide. They
- * arrive with the phases that call them (P3–P6); a route no spec drives is a
- * route whose shape nobody has checked against the SDK.
+ * P2 adds the operator side coordination reads and writes: `GET /v1/catalog`,
+ * and `POST /v1/tasks {type: "module"}` with `GET /v1/tasks`, `/v1/tasks/{id}`
+ * and the task SSE stream. A module is validated the way the server's
+ * `validate_module` does it (an unknown key, such as the generated `backends`,
+ * is `invalid_module`; a subject this backend's catalog does not list is
+ * `unknown_subject`), and a finished module installs what it named, so the
+ * next coordination read finds it stocked.
+ *
+ * Deliberately NOT here yet: uploads, jobs, chat and decide. They arrive with
+ * the phases that call them (P3–P6); a route no spec drives is a route whose
+ * shape nobody has checked against the SDK.
  */
 import * as http from 'http';
 import { randomBytes } from 'crypto';
@@ -85,6 +93,34 @@ export interface NamedFaults {
   serverBusy?: { client: string; type: string; progress: number; model?: string | null };
   /** Every route stalls this long before answering nothing (a sleeping machine). */
   stallMs?: number;
+  /**
+   * The operator door's `409 server_busy`: a task post is refused with the
+   * holder named (`CrucibleCardHeld`), and `activity` says the card does not
+   * accept work. `times` counts the refusals (absent: until cleared).
+   */
+  cardHeld?: { fact: string; who: string; times?: number };
+  /** Another app's task is running: posts are refused `task_busy`, and it lists as running. */
+  taskBusy?: { type: string; finishAfterMs?: number };
+}
+
+/** One catalog row, in the SDK's camelCase; served snake_case. */
+export interface FakeCatalogRow {
+  kind: 'model' | 'voice' | 'rvc' | 'rvc-base' | 'denoise' | 'engine';
+  id: string;
+  name?: string | null;
+  jobType: string;
+  installed: boolean;
+  expectedBytes?: number | null;
+}
+
+/** A task this fake has run, for a spec to assert on. */
+export interface FakeTask {
+  taskId: string;
+  type: string;
+  request: Record<string, unknown>;
+  state: 'running' | 'done' | 'failed' | 'cancelled';
+  events: Array<{ id: number; event: string; data: Record<string, unknown> }>;
+  unmet: Array<{ class: string; reason: string }>;
 }
 
 export interface FakeCrucibleOptions {
@@ -109,6 +145,17 @@ export interface FakeCrucibleOptions {
   /** Initial upstream configuration, e.g. `{anthropic: {key: 'sk-ant-1234'}}`. */
   upstreams?: Record<string, { key?: string; url?: string }>;
   faults?: FaultLayer;
+  /**
+   * The job types whose environments are installed: `info.capabilities`.
+   * Default `['echo']`, a bare service as `install({jobTypes: ['echo']})` leaves it.
+   */
+  installedJobTypes?: string[];
+  /** This backend's catalog. Default: the analysis model and the mlx whisper, neither installed. */
+  catalog?: FakeCatalogRow[];
+  /** A class the capability record switches off, with the engine's reason. */
+  disabledClasses?: Record<string, string>;
+  /** A module task fails at this step, with this code, instead of finishing. */
+  failModuleWith?: { code: string; message: string };
 }
 
 export interface FakeCrucible {
@@ -129,7 +176,30 @@ export interface FakeCrucible {
   expirePairings(): void;
   /** Requests whose path starts with `prefix` (and, when given, whose method matches). */
   requestsTo(prefix: string, method?: string): RecordedRequest[];
+  /** Every task posted to this fake (module tasks), oldest first. */
+  readonly tasks: FakeTask[];
+  /** The catalog as it stands (a finished module marks rows installed). */
+  readonly catalog: FakeCatalogRow[];
+  /** The installed job types as they stand. */
+  readonly installedJobTypes: string[];
   close(): Promise<void>;
+}
+
+/** The default catalog of a fresh mlx-darwin engine. */
+export function defaultFakeCatalog(): FakeCatalogRow[] {
+  return [
+    { kind: 'model', id: 'qwen3.5-9b', name: 'Qwen3.5 9B', jobType: 'llm', installed: false, expectedBytes: null },
+    { kind: 'model', id: 'mlx-whisper-large-v3', name: 'Whisper large-v3 (MLX)', jobType: 'asr', installed: false, expectedBytes: null },
+    { kind: 'model', id: 'mlx-whisper-large-v3-turbo', name: 'Whisper large-v3 turbo (MLX)', jobType: 'asr', installed: false, expectedBytes: null },
+  ];
+}
+
+/** Every job type and subject a catalog/info pair needs for Briefcase's module to read as stocked on mlx-darwin. */
+export function stockedForBriefcase(): { installedJobTypes: string[]; catalog: FakeCatalogRow[] } {
+  return {
+    installedJobTypes: ['echo', 'llm', 'asr'],
+    catalog: defaultFakeCatalog().map((row) => ({ ...row, installed: row.id !== 'mlx-whisper-large-v3-turbo' })),
+  };
 }
 
 const UPSTREAM_NAMES = ['anthropic', 'openai', 'ollama'] as const;
@@ -228,6 +298,12 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
   const routes: Record<string, string> = {};
   const pairingRows = new Map<string, { id: string; deviceCode: string; userCode: string; clientName: string; status: 'pending' | 'approved' | 'denied' | 'expired'; expiresAt: number }>();
   const pairings: FakeCrucible['pairings'] = [];
+  const installedJobTypes: string[] = [...(options.installedJobTypes ?? ['echo'])];
+  const catalog: FakeCatalogRow[] = (options.catalog ?? defaultFakeCatalog()).map((row) => ({ ...row }));
+  const tasks: FakeTask[] = [];
+  const taskListeners = new Map<string, Set<() => void>>();
+  let nextTask = 1;
+  const disabledClasses = options.disabledClasses ?? {};
 
   const apiVersion = (): number => (named.apiVersion2 ? 2 : 1);
 
@@ -253,8 +329,8 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
       backend: role === 'orchestrator' ? 'orchestrator' : backend,
       gpu: { vendor: 'apple', name: 'Fake M1 Ultra', vram_bytes: 68719476736 },
     },
-    job_types: role === 'orchestrator' ? [] : ['asr', 'echo', 'load-model', 'unload-model'],
-    capabilities: [],
+    job_types: role === 'orchestrator' ? [] : [...installedJobTypes, 'load-model', 'unload-model'],
+    capabilities: role === 'orchestrator' ? [] : installedJobTypes.map((jobType) => ({ job_type: jobType, models: [] })),
   });
 
   const activityDoc = (): unknown => {
@@ -280,7 +356,7 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
       streaming: null,
       lease: null,
       chat: { in_flight: 0, max_in_flight: null, max_in_flight_basis: null, rows: [] },
-      slots: { accelerated: { busy: job === null ? 0 : 1, of: 1, queue_depth: 0, accepts_work: job === null } },
+      slots: { accelerated: { busy: job === null ? 0 : 1, of: 1, queue_depth: 0, accepts_work: job === null && (named.cardHeld === undefined || named.cardHeld.times === 0) } },
       running: job === null ? [] : [job],
       queued: [],
     };
@@ -320,7 +396,14 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
     total_bytes: 68719476736,
     desktop_allowance_bytes: 3221225472,
     classes: [
-      ...LLM_CLASSES.map((c) => ({
+      ...LLM_CLASSES.map((c) => (disabledClasses[c] !== undefined ? {
+        capability: c,
+        enabled: false,
+        selected: '',
+        reason: disabledClasses[c],
+        shortfall_bytes: 1,
+        route: 'local',
+      } : {
         capability: c,
         enabled: true,
         selected: routes[c] ?? 'qwen3.5-9b',
@@ -331,6 +414,178 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
       { capability: 'asr', enabled: true, selected: 'mlx-whisper-large-v3-turbo', reason: 'installed', shortfall_bytes: 0, route: 'local' },
     ],
   });
+
+  // ── tasks ────────────────────────────────────────────────────────────
+  const foreignTask: FakeTask = {
+    taskId: 'task-foreign', type: 'module', request: { type: 'module', module: { name: 'bookforge' } },
+    state: 'running', events: [{ id: 1, event: 'started', data: { type: 'module' } }], unmet: [],
+  };
+  let foreignFinishTimer: NodeJS.Timeout | null = null;
+
+  const listedTasks = (): FakeTask[] => (named.taskBusy !== undefined ? [foreignTask, ...tasks] : [...tasks]);
+  const findTask = (id: string): FakeTask | undefined => listedTasks().find((task) => task.taskId === id);
+
+  const taskStatusDoc = (task: FakeTask): unknown => ({
+    task_id: task.taskId,
+    type: task.type,
+    request: task.request,
+    state: task.state,
+    error: task.state === 'failed'
+      ? { code: String(task.events.at(-1)?.data['code'] ?? 'failed'), message: String(task.events.at(-1)?.data['message'] ?? '') }
+      : null,
+    created: '2026-09-23T01:00:00Z',
+    started: '2026-09-23T01:00:00Z',
+    finished: task.state === 'running' ? null : '2026-09-23T01:05:00Z',
+    unmet: task.unmet,
+  });
+
+  const pushTaskEvent = (task: FakeTask, event: string, data: Record<string, unknown>): void => {
+    task.events.push({ id: task.events.length + 1, event, data });
+    for (const wake of taskListeners.get(task.taskId) ?? []) wake();
+  };
+
+  function streamTask(req: http.IncomingMessage, res: http.ServerResponse, id: string): void {
+    const task = findTask(id);
+    if (task === undefined) {
+      refusal(res, 404, 'unknown_task', `no task ${id}`);
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
+    let sent = Number(req.headers['last-event-id'] ?? 0) || 0;
+    const flush = (): void => {
+      while (sent < task.events.length) {
+        const ev = task.events[sent];
+        sent += 1;
+        res.write(`id: ${ev.id}\nevent: ${ev.event}\ndata: ${JSON.stringify(ev.data)}\n\n`);
+        if (ev.event === 'done' || ev.event === 'failed' || ev.event === 'cancelled') {
+          taskListeners.get(task.taskId)?.delete(flush);
+          res.end();
+          return;
+        }
+      }
+    };
+    if (!taskListeners.has(task.taskId)) taskListeners.set(task.taskId, new Set());
+    taskListeners.get(task.taskId)?.add(flush);
+    res.on('close', () => taskListeners.get(task.taskId)?.delete(flush));
+    flush();
+  }
+
+  /** The server's `validate_module`, the parts a client can get wrong. */
+  function validateModule(module: unknown): { code: string; message: string } | null {
+    if (module === null || typeof module !== 'object') return { code: 'invalid_module', message: 'module must be an object' };
+    const m = module as Record<string, unknown>;
+    const jobTypes = Array.isArray(m['job_types']) ? m['job_types'] as Record<string, unknown>[] : [];
+    const subjects = Array.isArray(m['subjects']) ? m['subjects'] as Record<string, unknown>[] : [];
+    for (const [index, entry] of jobTypes.entries()) {
+      const extra = Object.keys(entry).filter((k) => k !== 'type' && k !== 'narrator_engine');
+      if (extra.length > 0) return { code: 'invalid_module', message: `job_types[${index}]: unknown key(s) ${JSON.stringify(extra)}` };
+    }
+    for (const [index, entry] of subjects.entries()) {
+      const extra = Object.keys(entry).filter((k) => k !== 'kind' && k !== 'id');
+      if (extra.length > 0) return { code: 'invalid_module', message: `subjects[${index}]: unknown key(s) ${JSON.stringify(extra)}` };
+      if (!catalog.some((row) => row.kind === entry['kind'] && row.id === entry['id'])) {
+        return { code: 'unknown_subject', message: `subjects[${index}]: this server has no ${String(entry['kind'])} called '${String(entry['id'])}' for ${backend}` };
+      }
+    }
+    return null;
+  }
+
+  function postTask(res: http.ServerResponse, body: Record<string, unknown>): void {
+    const held = named.cardHeld;
+    if (held !== undefined && (held.times === undefined || held.times > 0)) {
+      if (held.times !== undefined) held.times -= 1;
+      refusal(res, 409, 'server_busy', `the card is held by ${held.fact}`, { fact: held.fact, who: held.who });
+      return;
+    }
+    if (named.taskBusy !== undefined && foreignTask.state === 'running') {
+      refusal(res, 409, 'task_busy', `task ${foreignTask.taskId} is running`, { task_id: foreignTask.taskId, type: named.taskBusy.type });
+      return;
+    }
+    if (body['type'] !== 'module') {
+      refusal(res, 400, 'invalid_task', `this fake runs module tasks only, not ${String(body['type'])}`);
+      return;
+    }
+    const invalid = validateModule(body['module']);
+    if (invalid !== null) {
+      refusal(res, 400, invalid.code, invalid.message);
+      return;
+    }
+    const module = body['module'] as { job_types: Array<{ type: string }>; needs: Array<{ class: string }>; subjects: Array<{ kind: string; id: string }> };
+    const task: FakeTask = { taskId: `task-${nextTask++}`, type: 'module', request: body, state: 'running', events: [], unmet: [] };
+    tasks.push(task);
+    send(res, 201, { task_id: task.taskId });
+    runModule(task, module);
+  }
+
+  /** Walk the module a few milliseconds apart, the way the server streams it. */
+  function runModule(task: FakeTask, module: { job_types: Array<{ type: string }>; needs: Array<{ class: string }>; subjects: Array<{ kind: string; id: string }> }): void {
+    const steps: Array<() => void> = [];
+    const total = module.job_types.length + module.needs.length + module.subjects.length + 1;
+    let index = 0;
+    steps.push(() => pushTaskEvent(task, 'started', { type: 'module' }));
+    for (const entry of module.job_types) {
+      steps.push(() => {
+        index += 1;
+        pushTaskEvent(task, 'step', { name: `install ${entry.type}`, index, total });
+        if (installedJobTypes.includes(entry.type)) {
+          pushTaskEvent(task, 'skipped', { reason: `${entry.type} is installed` });
+          return;
+        }
+        pushTaskEvent(task, 'progress', { line: `Installing the ${entry.type} environment` });
+        installedJobTypes.push(entry.type);
+      });
+    }
+    for (const need of module.needs) {
+      steps.push(() => {
+        index += 1;
+        pushTaskEvent(task, 'step', { name: `resolve ${need.class}`, index, total });
+        if (disabledClasses[need.class] !== undefined) {
+          task.unmet.push({ class: need.class, reason: disabledClasses[need.class] });
+          return;
+        }
+        const selected = routes[need.class] ?? 'qwen3.5-9b';
+        const row = catalog.find((r) => r.id === selected);
+        if (row !== undefined && !row.installed) {
+          pushTaskEvent(task, 'progress', { bytes_done: 512, bytes_total: 1024, file: `${selected}/model.safetensors` });
+          row.installed = true;
+        }
+      });
+    }
+    for (const subject of module.subjects) {
+      steps.push(() => {
+        index += 1;
+        pushTaskEvent(task, 'step', { name: `pull ${subject.id}`, index, total });
+        const row = catalog.find((r) => r.kind === subject.kind && r.id === subject.id);
+        if (row === undefined || row.installed) {
+          pushTaskEvent(task, 'skipped', { reason: `${subject.id} is installed` });
+          return;
+        }
+        pushTaskEvent(task, 'progress', { bytes_done: 1024, bytes_total: 1024, file: `${subject.id}/weights.npz` });
+        row.installed = true;
+      });
+    }
+    steps.push(() => {
+      if (options.failModuleWith !== undefined) {
+        task.state = 'failed';
+        pushTaskEvent(task, 'failed', { code: options.failModuleWith.code, message: options.failModuleWith.message });
+        return;
+      }
+      index += 1;
+      pushTaskEvent(task, 'step', { name: 'reload', index, total, job_types: [...installedJobTypes] });
+      task.state = 'done';
+      pushTaskEvent(task, 'done', {});
+    });
+    let at = 0;
+    const tick = (): void => {
+      if (task.state === 'cancelled') return;
+      const next = steps[at];
+      at += 1;
+      if (next === undefined) return;
+      next();
+      setTimeout(tick, 5).unref?.();
+    };
+    setTimeout(tick, 5).unref?.();
+  }
 
   const server = http.createServer((req, res) => {
     void handle(req, res).catch((err) => {
@@ -520,6 +775,51 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
       send(res, 200, { models: [`${upstream}-model-a`, `${upstream}-model-b`] });
       return;
     }
+    // ── the operator side: catalog and tasks (P2 coordination) ───────────
+    if (path === '/v1/catalog' && method === 'GET') {
+      send(res, 200, {
+        rows: catalog.map((row) => ({
+          kind: row.kind, id: row.id, name: row.name ?? null, job_type: row.jobType, installed: row.installed,
+          installed_bytes: row.installed ? 1024 : null, expected_bytes: row.expectedBytes ?? null, floors: [],
+          license: null, source: `hf:fake/${row.id}`, resident: false,
+        })),
+      });
+      return;
+    }
+    if (path === '/v1/tasks' && method === 'GET') {
+      send(res, 200, { tasks: [...listedTasks()].reverse().map(taskStatusDoc) });
+      return;
+    }
+    if (path === '/v1/tasks' && method === 'POST') {
+      postTask(res, body);
+      return;
+    }
+    const taskEvents = /^\/v1\/tasks\/([^/]+)\/events$/.exec(path);
+    if (taskEvents && method === 'GET') {
+      streamTask(req, res, decodeURIComponent(taskEvents[1]));
+      return;
+    }
+    const taskDoc = /^\/v1\/tasks\/([^/]+)$/.exec(path);
+    if (taskDoc && method === 'GET') {
+      const task = findTask(decodeURIComponent(taskDoc[1]));
+      if (task === undefined) {
+        refusal(res, 404, 'unknown_task', `no task ${taskDoc[1]}`);
+        return;
+      }
+      send(res, 200, taskStatusDoc(task));
+      return;
+    }
+    if (taskDoc && method === 'DELETE') {
+      const task = findTask(decodeURIComponent(taskDoc[1]));
+      if (task === undefined || task.state !== 'running') {
+        refusal(res, 409, 'task_not_running', `task ${taskDoc[1]} is not running`);
+        return;
+      }
+      pushTaskEvent(task, 'cancelled', {});
+      task.state = 'cancelled';
+      send(res, 200, { task_id: task.taskId, status: 'cancelling' });
+      return;
+    }
     if (path === '/v1/models' && method === 'GET') {
       send(res, 200, [{
         id: 'qwen3.5-9b', family: 'qwen3.5', params_b: 9, revision: 'abc1234', fingerprint: 'qwen3.5-9b@abc1234',
@@ -591,6 +891,19 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
     pairings,
     inject(next: NamedFaults): void {
       named = { ...next };
+      if (foreignFinishTimer !== null) clearTimeout(foreignFinishTimer);
+      foreignFinishTimer = null;
+      if (next.taskBusy !== undefined) {
+        foreignTask.state = 'running';
+        foreignTask.events = [{ id: 1, event: 'started', data: { type: 'module' } }];
+        if (next.taskBusy.finishAfterMs !== undefined) {
+          foreignFinishTimer = setTimeout(() => {
+            foreignTask.state = 'done';
+            pushTaskEvent(foreignTask, 'done', {});
+          }, next.taskBusy.finishAfterMs);
+          foreignFinishTimer.unref?.();
+        }
+      }
     },
     decidePairing(id: string, allow: boolean): void {
       const row = pairingRows.get(id);
@@ -605,10 +918,14 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
       }
       for (const shown of pairings) if (shown.status === 'pending') shown.status = 'expired';
     },
+    tasks,
+    catalog,
+    installedJobTypes,
     requestsTo(prefix: string, m?: string): RecordedRequest[] {
       return requests.filter((r) => r.path.startsWith(prefix) && (m === undefined || r.method === m));
     },
     close(): Promise<void> {
+      if (foreignFinishTimer !== null) clearTimeout(foreignFinishTimer);
       return new Promise((resolve) => {
         server.closeAllConnections();
         server.close(() => resolve());
