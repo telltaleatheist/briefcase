@@ -16,6 +16,7 @@ import { systemClipboard } from './clipboard';
 import { CrucibleConnectService } from './connect.service';
 import { CRUCIBLE_CLIPBOARD, CRUCIBLE_PAIRING_HOST, CRUCIBLE_STATE_DIR } from './crucible.constants';
 import { CrucibleController } from './crucible.controller';
+import { CrucibleServersService } from './crucible-servers.service';
 import { processPairingFileHost } from './pairing-file';
 import { CrucibleProbeService } from './probe';
 import { CrucibleRegistryService } from './registry.service';
@@ -33,7 +34,9 @@ import { CrucibleSettingsBridge } from './settings-bridge.service';
     CrucibleConnectService,
     CrucibleSettingsBridge,
     CrucibleAutoConnectService,
+    CrucibleServersService,
   ],
-  exports: [CrucibleRegistryService, CrucibleClientFactory, CrucibleProbeService, CrucibleAutoConnectService],
+  // CrucibleServersService is the seam the rest of the backend uses (list/get/clientFor).
+  exports: [CrucibleServersService, CrucibleRegistryService, CrucibleClientFactory, CrucibleProbeService, CrucibleAutoConnectService],
 })
 export class CrucibleModule {}
