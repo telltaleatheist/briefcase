@@ -17,7 +17,15 @@ const emitted: unknown[] = [];
 
 @Global()
 @Module({
-  providers: [{ provide: WebSocketService, useValue: { emitCrucibleServersChanged: (p: unknown) => emitted.push(p) } }],
+  providers: [{
+    provide: WebSocketService,
+    useValue: {
+      emitCrucibleServersChanged: (p: unknown) => emitted.push(p),
+      emitCrucibleCoordination: () => undefined,
+      emitCrucibleInstallProgress: () => undefined,
+      emitCrucibleInstallDoor: () => undefined,
+    },
+  }],
   exports: [WebSocketService],
 })
 class WebSocketStubModule {}
