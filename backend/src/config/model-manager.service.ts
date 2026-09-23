@@ -330,7 +330,13 @@ export class ModelManagerService implements OnModuleInit {
       }
 
       // Handle content-length for both full and partial responses
-      const contentLength = parseInt(response.headers['content-length'] || '0', 10);
+      // Newer axios (1.20) types lowercase common headers as AxiosHeaderValue
+      // (string | number | string[] | ...), so narrow before parsing.
+      const rawContentLength = response.headers['content-length'];
+      const contentLength =
+        typeof rawContentLength === 'string' || typeof rawContentLength === 'number'
+          ? parseInt(String(rawContentLength), 10) || 0
+          : 0;
       const totalBytes = resumeFromByte + contentLength;
       const totalGB = totalBytes / (1024 ** 3);
       let downloadedBytes = resumeFromByte;

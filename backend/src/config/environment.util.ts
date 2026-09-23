@@ -1,9 +1,6 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import { log } from '../common/logger';
-
-// Import the binary installers
-import YTDlpWrap from 'yt-dlp-wrap-extended';
 import { execSync } from 'child_process';
 
 export class EnvironmentUtil {

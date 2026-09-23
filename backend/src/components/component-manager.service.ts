@@ -626,7 +626,13 @@ export class ComponentManagerService implements OnModuleInit {
         resumeFromByte = 0;
       }
 
-      const contentLength = parseInt(response.headers['content-length'] || '0', 10);
+      // Newer axios (1.20) types lowercase common headers as AxiosHeaderValue
+      // (string | number | string[] | ...), so narrow before parsing.
+      const rawContentLength = response.headers['content-length'];
+      const contentLength =
+        typeof rawContentLength === 'string' || typeof rawContentLength === 'number'
+          ? parseInt(String(rawContentLength), 10) || 0
+          : 0;
       const totalBytes = resumeFromByte + contentLength;
       let downloadedBytes = resumeFromByte;
       let lastTime = Date.now();
