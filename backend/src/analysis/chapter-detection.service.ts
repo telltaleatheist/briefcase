@@ -317,6 +317,8 @@ function formatDisplayTime(seconds: number): string {
 @Injectable()
 export class ChapterDetectionService {
   private readonly logger = new Logger(ChapterDetectionService.name);
+  /** The "no embeddings under Crucible" line is logged once per process. */
+  private static lexicalNoticeLogged = false;
 
   constructor(private readonly aiProviderService: AIProviderService) {}
 
@@ -416,6 +418,17 @@ export class ChapterDetectionService {
     ollamaEndpoint?: string,
     signal?: AbortSignal,
   ): Promise<number[][] | null> {
+    // Crucible has no embeddings route (migration plan §6.4). Through Crucible
+    // the step is skipped outright and boundaries are scored lexically, the
+    // same fallback a machine with no Ollama has always had. Said once.
+    if (this.aiProviderService.via() === 'crucible') {
+      if (!ChapterDetectionService.lexicalNoticeLogged) {
+        ChapterDetectionService.lexicalNoticeLogged = true;
+        this.logger.log('[Pass 1] AI runs through Crucible, which has no embeddings: chapter boundaries use the lexical scorer');
+      }
+      return null;
+    }
+
     const endpoint = ollamaEndpoint || 'http://localhost:11434';
     const model = this.resolveEmbeddingModel();
 

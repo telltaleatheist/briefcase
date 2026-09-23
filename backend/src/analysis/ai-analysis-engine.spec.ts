@@ -94,6 +94,8 @@ class Harness {
         };
       },
       releaseOllamaModelKeys: async () => undefined,
+      via: () => 'direct' as const,
+      withRun: <T>(fn: () => Promise<T>) => fn(),
     };
     const detection = {
       detectBoundaries: async () => {

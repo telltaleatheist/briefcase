@@ -188,6 +188,29 @@ export class ApiKeysService {
   /**
    * Get full config (for returning to frontend)
    */
+  /**
+   * The raw keys, for the one-time copy to a Crucible (crucible/llm/key-copy).
+   * Backend-internal: never returned by a controller.
+   */
+  keysForCopy(): { claude?: string; openai?: string } {
+    return {
+      ...(this.config.claudeApiKey ? { claude: this.config.claudeApiKey } : {}),
+      ...(this.config.openaiApiKey ? { openai: this.config.openaiApiKey } : {}),
+    };
+  }
+
+  /**
+   * Forget the keys in memory AND delete api-keys.json, after a Crucible on
+   * this computer has confirmed it holds them. The in-memory copy goes first:
+   * deleting only the file would let the next saveConfig() write the keys back.
+   * The non-key fields (last-used provider/model) go with the file.
+   */
+  forgetKeysAndDeleteFile(): void {
+    this.config = {};
+    if (fs.existsSync(this.configPath)) fs.rmSync(this.configPath, { force: true });
+    this.logger.log('API keys moved to Crucible; api-keys.json deleted');
+  }
+
   getConfig(): ApiKeysConfig {
     return {
       lastUsedProvider: this.config.lastUsedProvider,

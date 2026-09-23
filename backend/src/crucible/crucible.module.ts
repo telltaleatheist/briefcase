@@ -91,6 +91,8 @@ function processInstallDeps(registry: CrucibleRegistryService, factory: Crucible
   exports: [
     CrucibleServersService, CrucibleRegistryService, CrucibleClientFactory, CrucibleProbeService, CrucibleAutoConnectService,
     CrucibleCoordinationService,
+    // P3: the AI pane edits the connected server's upstreams, and the key copy asks which server is this computer's.
+    CrucibleSettingsBridge, CRUCIBLE_PAIRING_HOST,
   ],
 })
 export class CrucibleModule {}

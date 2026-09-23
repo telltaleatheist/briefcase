@@ -245,6 +245,9 @@ const ROUTABLE_TASKS = ['boundary', 'chapter', 'flags', 'description', 'tags', '
  */
 const PREFERRED_PLACEMENT_MODELS = ['qwen3.5:4b'] as const;
 
+/** A Crucible catalog model whose context could not be read is sized as 16K. */
+const CRUCIBLE_LOCAL_CONTEXT_FALLBACK = 16384;
+
 /**
  * How many chapters have their flags extracted at once (Pass 2b).
  *
@@ -780,6 +783,13 @@ export class AIAnalysisService {
     if (!model || (provider === base.provider && model === base.model)) return base;
 
     let apiKey = base.apiKey;
+    // Through Crucible the keys are the SERVER's (Settings › AI), so an override
+    // naming a cloud provider is taken as it is; the server refuses by name if
+    // it has no key for it.
+    if (provider !== base.provider && this.aiProviderService.via() === 'crucible') {
+      this.logger.log(`[TaskModels] ${task} -> ${provider}:${model} (via Crucible)`);
+      return { ...base, provider, model, apiKey: undefined };
+    }
     if (provider !== base.provider) {
       if (provider === 'claude') apiKey = this.apiKeysService.getClaudeApiKey();
       else if (provider === 'openai') apiKey = this.apiKeysService.getOpenAiApiKey();
@@ -861,6 +871,20 @@ export class AIAnalysisService {
       return;
     }
 
+    // Through Crucible: a small model from the server's OWN catalog, when it has
+    // one installed. Ollama is only an upstream there, and its /api/tags is not
+    // Briefcase's to probe.
+    if (this.aiProviderService.via() === 'crucible') {
+      const small = await this.aiProviderService.smallLocalCrucibleModel();
+      if (small) {
+        overrides.boundary = small;
+        this.logger.log(`[Placement] boundary -> ${small} (a small model in the Crucible catalog)`);
+      } else {
+        this.logger.log('[Placement] boundary -> main model (the Crucible catalog has no small local model installed)');
+      }
+      return;
+    }
+
     const endpoint = ollamaEndpoint || 'http://localhost:11434';
     const installed = await this.listOllamaTags(endpoint);
     if (!installed) {
@@ -903,6 +927,13 @@ export class AIAnalysisService {
    *   Pass 2b: Extract category flags per chapter, as a dedicated call
    */
   async analyzeTranscript(options: AnalysisOptions): Promise<AnalysisResult> {
+    // ONE Crucible run per analysis: each local model the run uses is loaded
+    // once, leased and heartbeaten until the analysis settles (done, failed or
+    // cancelled), then released. On the direct road this is a plain call.
+    return this.aiProviderService.withRun(() => this.analyzeTranscriptRun(options));
+  }
+
+  private async analyzeTranscriptRun(options: AnalysisOptions): Promise<AnalysisResult> {
     console.log('=== AIAnalysisService.analyzeTranscript CALLED (Two-Pass) ===');
     console.log(`Provider: ${options.provider}, Model: ${options.model}`);
     console.log(`[analyzeTranscript] SEGMENTS RECEIVED: ${options.segments?.length || 0}`);
@@ -1043,8 +1074,10 @@ export class AIAnalysisService {
     try {
       sendProgress('analysis', 0, `Starting AI analysis with ${model}...`);
 
-      // Check model availability (only for Ollama)
-      if (provider === 'ollama') {
+      // Check model availability (only for Ollama, and only on the direct road:
+      // through Crucible, Ollama is the server's upstream and the server answers
+      // for it).
+      if (provider === 'ollama' && this.aiProviderService.via() !== 'crucible') {
         const available = await this.ollamaService.isModelAvailable(
           model,
           ollamaEndpoint,
@@ -1109,8 +1142,21 @@ export class AIAnalysisService {
       // safe for all of them, so every limit is the most CONSERVATIVE across the
       // resolved models: sizing to the main model alone would overflow a smaller
       // routed model's context and silently truncate its prompt.
+      // Through Crucible a 'local' model is one in the server's catalog, served
+      // at the context its manifest sizes for this host: read it once per model.
+      const crucibleLocalContext = new Map<string, number>();
+      if (this.aiProviderService.via() === 'crucible') {
+        for (const t of ['chapter', 'flags'] as AITaskKind[]) {
+          const cfg = this.resolveTaskConfig(aiConfig, t, taskModels);
+          if (cfg.provider !== 'local' || crucibleLocalContext.has(cfg.model)) continue;
+          const window = await this.aiProviderService.crucibleContextWindow(cfg.model);
+          crucibleLocalContext.set(cfg.model, window ?? CRUCIBLE_LOCAL_CONTEXT_FALLBACK);
+        }
+      }
       const contextFor = (cfg: AIProviderConfig): number =>
-        cfg.provider === 'local'
+        cfg.provider === 'local' && crucibleLocalContext.has(cfg.model)
+          ? crucibleLocalContext.get(cfg.model)!
+          : cfg.provider === 'local'
           ? 8192 // pinned llama.cpp server context (-c 8192)
           : cfg.provider === 'ollama'
             ? numCtxMaxForModel(cfg.model) // what we request as num_ctx

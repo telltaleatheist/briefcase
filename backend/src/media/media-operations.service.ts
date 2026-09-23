@@ -1,5 +1,7 @@
 // Atomic media operations service - each operation is standalone and emits progress
 
+// Through Crucible, keys are the serving server's (Settings › AI): no local key is required.
+import { aiViaCrucible } from '../crucible/llm/ai-via';
 import { Injectable, Logger } from '@nestjs/common';
 import { MediaEventService } from './media-event.service';
 import { MediaProcessingService } from './media-processing.service';
@@ -617,7 +619,7 @@ export class MediaOperationsService {
 
       // Get API key from options or from stored config
       let apiKey = options.apiKey;
-      if (!apiKey && provider !== 'ollama' && provider !== 'local') {
+      if (!apiKey && provider !== 'ollama' && provider !== 'local' && !aiViaCrucible()) {
         // Get API key from the API keys service
         if (provider === 'openai') {
           apiKey = this.apiKeysService.getOpenAiApiKey();
@@ -935,7 +937,7 @@ export class MediaOperationsService {
       }
 
       let apiKey = options.apiKey;
-      if (!apiKey && provider !== 'ollama' && provider !== 'local') {
+      if (!apiKey && provider !== 'ollama' && provider !== 'local' && !aiViaCrucible()) {
         if (provider === 'openai') {
           apiKey = this.apiKeysService.getOpenAiApiKey();
         } else if (provider === 'claude') {

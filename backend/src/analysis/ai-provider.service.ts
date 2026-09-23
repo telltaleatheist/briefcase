@@ -1,5 +1,5 @@
 // backend/src/analysis/ai-provider.service.ts
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import { LlamaManager } from '../bridges';
@@ -11,6 +11,18 @@ import {
 } from './model-utils';
 import { negotiateOllamaThink, markGradedThinkUnsupported } from './ollama-capabilities';
 import { AnalysisCancelledError, ensureNotCancelled } from './cancellation';
+import { resolveAiVia, type AiVia } from '../crucible/llm/ai-via';
+import { CrucibleChatService, type CrucibleChatResult } from '../crucible/llm/crucible-chat.service';
+import { CrucibleBusyError, CrucibleChatCancelled, CrucibleChatError, CrucibleNoVenueError } from '../crucible/llm/errors';
+import { crucibleTargetOf, type CrucibleTarget } from '../crucible/llm/target';
+
+/**
+ * P3's minimal admission (migration plan §9 P3): a Crucible busy with someone
+ * else's work is asked again every 10 s for up to 30 min while the task keeps
+ * its AI-pool slot. P4 replaces this with parking.
+ */
+export const CRUCIBLE_BUSY_RETRY_MS = 10_000;
+export const CRUCIBLE_BUSY_WAIT_MS = 30 * 60_000;
 
 export interface AIProviderConfig {
   provider: 'local' | 'ollama' | 'claude' | 'openai';
@@ -108,7 +120,69 @@ export class AIProviderService {
   /** True once shutdown has begun, so cancelled calls aren't logged as errors. */
   private releasingOllama = false;
 
-  constructor(private readonly llamaManager: LlamaManager) {}
+  constructor(
+    private readonly llamaManager: LlamaManager,
+    /**
+     * Crucible's chat door (P3). Optional so the direct path, and anything
+     * constructing this service by hand, runs exactly as before without it.
+     */
+    @Optional() private readonly crucibleChat?: CrucibleChatService,
+  ) {}
+
+  /**
+   * Which road LLM calls take right now: 'crucible' or 'direct' (ai-via.ts).
+   * Read per call so a change in Settings applies to the next call.
+   */
+  via(): AiVia {
+    return this.crucibleChat === undefined ? 'direct' : resolveAiVia().via;
+  }
+
+  /**
+   * Run a multi-call job (one analysis) as ONE Crucible run: each local model
+   * it uses is loaded once and leased until `fn` settles, then released. On the
+   * direct road it is just `fn()`.
+   */
+  async withRun<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.via() !== 'crucible' || this.crucibleChat === undefined) return fn();
+    return this.crucibleChat.withRun(fn);
+  }
+
+  /**
+   * A small model in the connected Crucible's own catalog, installed and
+   * loadable, for boundary placement (the direct road's `qwen3.5:4b` probe).
+   * Returns `local:<id>`, or null when the catalog has none.
+   */
+  async smallLocalCrucibleModel(maxParamsB = 5): Promise<string | null> {
+    if (this.via() !== 'crucible' || this.crucibleChat === undefined) return null;
+    try {
+      const venue = await this.crucibleChat.venueFor(crucibleTargetOf('local', '_'));
+      const models = await this.crucibleChat.modelsOn(venue);
+      const small = models
+        .filter((m) => m.backendSupported && m.installed && m.modalities.includes('text') && m.paramsB > 0 && m.paramsB <= maxParamsB)
+        .sort((a, b) => a.paramsB - b.paramsB);
+      return small.length > 0 ? `local:${small[small.length - 1].id}` : null;
+    } catch (error) {
+      this.logger.debug(`[Placement] Crucible catalog not readable: ${(error as Error).message}`);
+      return null;
+    }
+  }
+
+  /** The context window a Crucible local model is served at, or null when it can't be read. */
+  async crucibleContextWindow(model: string): Promise<number | null> {
+    if (this.via() !== 'crucible' || this.crucibleChat === undefined) return null;
+    try {
+      const target = crucibleTargetOf('local', model);
+      const venue = await this.crucibleChat.venueFor(target);
+      const info = (await this.crucibleChat.modelsOn(venue)).find((m) => m.id === target.model);
+      if (!info) return null;
+      // The context this host serves it at, never more than what is in force,
+      // and capped at 32K: a larger chunk is slower on a local card for no gain.
+      const served = Math.min(info.contextDefault, info.maxModelLen ?? Number.POSITIVE_INFINITY);
+      return Number.isFinite(served) && served > 0 ? Math.min(served, 32768) : null;
+    } catch {
+      return null;
+    }
+  }
 
   // Pricing per 1M tokens (as of May 2025)
   private readonly PRICING: Record<'claude' | 'openai', Record<string, { input: number; output: number }>> = {
@@ -197,10 +271,14 @@ export class AIProviderService {
     // a cancellation; the other half is never starting the next one.
     ensureNotCancelled(overrides?.signal, `a ${task ?? 'generation'} call`);
 
-    this.logger.log(`Generating text with provider: ${config.provider}, model: ${config.model}, task: ${task ?? 'unspecified'}`);
-
     // Per-task default, unless this particular call asked for its own.
     const temperature = overrides?.temperature ?? temperatureForTask(task);
+
+    if (this.via() === 'crucible') {
+      return this.generateViaCrucible(prompt, config, temperature, task, overrides);
+    }
+
+    this.logger.log(`Generating text with provider: ${config.provider}, model: ${config.model}, task: ${task ?? 'unspecified'}`);
 
     switch (config.provider) {
       case 'local':
@@ -216,6 +294,91 @@ export class AIProviderService {
       default:
         throw new Error(`Unsupported AI provider: ${config.provider}`);
     }
+  }
+
+  /**
+   * THE CRUCIBLE ROAD (P3). The same AIResponse the direct providers return,
+   * so no caller changes. What differs is what crosses the wire, and that is
+   * decided in crucible/llm/target.ts: cloud upstreams get no sampling
+   * parameters at all, ollama/ and local models keep the per-task temperature,
+   * 'json' and schemas become response_format where the target takes one.
+   * Keys are the serving Crucible's, so `config.apiKey` is not read here.
+   */
+  private async generateViaCrucible(
+    prompt: string,
+    config: AIProviderConfig,
+    temperature: number,
+    task: AITaskKind | undefined,
+    overrides: AIGenerateOverrides | undefined,
+  ): Promise<AIResponse> {
+    const chat = this.crucibleChat!;
+    const signal = overrides?.signal;
+    let target: CrucibleTarget;
+    try {
+      target = crucibleTargetOf(config.provider, config.model);
+    } catch (error) {
+      throw new Error(`Crucible: ${(error as Error).message}`);
+    }
+    this.logger.log(`Generating via Crucible: ${target.model} (from ${config.provider}:${config.model}), task: ${task ?? 'unspecified'}`);
+
+    let result: CrucibleChatResult;
+    try {
+      result = await chat.chat({
+        model: target.model,
+        prompt,
+        temperature,
+        responseFormat: overrides?.format,
+        schemaName: task ?? 'answer',
+        signal,
+        busyWait: {
+          everyMs: CRUCIBLE_BUSY_RETRY_MS,
+          forMs: CRUCIBLE_BUSY_WAIT_MS,
+          onWait: (line, server) => this.logger.log(`[Crucible] ${server} is busy (${line}); waiting to run ${task ?? 'the call'}`),
+        },
+      });
+    } catch (error) {
+      if (signal?.aborted || error instanceof CrucibleChatCancelled) {
+        throw new AnalysisCancelledError(`Crucible request cancelled: job was cancelled`);
+      }
+      if (error instanceof CrucibleBusyError) {
+        throw new Error(`Crucible "${error.server}" stayed busy for ${Math.round(CRUCIBLE_BUSY_WAIT_MS / 60_000)} min (${error.busyLine}).`);
+      }
+      if (error instanceof CrucibleChatError) {
+        this.logger.error(`Crucible chat error (${error.server ?? 'no server'}): ${error.code}: ${error.message}`);
+        throw new Error(`Crucible ${error.code}: ${error.message}`);
+      }
+      if (error instanceof CrucibleNoVenueError) throw new Error(`Crucible: ${error.message}`);
+      throw new Error(`Crucible error: ${(error as Error).message}`);
+    }
+
+    if (result.sampling) this.logger.debug(`[Crucible] ${result.server} sampling sources: ${JSON.stringify(result.sampling)}`);
+    if (result.fromReasoning) this.logger.debug(`[Crucible] structured answer read from the reasoning field (empty content)`);
+    if (result.finishReason === 'length') {
+      this.logger.warn(`[Crucible] ${target.model} stopped at its token limit on ${task ?? 'a call'} (finish_reason=length)`);
+      if (!result.text.trim()) {
+        throw new Error('The model spent its whole token budget thinking and returned no answer. Turn thinking off for this model on the Crucible server, or pick another model.');
+      }
+    }
+
+    const text = stripThinkTags(result.text);
+    const inputTokens = result.usage?.promptTokens ?? 0;
+    const outputTokens = result.usage?.completionTokens ?? 0;
+    const pricedAs = target.upstream === 'anthropic' ? 'claude' : target.upstream === 'openai' ? 'openai' : null;
+    const estimatedCost = pricedAs === null ? 0 : this.calculateCost(pricedAs, target.bareModel, inputTokens, outputTokens);
+    this.logger.log(
+      `Crucible (${result.server}) ${target.model}: ${inputTokens} input + ${outputTokens} output tokens`
+        + `${pricedAs ? ` (≈$${estimatedCost.toFixed(4)})` : ''}${result.attempts > 1 ? `, ${result.attempts} attempts` : ''}`,
+    );
+    return {
+      text,
+      tokensUsed: inputTokens + outputTokens,
+      inputTokens,
+      outputTokens,
+      estimatedCost,
+      provider: config.provider,
+      model: config.model,
+      doneReason: result.finishReason ?? undefined,
+    };
   }
 
   /**
@@ -667,11 +830,36 @@ export class AIProviderService {
    * Test if an AI provider is accessible and configured correctly
    */
   async testProvider(config: AIProviderConfig): Promise<{ success: boolean; error?: string }> {
+    if (this.via() === 'crucible') return this.testViaCrucible(config);
     try {
       await this.generateText('Test connection. Respond with "OK".', config);
       return { success: true };
     } catch (error) {
       this.logger.error(`Provider test failed: ${(error as Error).message}`);
+      return { success: false, error: (error as Error).message };
+    }
+  }
+
+  /**
+   * Test without a billed call (migration plan §6.1): an upstream is tested by
+   * the server's own upstream test, a local model by the catalog saying it is
+   * installed and loadable.
+   */
+  private async testViaCrucible(config: AIProviderConfig): Promise<{ success: boolean; error?: string }> {
+    const chat = this.crucibleChat!;
+    try {
+      const target = crucibleTargetOf(config.provider, config.model);
+      const venue = await chat.venueFor(target);
+      if (target.upstream !== null) {
+        const configured = await chat.upstreamsConfigured(venue);
+        if (!configured[target.upstream]) return { success: false, error: `"${venue}" has no ${target.upstream} configured. Add it in Settings › AI.` };
+        return { success: true };
+      }
+      const info = (await chat.modelsOn(venue, true)).find((m) => m.id === target.model);
+      if (!info) return { success: false, error: `"${target.model}" is not in the catalog of "${venue}".` };
+      if (!info.installed) return { success: false, error: `"${target.model}" is not downloaded on "${venue}".` };
+      return info.loadable || info.resident ? { success: true } : { success: false, error: info.reason ?? `"${target.model}" can't load on "${venue}" right now.` };
+    } catch (error) {
       return { success: false, error: (error as Error).message };
     }
   }

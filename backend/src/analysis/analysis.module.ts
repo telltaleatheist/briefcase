@@ -18,6 +18,7 @@ import { MediaModule } from '../media/media.module';
 import { QueueModule } from '../queue/queue.module';
 import { ApiKeysModule } from '../config/config.module';
 import { SnapAnalysisModule } from '../scorer/snap-analysis.module';
+import { CrucibleLlmModule } from '../crucible/llm/crucible-llm.module';
 
 @Module({
   imports: [
@@ -33,6 +34,8 @@ import { SnapAnalysisModule } from '../scorer/snap-analysis.module';
     // The snap engine's scorer stage. Injected @Optional into AIAnalysisService
     // and used only when analysisEngine selects 'snap'.
     SnapAnalysisModule,
+    // P3: every LLM call goes through Crucible when aiVia resolves to 'crucible'.
+    CrucibleLlmModule,
   ],
   controllers: [
     AnalysisController,

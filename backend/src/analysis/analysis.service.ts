@@ -1,4 +1,6 @@
 import { Injectable, Logger, OnModuleInit, Inject, forwardRef } from '@nestjs/common';
+// Through Crucible, keys are the serving server's (Settings › AI): no local key is required.
+import { aiViaCrucible } from '../crucible/llm/ai-via';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as path from 'path';
 import * as fs from 'fs/promises';
@@ -757,7 +759,7 @@ export class AnalysisService implements OnModuleInit {
     let apiKey = request.apiKey;
 
     // Fetch API key from stored config if not provided and not using Ollama or local
-    if (!apiKey && provider !== 'ollama' && provider !== 'local') {
+    if (!apiKey && provider !== 'ollama' && provider !== 'local' && !aiViaCrucible()) {
       if (provider === 'openai') {
         apiKey = this.apiKeysService.getOpenAiApiKey();
         this.logger.log(`[${jobId}] Using stored OpenAI API key`);
