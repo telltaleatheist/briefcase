@@ -2,6 +2,9 @@ import { Injectable, signal, OnDestroy, NgZone } from '@angular/core';
 import { io, Socket } from 'socket.io-client';
 import { getBackendOrigin } from '../core/runtime-url';
 import type { CrucibleServersChangedPayload } from '@crucible-wire/settings-wire';
+import type { CrucibleInstallProgress } from '@crucible-wire/install-wire';
+import type { CrucibleCoordinationState } from '@crucible-wire/coordinate-wire';
+import type { CrucibleInstallDoorEvent } from '@crucible-wire/install-door-wire';
 
 export type CrucibleServersChanged = CrucibleServersChangedPayload;
 
@@ -160,6 +163,9 @@ export class WebsocketService implements OnDestroy {
   private componentDownloadErrorCallbacks: ((event: ComponentDownloadError) => void)[] = [];
   private componentDownloadCancelledCallbacks: ((event: ComponentDownloadCancelled) => void)[] = [];
   private crucibleServersChangedCallbacks: ((event: CrucibleServersChanged) => void)[] = [];
+  private crucibleInstallProgressCallbacks: ((event: CrucibleInstallProgress) => void)[] = [];
+  private crucibleCoordinationCallbacks: ((event: CrucibleCoordinationState) => void)[] = [];
+  private crucibleInstallDoorCallbacks: ((event: CrucibleInstallDoorEvent) => void)[] = [];
 
   constructor(private ngZone: NgZone) {}
 
@@ -355,6 +361,18 @@ export class WebsocketService implements OnDestroy {
       this.dispatch(this.crucibleServersChangedCallbacks, event);
     });
 
+    this.socket.on('crucible.install-progress', (event: CrucibleInstallProgress) => {
+      this.dispatch(this.crucibleInstallProgressCallbacks, event);
+    });
+
+    this.socket.on('crucible.coordination', (event: CrucibleCoordinationState) => {
+      this.dispatch(this.crucibleCoordinationCallbacks, event);
+    });
+
+    this.socket.on('crucible.install-door', (event: CrucibleInstallDoorEvent) => {
+      this.dispatch(this.crucibleInstallDoorCallbacks, event);
+    });
+
     this.socket.on('analysisProgress', (event: any) => {
       const progress: TaskProgress = {
         taskId: event.taskId || event.id,
@@ -448,6 +466,30 @@ export class WebsocketService implements OnDestroy {
     this.crucibleServersChangedCallbacks.push(callback);
     return () => {
       this.crucibleServersChangedCallbacks = this.crucibleServersChangedCallbacks.filter(cb => cb !== callback);
+    };
+  }
+
+  /** One event of a local Crucible install. */
+  onCrucibleInstallProgress(callback: (event: CrucibleInstallProgress) => void): () => void {
+    this.crucibleInstallProgressCallbacks.push(callback);
+    return () => {
+      this.crucibleInstallProgressCallbacks = this.crucibleInstallProgressCallbacks.filter(cb => cb !== callback);
+    };
+  }
+
+  /** A server's coordination state (does it have what Briefcase needs). */
+  onCrucibleCoordination(callback: (event: CrucibleCoordinationState) => void): () => void {
+    this.crucibleCoordinationCallbacks.push(callback);
+    return () => {
+      this.crucibleCoordinationCallbacks = this.crucibleCoordinationCallbacks.filter(cb => cb !== callback);
+    };
+  }
+
+  /** The Windows host's own engine move (WSL), as its install door reports it. */
+  onCrucibleInstallDoor(callback: (event: CrucibleInstallDoorEvent) => void): () => void {
+    this.crucibleInstallDoorCallbacks.push(callback);
+    return () => {
+      this.crucibleInstallDoorCallbacks = this.crucibleInstallDoorCallbacks.filter(cb => cb !== callback);
     };
   }
 

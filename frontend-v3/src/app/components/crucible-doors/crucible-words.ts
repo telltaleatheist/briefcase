@@ -1,0 +1,95 @@
+/**
+ * The words Briefcase uses about Crucible's install and coordination, in one
+ * place so every screen says the same thing (BookForge's crucible-words.ts,
+ * trimmed to what Briefcase draws). Pure functions; a spec covers them.
+ *
+ * Rules: name the holder on a wait, never say "maybe", never tell the user to
+ * open Crucible's own page for a normal workflow.
+ */
+import type { CrucibleCoordinationState, CrucibleUnmetClass } from '@crucible-wire/coordinate-wire';
+import type { CrucibleInstallProgress } from '@crucible-wire/install-wire';
+
+const CLASS_WORDS: Record<string, string> = {
+  analysis: 'video analysis',
+  clean: 'text cleanup',
+  translate: 'translation',
+  simplify: 'simplifying',
+  pages: 'page reading',
+};
+
+export function classWord(name: string): string {
+  return CLASS_WORDS[name] ?? name;
+}
+
+export function unmetLine(unmet: readonly CrucibleUnmetClass[]): string | null {
+  if (unmet.length === 0) return null;
+  return `Not on this server: ${unmet.map((u) => `${classWord(u.class)} (${u.reason})`).join('; ')}.`;
+}
+
+function gb(bytes: number): string {
+  return bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / 1024 ** 2))} MB`;
+}
+
+/** One sentence for a server's coordination state. */
+export function coordinationLine(state: CrucibleCoordinationState): string {
+  switch (state.phase) {
+    case 'deferred':
+      return `${state.server}: what Briefcase needs is prepared when you finish setup.`;
+    case 'checking':
+      return `${state.server}: checking what it has.`;
+    case 'stocked':
+      return `${state.server} has everything Briefcase needs.`;
+    case 'preparing': {
+      const p = state.progress;
+      if (p.state === 'done') return `${state.server} is ready for Briefcase.`;
+      if (p.state === 'failed') return `${state.server}: preparing stopped. ${p.error?.code ?? 'failed'}: ${p.error?.message ?? ''}`.trim();
+      if (p.state === 'cancelled') return `${state.server}: preparing was cancelled.`;
+      const step = p.step === null ? 'starting' : `step ${p.step.index} of ${p.step.total}, ${p.step.name}`;
+      const bytes = p.bytes === null ? '' : p.bytes.total === null
+        ? ` (${gb(p.bytes.done)})`
+        : ` (${Math.round((p.bytes.done / Math.max(1, p.bytes.total)) * 100)}% of ${gb(p.bytes.total)})`;
+      const whose = state.followed ? 'finishing another app\'s setup first' : 'preparing what Briefcase needs';
+      return `${state.server}: ${whose}, ${step}${bytes}. This keeps going while you work.`;
+    }
+    case 'waiting':
+      return state.stopped
+        ? `${state.server} stayed busy (${state.holder.who}). Briefcase will ask again the next time it connects.`
+        : `${state.server} is busy: ${state.holder.who}. Briefcase will prepare it when the card is free.`;
+    case 'refused':
+      return `${state.server} refused Briefcase's request. ${state.message}`;
+    case 'unreachable':
+      return state.message;
+  }
+}
+
+/** Is this state still moving (worth a spinner)? */
+export function coordinationBusy(state: CrucibleCoordinationState): boolean {
+  return state.phase === 'checking' || (state.phase === 'preparing' && state.progress.state === 'running') || (state.phase === 'waiting' && !state.stopped);
+}
+
+/** Readable names for the package's install steps. Unknown steps show their own name. */
+const STEP_WORDS: Record<string, string> = {
+  'host-facts': 'Checking this computer',
+  server: 'Installing Crucible',
+  init: 'Setting up Crucible',
+  service: 'Registering the login service',
+  'local-readiness': 'Starting Crucible',
+  capability: 'Measuring this computer',
+  linger: 'Keeping Crucible running',
+};
+
+export function installStepWord(step: string): string {
+  return STEP_WORDS[step] ?? step;
+}
+
+/** The current headline of a running install, from its events. */
+export function installHeadline(events: readonly CrucibleInstallProgress[]): string {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const e = events[i];
+    if (e.kind === 'done') return `Crucible ${e.release} is installed and running.`;
+    if (e.kind === 'failed') return 'The install stopped.';
+    if (e.kind === 'state') return e.sentence;
+    if (e.kind === 'step') return `${installStepWord(e.step)}${e.detail ? `: ${e.detail}` : ''}`;
+  }
+  return 'Starting the install.';
+}

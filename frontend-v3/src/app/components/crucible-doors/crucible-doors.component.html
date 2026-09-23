@@ -1,0 +1,240 @@
+@if (error(); as e) {
+  <p class="cd-bad">{{ e }}</p>
+}
+
+@if (view(); as v) {
+  @if (v.plan; as p) {
+
+    <!-- ══ THE WIZARD'S STEP: ONE FACE ═════════════════════════════════ -->
+    @if (mode === 'probing') {
+      @switch (v.face) {
+        @case ('connected') {
+          <div class="cd-panel">
+            <p class="cd-ok">
+              {{ v.servers.length === 1 ? 'Briefcase is connected to' : 'Briefcase is connected to ' + v.servers.length + ' servers:' }}
+              <strong>{{ v.servers.join(', ') }}</strong>
+            </p>
+            <p class="cd-hint">
+              @if (held()) {
+                Choose how Briefcase should analyse video on the next steps. What Briefcase needs is prepared on
+                this server when you finish setup, and downloads keep going while you work.
+              } @else {
+                Briefcase is making sure it has what it needs. Progress shows below.
+              }
+            </p>
+            <ng-container *ngTemplateOutlet="coordinationList" />
+          </div>
+        }
+
+        @case ('adopt') {
+          @if (discovered(); as d) {
+            <div class="cd-panel">
+              <p class="cd-ok"><strong>{{ d.serverName }}</strong> is already on this computer.</p>
+              <p class="cd-hint">
+                Another app, such as BookForge or Foundry, installed it. There is one Crucible per computer, and
+                Briefcase shares it.
+              </p>
+              <div class="cd-actions">
+                <button type="button" class="cd-btn cd-btn-primary" [disabled]="busy() !== null" (click)="adopt()">
+                  {{ busy() === 'adopt' ? 'Connecting…' : 'Use the Crucible already on this computer' }}
+                </button>
+              </div>
+              <ng-container *ngTemplateOutlet="startDoor" />
+            </div>
+          }
+        }
+
+        @case ('install') {
+          <div class="cd-panel">
+            <p class="cd-machine">{{ p.machine }}</p>
+            <p class="cd-hint">{{ p.hostableWhy }}</p>
+            <ng-container *ngTemplateOutlet="installDoor" />
+          </div>
+        }
+
+        @case ('connect-only') {
+          <div class="cd-panel">
+            <p class="cd-machine">{{ p.machine }}</p>
+            <p class="cd-warn">{{ p.hostableWhy }}</p>
+            <p class="cd-hint">
+              Connect to Crucible running on another computer below, or press Next to use Briefcase without AI.
+              Your library, downloads and the editor work either way.
+            </p>
+          </div>
+        }
+      }
+
+      @if (v.face !== 'connect-only') {
+        <button type="button" class="cd-link" (click)="toggleConnect()">
+          {{ connectOpen() ? 'Hide' : 'Use a Crucible on another computer' }}
+        </button>
+      }
+      @if (connectOpen()) {
+        <ng-container *ngTemplateOutlet="connectForm" />
+      }
+      @if (connectedNote(); as note) { <p class="cd-ok cd-note">{{ note }}</p> }
+    }
+
+    <!-- ══ SETTINGS: THIS COMPUTER'S DOOR ══════════════════════════════ -->
+    @if (mode === 'settings') {
+      <div class="cd-panel">
+        <p class="cd-machine">{{ p.machine }}</p>
+        @if (discovered(); as d) {
+          @if (d.registeredAs) {
+            <p class="cd-hint">
+              {{ d.serverName }} runs on this computer and is in the list above as {{ d.registeredAs }}.
+              It is shared with BookForge and Foundry, so Briefcase never removes it.
+            </p>
+            <div class="cd-actions">
+              <button type="button" class="cd-btn" [disabled]="busy() !== null || installing()" (click)="checkForUpdate()">
+                {{ busy() === 'release' ? 'Checking…' : 'Check for a newer Crucible' }}
+              </button>
+            </div>
+            @if (release(); as r) {
+              @switch (r.action) {
+                @case ('upgrade') {
+                  <p class="cd-hint">Crucible {{ r.latest }} is available; this computer runs {{ r.running }}.</p>
+                  <div class="cd-actions">
+                    <button type="button" class="cd-btn cd-btn-primary" [disabled]="busy() !== null || installing()" (click)="install()">
+                      Update Crucible to {{ r.latest }}
+                    </button>
+                  </div>
+                }
+                @case ('none') { <p class="cd-hint">{{ r.code === 'crucible_already_latest' ? 'This computer has the newest Crucible.' : 'This computer runs a newer Crucible than the release channel offers, so Briefcase leaves it alone.' }}</p> }
+                @case ('unknown') { <p class="cd-warn">{{ r.refusal.message }}</p> }
+                @case ('install') { <p class="cd-hint">Crucible {{ r.latest }} is available.</p> }
+              }
+            }
+            @if (installing() || events().length) {
+              <app-crucible-install-progress [events]="events()" [active]="installing()" />
+            }
+          } @else {
+            <p class="cd-hint">{{ d.serverName }} is on this computer but not in the list yet. Add it above.</p>
+            <ng-container *ngTemplateOutlet="startDoor" />
+          }
+        } @else if (p.hostable === 'no') {
+          <p class="cd-hint">{{ p.hostableWhy }}</p>
+        } @else {
+          <p class="cd-hint">There is no Crucible on this computer. {{ p.hostableWhy }}</p>
+          <ng-container *ngTemplateOutlet="installDoor" />
+        }
+      </div>
+      @if (coordinationRows().length) {
+        <p class="cd-label">What Briefcase needs on each server</p>
+        <ng-container *ngTemplateOutlet="coordinationList" />
+      }
+    }
+  }
+} @else if (!error()) {
+  <p class="cd-hint">Looking for Crucible…</p>
+}
+
+<!-- ── the install door: one button, then its progress ─────────────── -->
+<ng-template #installDoor>
+  @if (plan(); as p) {
+    @if (!installing() && !events().length) {
+      <ol class="cd-steps">
+        @for (s of p.steps; track s.title) {
+          <li [class.done]="s.done"><span class="cd-step-title">{{ s.title }}</span> <span class="cd-step-detail">{{ s.detail }}</span></li>
+        }
+      </ol>
+    }
+    @if (interrupted()) {
+      <p class="cd-warn">The last install did not finish (Briefcase was closed while it ran). Install again to pick up where it stopped.</p>
+    }
+    <div class="cd-actions">
+      <button type="button" class="cd-btn cd-btn-primary" [disabled]="busy() !== null || installing()" (click)="install()">
+        {{ installing() ? 'Installing Crucible…' : busy() === 'install' ? 'Checking the release…' : 'Install Crucible' }}
+      </button>
+      <button type="button" class="cd-link" (click)="openReadme()">What is Crucible?</button>
+    </div>
+    @if (refusal(); as r) {
+      @if (!events().length) {
+        <p class="cd-warn"><span class="cd-code">{{ r.code }}</span> {{ r.message }}</p>
+        @if (r.detail) { <p class="cd-detail">{{ r.detail }}</p> }
+      }
+    }
+    @if (installing() || events().length) {
+      <app-crucible-install-progress [events]="events()" [active]="installing()" />
+    }
+  }
+</ng-template>
+
+<!-- ── start a stopped local engine (never stop) ─────────────────────── -->
+<ng-template #startDoor>
+  @if (adoptError(); as e) { <p class="cd-warn">{{ e }}</p> }
+  @if (presence(); as pr) {
+    @if (pr.message) { <p class="cd-hint">{{ pr.message }}</p> }
+    @if (pr.offerStart) {
+      <div class="cd-actions">
+        <button type="button" class="cd-btn" [disabled]="busy() !== null" (click)="startEngine()">
+          {{ busy() === 'start' ? 'Starting…' : 'Start Crucible' }}
+        </button>
+      </div>
+    }
+  }
+</ng-template>
+
+<!-- ── each server's coordination state ──────────────────────────────── -->
+<ng-template #coordinationList>
+  <ul class="cd-coord">
+    @for (row of coordinationRows(); track row.name) {
+      <li>
+        @if (row.state; as s) {
+          @if (moving(s)) { <span class="cd-spinner" aria-hidden="true"></span> }
+          <span>{{ line(s) }}</span>
+          @if (unmet(s); as u) { <span class="cd-detail">{{ u }}</span> }
+        } @else {
+          <span>{{ row.name }}: {{ held() ? 'prepared when you finish setup.' : 'not checked yet.' }}</span>
+        }
+      </li>
+    }
+  </ul>
+</ng-template>
+
+<!-- ── connect a Crucible on another computer ─────────────────────────── -->
+<ng-template #connectForm>
+  <div class="cd-connect">
+    <div class="cd-modes" role="radiogroup" aria-label="How to connect">
+      <div class="cd-mode" role="radio" tabindex="0" [class.on]="connectMode() === 'pair'" [attr.aria-checked]="connectMode() === 'pair'"
+           (click)="setConnectMode('pair')" (keydown.enter)="setConnectMode('pair')" (keydown.space)="$event.preventDefault(); setConnectMode('pair')">
+        <span class="cd-mode-title">By address</span>
+        <span class="cd-mode-desc">The other computer's name or IP. It answers with a short code and connects.</span>
+      </div>
+      <div class="cd-mode" role="radio" tabindex="0" [class.on]="connectMode() === 'code'" [attr.aria-checked]="connectMode() === 'code'"
+           (click)="setConnectMode('code')" (keydown.enter)="setConnectMode('code')" (keydown.space)="$event.preventDefault(); setConnectMode('code')">
+        <span class="cd-mode-title">With a connect code</span>
+        <span class="cd-mode-desc">A crucible:// code copied from Briefcase or BookForge on that computer.</span>
+      </div>
+    </div>
+
+    @if (connectMode() === 'pair') {
+      @if (pairing(); as prompt) {
+        <div class="cd-pairing">
+          <span class="cd-usercode">{{ prompt.userCode }}</span>
+          <span class="cd-hint">
+            {{ prompt.approvalRequired ? 'Waiting for ' + prompt.name + ' to approve Briefcase. Check that it shows this same code.' : 'Connecting to ' + prompt.name + '…' }}
+          </span>
+          <button type="button" class="cd-link" (click)="cancelPairing()">Cancel</button>
+        </div>
+      } @else {
+        <div class="cd-form">
+          <input class="cd-input" placeholder="192.168.1.20, owens-pc.local or http://owens-pc:7100"
+                 [(ngModel)]="address" (keydown.enter)="pair()" />
+          <button type="button" class="cd-btn" [disabled]="connectBusy() || address.trim() === ''" (click)="pair()">
+            {{ connectBusy() ? 'Asking…' : 'Connect' }}
+          </button>
+        </div>
+      }
+    } @else {
+      <div class="cd-form">
+        <input class="cd-input" placeholder="crucible://name@host:7100/#…" spellcheck="false"
+               [(ngModel)]="connectCode" (keydown.enter)="addCode()" />
+        <button type="button" class="cd-btn" [disabled]="connectBusy() || connectCode.trim() === ''" (click)="addCode()">
+          {{ connectBusy() ? 'Checking…' : 'Add server' }}
+        </button>
+      </div>
+    }
+    @if (connectError(); as e) { <p class="cd-warn">{{ e }}</p> }
+  </div>
+</ng-template>

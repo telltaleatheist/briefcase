@@ -9,6 +9,15 @@ import type {
   CruciblePairingPrompt,
 } from '@crucible-wire/connect-wire';
 import type {
+  CrucibleEnginePresence,
+  CrucibleEngineStartOutcome,
+  CrucibleInstallStatus,
+  CrucibleReleaseCheck,
+  CrucibleSetupView,
+} from '@crucible-wire/install-wire';
+import type { CrucibleCoordinationMap } from '@crucible-wire/coordinate-wire';
+import type { CrucibleInstallDoorStatus } from '@crucible-wire/install-door-wire';
+import type {
   CrucibleProbeAnswer,
   CrucibleServerRow,
   CrucibleServersView,
@@ -19,6 +28,10 @@ import type {
 export interface CrucibleRefusal {
   code: string;
   message: string;
+  /** Install refusals only: the exact line to run, when there is one. */
+  command?: string | null;
+  /** Install refusals only: verbatim evidence (a stderr tail). */
+  detail?: string | null;
 }
 
 /**
@@ -37,6 +50,8 @@ export class CrucibleService {
       const refusal: CrucibleRefusal = {
         code: typeof body?.code === 'string' ? body.code : `http_${error.status}`,
         message: typeof body?.message === 'string' ? body.message : 'Briefcase could not reach its own backend. Try again.',
+        command: typeof body?.command === 'string' ? body.command : null,
+        detail: typeof body?.detail === 'string' ? body.detail : null,
       };
       return throwError(() => refusal);
     }));
@@ -106,5 +121,60 @@ export class CrucibleService {
 
   cancelPairing(requestId: string): Observable<{ cancelled: true }> {
     return this.refusal(this.http.post<{ cancelled: true }>(`${this.base}/pair/cancel`, { requestId }));
+  }
+
+  // ── install and first run (P2) ───────────────────────────────────────
+
+  /** The setup face and everything it draws. */
+  setup(): Observable<CrucibleSetupView> {
+    return this.refusal(this.http.get<CrucibleSetupView>(`${this.base}/setup`));
+  }
+
+  installStatus(): Observable<CrucibleInstallStatus> {
+    return this.refusal(this.http.get<CrucibleInstallStatus>(`${this.base}/install`));
+  }
+
+  /** Start the one install. Answers once the never-older gate has chosen a release; progress follows on the socket. */
+  startInstall(): Observable<{ started: true; release: string }> {
+    return this.refusal(this.http.post<{ started: true; release: string }>(`${this.base}/install`, {}));
+  }
+
+  /** Is there a newer Crucible for this computer? Installs nothing. */
+  checkRelease(): Observable<CrucibleReleaseCheck> {
+    return this.refusal(this.http.get<CrucibleReleaseCheck>(`${this.base}/install/release`));
+  }
+
+  installDoor(): Observable<CrucibleInstallDoorStatus> {
+    return this.refusal(this.http.get<CrucibleInstallDoorStatus>(`${this.base}/install/door`));
+  }
+
+  retryInstallDoor(): Observable<{ retrying: true }> {
+    return this.refusal(this.http.post<{ retrying: true }>(`${this.base}/install/door/retry`, {}));
+  }
+
+  localPresence(): Observable<CrucibleEnginePresence> {
+    return this.refusal(this.http.get<CrucibleEnginePresence>(`${this.base}/local/presence`));
+  }
+
+  startLocal(): Observable<CrucibleEngineStartOutcome> {
+    return this.refusal(this.http.post<CrucibleEngineStartOutcome>(`${this.base}/local/start`, {}));
+  }
+
+  coordination(): Observable<CrucibleCoordinationMap> {
+    return this.refusal(this.http.get<CrucibleCoordinationMap>(`${this.base}/coordination`));
+  }
+
+  coordinate(name: string): Observable<{ coordinating: string }> {
+    return this.refusal(this.http.post<{ coordinating: string }>(`${this.server(name)}/coordinate`, {}));
+  }
+
+  /** The setup wizard opened: hold coordination until it finishes. */
+  holdFirstRun(): Observable<{ held: true }> {
+    return this.refusal(this.http.post<{ held: true }>(`${this.base}/first-run/hold`, {}));
+  }
+
+  /** The setup wizard finished or was skipped: release the hold. Models download in the background. */
+  finishFirstRun(): Observable<{ released: boolean; coordinating: string[] }> {
+    return this.refusal(this.http.post<{ released: boolean; coordinating: string[] }>(`${this.base}/first-run/finish`, {}));
   }
 }
