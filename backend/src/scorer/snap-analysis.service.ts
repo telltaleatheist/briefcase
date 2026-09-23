@@ -222,7 +222,7 @@ export class SnapAnalysisService {
     };
 
     try {
-      await this.scorerServer.withScorer(leased);
+      await this.scorerServer.withScorer(leased, signal);
     } catch (err) {
       if (isCancellation(err) || isScorerError(err, 'cancelled') || signal?.aborted) throw cancelled('the scorer stage');
       // The lease itself failed: the server would not start (or its template/labels

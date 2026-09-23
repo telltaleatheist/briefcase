@@ -378,6 +378,28 @@ describe('ScorerServerService lifecycle', () => {
     expect(svc.getStatus().running).toBe(false);
   });
 
+  it('a cancel while the model is still loading ends the lease at once (the server keeps starting, then idles out)', async () => {
+    const svc = new TestScorerServer(configWithModel({ idleTimeoutMs: 30 }));
+    svc.server = fakeServerFetch(1_000_000); // an 18 GB load: /health stays 503 for the whole test
+    const controller = new AbortController();
+    let leased = false;
+    const t0 = Date.now();
+    setTimeout(() => controller.abort(), 20);
+    const err = await svc
+      .withScorer(async () => {
+        leased = true;
+      }, controller.signal)
+      .then(
+        () => null,
+        (e) => e,
+      );
+    expect(err).toBeInstanceOf(ScorerError);
+    expect((err as ScorerError).code).toBe('cancelled');
+    expect(leased).toBe(false);
+    expect(Date.now() - t0).toBeLessThan(1000); // not the 2 s startup timeout
+    await svc.stop();
+  });
+
   it('refuses to start without the model file, naming the path', async () => {
     const svc = new TestScorerServer({ ...configWithModel(), modelPath: path.join(tmp, 'models', 'absent.gguf') });
     await expect(svc.ensureReady()).rejects.toThrow(/absent\.gguf/);

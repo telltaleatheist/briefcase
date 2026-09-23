@@ -277,6 +277,6 @@ export class SnapChapterService {
         countTokens: async (text, signal) => (await (await handle.decider()).engine.tokenize(text, signal)).length,
       };
       return runSnapChapters(scorer, units, opts, this.logger);
-    });
+    }, opts.signal);
   }
 }

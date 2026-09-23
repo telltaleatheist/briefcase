@@ -80,6 +80,20 @@ export function findFreePort(): Promise<number> {
   });
 }
 
+/** `p`, or ScorerError('cancelled') as soon as `signal` aborts (p is left to settle on its own). */
+function untilAborted<T>(p: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return p;
+  if (signal.aborted) {
+    p.catch(() => undefined);
+    return Promise.reject(new ScorerError('cancelled', 'cancelled while the scorer was starting'));
+  }
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new ScorerError('cancelled', 'cancelled while the scorer was starting'));
+    signal.addEventListener('abort', onAbort, { once: true });
+    p.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
+  });
+}
+
 const STARTUP_TIMEOUT_MS = 5 * 60_000; // an 18 GB BF16 load from a cold disk
 const HEALTH_POLL_MS = 500;
 const STOP_GRACE_MS = 5000;
@@ -175,10 +189,13 @@ export class ScorerServerService implements OnModuleDestroy {
    * idle timer cannot stop it between calls. Calls through the handle are still
    * serialized with other callers.
    */
-  async withScorer<T>(fn: (scorer: ScorerHandle) => Promise<T>): Promise<T> {
+  async withScorer<T>(fn: (scorer: ScorerHandle) => Promise<T>, signal?: AbortSignal): Promise<T> {
     this.acquire();
     try {
-      await this.ensureReady();
+      // A cold start is minutes of model load; a cancel must not wait it out.
+      // The start itself carries on (another caller may share it) and, with no
+      // lease left, the idle timer stops it once it is up.
+      await untilAborted(this.ensureReady(), signal);
       return await fn({
         decide: (req, options) => this.decide(req, options),
         generate: (messages, options) => this.generate(messages, options),

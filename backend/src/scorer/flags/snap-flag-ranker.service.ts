@@ -198,7 +198,7 @@ export class SnapFlagRanker {
     if (units.length) {
       const work = (scorer: FlagScorer) => this.score(scorer, map, plan, params, options, counters);
       if (options.scorer) await work(options.scorer);
-      else if (this.scorerServer) await this.scorerServer.withScorer((handle) => work(handle));
+      else if (this.scorerServer) await this.scorerServer.withScorer((handle) => work(handle), options.signal);
       else throw new Error('SnapFlagRanker: no scorer (inject ScorerServerService or pass options.scorer)');
     }
 
