@@ -30,6 +30,9 @@
       "@shared/*": [
         "../shared/*"
       ],
+      "@crucible-wire/*": [
+        "../backend/src/crucible/wire/*"
+      ],
       "plyr": [
         "node_modules/plyr/src/js/plyr.d.ts"
       ]

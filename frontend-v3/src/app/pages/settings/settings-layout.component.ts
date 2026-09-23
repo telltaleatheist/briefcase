@@ -28,6 +28,7 @@ export class SettingsLayoutComponent {
     { path: 'downloads', label: 'Downloads', glyph: '⬇️' },
     { path: 'transcription', label: 'Transcription', glyph: '🎤' },
     { path: 'ai', label: 'AI', glyph: '✦' },
+    { path: 'crucible', label: 'Crucible Servers', glyph: '◈' },
     { path: 'components', label: 'Components', glyph: '📦' },
   ];
 }

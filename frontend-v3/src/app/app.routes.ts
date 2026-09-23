@@ -84,6 +84,11 @@ export const routes: Routes = [
             title: 'AI Settings | Briefcase'
           },
           {
+            path: 'crucible',
+            loadComponent: () => import('./pages/settings/panes/crucible-pane.component').then(m => m.CruciblePaneComponent),
+            title: 'Crucible Servers | Briefcase'
+          },
+          {
             path: 'components',
             loadComponent: () => import('./pages/settings/panes/components-pane.component').then(m => m.ComponentsPaneComponent),
             title: 'Components | Briefcase'

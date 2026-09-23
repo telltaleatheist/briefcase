@@ -1,6 +1,9 @@
 import { Injectable, signal, OnDestroy, NgZone } from '@angular/core';
 import { io, Socket } from 'socket.io-client';
 import { getBackendOrigin } from '../core/runtime-url';
+import type { CrucibleServersChangedPayload } from '@crucible-wire/settings-wire';
+
+export type CrucibleServersChanged = CrucibleServersChangedPayload;
 
 export interface TaskProgress {
   taskId: string;
@@ -156,6 +159,7 @@ export class WebsocketService implements OnDestroy {
   private componentDownloadCompleteCallbacks: ((event: ComponentDownloadComplete) => void)[] = [];
   private componentDownloadErrorCallbacks: ((event: ComponentDownloadError) => void)[] = [];
   private componentDownloadCancelledCallbacks: ((event: ComponentDownloadCancelled) => void)[] = [];
+  private crucibleServersChangedCallbacks: ((event: CrucibleServersChanged) => void)[] = [];
 
   constructor(private ngZone: NgZone) {}
 
@@ -347,6 +351,10 @@ export class WebsocketService implements OnDestroy {
     });
 
     // Legacy events for backward compatibility
+    this.socket.on('crucible.servers-changed', (event: CrucibleServersChanged) => {
+      this.dispatch(this.crucibleServersChangedCallbacks, event);
+    });
+
     this.socket.on('analysisProgress', (event: any) => {
       const progress: TaskProgress = {
         taskId: event.taskId || event.id,
@@ -435,6 +443,14 @@ export class WebsocketService implements OnDestroy {
   }
 
   // Model download event subscriptions
+  /** The Crucible server registry or its rank/pause record changed. */
+  onCrucibleServersChanged(callback: (event: CrucibleServersChanged) => void): () => void {
+    this.crucibleServersChangedCallbacks.push(callback);
+    return () => {
+      this.crucibleServersChangedCallbacks = this.crucibleServersChangedCallbacks.filter(cb => cb !== callback);
+    };
+  }
+
   onModelDownloadProgress(callback: (event: ModelDownloadProgress) => void): () => void {
     this.modelDownloadProgressCallbacks.push(callback);
     return () => {

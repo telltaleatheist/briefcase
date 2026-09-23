@@ -1,0 +1,251 @@
+<h2 class="pane-title">Crucible Servers</h2>
+<p class="pane-lede">
+  Crucible is the AI engine Briefcase uses: it runs the models on a computer's GPU and holds your
+  Claude, OpenAI and Ollama connections. Briefcase uses the one on this computer and any you connect
+  below, over the network, the same way either way.
+</p>
+
+@if (loadError(); as err) {
+  <p class="cru-refusal">{{ err }}</p>
+}
+
+@if (offer(); as found) {
+  <div class="cru-offer">
+    <div class="cru-offer-main">
+      <div class="row-name">There is a Crucible on this computer</div>
+      <div class="row-desc">{{ found.serverName }} at {{ found.url }}</div>
+    </div>
+    <ui-button variant="primary" size="sm" (pressed)="addThisComputer()">Add it</ui-button>
+  </div>
+}
+
+<div class="pane-section">
+  <div class="cru-head">
+    <p class="section-label">Servers Briefcase may use</p>
+    <ui-button variant="ghost" size="sm" (pressed)="reload()">Re-check</ui-button>
+  </div>
+  <p class="hint cru-sub">
+    Drag to set the order: the first one that is free gets the work. Click a server to switch it
+    between Running and Paused. A paused server is given no new work, while work already on it finishes.
+  </p>
+
+  @if (view() !== null && rows().length === 0) {
+    <p class="cru-empty">No Crucible server yet. Add one below.</p>
+  }
+
+  <div class="cru-list" (dragover)="$event.preventDefault()" (drop)="onDrop($event)">
+    @for (row of rows(); track row.name) {
+      <div
+        class="cru-card"
+        [class.on]="row.enabled"
+        [class.dragging]="dragName() === row.name"
+        [class.busy-switch]="switching() === row.name"
+        role="switch"
+        tabindex="0"
+        [attr.aria-checked]="row.enabled"
+        [attr.aria-label]="row.name + (row.enabled ? ', running' : ', paused')"
+        draggable="true"
+        (click)="toggleRunning(row)"
+        (keydown.enter)="toggleRunning(row)"
+        (keydown.space)="$event.preventDefault(); toggleRunning(row)"
+        (dragstart)="onDragStart(row.name, $event)"
+        (dragover)="onDragOver($event, row.name)"
+        (dragend)="onDragEnd()">
+        <span class="cru-grip" title="Drag to re-order" aria-hidden="true">
+          <span></span><span></span><span></span>
+        </span>
+
+        <div class="cru-main">
+          <div class="cru-title">
+            <span class="cru-name">{{ row.name }}</span>
+            <span class="pill" [class.ok]="row.enabled" [class.off]="!row.enabled">
+              {{ row.enabled ? 'Running' : 'Paused' }}
+            </span>
+            @if (probes()[row.name]; as answer) {
+              <span class="cru-reach" [attr.data-reach]="answer.reach">{{ reachWord(answer.reach) }}</span>
+            } @else {
+              <span class="cru-reach" data-reach="unknown">Checking…</span>
+            }
+          </div>
+
+          @if (row.server; as server) {
+            <div class="row-desc">{{ server.url }} · key {{ server.tokenMasked }}</div>
+          }
+
+          @if (probes()[row.name]; as answer) {
+            @if (answer.probe.outcome === 'ok') {
+              <div class="cru-facts">
+                Crucible {{ answer.probe.facts.version }} · {{ answer.probe.facts.backend }} ·
+                {{ answer.probe.facts.gpu.name }} ({{ gb(answer.probe.facts.gpu.vramBytes) }})
+                @if (answer.probe.facts.engineUrl) { · engine at {{ answer.probe.facts.engineUrl }} }
+              </div>
+              @if (answer.probe.facts.capabilities; as caps) {
+                <div class="cru-caps">
+                  @for (cap of caps; track cap.capability) {
+                    <span class="cru-cap" [class.no]="!cap.enabled" [attr.title]="cap.reason">
+                      {{ capabilityWord(cap) }}:
+                      @if (cap.enabled) {
+                        {{ cap.selected }}@if (cap.route === 'upstream') { (cloud) }
+                      } @else {
+                        not on this server
+                      }
+                    </span>
+                  }
+                </div>
+              }
+              @if (answer.probe.facts.busyLine; as line) {
+                <div class="cru-busy">{{ line }}</div>
+              }
+              @if (answer.probe.facts.needsUpdate) {
+                <div class="cru-warn">This Crucible is older than Briefcase supports. Update it on that computer.</div>
+              }
+            } @else {
+              <div class="cru-warn">{{ answer.probe.message }}</div>
+            }
+          }
+
+          @if (rowError()[row.name]; as err) {
+            <div class="cru-warn">{{ err }}</div>
+          }
+        </div>
+
+        <div class="cru-actions" (click)="$event.stopPropagation()" (keydown)="$event.stopPropagation()">
+          @if (confirmRemove() === row.name) {
+            <span class="cru-confirm">Forget {{ row.name }}?</span>
+            <ui-button variant="secondary" size="sm" (pressed)="remove(row.name, $event)">Remove</ui-button>
+            <ui-button variant="ghost" size="sm" (pressed)="cancelRemove($event)">Cancel</ui-button>
+          } @else {
+            <ui-button variant="ghost" size="sm" [disabled]="testing()[row.name] === true" (pressed)="test(row.name, $event)">
+              {{ testing()[row.name] ? 'Testing…' : 'Test' }}
+            </ui-button>
+            <ui-button variant="ghost" size="sm" title="Copy this server's connect code, to add it on another computer" (pressed)="copyCode(row.name, $event)">
+              Copy code
+            </ui-button>
+            <ui-button variant="ghost" size="sm" (pressed)="askRemove(row.name, $event)">Remove</ui-button>
+          }
+        </div>
+      </div>
+    }
+  </div>
+
+  @for (name of unknown(); track name) {
+    <div class="row-card cru-stale">
+      <div class="row-main">
+        <div class="row-name">{{ name }}</div>
+        <div class="row-desc">Ranked here, but no longer connected. Its place is kept in case it comes back.</div>
+      </div>
+      <div class="row-actions">
+        <ui-button variant="ghost" size="sm" (pressed)="forgetRank(name)">Forget it</ui-button>
+      </div>
+    </div>
+  }
+
+  @if (note(); as message) {
+    <p class="hint cru-note">{{ message }}</p>
+  }
+</div>
+
+<div class="pane-section">
+  <p class="section-label">Connect another Crucible</p>
+  <div class="cru-modes" role="radiogroup" aria-label="How to connect">
+    <label class="cru-mode" [class.on]="addMode() === 'pair'">
+      <input type="radio" name="cru-add-mode" [checked]="addMode() === 'pair'" (change)="setAddMode('pair')" />
+      <span class="cru-mode-text">
+        <span class="cru-mode-title">By address</span>
+        <span class="cru-mode-desc">Type the other computer's name or IP. It answers with a short code, and connects.</span>
+      </span>
+    </label>
+    <label class="cru-mode" [class.on]="addMode() === 'code'">
+      <input type="radio" name="cru-add-mode" [checked]="addMode() === 'code'" (change)="setAddMode('code')" />
+      <span class="cru-mode-text">
+        <span class="cru-mode-title">With a connect code</span>
+        <span class="cru-mode-desc">Paste a crucible:// code copied from Briefcase or BookForge on that computer.</span>
+      </span>
+    </label>
+  </div>
+
+  @if (addMode() === 'pair') {
+    @if (pairing(); as prompt) {
+      <div class="cru-pairing">
+        <div class="cru-code">{{ prompt.userCode }}</div>
+        <div class="cru-pairing-text">
+          @if (prompt.approvalRequired) {
+            Waiting for {{ prompt.name }} to approve Briefcase. Check that it shows this same code.
+          } @else {
+            Connecting to {{ prompt.name }}…
+          }
+        </div>
+        <ui-button variant="ghost" size="sm" (pressed)="cancelPairing()">Cancel</ui-button>
+      </div>
+    } @else {
+      <div class="cru-form">
+        <label class="field-label" for="cru-address">Address</label>
+        <input
+          id="cru-address"
+          class="text-input"
+          placeholder="192.168.1.20, owens-pc.local or http://owens-pc:7100"
+          [(ngModel)]="pairAddress"
+          (keydown.enter)="startPairing()" />
+        <label class="field-label cru-gap" for="cru-pair-name">Name in Briefcase (optional)</label>
+        <input id="cru-pair-name" class="text-input" placeholder="What the server calls itself" [(ngModel)]="pairName" />
+        <div class="actions-row cru-gap">
+          <ui-button variant="primary" [disabled]="pairBusy() || pairAddress.trim() === ''" (pressed)="startPairing()">
+            {{ pairBusy() ? 'Asking…' : 'Connect' }}
+          </ui-button>
+        </div>
+      </div>
+    }
+    @if (pairError(); as err) {
+      <p class="cru-refusal">{{ err }}</p>
+    }
+  } @else {
+    <div class="cru-form">
+      <label class="field-label" for="cru-code">Connect code</label>
+      <textarea
+        id="cru-code"
+        class="text-input cru-code-input"
+        rows="2"
+        spellcheck="false"
+        placeholder="crucible://name@host:7100/#…"
+        [(ngModel)]="connectCode"
+        (ngModelChange)="onCodeChanged()"></textarea>
+      @if (codePreview(); as preview) {
+        @if (preview.ok) {
+          <p class="hint">{{ preview.name }} at {{ preview.url }} · key {{ preview.tokenMasked }}</p>
+        } @else {
+          <p class="cru-refusal">{{ preview.message }}</p>
+        }
+      }
+      <label class="field-label cru-gap" for="cru-code-name">Name in Briefcase (optional)</label>
+      <input id="cru-code-name" class="text-input" placeholder="What the server calls itself" [(ngModel)]="codeName" />
+      <div class="actions-row cru-gap">
+        <ui-button
+          variant="primary"
+          [disabled]="codeBusy() || codePreview()?.ok !== true"
+          (pressed)="addByCode()">
+          {{ codeBusy() ? 'Checking…' : 'Add server' }}
+        </ui-button>
+      </div>
+    </div>
+    @if (codeError(); as err) {
+      <p class="cru-refusal">{{ err }}</p>
+    }
+  }
+
+  @if (addedNote(); as added) {
+    <p class="save-flash">{{ added }}</p>
+  }
+</div>
+
+@if (thisComputer(); as here) {
+  <div class="pane-section">
+    <p class="section-label">This computer's Crucible</p>
+    <div class="actions-row">
+      <ui-button variant="secondary" size="sm" (pressed)="copyThisComputersCode()">Copy connect code</ui-button>
+    </div>
+    <p class="hint">
+      Paste it into Briefcase on another computer to let that computer use {{ here.serverName }}.
+      The code includes this Crucible's access key, so share it only with your own computers.
+    </p>
+  </div>
+}
