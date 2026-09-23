@@ -75,3 +75,23 @@
   line-height: 1.5;
   resize: vertical;
 }
+
+.engine-card {
+  margin-top: 10px;
+
+  .row-desc.wrap {
+    white-space: normal;
+  }
+}
+
+.row-desc.wrap {
+  white-space: normal;
+}
+
+.task-select {
+  margin-bottom: 10px;
+}
+
+.task-hint {
+  margin: -6px 0 10px;
+}

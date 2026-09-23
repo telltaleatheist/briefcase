@@ -1068,3 +1068,15 @@
     }
   }
 }
+
+// ==================== THROUGH CRUCIBLE ====================
+.crucible-step {
+  app-crucible-upstreams {
+    margin: $spacing-lg 0;
+  }
+
+  .step-footer {
+    gap: $spacing-md;
+    margin-top: $spacing-lg;
+  }
+}

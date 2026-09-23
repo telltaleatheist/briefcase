@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output, OnInit, OnChanges, OnDestroy, SimpleChanges, inject, ChangeDetectorRef } from '@angular/core';
+import { Component, EventEmitter, Input, Output, OnInit, OnChanges, OnDestroy, SimpleChanges, inject, ChangeDetectorRef, computed } from '@angular/core';
 import { Subscription } from 'rxjs';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -32,6 +32,9 @@ interface AIModelOption {
 })
 export class VideoConfigDialogComponent implements OnInit, OnChanges, OnDestroy {
   private aiSetupService = inject(AiSetupService);
+  /** True when AI runs through Crucible: the local group is the server's catalog. */
+  readonly viaCrucible = computed(() => this.aiSetupService.via() === 'crucible');
+  readonly localGroupLabel = computed(() => (this.viaCrucible() ? 'Crucible models' : 'Local AI (Bundled)'));
   private http = inject(HttpClient);
   private cdr = inject(ChangeDetectorRef);
   private tourService = inject(TourService);
@@ -181,63 +184,77 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges, OnDestroy 
       const availability = await this.aiSetupService.checkAIAvailability();
       const models: AIModelOption[] = [];
 
-      // Always try to fetch downloaded Local AI models (don't rely on hasLocal flag which may be stale)
+      // Through Crucible the list is the connected server's own: its catalog
+      // and its configured upstreams, in the same provider:model values.
+      let viaCrucible: AIModelOption[] | null;
       try {
-        const localModelsResult = await this.aiSetupService.getLocalModels().toPromise();
-        if (localModelsResult?.models) {
-          const downloadedModels = localModelsResult.models.filter(m => m.downloaded);
-          downloadedModels.forEach(model => {
-            models.push({
-              value: `local:${model.id}`,
-              label: `${model.name} (Local)`,
-              provider: 'local'
-            });
-          });
-        }
+        viaCrucible = await this.aiSetupService.modelOptionsIfCrucible();
       } catch (error) {
-        console.error('Failed to fetch local models:', error);
+        console.error('Failed to list the Crucible server\'s models:', error);
+        viaCrucible = [];
       }
+      if (viaCrucible !== null) {
+        viaCrucible.forEach(m => models.push({ value: m.value, label: m.label, provider: m.provider }));
+      } else {
 
-      // Add Ollama models (fetched dynamically by aiSetupService)
-      if (availability.hasOllama && availability.ollamaModels.length > 0) {
-        availability.ollamaModels.forEach(model => {
-          models.push({
-            value: `ollama:${model}`,
-            label: model,
-            provider: 'ollama'
-          });
-        });
-      }
-
-      // Fetch Claude models dynamically from API
-      if (availability.hasClaudeKey) {
+        // Always try to fetch downloaded Local AI models (don't rely on hasLocal flag which may be stale)
         try {
-          const claudeResponse = await this.http.get<{ success: boolean; models: any[] }>(
-            `${this.API_BASE}/config/claude-models`
-          ).toPromise();
-          if (claudeResponse?.success && claudeResponse.models.length > 0) {
-            claudeResponse.models.forEach(m => {
-              models.push({ value: m.value, label: m.label, provider: 'claude' });
+          const localModelsResult = await this.aiSetupService.getLocalModels().toPromise();
+          if (localModelsResult?.models) {
+            const downloadedModels = localModelsResult.models.filter(m => m.downloaded);
+            downloadedModels.forEach(model => {
+              models.push({
+                value: `local:${model.id}`,
+                label: `${model.name} (Local)`,
+                provider: 'local'
+              });
             });
           }
         } catch (error) {
-          console.error('Failed to fetch Claude models:', error);
+          console.error('Failed to fetch local models:', error);
         }
-      }
 
-      // Fetch OpenAI models dynamically from API
-      if (availability.hasOpenAIKey) {
-        try {
-          const openaiResponse = await this.http.get<{ success: boolean; models: any[] }>(
-            `${this.API_BASE}/config/openai-models`
-          ).toPromise();
-          if (openaiResponse?.success && openaiResponse.models.length > 0) {
-            openaiResponse.models.forEach(m => {
-              models.push({ value: m.value, label: m.label, provider: 'openai' });
+        // Add Ollama models (fetched dynamically by aiSetupService)
+        if (availability.hasOllama && availability.ollamaModels.length > 0) {
+          availability.ollamaModels.forEach(model => {
+            models.push({
+              value: `ollama:${model}`,
+              label: model,
+              provider: 'ollama'
             });
+          });
+        }
+
+        // Fetch Claude models dynamically from API
+        if (availability.hasClaudeKey) {
+          try {
+            const claudeResponse = await this.http.get<{ success: boolean; models: any[] }>(
+              `${this.API_BASE}/config/claude-models`
+            ).toPromise();
+            if (claudeResponse?.success && claudeResponse.models.length > 0) {
+              claudeResponse.models.forEach(m => {
+                models.push({ value: m.value, label: m.label, provider: 'claude' });
+              });
+            }
+          } catch (error) {
+            console.error('Failed to fetch Claude models:', error);
           }
-        } catch (error) {
-          console.error('Failed to fetch OpenAI models:', error);
+        }
+
+        // Fetch OpenAI models dynamically from API
+        if (availability.hasOpenAIKey) {
+          try {
+            const openaiResponse = await this.http.get<{ success: boolean; models: any[] }>(
+              `${this.API_BASE}/config/openai-models`
+            ).toPromise();
+            if (openaiResponse?.success && openaiResponse.models.length > 0) {
+              openaiResponse.models.forEach(m => {
+                models.push({ value: m.value, label: m.label, provider: 'openai' });
+              });
+            }
+          } catch (error) {
+            console.error('Failed to fetch OpenAI models:', error);
+          }
         }
       }
 

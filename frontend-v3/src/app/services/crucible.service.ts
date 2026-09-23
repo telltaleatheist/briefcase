@@ -21,8 +21,12 @@ import type {
   CrucibleProbeAnswer,
   CrucibleServerRow,
   CrucibleServersView,
+  CrucibleSettingsView,
   RoutingView,
+  UpstreamName,
+  UpstreamTestAnswer,
 } from '@crucible-wire/settings-wire';
+import type { AiModelsView, AiTaskModels, AiVia, AiViaView, KeyCopyOutcome, LegacyKeysView } from '@crucible-wire/ai-wire';
 
 /** A refusal from /api/crucible, always with a sentence that carries the fix. */
 export interface CrucibleRefusal {
@@ -176,5 +180,62 @@ export class CrucibleService {
   /** The setup wizard finished or was skipped: release the hold. Models download in the background. */
   finishFirstRun(): Observable<{ released: boolean; coordinating: string[] }> {
     return this.refusal(this.http.post<{ released: boolean; coordinating: string[] }>(`${this.base}/first-run/finish`, {}));
+  }
+
+  // ── one server's own settings: upstream keys and the Ollama URL (P3) ──
+
+  /** The server's settings. Keys come back as `keyHint` only. */
+  settings(name: string): Observable<CrucibleSettingsView> {
+    return this.refusal(this.http.get<CrucibleSettingsView>(`${this.server(name)}/settings`));
+  }
+
+  /** Write to THAT server's settings. A key crosses once, on its way in. */
+  putSettings(name: string, patch: { upstreams?: Partial<Record<UpstreamName, { key?: string; url?: string } | null>> }): Observable<CrucibleSettingsView> {
+    return this.refusal(this.http.put<CrucibleSettingsView>(`${this.server(name)}/settings`, patch));
+  }
+
+  /** Test an upstream through the server: a pasted key or URL before saving, or the stored one. */
+  testUpstream(name: string, upstream: UpstreamName, probe: { key?: string; url?: string } = {}): Observable<UpstreamTestAnswer> {
+    return this.refusal(this.http.post<UpstreamTestAnswer>(`${this.server(name)}/settings/upstreams/${upstream}/test`, probe));
+  }
+
+  // ── AI through Crucible (P3) ─────────────────────────────────────────
+
+  aiVia(): Observable<AiViaView> {
+    return this.refusal(this.http.get<AiViaView>(`${this.base}/ai/via`));
+  }
+
+  /** 'crucible' | 'direct', or null to go back to the default. */
+  setAiVia(via: AiVia | null): Observable<AiViaView> {
+    return this.refusal(this.http.put<AiViaView>(`${this.base}/ai/via`, { via }));
+  }
+
+  /** The connected server's models (catalog + configured upstreams) as picker options. */
+  aiModels(server?: string): Observable<AiModelsView> {
+    const query = server ? `?server=${encodeURIComponent(server)}` : '';
+    return this.refusal(this.http.get<AiModelsView>(`${this.base}/ai/models${query}`));
+  }
+
+  /** Forget cached model lists after a settings save. */
+  refreshAiModels(server?: string): Observable<{ refreshed: true }> {
+    return this.refusal(this.http.post<{ refreshed: true }>(`${this.base}/ai/models/refresh`, { server }));
+  }
+
+  legacyKeys(): Observable<LegacyKeysView> {
+    return this.refusal(this.http.get<LegacyKeysView>(`${this.base}/ai/keys/legacy`));
+  }
+
+  /** The one-time copy of Briefcase's own keys onto a server the user named. */
+  copyLegacyKeys(server: string): Observable<KeyCopyOutcome> {
+    return this.refusal(this.http.post<KeyCopyOutcome>(`${this.base}/ai/keys/copy`, { server }));
+  }
+
+  taskModels(): Observable<AiTaskModels> {
+    return this.refusal(this.http.get<AiTaskModels>(`${this.base}/ai/task-models`));
+  }
+
+  /** Set (`provider:model`) or clear (null) per-task models. */
+  setTaskModels(changes: Partial<Record<keyof AiTaskModels, string | null>>): Observable<AiTaskModels> {
+    return this.refusal(this.http.put<AiTaskModels>(`${this.base}/ai/task-models`, changes));
   }
 }

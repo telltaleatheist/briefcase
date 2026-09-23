@@ -411,7 +411,7 @@ export class ProcessConfigComponent {
     return order
       .map(provider => ({
         provider,
-        label: this.providerLabels[provider],
+        label: provider === 'local' && this.aiSetup.via() === 'crucible' ? 'Crucible' : this.providerLabels[provider],
         models: models.filter(m => m.provider === provider),
       }))
       .filter(group => group.models.length > 0);
@@ -436,39 +436,46 @@ export class ProcessConfigComponent {
     try {
       const models: AiModelOption[] = [];
 
-      // Downloaded local (bundled) models — getLocalModels never throws.
-      const local = await firstValueFrom(this.aiSetup.getLocalModels());
-      for (const model of local.models.filter(m => m.downloaded)) {
-        models.push({ value: `local:${model.id}`, label: `${model.name} (Local)`, provider: 'local' });
-      }
-
-      const availability = await this.aiSetup.checkAIAvailability();
-
-      if (availability.hasOllama) {
-        for (const model of availability.ollamaModels) {
-          models.push({ value: `ollama:${model}`, label: model, provider: 'ollama' });
+      // Through Crucible the list is the connected server's: its catalog and
+      // its configured upstreams, in the same provider:model values.
+      const viaCrucible = await this.aiSetup.modelOptionsIfCrucible();
+      if (viaCrucible !== null) {
+        for (const m of viaCrucible) models.push({ value: m.value, label: m.label, provider: m.provider });
+      } else {
+        // Downloaded local (bundled) models — getLocalModels never throws.
+        const local = await firstValueFrom(this.aiSetup.getLocalModels());
+        for (const model of local.models.filter(m => m.downloaded)) {
+          models.push({ value: `local:${model.id}`, label: `${model.name} (Local)`, provider: 'local' });
         }
-      }
 
-      if (availability.hasClaudeKey) {
-        const claude = await firstValueFrom(
-          this.http.get<{ success: boolean; models: { value: string; label: string }[] }>(
-            `${getApiBase()}/config/claude-models`
-          )
-        );
-        if (claude.success) {
-          for (const m of claude.models) models.push({ value: m.value, label: m.label, provider: 'claude' });
+        const availability = await this.aiSetup.checkAIAvailability();
+
+        if (availability.hasOllama) {
+          for (const model of availability.ollamaModels) {
+            models.push({ value: `ollama:${model}`, label: model, provider: 'ollama' });
+          }
         }
-      }
 
-      if (availability.hasOpenAIKey) {
-        const openai = await firstValueFrom(
-          this.http.get<{ success: boolean; models: { value: string; label: string }[] }>(
-            `${getApiBase()}/config/openai-models`
-          )
-        );
-        if (openai.success) {
-          for (const m of openai.models) models.push({ value: m.value, label: m.label, provider: 'openai' });
+        if (availability.hasClaudeKey) {
+          const claude = await firstValueFrom(
+            this.http.get<{ success: boolean; models: { value: string; label: string }[] }>(
+              `${getApiBase()}/config/claude-models`
+            )
+          );
+          if (claude.success) {
+            for (const m of claude.models) models.push({ value: m.value, label: m.label, provider: 'claude' });
+          }
+        }
+
+        if (availability.hasOpenAIKey) {
+          const openai = await firstValueFrom(
+            this.http.get<{ success: boolean; models: { value: string; label: string }[] }>(
+              `${getApiBase()}/config/openai-models`
+            )
+          );
+          if (openai.success) {
+            for (const m of openai.models) models.push({ value: m.value, label: m.label, provider: 'openai' });
+          }
         }
       }
 

@@ -5,6 +5,9 @@ import { AiSetupService, AIAvailability, LocalModelInfo, SystemInfo } from '../.
 import { ElectronService } from '../../services/electron.service';
 import { WebsocketService } from '../../services/websocket.service';
 import { TourService } from '../../services/tour.service';
+import { Router } from '@angular/router';
+import type { AiModelsView } from '@crucible-wire/ai-wire';
+import { CrucibleUpstreamsComponent } from '../crucible-upstreams/crucible-upstreams.component';
 
 export type WizardStep = 'welcome' | 'local-models' | 'ollama' | 'claude' | 'openai' | 'done';
 
@@ -20,7 +23,7 @@ export interface RecommendedModel {
 @Component({
   selector: 'app-ai-setup-wizard',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, CrucibleUpstreamsComponent],
   templateUrl: './ai-setup-wizard.component.html',
   styleUrls: ['./ai-setup-wizard.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush
@@ -30,6 +33,15 @@ export class AiSetupWizardComponent implements OnInit, OnDestroy {
   private electronService = inject(ElectronService);
   private websocketService = inject(WebsocketService);
   private tourService = inject(TourService);
+  private router = inject(Router);
+
+  /**
+   * Through Crucible there is nothing to install here: Ollama is an upstream
+   * configured on the server, and keys live on the server. The wizard then
+   * shows the connected server's upstreams, or the way to connect one.
+   */
+  readonly via = this.aiSetupService.via;
+  readonly crucibleView = signal<AiModelsView | null>(null);
 
   @Output() closed = new EventEmitter<void>();
   @Output() completed = new EventEmitter<void>();
@@ -73,6 +85,11 @@ export class AiSetupWizardComponent implements OnInit, OnDestroy {
   private tourTimeout?: ReturnType<typeof setTimeout>;
 
   async ngOnInit() {
+    if ((await this.aiSetupService.refreshVia()) === 'crucible') {
+      await this.refreshCrucible();
+      return;
+    }
+
     // Check initial AI availability
     await this.refreshAvailability();
 
@@ -462,6 +479,20 @@ export class AiSetupWizardComponent implements OnInit, OnDestroy {
     } finally {
       this.isSavingKeys.set(false);
     }
+  }
+
+  async refreshCrucible(): Promise<void> {
+    try {
+      this.crucibleView.set(await this.aiSetupService.loadCrucibleModels());
+    } catch {
+      this.crucibleView.set(null);
+    }
+    this.aiSetupService.notifyModelsChanged();
+  }
+
+  openCrucibleServers(): void {
+    this.closed.emit();
+    void this.router.navigate(['/settings/crucible']);
   }
 
   skipSetup() {

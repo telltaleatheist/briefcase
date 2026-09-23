@@ -1,8 +1,10 @@
-import { Injectable, signal } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, of, Subject } from 'rxjs';
+import { Observable, firstValueFrom, of, Subject } from 'rxjs';
 import { map, catchError } from 'rxjs/operators';
 import { getApiBase } from '../core/runtime-url';
+import { CrucibleService } from './crucible.service';
+import type { AiModelOption, AiModelsView, AiVia } from '@crucible-wire/ai-wire';
 
 export interface AIAvailability {
   hasLocal: boolean;
@@ -81,6 +83,18 @@ export class AiSetupService {
     checkFailed: false
   });
 
+  /**
+   * Which road AI takes: 'crucible' (every call through the connected
+   * Crucible, keys on that server) or 'direct' (Briefcase's own providers).
+   * Null until first asked. Under 'crucible' the Ollama/key UI is hidden:
+   * Ollama is an upstream configured on the server.
+   */
+  readonly via = signal<AiVia | null>(null);
+  /** The last Crucible model listing, for pickers and the AI pane. */
+  readonly crucibleModels = signal<AiModelsView | null>(null);
+
+  private readonly crucible = inject(CrucibleService);
+
   // Subject to notify when models change (downloaded, deleted, etc.)
   private modelsChangedSubject = new Subject<void>();
   public modelsChanged$ = this.modelsChangedSubject.asObservable();
@@ -95,10 +109,45 @@ export class AiSetupService {
     this.modelsChangedSubject.next();
   }
 
+  /** Ask the backend which road AI takes. A failed ask keeps the last answer (or 'direct'). */
+  async refreshVia(): Promise<AiVia> {
+    try {
+      const view = await firstValueFrom(this.crucible.aiVia());
+      this.via.set(view.via);
+      return view.via;
+    } catch {
+      const known = this.via() ?? 'direct';
+      this.via.set(known);
+      return known;
+    }
+  }
+
+  /** The connected Crucible's models, read now. */
+  async loadCrucibleModels(): Promise<AiModelsView> {
+    const view = await firstValueFrom(this.crucible.aiModels());
+    this.crucibleModels.set(view);
+    return view;
+  }
+
+  /**
+   * Picker options when AI runs through Crucible: the server's installed
+   * catalog models and its configured upstreams' models, as `provider:model`
+   * values (the stored format every picker already uses). Null on the direct
+   * road, so the caller keeps its own direct-provider listing unchanged.
+   */
+  async modelOptionsIfCrucible(): Promise<AiModelOption[] | null> {
+    if ((await this.refreshVia()) !== 'crucible') return null;
+    const view = await this.loadCrucibleModels();
+    return view.models
+      .filter(m => m.provider !== 'local' || m.installed !== false)
+      .map(m => ({ ...m, label: m.provider === 'local' ? `${m.label} (Crucible)` : m.label }));
+  }
+
   /**
    * Check all AI providers and update availability status
    */
   async checkAIAvailability(): Promise<AIAvailability> {
+    if ((await this.refreshVia()) === 'crucible') return this.checkCrucibleAvailability();
     this.availability.update(v => ({ ...v, isChecking: true }));
 
     // Distinguish "probe failed" from "probe says not configured" — a failed
@@ -164,6 +213,40 @@ export class AiSetupService {
         checkFailed: true,
         lastChecked: new Date()
       }));
+      return this.availability();
+    }
+  }
+
+  /**
+   * Availability through Crucible, in the same shape the direct road reports,
+   * so every existing reader (the shell's AI chip, "set up AI first" prompts)
+   * keeps working: a provider is "ready" when the connected server has it.
+   */
+  private async checkCrucibleAvailability(): Promise<AIAvailability> {
+    this.availability.update(v => ({ ...v, isChecking: true }));
+    try {
+      const view = await this.loadCrucibleModels();
+      const ups = view.upstreams;
+      const ollamaModels = view.models.filter(m => m.provider === 'ollama').map(m => m.value.slice('ollama:'.length));
+      const hasLocal = view.models.some(m => m.provider === 'local' && m.installed !== false);
+      const next: AIAvailability = {
+        hasLocal,
+        localReady: hasLocal,
+        hasOllama: !!ups?.ollama.configured && ollamaModels.length > 0,
+        ollamaConnected: !!ups?.ollama.configured,
+        ollamaModels,
+        hasClaudeKey: !!ups?.anthropic.configured,
+        hasOpenAIKey: !!ups?.openai.configured,
+        isChecking: false,
+        // A registered server that is not answering is "unknown", not "not configured".
+        checkFailed: view.server === null && view.via.registeredServers > 0,
+        lastChecked: new Date(),
+      };
+      this.availability.set(next);
+      return next;
+    } catch (error) {
+      console.error('Crucible AI availability probe failed:', error);
+      this.availability.update(v => ({ ...v, isChecking: false, checkFailed: true, lastChecked: new Date() }));
       return this.availability();
     }
   }

@@ -3,6 +3,32 @@
     <!-- Close Button -->
     <button class="close-btn" (click)="skipSetup()" title="Close">×</button>
 
+    @if (via() === 'crucible') {
+      <!-- ==================== THROUGH CRUCIBLE ==================== -->
+      <div class="wizard-step crucible-step">
+        @if (crucibleView()?.server; as server) {
+          <div class="step-header">
+            <h2 class="step-title">AI runs through Crucible</h2>
+            <p class="step-subtitle">Every AI call goes through {{ server }}. Add Claude, OpenAI or Ollama there; local models come from its catalog.</p>
+          </div>
+          <app-crucible-upstreams [server]="server" (changed)="refreshCrucible()" />
+          <div class="step-footer centered">
+            <button class="action-btn secondary" (click)="openCrucibleServers()">Crucible Servers…</button>
+            <button class="action-btn primary" (click)="complete()">Done</button>
+          </div>
+        } @else {
+          <div class="step-header">
+            <h2 class="step-title">AI needs Crucible</h2>
+            <p class="step-subtitle">{{ crucibleView()?.unavailable ?? 'No Crucible server is answering.' }} Your library, downloads and the editor work without it.</p>
+          </div>
+          <div class="step-footer centered">
+            <button class="action-btn secondary" (click)="skipSetup()">Not now</button>
+            <button class="action-btn primary" (click)="openCrucibleServers()">Crucible Servers…</button>
+          </div>
+        }
+      </div>
+    } @else {
+
     <!-- Progress Indicator -->
     <div class="progress-dots" *ngIf="currentStep() !== 'welcome'">
       <span class="dot" [class.active]="currentStep() !== 'done'" [class.completed]="currentStep() === 'done'"></span>
@@ -625,6 +651,7 @@
           </button>
         </div>
       </div>
+    }
     }
   </div>
 </div>

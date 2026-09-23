@@ -10,6 +10,10 @@ import { UiButtonComponent } from '../../../ui';
 import { getApiBase } from '../../../core/runtime-url';
 import { ErrorSurface } from '../../../core/error-surface.service';
 import { PipelinePresetsService } from '../../../core/stores/pipeline-presets.service';
+import { Router } from '@angular/router';
+import { CrucibleService, type CrucibleRefusal } from '../../../services/crucible.service';
+import { CrucibleUpstreamsComponent } from '../../../components/crucible-upstreams/crucible-upstreams.component';
+import type { AiModelsView, AiTaskModels, AiTaskName, AiViaView, LegacyKeysView } from '@crucible-wire/ai-wire';
 
 interface AnalysisCategory {
   id: string;
@@ -48,6 +52,18 @@ interface ModelOption {
 
 const PROMPT_KEYS: (keyof AnalysisPrompts)[] = ['description', 'title', 'tags', 'quotes'];
 
+/** The tasks that can each have their own model (app-config `taskModels`). */
+const AI_TASKS: { key: AiTaskName; label: string; hint: string }[] = [
+  { key: 'boundary', label: 'Chapter boundaries', hint: 'Short quote-copying calls; a small model is plenty.' },
+  { key: 'chapter', label: 'Chapter titles and summaries', hint: '' },
+  { key: 'flags', label: 'Flags', hint: '' },
+  { key: 'description', label: 'Description', hint: '' },
+  { key: 'tags', label: 'Tags', hint: '' },
+  { key: 'title', label: 'Suggested title', hint: '' },
+];
+
+type ViaChoice = 'default' | 'crucible' | 'direct';
+
 const PROMPT_LABELS: Record<string, string> = {
   description: 'Video Description Prompt',
   title: 'Suggested Title Prompt',
@@ -83,7 +99,7 @@ const DEFAULT_CATEGORIES: AnalysisCategory[] = [
 @Component({
   selector: 'app-ai-pane',
   standalone: true,
-  imports: [FormsModule, AiSetupWizardComponent, UiButtonComponent],
+  imports: [FormsModule, AiSetupWizardComponent, UiButtonComponent, CrucibleUpstreamsComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styleUrls: ['./panes-shared.scss', './ai-pane.component.scss'],
   templateUrl: './ai-pane.component.html'
@@ -95,7 +111,23 @@ export class AiPaneComponent {
   private destroyRef = inject(DestroyRef);
   private errorSurface = inject(ErrorSurface);
   private presetsService = inject(PipelinePresetsService);
+  private crucible = inject(CrucibleService);
+  private router = inject(Router);
   private readonly apiBase = getApiBase();
+
+  // ── AI engine: which road, and the connected Crucible (P3) ────────────
+  /** 'crucible' | 'direct' as the backend resolves it right now. */
+  readonly via = this.aiSetupService.via;
+  readonly viaView = signal<AiViaView | null>(null);
+  readonly viaChoice = computed<ViaChoice>(() => this.viaView()?.stored ?? 'default');
+  readonly crucibleView = signal<AiModelsView | null>(null);
+  /** The server whose upstreams the pane edits: the connected one, under Crucible only. */
+  readonly connectedServer = computed(() => (this.via() === 'crucible' ? this.crucibleView()?.server ?? null : null));
+  readonly legacy = signal<LegacyKeysView | null>(null);
+  readonly copyingKeys = signal(false);
+  readonly copyLine = signal<{ ok: boolean; text: string } | null>(null);
+  readonly aiTasks = AI_TASKS;
+  readonly taskModels = signal<AiTaskModels>({});
 
   // Provider status
   providers = signal<ProviderCard[]>([]);
@@ -189,6 +221,7 @@ export class AiPaneComponent {
   // ── Providers / status ──────────────────────────────────────────────────
 
   private async refreshStatus(): Promise<void> {
+    await this.refreshEngine();
     const availability = await this.aiSetupService.checkAIAvailability();
     this.statusCheckFailed.set(availability.checkFailed);
     this.aiConfigured.set(
@@ -201,6 +234,98 @@ export class AiPaneComponent {
       { key: 'openai', name: 'OpenAI API', description: 'OpenAI cloud models. Requires an API key.', ready: availability.hasOpenAIKey },
     ]);
     await this.loadAvailableModels();
+  }
+
+  /** The road, the connected server, Briefcase's leftover keys and the per-task models. */
+  private async refreshEngine(): Promise<void> {
+    try {
+      this.viaView.set(await firstValueFrom(this.crucible.aiVia()));
+    } catch (error) {
+      this.errorSurface.surfaceError("Couldn't read where AI runs", error);
+    }
+    const via = await this.aiSetupService.refreshVia();
+    if (via === 'crucible') {
+      try {
+        this.crucibleView.set(await this.aiSetupService.loadCrucibleModels());
+      } catch (error) {
+        this.crucibleView.set(null);
+        this.errorSurface.surfaceError("Couldn't list the Crucible server's models", error);
+      }
+    }
+    try {
+      this.legacy.set(await firstValueFrom(this.crucible.legacyKeys()));
+    } catch {
+      this.legacy.set(null);
+    }
+    try {
+      this.taskModels.set(await firstValueFrom(this.crucible.taskModels()));
+    } catch {
+      this.taskModels.set({});
+    }
+  }
+
+  async onViaChange(choice: ViaChoice): Promise<void> {
+    try {
+      this.viaView.set(await firstValueFrom(this.crucible.setAiVia(choice === 'default' ? null : choice)));
+      this.flashSaved();
+      await this.refreshStatus();
+    } catch (error) {
+      this.errorSurface.surfaceError("Where AI runs didn't save", error);
+    }
+  }
+
+  openCrucibleServers(): void {
+    void this.router.navigate(['/settings/crucible']);
+  }
+
+  async onUpstreamsChanged(): Promise<void> {
+    await this.refreshStatus();
+  }
+
+  /** Which server Briefcase's own keys would be copied to: this computer's Crucible, else the connected one. */
+  readonly copyTarget = computed(() => this.legacy()?.localServer ?? this.connectedServer());
+
+  async copyLegacyKeys(): Promise<void> {
+    const target = this.copyTarget();
+    if (!target) return;
+    this.copyingKeys.set(true);
+    this.copyLine.set(null);
+    try {
+      const outcome = await firstValueFrom(this.crucible.copyLegacyKeys(target));
+      const parts: string[] = [];
+      const names = (list: string[]) => list.map((u) => (u === 'anthropic' ? 'Claude' : 'OpenAI')).join(' and ');
+      if (outcome.copied.length) parts.push(`Copied the ${names(outcome.copied)} key to ${target}.`);
+      if (outcome.alreadyThere.length) parts.push(`${target} already had the same ${names(outcome.alreadyThere)} key.`);
+      for (const skip of outcome.skipped) parts.push(skip.reason);
+      parts.push(outcome.deletedLocalFile ? "Briefcase's own copy is deleted; the keys now live on the server." : (outcome.keptBecause ?? ''));
+      this.copyLine.set({ ok: outcome.skipped.length === 0, text: parts.filter(Boolean).join(' ') });
+      await this.refreshStatus();
+    } catch (error) {
+      this.copyLine.set({ ok: false, text: (error as CrucibleRefusal).message ?? 'The keys were not copied.' });
+    } finally {
+      this.copyingKeys.set(false);
+    }
+  }
+
+  taskModelFor(task: AiTaskName): string {
+    return this.taskModels()[task] ?? '';
+  }
+
+  async onTaskModelChange(task: AiTaskName, value: string): Promise<void> {
+    try {
+      this.taskModels.set(await firstValueFrom(this.crucible.setTaskModels({ [task]: value || null })));
+      this.flashSaved();
+    } catch (error) {
+      this.errorSurface.surfaceError("That task's model didn't save", error);
+    }
+  }
+
+  /** A stored per-task model that is not among the options, shown as "(unavailable)" rather than dropped. */
+  missingTaskModel(task: AiTaskName): string | null {
+    const current = this.taskModelFor(task);
+    if (!current) return null;
+    const models = this.availableModels();
+    return models.length === 0 || models.some((m) => m.value === current) ? null : current;
   }
 
   retryStatusCheck(): void {
@@ -234,6 +359,19 @@ export class AiPaneComponent {
   }
 
   private async loadAvailableModels(): Promise<void> {
+    // Through Crucible: the connected server's catalog and upstreams.
+    let viaCrucible: ModelOption[] | null;
+    try {
+      viaCrucible = await this.aiSetupService.modelOptionsIfCrucible();
+    } catch (error) {
+      this.errorSurface.surfaceError("Couldn't list the Crucible server's models", error);
+      viaCrucible = [];
+    }
+    if (viaCrucible !== null) {
+      this.availableModels.set(viaCrucible.map((m) => ({ value: m.value, label: m.label, provider: m.provider })));
+      return;
+    }
+
     const availability = await this.aiSetupService.checkAIAvailability();
     const models: ModelOption[] = [];
 

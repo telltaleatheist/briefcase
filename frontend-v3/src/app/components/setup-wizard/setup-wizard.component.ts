@@ -8,6 +8,9 @@ import { ElectronService } from '../../services/electron.service';
 import { isChatModelComponent } from '../../models/chat-model-component';
 import { CrucibleService } from '../../services/crucible.service';
 import { CrucibleDoorsComponent } from '../crucible-doors/crucible-doors.component';
+import { CrucibleUpstreamsComponent } from '../crucible-upstreams/crucible-upstreams.component';
+import type { AiModelsView, AiViaView } from '@crucible-wire/ai-wire';
+import { firstValueFrom } from 'rxjs';
 
 type Step = 'welcome' | 'tools' | 'engine' | 'models' | 'ai' | 'review' | 'finishing';
 
@@ -27,7 +30,7 @@ type Step = 'welcome' | 'tools' | 'engine' | 'models' | 'ai' | 'review' | 'finis
 @Component({
   selector: 'app-setup-wizard',
   standalone: true,
-  imports: [CommonModule, FormsModule, CrucibleDoorsComponent],
+  imports: [CommonModule, FormsModule, CrucibleDoorsComponent, CrucibleUpstreamsComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="setup-overlay">
@@ -115,6 +118,21 @@ type Step = 'welcome' | 'tools' | 'engine' | 'models' | 'ai' | 'review' | 'finis
             }
 
             @case ('ai') {
+              @if (aiRoad() === 'crucible') {
+                @if (crucibleAi()?.server; as server) {
+                  <div class="step-head">
+                    <h3>Cloud models and Ollama</h3>
+                    <p class="sub">AI runs through Crucible on {{ server }}. A Claude or OpenAI key, or an Ollama address, is saved on that server, not in Briefcase. Local models come from its catalog, and Crucible prepares them when you finish. All of this is optional.</p>
+                  </div>
+                  <app-crucible-upstreams [server]="server" />
+                } @else {
+                  <div class="step-head">
+                    <h3>AI needs Crucible</h3>
+                    <p class="sub">Briefcase's AI features (chapters, flags, titles) run on Crucible. Set it up on this computer or connect one on another, or skip this: your library, downloads and the editor work without it.</p>
+                  </div>
+                  <app-crucible-doors mode="probing" (changed)="loadAiStep()" />
+                }
+              } @else {
               <div class="step-head">
                 <h3>AI for video analysis</h3>
                 <p class="sub">Briefcase can analyse video with a local model through <a class="linklike" href="#" (click)="open('https://ollama.com'); $event.preventDefault()">Ollama</a> — private, offline, and free — or with Claude or OpenAI. Install Ollama and pull a model, or add a cloud API key below.</p>
@@ -181,6 +199,7 @@ type Step = 'welcome' | 'tools' | 'engine' | 'models' | 'ai' | 'review' | 'finis
                   </div>
                 </div>
               </div>
+              }
             }
 
             @case ('review') {
@@ -301,6 +320,19 @@ export class SetupWizardComponent implements OnInit {
   readonly savingKey = signal(false);
 
   private order: Step[] = ['welcome', 'tools', 'engine', 'models', 'ai', 'review', 'finishing'];
+
+  /**
+   * The AI step's face. 'crucible' unless the user (or BRIEFCASE_AI_VIA)
+   * chose the direct road: with nothing connected yet the default would read
+   * 'direct', but the wizard offers Crucible, the road AI takes from P3 on.
+   */
+  readonly aiVia = signal<AiViaView | null>(null);
+  readonly crucibleAi = signal<AiModelsView | null>(null);
+  readonly aiRoad = computed<'crucible' | 'direct'>(() => {
+    const view = this.aiVia();
+    if (view === null || view.source === 'default') return 'crucible';
+    return view.via;
+  });
 
   readonly stepIndex = computed(() => Math.min(this.order.indexOf(this.step()), this.NUMBERED - 1));
   readonly requiredTools = computed(() => this.all().filter((c) => c.kind === 'binary' && c.required && c.supported));
@@ -446,11 +478,28 @@ export class SetupWizardComponent implements OnInit {
   next(): void {
     const i = this.order.indexOf(this.step());
     this.step.set(this.order[Math.min(i + 1, this.order.length - 1)]);
+    if (this.step() === 'ai') void this.loadAiStep();
   }
 
   back(): void {
     const i = this.order.indexOf(this.step());
     this.step.set(this.order[Math.max(i - 1, 0)]);
+    if (this.step() === 'ai') void this.loadAiStep();
+  }
+
+  /** Where AI runs and, through Crucible, which server the keys would go to. Read on entering the AI step. */
+  async loadAiStep(): Promise<void> {
+    try {
+      this.aiVia.set(await firstValueFrom(this.crucible.aiVia()));
+    } catch {
+      this.aiVia.set(null);
+    }
+    if (this.aiRoad() !== 'crucible') return;
+    try {
+      this.crucibleAi.set(await firstValueFrom(this.crucible.aiModels()));
+    } catch {
+      this.crucibleAi.set(null);
+    }
   }
 
   startDownload(): void {

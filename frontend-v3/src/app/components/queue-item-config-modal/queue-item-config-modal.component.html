@@ -123,14 +123,14 @@
                   <option *ngIf="!loadingModels() && aiModels().length > 0 && !selectedAIModel()" value="" disabled>-- Select a model --</option>
 
                   <!-- Local AI (Bundled) -->
-                  <optgroup *ngIf="hasModelsForProvider('local')" label="Local AI (Bundled)">
+                  <optgroup *ngIf="hasModelsForProvider('local')" [label]="localGroupLabel()">
                     <option *ngFor="let model of getModelsByProvider('local')" [value]="model.value">
                       {{ model.label }}
                     </option>
                   </optgroup>
 
                   <!-- Ollama Models -->
-                  <optgroup *ngIf="hasModelsForProvider('ollama')" label="Ollama">
+                  <optgroup *ngIf="hasModelsForProvider('ollama')" [label]="viaCrucible() ? 'Ollama (through Crucible)' : 'Ollama'">
                     <option *ngFor="let model of getModelsByProvider('ollama')" [value]="model.value">
                       {{ model.label }}
                     </option>

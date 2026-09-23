@@ -5,12 +5,89 @@
 </p>
 
 <div class="pane-section">
+  <p class="section-label">AI engine</p>
+  <label class="field-label" for="ai-via">Where AI runs</label>
+  <select
+    id="ai-via"
+    class="select"
+    [ngModel]="viaChoice()"
+    [disabled]="!!viaView()?.envOverride"
+    (ngModelChange)="onViaChange($event)">
+    <option value="default">Automatic: through Crucible once a server is connected</option>
+    <option value="crucible">Through Crucible</option>
+    <option value="direct">Directly from Briefcase (the old providers)</option>
+  </select>
+  @if (viaView()?.envOverride; as env) {
+    <p class="hint">Set by BRIEFCASE_AI_VIA={{ env }} for this session.</p>
+  }
+
+  @if (via() === 'crucible') {
+    @if (connectedServer(); as server) {
+      <div class="row-card engine-card">
+        <div class="row-main">
+          <div class="row-name">
+            Crucible on {{ server }}
+            <span class="pill" [class.ok]="crucibleView()?.reach === 'ready'" [class.accent]="crucibleView()?.reach === 'busy'">
+              {{ crucibleView()?.reach === 'busy' ? 'Busy' : 'Connected' }}
+            </span>
+          </div>
+          <div class="row-desc">Every AI call goes through this server, including Claude, OpenAI and Ollama. Their keys live on it.</div>
+        </div>
+        <ui-button variant="secondary" size="sm" (pressed)="openCrucibleServers()">Crucible Servers…</ui-button>
+      </div>
+    } @else {
+      <div class="row-card engine-card">
+        <div class="row-main">
+          <div class="row-name">AI needs Crucible</div>
+          <div class="row-desc wrap">{{ crucibleView()?.unavailable ?? 'No Crucible server is answering.' }}</div>
+        </div>
+        <ui-button variant="primary" size="sm" (pressed)="openCrucibleServers()">Crucible Servers…</ui-button>
+      </div>
+    }
+  } @else if ((viaView()?.registeredServers ?? 0) === 0) {
+    <p class="hint">AI can run through Crucible, a shared engine on this computer or another. Connect one in Settings › Crucible Servers.</p>
+  }
+</div>
+
+@if (connectedServer(); as server) {
+  <div class="pane-section">
+    <p class="section-label">Cloud models and Ollama on {{ server }}</p>
+    <app-crucible-upstreams [server]="server" (changed)="onUpstreamsChanged()" />
+
+    @if (legacy(); as keys) {
+      @if ((keys.claude || keys.openai) && copyTarget(); as target) {
+        <div class="row-card">
+          <div class="row-main">
+            <div class="row-name">Briefcase still holds its own {{ keys.claude && keys.openai ? 'Claude and OpenAI keys' : keys.claude ? 'Claude key' : 'OpenAI key' }}</div>
+            <div class="row-desc wrap">
+              Copy {{ keys.claude && keys.openai ? 'them' : 'it' }} to {{ target }} once.
+              @if (target === keys.localServer) {
+                Briefcase deletes its own copy after {{ target }} confirms each key.
+              } @else {
+                {{ target }} is not on this computer, so Briefcase keeps its own copy.
+              }
+            </div>
+          </div>
+          <ui-button variant="secondary" size="sm" [disabled]="copyingKeys()" (pressed)="copyLegacyKeys()">
+            {{ copyingKeys() ? 'Copying…' : 'Copy to ' + target }}
+          </ui-button>
+        </div>
+      }
+    }
+    @if (copyLine(); as line) {
+      <p class="hint" [class.warn]="!line.ok">{{ line.text }}</p>
+    }
+  </div>
+}
+
+@if (via() !== 'crucible') {
+<div class="pane-section">
   <p class="section-label">Providers</p>
 
   @if (statusCheckFailed()) {
     <div class="row-card">
       <div class="row-main">
-        <div class="row-name">⚠️ Couldn't check provider status</div>
+        <div class="row-name">Couldn't check provider status</div>
         <div class="row-desc">Statuses below may be stale or wrong — the availability check failed.</div>
       </div>
       <ui-button variant="secondary" size="sm" (pressed)="retryStatusCheck()">Retry</ui-button>
@@ -36,6 +113,7 @@
   </div>
   <p class="hint">The guided setup walks through local models, Ollama, and API keys step by step.</p>
 </div>
+}
 
 <div class="pane-section">
   <p class="section-label">Default model</p>
@@ -60,7 +138,34 @@
     <span class="save-flash">✓ Saved</span>
   }
   @if (availableModels().length === 0) {
-    <div class="warn">⚠️ No AI models available. Configure a provider above first.</div>
+    <div class="warn">No AI models available. {{ via() === 'crucible' ? 'Add a cloud key above, or download a model on the Crucible server.' : 'Configure a provider above first.' }}</div>
+  }
+</div>
+
+<div class="pane-section">
+  <p class="section-label">Model per task</p>
+  <p class="hint" style="margin: 0 0 10px;">
+    Optional. A task left on "Same as the analysis model" uses the model the analysis runs with.
+  </p>
+  @for (task of aiTasks; track task.key) {
+    <label class="field-label" [attr.for]="'task-model-' + task.key">{{ task.label }}</label>
+    <select
+      class="select task-select"
+      [id]="'task-model-' + task.key"
+      [ngModel]="taskModelFor(task.key)"
+      [disabled]="availableModels().length === 0"
+      (ngModelChange)="onTaskModelChange(task.key, $event)">
+      <option value="">Same as the analysis model</option>
+      @for (model of availableModels(); track model.value) {
+        <option [value]="model.value">{{ model.label }}</option>
+      }
+      @if (missingTaskModel(task.key); as missing) {
+        <option [value]="missing">{{ missing }} (unavailable)</option>
+      }
+    </select>
+    @if (task.hint) {
+      <p class="hint task-hint">{{ task.hint }}</p>
+    }
   }
 </div>
 
