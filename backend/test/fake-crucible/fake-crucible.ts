@@ -30,9 +30,18 @@
  * `unknown_subject`), and a finished module installs what it named, so the
  * next coordination read finds it stocked.
  *
- * Deliberately NOT here yet: uploads, jobs, chat and decide. They arrive with
- * the phases that call them (P3–P6); a route no spec drives is a route whose
- * shape nobody has checked against the SDK.
+ * P3 adds the LLM side: `GET /v1/models` from a configurable list with ONE
+ * resident model, `load-model` jobs (`POST /v1/jobs`, `GET /v1/jobs/{id}`, the
+ * job SSE stream with ids, `DELETE /v1/jobs/{id}`) that make a model resident
+ * and take a lease on load when asked, leases that need a resident model, and
+ * `POST /v1/openai/chat/completions`: residency enforced for local models
+ * (`409 model_not_resident`), upstream prefixes forwarded only when that
+ * upstream is configured (`409 upstream_unconfigured`), canned replies per
+ * model, `X-Crucible-Sampling` on every answer, and a `chatDelayMs` fault a
+ * cancel can land in. `chat_queue_full` + `Retry-After` is a `refuse` rule.
+ *
+ * Deliberately NOT here yet: uploads, asr jobs and decide. They arrive with
+ * the phases that call them (P5–P6).
  */
 import * as http from 'http';
 import { randomBytes } from 'crypto';
@@ -101,6 +110,41 @@ export interface NamedFaults {
   cardHeld?: { fact: string; who: string; times?: number };
   /** Another app's task is running: posts are refused `task_busy`, and it lists as running. */
   taskBusy?: { type: string; finishAfterMs?: number };
+  /** Every chat completion waits this long before answering (a cancel can land in it). */
+  chatDelayMs?: number;
+  /** A load-model job fails with this code and message. */
+  failLoadWith?: { code: string; message: string };
+}
+
+/** One `GET /v1/models` row, in the SDK's camelCase; served snake_case. */
+export interface FakeModel {
+  id: string;
+  paramsB: number;
+  installed?: boolean;
+  backendSupported?: boolean;
+  modalities?: string[];
+  contextDefault?: number;
+  maxModelLen?: number | null;
+  /** Set: not loadable, with this reason. */
+  unloadableReason?: string;
+}
+
+/** A canned chat reply: fixed content, or computed from the request body. */
+export type FakeChatReply =
+  | string
+  | { content?: string; reasoning?: string; finishReason?: string }
+  | ((body: Record<string, unknown>) => string | { content?: string; reasoning?: string; finishReason?: string });
+
+/** A job this fake ran, for a spec to assert on. */
+export interface FakeJob {
+  jobId: string;
+  type: string;
+  model: string | null;
+  params: Record<string, unknown>;
+  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
+  leaseId: string | null;
+  events: Array<{ id: number; event: string; data: Record<string, unknown> }>;
+  client: string | null;
 }
 
 /** One catalog row, in the SDK's camelCase; served snake_case. */
@@ -156,6 +200,16 @@ export interface FakeCrucibleOptions {
   disabledClasses?: Record<string, string>;
   /** A module task fails at this step, with this code, instead of finishing. */
   failModuleWith?: { code: string; message: string };
+  /** What `GET /v1/models` lists. Default: `qwen3.5-9b`, installed. */
+  models?: FakeModel[];
+  /** The model resident at start. Default none. */
+  resident?: string | null;
+  /** How long a load-model job takes. Default 20 ms. */
+  loadMs?: number;
+  /** What an upstream test lists, per upstream. Default `<upstream>-model-a`, `<upstream>-model-b`. */
+  upstreamModels?: Record<string, string[]>;
+  /** Canned chat replies by model string (`qwen3.5-9b`, `anthropic/claude-x`); `*` for any. */
+  chatReplies?: Record<string, FakeChatReply>;
 }
 
 export interface FakeCrucible {
@@ -182,6 +236,20 @@ export interface FakeCrucible {
   readonly catalog: FakeCatalogRow[];
   /** The installed job types as they stand. */
   readonly installedJobTypes: string[];
+  /** Every job posted, oldest first. */
+  readonly jobs: FakeJob[];
+  /** The model on the card now, or null. */
+  resident(): string | null;
+  /** Put a model on the card (or none), as another client's load would. Drops any lease on the old one. */
+  setResident(model: string | null): void;
+  /** Expire the open lease, as a missed heartbeat would. */
+  expireLease(): void;
+  /** The lease open now, if any. */
+  openLease(): { leaseId: string; model: string; client: string | null; act: string } | null;
+  /** Hold the card with another client's lease on `model` (which becomes resident). */
+  leaseAsOther(model: string, client: string): void;
+  /** Bodies of every chat completion posted, in order. */
+  chatBodies(): Array<Record<string, unknown>>;
   close(): Promise<void>;
 }
 
@@ -304,6 +372,11 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
   const taskListeners = new Map<string, Set<() => void>>();
   let nextTask = 1;
   const disabledClasses = options.disabledClasses ?? {};
+  const models: FakeModel[] = (options.models ?? [{ id: 'qwen3.5-9b', paramsB: 9, installed: true }]).map((m) => ({ ...m }));
+  let resident: string | null = options.resident ?? null;
+  const jobs: FakeJob[] = [];
+  const jobListeners = new Map<string, Set<() => void>>();
+  let nextJob = 1;
 
   const apiVersion = (): number => (named.apiVersion2 ? 2 : 1);
 
@@ -587,6 +660,177 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
     setTimeout(tick, 5).unref?.();
   }
 
+  // ── jobs ─────────────────────────────────────────────────────────────
+  const jobStatusDoc = (job: FakeJob): unknown => ({
+    job_id: job.jobId,
+    type: job.type,
+    model: job.model,
+    status: job.status,
+    progress: job.status === 'done' ? 1 : 0,
+    position: job.status === 'queued' ? 0 : null,
+    error: job.status === 'failed'
+      ? { code: String((job.events.at(-1)?.data['error'] as Record<string, unknown> | undefined)?.['code'] ?? 'failed'),
+          message: String((job.events.at(-1)?.data['error'] as Record<string, unknown> | undefined)?.['message'] ?? '') }
+      : null,
+    artifacts: [],
+    created: '2026-09-23T01:00:00Z',
+    started: job.status === 'queued' ? null : '2026-09-23T01:00:01Z',
+    finished: job.status === 'done' || job.status === 'failed' || job.status === 'cancelled' ? '2026-09-23T01:00:02Z' : null,
+    lease_id: job.leaseId,
+    client_ref: null,
+    interrupted_at: null,
+    chunks_done: [],
+    chunks_total: null,
+    chunk_at: null,
+  });
+
+  const pushJobEvent = (job: FakeJob, event: string, data: Record<string, unknown>): void => {
+    job.events.push({ id: job.events.length + 1, event, data });
+    for (const wake of jobListeners.get(job.jobId) ?? []) wake();
+  };
+
+  function streamJob(req: http.IncomingMessage, res: http.ServerResponse, id: string): void {
+    const job = jobs.find((j) => j.jobId === id);
+    if (job === undefined) {
+      refusal(res, 404, 'unknown_job', `no job ${id}`);
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
+    let sent = Number(req.headers['last-event-id'] ?? 0) || 0;
+    const flush = (): void => {
+      while (sent < job.events.length) {
+        const ev = job.events[sent];
+        sent += 1;
+        res.write(`id: ${ev.id}\nevent: ${ev.event}\ndata: ${JSON.stringify(ev.data)}\n\n`);
+        if (ev.event === 'done' || ev.event === 'failed' || ev.event === 'cancelled') {
+          jobListeners.get(job.jobId)?.delete(flush);
+          res.end();
+          return;
+        }
+      }
+    };
+    if (!jobListeners.has(job.jobId)) jobListeners.set(job.jobId, new Set());
+    jobListeners.get(job.jobId)?.add(flush);
+    res.on('close', () => jobListeners.get(job.jobId)?.delete(flush));
+    flush();
+  }
+
+  function busyDetails(busy: { client: string; type: string; progress: number; model?: string | null }): Record<string, unknown> {
+    return {
+      holder: busy.client, job_id: 'job-held', type: busy.type, model: busy.model ?? null,
+      status: 'running', since: '2026-09-23T01:00:01Z', progress: busy.progress, message: null,
+    };
+  }
+
+  function postJob(req: http.IncomingMessage, res: http.ServerResponse, body: Record<string, unknown>): void {
+    const type = String(body['type'] ?? '');
+    if (named.serverBusy !== undefined) {
+      const busy = named.serverBusy;
+      refusal(res, 409, 'server_busy', `the lane is busy with ${busy.client}'s ${busy.type}`, busyDetails(busy));
+      return;
+    }
+    if (type !== 'load-model' && type !== 'unload-model') {
+      refusal(res, 400, 'unknown_job_type', `this fake runs load-model and unload-model jobs, not ${type}`);
+      return;
+    }
+    const model = typeof body['model'] === 'string' ? body['model'] : null;
+    const info = models.find((m) => m.id === model);
+    if (type === 'load-model') {
+      if (info === undefined) {
+        refusal(res, 404, 'unknown_model', `no model '${String(model)}'`);
+        return;
+      }
+      if (info.installed === false) {
+        refusal(res, 409, 'model_not_installed', `'${info.id}' is not installed`);
+        return;
+      }
+      if (openLease !== null && openLease.model !== model) {
+        refusal(res, 409, 'leased', `'${openLease.model}' is leased by '${openLease.client}' for '${openLease.act}'`, {
+          lease_id: openLease.leaseId, kind: 'llm', client: openLease.client, act: openLease.act,
+          since: '2026-09-23T01:00:00+00:00', expires_at: '2026-09-23T01:02:00+00:00',
+        });
+        return;
+      }
+    }
+    const params = (body['params'] ?? {}) as Record<string, unknown>;
+    const client = (req.headers['x-crucible-client'] as string | undefined) ?? null;
+    const job: FakeJob = { jobId: `job-${nextJob++}`, type, model, params, status: 'queued', leaseId: null, events: [], client };
+    jobs.push(job);
+    send(res, 202, { job_id: job.jobId });
+    pushJobEvent(job, 'queued', { position: 0 });
+    const finish = (): void => {
+      if (job.status === 'cancelled') return;
+      if (type === 'load-model' && named.failLoadWith !== undefined) {
+        job.status = 'failed';
+        pushJobEvent(job, 'failed', { error: { code: named.failLoadWith.code, message: named.failLoadWith.message } });
+        return;
+      }
+      if (type === 'unload-model') {
+        resident = null;
+        job.status = 'done';
+        pushJobEvent(job, 'done', { resident: null });
+        return;
+      }
+      resident = model;
+      const lease = params['lease'] as { act?: string; ttl_seconds?: number } | undefined;
+      if (lease !== undefined) {
+        const leaseId = `lease-${nextLease++}`;
+        openLease = { leaseId, model: model!, client, act: String(lease.act ?? '') };
+        leases.taken.push({ leaseId, model: model!, act: lease.act, ttlSeconds: lease.ttl_seconds });
+        job.leaseId = leaseId;
+      }
+      job.status = 'done';
+      pushJobEvent(job, 'done', { resident: model, ...(job.leaseId ? { lease_id: job.leaseId } : {}) });
+    };
+    setTimeout(() => {
+      if (job.status === 'cancelled') return;
+      job.status = 'running';
+      pushJobEvent(job, 'warming', { message: `loading ${String(model)}` });
+      setTimeout(finish, Math.max(1, (options.loadMs ?? 20) / 2)).unref?.();
+    }, Math.max(1, (options.loadMs ?? 20) / 2)).unref?.();
+  }
+
+  // ── chat ─────────────────────────────────────────────────────────────
+  async function chat(req: http.IncomingMessage, res: http.ServerResponse, body: Record<string, unknown>): Promise<void> {
+    const model = String(body['model'] ?? '');
+    const upstreamMatch = /^(anthropic|openai|ollama)\/(.+)$/.exec(model);
+    if (upstreamMatch) {
+      if (!configured(upstreamMatch[1])) {
+        refusal(res, 409, 'upstream_unconfigured', `the ${upstreamMatch[1]} upstream is not configured on this server`, { upstream: upstreamMatch[1] });
+        return;
+      }
+    } else if (resident !== model) {
+      refusal(res, 409, 'model_not_resident', `'${model}' is not resident${resident ? `; '${resident}' is` : '; nothing is'}`, { resident });
+      return;
+    }
+    if (named.chatDelayMs !== undefined) {
+      const aborted = await new Promise<boolean>((resolve) => {
+        const t = setTimeout(() => resolve(false), named.chatDelayMs);
+        res.on('close', () => { clearTimeout(t); resolve(true); });
+      });
+      if (aborted || res.destroyed) return;
+    }
+    const canned = options.chatReplies?.[model] ?? options.chatReplies?.['*'] ?? '{"ok":true}';
+    const reply = typeof canned === 'function' ? canned(body) : canned;
+    const shaped = typeof reply === 'string' ? { content: reply } : reply;
+    const sources: Record<string, string> = {};
+    for (const key of ['temperature', 'top_p', 'top_k', 'max_tokens', 'seed']) {
+      sources[key] = key in body ? 'request' : upstreamMatch ? 'engine' : 'manifest';
+    }
+    if (upstreamMatch?.[1] === 'anthropic' && !('max_tokens' in body)) sources['max_tokens'] = 'upstream default 4096';
+    const kwargs = body['chat_template_kwargs'] as Record<string, unknown> | undefined;
+    sources['thinking'] = kwargs && 'enable_thinking' in kwargs ? (upstreamMatch ? 'dropped' : 'request') : upstreamMatch ? 'engine' : 'manifest';
+    const message: Record<string, unknown> = { role: 'assistant', content: shaped.content ?? '' };
+    if (shaped.reasoning !== undefined) message['reasoning'] = shaped.reasoning;
+    send(res, 200, {
+      id: `chatcmpl-${randomBytes(4).toString('hex')}`,
+      object: 'chat.completion',
+      model,
+      choices: [{ index: 0, message, finish_reason: shaped.finishReason ?? 'stop' }],
+      usage: { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 },
+    }, { 'X-Crucible-Sampling': JSON.stringify(sources) });
+  }
+
   const server = http.createServer((req, res) => {
     void handle(req, res).catch((err) => {
       if (!res.headersSent) refusal(res, 500, 'fake_crashed', String((err as Error)?.stack ?? err));
@@ -772,7 +1016,7 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
         refusal(res, 400, 'upstream_unconfigured', `${upstream} has nothing configured and the test carried nothing`);
         return;
       }
-      send(res, 200, { models: [`${upstream}-model-a`, `${upstream}-model-b`] });
+      send(res, 200, { models: options.upstreamModels?.[upstream] ?? [`${upstream}-model-a`, `${upstream}-model-b`] });
       return;
     }
     // ── the operator side: catalog and tasks (P2 coordination) ───────────
@@ -821,11 +1065,63 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
       return;
     }
     if (path === '/v1/models' && method === 'GET') {
-      send(res, 200, [{
-        id: 'qwen3.5-9b', family: 'qwen3.5', params_b: 9, revision: 'abc1234', fingerprint: 'qwen3.5-9b@abc1234',
-        modalities: ['text'], backend_supported: true, installed: true, resident: false, loadable: true, reason: null,
-        memory_bytes_estimate: 20950548480, context_default: 32768, max_model_len: 262144,
-      }]);
+      send(res, 200, models.map((m) => {
+        const supported = m.backendSupported !== false;
+        const installed = m.installed !== false;
+        const reason = !supported ? `not served on ${backend}` : !installed ? 'weights are not installed' : m.unloadableReason ?? null;
+        return {
+          id: m.id, family: m.id.split('-')[0], params_b: m.paramsB,
+          revision: supported ? 'abc1234' : null, fingerprint: supported ? `${m.id}@abc1234` : null,
+          modalities: m.modalities ?? ['text'], backend_supported: supported, installed, resident: resident === m.id,
+          loadable: reason === null, reason,
+          memory_bytes_estimate: supported ? 20950548480 : null,
+          context_default: m.contextDefault ?? 32768,
+          max_model_len: supported ? (m.maxModelLen === undefined ? 262144 : m.maxModelLen) : null,
+        };
+      }));
+      return;
+    }
+
+    // ── jobs: load-model (P3) ────────────────────────────────────────────
+    if (path === '/v1/jobs' && method === 'POST') {
+      postJob(req, res, body);
+      return;
+    }
+    const jobEvents = /^\/v1\/jobs\/([^/]+)\/events$/.exec(path);
+    if (jobEvents && method === 'GET') {
+      streamJob(req, res, decodeURIComponent(jobEvents[1]));
+      return;
+    }
+    const jobDoc = /^\/v1\/jobs\/([^/]+)$/.exec(path);
+    if (jobDoc && method === 'GET') {
+      const job = jobs.find((j) => j.jobId === decodeURIComponent(jobDoc[1]));
+      if (job === undefined) {
+        refusal(res, 404, 'unknown_job', `no job ${jobDoc[1]}`);
+        return;
+      }
+      send(res, 200, jobStatusDoc(job));
+      return;
+    }
+    if (jobDoc && method === 'DELETE') {
+      const job = jobs.find((j) => j.jobId === decodeURIComponent(jobDoc[1]));
+      if (job === undefined) {
+        refusal(res, 404, 'unknown_job', `no job ${jobDoc[1]}`);
+        return;
+      }
+      if (job.status === 'done' || job.status === 'failed' || job.status === 'cancelled') {
+        refusal(res, 409, 'job_not_cancellable', `job ${job.jobId} is ${job.status}`);
+        return;
+      }
+      const wasQueued = job.status === 'queued';
+      job.status = 'cancelled';
+      pushJobEvent(job, 'cancelled', { status: 'cancelled' });
+      send(res, 200, { job_id: job.jobId, status: wasQueued ? 'cancelled' : 'cancelling' });
+      return;
+    }
+
+    // ── chat (P3) ────────────────────────────────────────────────────────
+    if (path === '/v1/openai/chat/completions' && method === 'POST') {
+      await chat(req, res, body);
       return;
     }
 
@@ -838,6 +1134,10 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
           lease_id: openLease.leaseId, kind: 'llm', client: openLease.client, act: openLease.act,
           since: '2026-09-23T01:00:00+00:00', expires_at: '2026-09-23T01:02:00+00:00',
         });
+        return;
+      }
+      if (resident !== model) {
+        refusal(res, 409, 'not_resident', `'${model}' is not resident${resident ? `; '${resident}' is` : ''}`, { resident });
         return;
       }
       const leaseId = `lease-${nextLease++}`;
@@ -921,6 +1221,23 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
     tasks,
     catalog,
     installedJobTypes,
+    jobs,
+    resident: () => resident,
+    setResident(model: string | null): void {
+      resident = model;
+      if (openLease !== null && openLease.model !== model) openLease = null;
+    },
+    expireLease(): void {
+      openLease = null;
+    },
+    openLease: () => (openLease === null ? null : { ...openLease }),
+    leaseAsOther(model: string, client: string): void {
+      resident = model;
+      openLease = { leaseId: `lease-${nextLease++}`, model, client, act: 'translate' };
+    },
+    chatBodies(): Array<Record<string, unknown>> {
+      return requests.filter((r) => r.path === '/v1/openai/chat/completions' && r.method === 'POST').map((r) => r.body as Record<string, unknown>);
+    },
     requestsTo(prefix: string, m?: string): RecordedRequest[] {
       return requests.filter((r) => r.path.startsWith(prefix) && (m === undefined || r.method === m));
     },

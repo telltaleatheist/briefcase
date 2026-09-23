@@ -79,6 +79,30 @@ export class CrucibleClientFactory {
     return new EngineResolver(makeClient).resolve({ name: url, url, token });
   }
 
+  /**
+   * A raw authenticated request to the ENGINE behind a registered server, for
+   * the one door whose answer the SDK reads down too far: the chat completion.
+   * SDK `chat()` drops `Retry-After` on `503 chat_queue_full`, the
+   * `X-Crucible-Sampling` audit and a reasoning model's `reasoning` field
+   * (crucible docs/INTEGRATING-AN-APP.md §6.1), and Briefcase needs all three.
+   *
+   * The token is read here, at call time, and set on the request here, so it
+   * still never leaves this file. Headers match the SDK's: bearer,
+   * `X-Crucible-Api: 1`, `X-Crucible-Client` and a User-Agent naming the app.
+   */
+  async engineFetch(name: string, path: string, init: RequestInit & { act?: string }): Promise<Response> {
+    const resolved = await this.resolve(name);
+    const { token } = this.registry.getWithToken(name);
+    const headers = new Headers(init.headers);
+    headers.set('Authorization', `Bearer ${token}`);
+    headers.set('X-Crucible-Api', '1');
+    headers.set('X-Crucible-Client', CRUCIBLE_CLIENT_NAME);
+    headers.set('User-Agent', `${CRUCIBLE_CLIENT_NAME} crucible-raw`);
+    const { act, ...rest } = init;
+    if (act !== undefined) headers.set('X-Crucible-Act', act);
+    return fetch(`${resolved.url.replace(/\/+$/, '')}${path}`, { ...rest, headers });
+  }
+
   /** Drop every cached hop (a spec, or a Re-check button). */
   forgetResolved(name?: string): void {
     this.resolver.forget(name);
