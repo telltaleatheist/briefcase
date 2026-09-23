@@ -757,11 +757,12 @@ Jest runs these as ordinary specs (`backend/test/crucible/*.spec.ts`, plus co-lo
 
 ---
 
-## 13. Open questions for the user
+## 13. Decisions from the user (2026-09-23), replacing the open questions
 
-1. **Intel Mac and non-NVIDIA Linux.** Crucible can't be installed on these at all; there is no upstream-only mode. Should Briefcase keep a **direct** Claude/OpenAI path for them (keys held by Briefcase), or is "connect to a Crucible on another machine, or no AI" acceptable? The plan assumes no direct path, so there is one AI path.
-2. **Whisper-cli's future.** Crucible asr has no translate, no CPU, no native-Windows support and no Intel Mac support. Should whisper-cli stay permanently as the offline or translate fallback (about 1.5 GB, optional download), or be deleted once Crucible adds translate (A5), leaving those machines without transcription?
-3. **Snap on the Mac.** Until Crucible serves more than 11 mlx logprobs (A2), snap-via-Crucible can't run chapter assign or flag pass 1 on the Mac Studio. Is classic-on-the-Mac acceptable meanwhile? Or should Briefcase's own scorer llama-server survive P7 on the Mac only, which goes against "all AI through Crucible"?
-4. **Keys on remote servers.** The plan moves keys only into the **local** Crucible, automatically. Is that right, or do you want a key to follow you to every server you add?
-5. **The transcriber for the Briefcase module.** `mlx-whisper-large-v3-turbo` on the Mac (fast; the plan's pick, since video transcripts aren't aligned against) or `large-v3` like BookForge? `faster-whisper-large-v3` on the PC either way, because there is no faster-whisper turbo in the catalog.
-6. **Losing embeddings.** Under Crucible, classic chapter boundaries go lexical-only, since Crucible has no embeddings. Is that acceptable as a stopgap until snap chapters take over, or do you want an embeddings route asked of Crucible?
+1. **Intel Mac and non-NVIDIA Linux: no local Crucible, by design.** Crucible installs only on Apple Silicon (darwin) or NVIDIA hosts, and that's expected. On those machines Briefcase skips the install and has the user connect to a Crucible on another computer that they choose. There is no direct cloud path: all AI goes through Crucible.
+2. **Server model: exactly BookForge's.** Briefcase finds the local Crucible automatically. If none is installed, it walks the user through the install. Settings and setup both let the user connect a different Crucible server, remote or LAN. Keys and upstreams live on whichever Crucible serves the call, configured through that server's settings as BookForge does (engine-settings). Briefcase doesn't copy keys between servers.
+3. **Whisper stays local.** whisper-cli remains Briefcase's transcriber. **P5 (ASR through Crucible) is dropped from the critical path.** It may come later as an option, but nothing depends on it. Translation is not a Briefcase requirement: videos are transcribed in their spoken language, and if anything ever needs translating, it goes through a separate text-translation step on Crucible (typically Qwen 27B). The existing `--translate` transcribe option can stay as it is; nothing is built around it.
+4. **Decide-route limits get fixed in Crucible.** The user is raising the candidate cap on the Mac and adding a lenient mode for missing labels on the decide-door branch (see §12 A2 and the floor policy). Briefcase targets the full option counts: 26 for chapter assign and 11 for flag pass 1. Classic analysis stays the fallback until that lands.
+5. **Still open, with defaults applied:**
+   - Transcriber model: moot while whisper stays local.
+   - Embeddings: the classic chapter path goes lexical-only under Crucible, as a stopgap until snap chapters take over.
