@@ -5,6 +5,8 @@
   "author": "Your Name",
   "private": true,
   "license": "MIT",
+  "//crucible-bootstrap": "Exact @crucible/bootstrap 1.0.23 LIBRARY tarball, vendored so a build is reproducible. It is the code that PERFORMS an install and never the release that GETS installed: which Crucible a machine should have is the release channel's answer, read at install time (crucible docs/INSTALL-UNINSTALL.md 6.5). Never replace with a directory dependency or repack these bytes.",
+  "//crucible-client": "CUT RELEASE 1.0.23: @crucible/client and @crucible/bootstrap are the vendored tarballs from crucible's v1.0.23 GitHub release (node tools/adopt-crucible-release.mjs <ver>, run from the repo root, fetches, repins and relinks). It is NOT a statement about which server this app can talk to; compatibility is the API version on X-Crucible-Api. Repin with the same tool, never by hand.",
   "scripts": {
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
@@ -17,10 +19,13 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json"
+    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "test:crucible": "jest --roots '<rootDir>/../test/crucible'"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.68.0",
+    "@crucible/bootstrap": "file:vendor/crucible-bootstrap-1.0.23.tgz",
+    "@crucible/client": "file:vendor/crucible-client-1.0.23.tgz",
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@ffprobe-installer/ffprobe": "^2.1.2",
     "@nestjs/common": "^11.0.13",
@@ -87,13 +92,22 @@
     "rootDir": "src",
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
-      "^.+\\.(t|j)s$": "ts-jest"
+      "^.+\\.(t|j)s$": [
+        "ts-jest",
+        {
+          "tsconfig": "<rootDir>/../tsconfig.spec.json"
+        }
+      ]
     },
     "collectCoverageFrom": [
       "**/*.(t|j)s"
     ],
     "coverageDirectory": "../coverage",
-    "testEnvironment": "node"
+    "testEnvironment": "node",
+    "roots": [
+      "<rootDir>",
+      "<rootDir>/../test"
+    ]
   },
   "optionalDependencies": {
     "@ffprobe-installer/darwin-arm64": "^5.0.1",

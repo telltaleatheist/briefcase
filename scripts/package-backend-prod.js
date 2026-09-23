@@ -25,12 +25,17 @@ const arch = process.arch; // 'arm64' or 'x64'
  * Calculate hash of package-lock.json to detect dependency changes
  */
 function getPackageLockHash() {
+  // package-lock.json is gitignored, so it can be absent; the dependency list in
+  // package.json (which names the vendored @crucible/* tarballs by version) is
+  // hashed too, so a repin never restores a cache built without it.
+  const hash = crypto.createHash('md5');
+  const pkg = require(path.join(backendDir, 'package.json'));
+  hash.update(JSON.stringify({ dependencies: pkg.dependencies, optionalDependencies: pkg.optionalDependencies }));
   const lockFile = path.join(backendDir, 'package-lock.json');
-  if (!fs.existsSync(lockFile)) {
-    return null;
+  if (fs.existsSync(lockFile)) {
+    hash.update(fs.readFileSync(lockFile));
   }
-  const content = fs.readFileSync(lockFile);
-  return crypto.createHash('md5').update(content).digest('hex').substring(0, 12);
+  return hash.digest('hex').substring(0, 12);
 }
 
 /**
@@ -198,6 +203,14 @@ async function main() {
     fs.copySync(path.join(backendDir, 'package.json'), path.join(tempDir, 'package.json'));
     if (fs.existsSync(path.join(backendDir, 'package-lock.json'))) {
       fs.copySync(path.join(backendDir, 'package-lock.json'), path.join(tempDir, 'package-lock.json'));
+    }
+
+    // Copy vendor/: the @crucible/* SDK tarballs are `file:vendor/*.tgz`
+    // dependencies, which npm resolves relative to this package.json, so the
+    // production install cannot find them without it.
+    if (fs.existsSync(path.join(backendDir, 'vendor'))) {
+      console.log('   ✓ Copying vendor/...');
+      fs.copySync(path.join(backendDir, 'vendor'), path.join(tempDir, 'vendor'));
     }
 
     // Copy dist folder (compiled code)
