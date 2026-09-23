@@ -1,12 +1,99 @@
 # Snap Analysis: Chapters and Flags on Logit Decisions
 
-Design doc, 2026-09-23. Branch `feat/snap-scorer`. Status: **planning**. The snap core is
-being ported to TypeScript at `backend/src/scorer/` in parallel; this doc treats that port
-as a `decide()` primitive and plans everything built on top of it.
+Design doc, 2026-09-23. Branch `feat/snap-scorer`. Status: **built and wired behind a
+setting, default off; pending a live run** (see Status below). The snap core is ported to
+TypeScript at `backend/src/scorer/`; this doc treats that port as a `decide()` primitive and
+plans everything built on top of it.
 
 > `docs/` is gitignored (`.gitignore:87`). Commit with `git add -f docs/snap-analysis-plan.md`.
 
 Line numbers below are for this worktree, which matches `main` HEAD (`9cbcb57`).
+
+---
+
+## Status (2026-09-23)
+
+Nothing below has run against a model yet (the GPU was busy); everything is unit-tested with
+fake scorers. The classic pipeline is still the default and is unchanged when the setting is
+absent.
+
+**Built** (`backend/src/scorer/`): the snap decision engine and its own llama-server
+lifecycle (`scorer-*.ts`); chapters (`chapters/`: outline, assign, Viterbi, ad confirmation,
+chunking and seam stitching); the flag ranker (`flags/`: pass 1, pass 2, span Viterbi,
+co-fire ranking, `buildWindows`, verify budget, offline eval); **one unit builder**
+(`chapters/units.ts`, `assembleUnits` with sentence ranges and the under-4-word fold) and
+**one transcript per video** (`snap-transcript.ts`: units + one `/tokenize` chunk plan) shared
+by both passes. A spec proves the chapter state is a byte prefix of the flag state, and the
+rendered chapter prime a byte prefix of the flag prime, per chunk.
+
+**Wired** (behind the setting):
+- **Setting** `analysisEngine` in `app-config.json`: `"classic"` (default) | `"snap"` |
+  `{ "chapters": "snap"|"classic", "flags": "snap"|"nli" }`; env `BRIEFCASE_ANALYSIS_ENGINE=snap`
+  beats it; `GET/POST /config/analysis-engine` reads/writes it and reports scorer availability.
+  No UI yet: it belongs in Settings -> Components (`components-pane.component.html`, an
+  "Analysis engine" section next to "Flag detection", §8.4), not the per-run inspector.
+- **Scorer stage** (`SnapAnalysisService`, `SnapAnalysisModule` imported by `AnalysisModule`):
+  chapters then flags in **one** `withScorer` lease, before any LLM stage. Progress 3-15 %.
+- **Chapters**: boundaries and titles from the scorer; the existing per-chapter LLM call runs
+  for the summary only (title discarded), no `splitLongChapters`; tags, description and title
+  come from those chapters as before.
+- **Flags**: `runRankedFlagStage` takes the snap windows instead of the NLI ranker; verifier,
+  prompt, cache and order unchanged. Over-budget windows: verified free when every question is
+  cached, else stored as `verdict='candidate'`. Accepted sub-passages of one span are stored as
+  **one** section. Rows carry `ranker` (`'nli'` / `'snap-v1'`); the snap `s_c` is stored in
+  `nli_score` (§5.6).
+- **Migration 26**: `analysis_sections.ranker TEXT`, additive, backfilled `'nli'` where
+  `nli_score IS NOT NULL` (only NLI ever wrote it). `'candidate'` needs no migration (no CHECK).
+  Frontend `flag-filter.ts`: candidates at **All** only, ghosted, captioned "not verified".
+- **Fallback**: scorer unavailable (no model / no binary / module absent) or failing -> that
+  stage runs classic (embedding chapters; NLI then discovery flags) and the job gets one warning
+  per reason. A cancel inside the scorer stage propagates as a cancellation and never falls back.
+
+**Pending a live run**: the smoke script (§ Live validation below), then one real video end to
+end with `BRIEFCASE_ANALYSIS_ENGINE=snap`, then the flag regression (`flags/eval/flag-eval.ts`,
+§6.1). The default flips only after §6 passes.
+
+**Follow-ups (not done)**:
+- Per-ranker Review threshold: `NEAR_MISS_SCORE` (0.9, NLI-calibrated) currently applies to snap
+  `skip` rows too; make it `Record<ranker, number>` once the snap distribution is known (§5.6).
+- Memory handoff (§3.4): the scorer is not stopped before a local verifier on small machines;
+  it idles out after `scorerIdleMinutes`.
+- `analyses.ai_model` does not yet record the engine; the snap rating map is not dumped per video.
+- Outline routing to the user's chapter model for small scorers (§4.1) is not wired: the scorer
+  always writes the outline.
+- Multi-chunk videos (> ~16k tokens) re-prime each chunk once per pass (chapters, flag pass 1,
+  flag pass 2); single-chunk videos prime once.
+- The flag layout default is `'prefix'` (legend in the state), unmeasured for accuracy (§6.4).
+- Binaries (§8.2: llama.cpp >= b10964 in `binaries-v1`) and the scorer model component/wizard
+  (§8.3-8.4) are unchanged: the scorer needs Homebrew llama.cpp or `BRIEFCASE_SCORER_LLAMA_SERVER`.
+
+### Live validation
+
+Once the GPU is free (from `backend/`):
+
+```bash
+TSC=/Volumes/Callisto/Projects/Briefcase/node_modules/.bin/tsc
+$TSC --outDir dist --rootDir src --module commonjs --target ES2021 --strict \
+     --experimentalDecorators --emitDecoratorMetadata --skipLibCheck --types node \
+     src/scorer/live/snap-smoke.ts                  # or: npm run build
+node dist/scorer/live/snap-smoke.js --offline      # no GPU: the scoring port (already PASS)
+node dist/scorer/live/snap-smoke.js                # starts the scorer (app-config scorerModel)
+node dist/scorer/live/snap-smoke.js --engine http://127.0.0.1:8481   # or attach to one
+```
+
+It runs snap's sanity cases (yes/no sentiment, choice routing, score ordering), then chapters
+on the 24 YTSeg videos of `bench.py sample(24)` with the cached 9B outlines injected (only
+assign + ad confirmation on the scorer), scored like `bench_snap.py`: F1@±1, F1@±3, Pk at
+switch costs 10/20/30/40, against ContentStudio's **0.72 / 0.23 at 20**, plus s/sentence
+(ContentStudio 0.70). Exit 0 = sanity passed and F1@±1 within 0.02 of 0.72 (the §6.3 gate).
+`--json out.json` keeps everything. The sample JSON is made once by
+`src/scorer/live/ytseg-sample.py` (pandas + pyarrow) and already exists at
+`content-studio-chaptering-ref/bench-cache/ytseg-sample-24.json`. `--offline` on the cached
+Python matrices gives 0.720 / 0.229 at 20, identical to `bench_snap.py score`.
+
+Then an end-to-end run on a real video: `BRIEFCASE_ANALYSIS_ENGINE=snap npm run dev`, analyze
+one video, and check the log's `[Engine]`, `[Snap]` and `[Pass 2b] FLAG PATH` lines and the
+job's warnings.
 
 ---
 
@@ -618,11 +705,13 @@ is a promise.
 
 ### 8.1 Settings and fallback order
 
-Add to `app-config.json`, read like `taskModels`:
+Add to `app-config.json`, read like `taskModels` (as built: `scorer/analysis-engine.ts`,
+which also accepts the plain string `"snap"` / `"classic"` and the env override
+`BRIEFCASE_ANALYSIS_ENGINE`; `scorerModel` is a GGUF filename, see `scorer-config.ts`):
 
 ```json
 "analysisEngine": { "chapters": "snap" | "classic", "flags": "snap" | "nli" },
-"scorerModel": "scorer-qwen3.5-9b-bf16"
+"scorerModel": "Qwen3.5-9B-BF16.gguf"
 ```
 
 The defaults are `classic` / `nli` until §6 passes. After that they flip to `snap`
