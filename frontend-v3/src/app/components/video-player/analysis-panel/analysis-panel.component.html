@@ -132,13 +132,13 @@
             [class.follow-current]="followCursor() && section.id === currentSectionId"
             [class.ghosted]="isGhostSection(section)"
             [style.--section-color]="section.color"
-            [title]="isGhostSection(section) ? verifierRejectionLabel + ' — ' + section.description : section.description">
+            [title]="isGhostSection(section) ? ghostCaption(section) + ' — ' + section.description : section.description">
             <button class="section-content" (click)="onSectionClick(section)">
               <div class="section-time">
                 {{ formatTimeRange(section.startTime, section.endTime) }}
                 <span class="section-category-badge" [style.backgroundColor]="section.color">{{ section.category }}</span>
                 @if (isGhostSection(section)) {
-                  <span class="section-verdict-badge">{{ verifierRejectionLabel }}</span>
+                  <span class="section-verdict-badge">{{ ghostCaption(section) }}</span>
                 }
               </div>
               <div class="section-description">

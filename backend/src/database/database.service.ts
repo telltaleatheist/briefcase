@@ -87,14 +87,28 @@ export interface AnalysisSectionRecord {
    * NULL means LEGACY — a row written before verdicts were stored, or by the
    * discovery fallback path, which produces no rejected candidates. Readers
    * treat NULL as 'flag'.
+   *
+   * 'candidate' (snap engine only): a ranked passage the verify budget did not
+   * reach. Never judged by the verifier; stored rather than discarded (plan
+   * §5.6), shown only at the All filter position.
    */
-  verdict: 'flag' | 'skip' | null;
+  verdict: 'flag' | 'skip' | 'candidate' | null;
   /**
    * The NLI ranker's score for the category this row carries, 0-1. NULL on
    * legacy and discovery rows; readers treat NULL as passing every filter
    * threshold so old data renders unchanged.
+   *
+   * On a row with ranker = 'snap-v1' this is the snap ranker's per-category
+   * span score s_c, not an NLI entailment probability: same column, different
+   * scale, told apart by `ranker` (docs/snap-analysis-plan.md §5.6).
    */
   nli_score: number | null;
+  /**
+   * Which ranker produced the row's candidate: 'nli', 'snap-v1', or NULL on
+   * legacy/discovery rows (migration 26). Lets readers pick a per-ranker
+   * threshold for `nli_score`.
+   */
+  ranker: string | null;
 }
 
 /**
@@ -592,6 +606,7 @@ export class DatabaseService {
         source TEXT DEFAULT 'ai',
         verdict TEXT,
         nli_score REAL,
+        ranker TEXT,
         FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
       );
 
@@ -1855,6 +1870,43 @@ export class DatabaseService {
     // which runs on every open, so an existing library picks it up empty on the
     // next load. This comment exists so the next person looking for "where does
     // flag_verdict_cache get created for old libraries" stops here.
+
+    // Migration 26: Add ranker to analysis_sections.
+    //
+    // The flag pipeline has two rankers now (NLI, and the snap scorer behind the
+    // analysisEngine setting), and nli_score means a different scale on each, so
+    // a row has to say which one scored it. Additive and nullable, like
+    // migration 24: the classic path keeps working against an old or new schema.
+    //
+    // BACKFILL IS FACTUAL, unlike migration 24's deliberate no-backfill: before
+    // this migration the NLI ranker was the ONLY writer of nli_score, so every
+    // row with a score IS an NLI row. Rows without one (legacy, discovery)
+    // stay NULL.
+    try {
+      db.exec('SELECT ranker FROM analysis_sections LIMIT 1');
+    } catch (error: any) {
+      if (error?.message && error.message.includes('no such column: ranker')) {
+        this.logger.log('Running migration: Adding ranker column to analysis_sections table');
+        try {
+          db.exec(`
+            ALTER TABLE analysis_sections ADD COLUMN ranker TEXT;
+            UPDATE analysis_sections SET ranker = 'nli' WHERE ranker IS NULL AND nli_score IS NOT NULL;
+          `);
+          this.saveDatabase();
+          this.logger.log('Migration complete: ranker column added to analysis_sections');
+        } catch (migrationError: any) {
+          // Fallback audit #6: a half-migrated schema corrupts every later write
+          // to the missing column. Abort the library load loudly.
+          throw new Error(
+            `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
+            `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
+            `Check that the library volume is mounted and writable, then reopen the library.`,
+          );
+        }
+      } else if (!error?.message || !error.message.includes('no such table')) {
+        throw error;
+      }
+    }
 
     // Migration: Create transcripts_soundex_fts FTS5 table for phonetic search
     try {
@@ -3930,17 +3982,19 @@ export class DatabaseService {
      * column is written NULL and every reader treats it as 'flag'. Callers on
      * the ranked path always pass one, including 'skip'.
      */
-    verdict?: 'flag' | 'skip';
+    verdict?: 'flag' | 'skip' | 'candidate';
     /** The ranker's score for this row's category. Omitted on paths with no score. */
     nliScore?: number;
+    /** Which ranker scored the row ('nli' | 'snap-v1'). Omitted on paths with no ranker. */
+    ranker?: string;
   }) {
     const db = this.ensureInitialized();
 
     db.prepare(
       `INSERT INTO analysis_sections (
         id, video_id, start_seconds, end_seconds, timestamp_text, title, description, category, source,
-        verdict, nli_score
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        verdict, nli_score, ranker
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       section.id,
       section.videoId,
@@ -3955,6 +4009,7 @@ export class DatabaseService {
       typeof section.nliScore === 'number' && Number.isFinite(section.nliScore)
         ? section.nliScore
         : null,
+      section.ranker ?? null,
     );
 
     this.saveDatabase();

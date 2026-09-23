@@ -1,7 +1,7 @@
 import { Component, Input, Output, EventEmitter, OnChanges, SimpleChanges } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { TimelineSection, ZoomState } from '../../../../models/video-editor.model';
-import { VERIFIER_REJECTION_LABEL, isGhosted } from '../../../../models/flag-filter';
+import { VERIFIER_REJECTION_LABEL, ghostLabel, isGhosted } from '../../../../models/flag-filter';
 
 interface SectionStyle {
   left: string;
@@ -31,6 +31,11 @@ export class TimelineSectionsLayerComponent implements OnChanges {
    */
   isGhostSection(section: TimelineSection): boolean {
     return isGhosted(section);
+  }
+
+  /** The rejection caption, or "not verified" on a snap candidate row. */
+  ghostCaption(section: TimelineSection): string {
+    return ghostLabel(section);
   }
   @Input() duration: number = 0;
   @Input() zoomState: ZoomState = { level: 1, offset: 0 };

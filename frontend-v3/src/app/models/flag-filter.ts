@@ -105,13 +105,23 @@ export const FLAG_FILTER_DESCRIPTION: Record<FlagFilter, string> = {
 export const VERIFIER_REJECTION_LABEL = 'verifier: reported/opposed, not asserted';
 
 /**
+ * The caption on a 'candidate' row (snap engine only): a passage the ranker
+ * captured but the verify budget did not reach. It was never judged, so it must
+ * not borrow the rejection caption — "not verified" is the whole truth.
+ */
+export const UNVERIFIED_CANDIDATE_LABEL = 'not verified (beyond the verification budget)';
+
+/**
  * The shape this filter needs from a section. Deliberately structural, so both
  * the section list and the timeline marker layer can filter the same way without
  * either importing the other's model.
  */
 export interface FlagFilterable {
-  /** 'flag' | 'skip', or null/undefined on legacy and discovery rows. */
-  verdict?: 'flag' | 'skip' | null;
+  /**
+   * 'flag' | 'skip', or null/undefined on legacy and discovery rows. 'candidate'
+   * (snap engine only): captured, never verified — shown at ALL only.
+   */
+  verdict?: 'flag' | 'skip' | 'candidate' | null;
   /** 0-1, or null/undefined where there is no ranker score. */
   nliScore?: number | null;
 }
@@ -128,6 +138,9 @@ export function passesFlagFilter(section: FlagFilterable, filter: FlagFilter): b
   // the verifier — see the note at the top of this file.
   if (verdict === 'flag') return true;
 
+  // Never verified: not a finding and not a near miss, so ALL only.
+  if (verdict === 'candidate') return false;
+
   // Rejected: shown only at REVIEW, and only when the ranker was highly certain
   // the passage was on-topic, so the rejection turned on stance alone.
   if (filter !== 'review') return false;
@@ -140,7 +153,12 @@ export function passesFlagFilter(section: FlagFilterable, filter: FlagFilter): b
 
 /** True when this section should be rendered as a verifier rejection. */
 export function isGhosted(section: FlagFilterable): boolean {
-  return section.verdict === 'skip';
+  return section.verdict === 'skip' || section.verdict === 'candidate';
+}
+
+/** The caption a ghosted row carries: the verifier's rejection, or "not verified" for a candidate. */
+export function ghostLabel(section: FlagFilterable): string {
+  return section.verdict === 'candidate' ? UNVERIFIED_CANDIDATE_LABEL : VERIFIER_REJECTION_LABEL;
 }
 
 /**

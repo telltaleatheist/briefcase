@@ -1189,6 +1189,7 @@ export class AnalysisService implements OnModuleInit {
                 // read back as "legacy: a flag that passes every filter".
                 verdict: section.verdict,
                 nliScore: section.nli_score,
+                ranker: section.ranker,
               });
             }
           }

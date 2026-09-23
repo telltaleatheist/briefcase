@@ -9,6 +9,7 @@ import {
   FLAG_FILTER_LABEL,
   VERIFIER_REJECTION_LABEL,
   isGhosted,
+  ghostLabel,
 } from '../../../models/flag-filter';
 import { TranscriptionSegment } from '../../../models/video-info.model';
 import { TranscriptSearchService, TranscriptSearchOptions } from '../../../services/transcript-search.service';
@@ -307,6 +308,11 @@ export class AnalysisPanelComponent implements OnChanges {
    */
   isGhostSection(section: TimelineSection): boolean {
     return isGhosted(section);
+  }
+
+  /** The rejection caption, or "not verified" on a snap candidate row. */
+  ghostCaption(section: TimelineSection): string {
+    return ghostLabel(section);
   }
 
   isCategoryEnabled(category: string): boolean {

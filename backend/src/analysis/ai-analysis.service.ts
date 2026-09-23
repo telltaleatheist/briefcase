@@ -88,14 +88,21 @@ export interface AnalyzedSection {
    *
    * ABSENT on the discovery fallback path and on everything that is not a flag
    * (chapter sections, legacy rows). Absent is read as 'flag' everywhere.
+   *
+   * 'candidate' comes only from the snap engine: a ranked passage beyond the
+   * verify budget, stored unverified (plan §5.6) and shown only at All.
    */
-  verdict?: 'flag' | 'skip';
+  verdict?: 'flag' | 'skip' | 'candidate';
   /**
-   * The NLI ranker's score, 0-1, for the category this section carries — the
-   * number the display filter thresholds on (STRICT >= 0.9, MODERATE >= 0.7).
-   * Absent wherever there is no ranker score, and absent passes every filter.
+   * The ranker's score, 0-1, for the category this section carries — the
+   * number the display filter thresholds on. For ranker 'nli' an entailment
+   * probability; for 'snap-v1' the snap span score s_c (same column, told apart
+   * by `ranker`). Absent wherever there is no ranker score, and absent passes
+   * every filter.
    */
   nli_score?: number;
+  /** Which ranker produced the candidate ('nli' | 'snap-v1'). Absent on discovery and legacy rows. */
+  ranker?: 'nli' | 'snap-v1';
 }
 
 export interface Chapter {

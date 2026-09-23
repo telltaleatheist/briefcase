@@ -10,7 +10,7 @@
       [style.borderColor]="getSectionStyle(section).borderColor"
       [style.display]="getSectionStyle(section).display"
       [title]="isGhostSection(section)
-        ? section.category + ' [' + verifierRejectionLabel + ']: ' + section.description
+        ? section.category + ' [' + ghostCaption(section) + ']: ' + section.description
         : section.category + ': ' + section.description"
       (click)="onSectionClick(section, $event)"
       (mouseenter)="onSectionMouseEnter(section)"

@@ -772,6 +772,7 @@ export class MediaOperationsService {
             // reads back as a legacy flag.
             verdict: section.verdict,
             nliScore: section.nli_score,
+            ranker: section.ranker,
           });
         }
         this.logger.log(`[${jobId || 'standalone'}] Saved ${analysisResult.sections.length} analysis sections`);
