@@ -22,6 +22,7 @@ import { CommonModule } from './common/common.module';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { BridgesModule } from './bridges';
 import { ScorerModule } from './scorer/scorer.module';
+import { CrucibleModule } from './crucible/crucible.module';
 import { join } from 'path';
 
 @Global()
@@ -57,6 +58,7 @@ import { join } from 'path';
     LibraryModule,
     WebArchiveModule,
     JobStateManagerModule,
+    CrucibleModule,
   ],
   controllers: [AppController],
   providers: [AppService],
