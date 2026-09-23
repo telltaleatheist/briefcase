@@ -31,7 +31,7 @@ describe('assembleUnits', () => {
       { start: 0, end: 6, text: 'Okay. Yeah, right. So here is the actual point.' },
       { start: 6, end: 10, text: 'It has at least four words.' },
       { start: 10, end: 11, text: 'Bye now.' },
-    ]));
+    ]);
   });
 
   it('can disable the fold', () => {
