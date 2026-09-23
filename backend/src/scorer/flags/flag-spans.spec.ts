@@ -233,7 +233,8 @@ describe('units and chunks', () => {
     const units = buildFlagUnits(sentences);
     expect(units.map((u) => [u.sentenceFrom, u.sentenceTo, u.start, u.end])).toEqual([
       [0, 1, 0, 5],
-      [2, 3, 5, 10], // short tail folds back
+      [2, 2, 5, 9],
+      [3, 3, 9, 10], // a short tail stays a unit of its own (submap.py; the builder chapters share)
     ]);
     expect(units[0].text).toBe('Yeah. This is the actual point here.');
   });

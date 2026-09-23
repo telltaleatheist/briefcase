@@ -17,3 +17,4 @@ export { LETTERS, MAX_OPTIONS } from './scorer-labels';
 export { loadScorerConfig, resolveScorerBinary, buildScorerArgs, SCORER_BINARY_ENV } from './scorer-config';
 export { ScorerServerService, type ScorerHandle, type ScorerServerStatus } from './scorer-server.service';
 export { ScorerModule } from './scorer.module';
+export { buildSnapTranscript, chunkTranscript, type SnapTranscript } from './snap-transcript';

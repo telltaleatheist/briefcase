@@ -20,7 +20,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ScorerServerService } from '../scorer-server.service';
 import { ChoiceAnswer, DecideOptions, DecideRequest, DecideResponse, GenerateOptions, GenerateResult, ScorerError, YesNoAnswer } from '../scorer.types';
 import { viterbi } from '../scorer-viterbi';
-import { ChunkPath, ChunkPlanOptions, Seam, planChunks, stitchChunks } from './chunks';
+import { Chunk, ChunkPath, ChunkPlanOptions, Seam, planChunks, stitchChunks } from './chunks';
 import { BATCH, OUTLINE_MAX_TOKENS, PLUG, START_OF_VIDEO, outlinePrompt, plugStatement } from './snap-prompts';
 import {
   PlugVerdict,
@@ -32,7 +32,7 @@ import {
   parseOutline,
   piecesToChapters,
 } from './segmenter';
-import { SentenceUnit, TranscriptSegment, assembleUnits } from './units';
+import { SentenceUnit, SnapUnit, TranscriptSegment, assembleUnits } from './units';
 
 /** What the pipeline needs from the scorer (a ScorerHandle satisfies it; tests pass a fake). */
 export interface ChapterScorer {
@@ -67,6 +67,11 @@ export interface BuildChaptersOptions {
   totalSeconds?: number;
   /** Chunk sizes (tokens); defaults 16k single / 12k core / 2k overlap. */
   chunking?: ChunkPlanOptions;
+  /**
+   * A chunk plan made once per video and shared with the flag pass (plan §3.2):
+   * both passes then build byte-identical chunk states. Absent: planned here.
+   */
+  chunkPlan?: Chunk[];
   /**
    * Who writes the outline. Default: the scorer model (the measured setup).
    * Plan §4.1 may route it to the user's chapter model when the scorer is small.
@@ -127,7 +132,7 @@ export async function runSnapChapters(
   throwIfAborted(signal);
 
   const texts = units.map((u) => u.text);
-  const chunks = planChunks(await unitTokens(scorer, texts, signal), opts.chunking);
+  const chunks = opts.chunkPlan ?? planChunks(await unitTokens(scorer, texts, signal), opts.chunking);
   const unitsTotal = chunks.reduce((n, c) => n + (c.end - c.start), 0);
   let unitsDone = 0;
   let doneWeight = 0;
@@ -234,7 +239,11 @@ export async function runSnapChapters(
  * state text, shared out over the units by character length (a per-unit call
  * would be thousands of requests). Without a tokenizer: ~4 characters per token.
  */
-async function unitTokens(scorer: ChapterScorer, texts: string[], signal?: AbortSignal): Promise<number[]> {
+export async function unitTokens(
+  scorer: Pick<ChapterScorer, 'countTokens'>,
+  texts: string[],
+  signal?: AbortSignal,
+): Promise<number[]> {
   const chars = texts.map((s) => s.length + 1);
   const totalChars = chars.reduce((a, b) => a + b, 0);
   const total = scorer.countTokens ? await scorer.countTokens(texts.join('\n'), signal) : totalChars / 4;
@@ -247,8 +256,8 @@ export class SnapChapterService {
 
   constructor(private readonly scorer: ScorerServerService) {}
 
-  /** Whisper segments -> sentence units (assembleSentences + fold + run-on cap). */
-  unitsFromSegments(segments: TranscriptSegment[]): SentenceUnit[] {
+  /** Whisper segments -> sentence units (assembleSentences + fold + run-on cap); the same list flags use. */
+  unitsFromSegments(segments: TranscriptSegment[]): SnapUnit[] {
     return assembleUnits(segments);
   }
 

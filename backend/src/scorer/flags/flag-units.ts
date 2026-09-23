@@ -8,108 +8,28 @@
  * every span maps back to whole sentences. A unit's times are its sentences'
  * times, which are whisper segment times; nothing is interpolated.
  *
- * DEVIATION (plan §3.1): the plan's run-on cap splits "at segment boundaries".
- * The ranker's input is the sentence list the verifier stage already has, not
- * the raw segments, so a run-on is split by word count instead, and each piece
- * keeps the times of the sentence(s) it lies in (never an interpolated time).
- * The pieces exist only to give the scorer shorter questions; the spans they
- * produce still resolve to whole sentences.
+ * ONE UNIT BUILDER (chapters/units.ts) serves chapters and flags, so the two
+ * passes ask about the same units against the same state and share one primed
+ * checkpoint (plan §3.2). In the analysis pipeline the units come from
+ * `assembleUnits(segments)` (run-ons cut at segment boundaries) and are passed
+ * in; `buildFlagUnits(sentences)` is the standalone entry for callers that only
+ * hold sentences (the eval), where a run-on is cut by word count instead.
  */
 
 import type { RankedSentence } from '../../analysis/nli-ranker.service';
+import type { Chunk } from '../chapters/chunks';
+import { AssembleUnitsOptions, DEFAULT_UNIT_OPTIONS as UNIT_DEFAULTS, SnapUnit, unitsFromSentences } from '../chapters/units';
 
-export interface FlagUnit {
-  index: number;
-  text: string;
-  /** Inclusive sentence-index range this unit covers. */
-  sentenceFrom: number;
-  sentenceTo: number;
-  /** Segment times: sentences[sentenceFrom].start / sentences[sentenceTo].end. */
-  start: number;
-  end: number;
-}
+/** A flag unit is a snap unit: index, text, inclusive sentence range, segment times. */
+export type FlagUnit = SnapUnit;
 
-export interface UnitOptions {
-  /** Sentences under this many words fold into the next one (ContentStudio min_words). */
-  minWords?: number;
-  /** A unit over this many words, or over maxSeconds with more than pieceWords words, is split. */
-  maxWords?: number;
-  maxSeconds?: number;
-  /** Target words per piece when splitting a run-on. */
-  pieceWords?: number;
-}
+export type UnitOptions = AssembleUnitsOptions;
 
-export const DEFAULT_UNIT_OPTIONS: Required<UnitOptions> = {
-  minWords: 4,
-  maxWords: 60,
-  maxSeconds: 30,
-  pieceWords: 30,
-};
+export const DEFAULT_UNIT_OPTIONS: Required<UnitOptions> = UNIT_DEFAULTS;
 
-function wordsOf(text: string): string[] {
-  return text.split(/\s+/).filter(Boolean);
-}
-
-/**
- * Fold short sentences forward, then cap run-ons. Pure.
- */
+/** Fold short sentences forward, then cap run-ons (by word count). Pure. */
 export function buildFlagUnits(sentences: RankedSentence[], options: UnitOptions = {}): FlagUnit[] {
-  const o = { ...DEFAULT_UNIT_OPTIONS, ...options };
-
-  // 1. Fold: accumulate sentences until the group reaches minWords.
-  const groups: Array<{ from: number; to: number }> = [];
-  let open: { from: number; to: number; words: number } | null = null;
-  for (let i = 0; i < sentences.length; i++) {
-    const n = wordsOf(sentences[i].text).length;
-    if (!open) open = { from: i, to: i, words: n };
-    else {
-      open.to = i;
-      open.words += n;
-    }
-    if (open.words >= o.minWords) {
-      groups.push({ from: open.from, to: open.to });
-      open = null;
-    }
-  }
-  if (open) {
-    // A short tail folds into the previous unit (there is no following one).
-    if (groups.length) groups[groups.length - 1].to = open.to;
-    else groups.push({ from: open.from, to: open.to });
-  }
-
-  // 2. Cap run-ons, splitting by words; each piece keeps its sentences' times.
-  const units: FlagUnit[] = [];
-  const push = (text: string, from: number, to: number) =>
-    units.push({
-      index: units.length,
-      text,
-      sentenceFrom: from,
-      sentenceTo: to,
-      start: sentences[from].start,
-      end: sentences[to].end,
-    });
-
-  for (const g of groups) {
-    const words: Array<{ w: string; s: number }> = [];
-    for (let s = g.from; s <= g.to; s++) for (const w of wordsOf(sentences[s].text)) words.push({ w, s });
-    const seconds = sentences[g.to].end - sentences[g.from].start;
-    const tooLong = words.length > o.maxWords || (seconds > o.maxSeconds && words.length > o.pieceWords);
-    if (!tooLong) {
-      const text = sentences
-        .slice(g.from, g.to + 1)
-        .map((s) => s.text.trim())
-        .join(' ');
-      push(text, g.from, g.to);
-      continue;
-    }
-    const pieces = Math.ceil(words.length / o.pieceWords);
-    const size = Math.ceil(words.length / pieces);
-    for (let k = 0; k < words.length; k += size) {
-      const slice = words.slice(k, k + size);
-      push(slice.map((x) => x.w).join(' '), slice[0].s, slice[slice.length - 1].s);
-    }
-  }
-  return units;
+  return unitsFromSentences(sentences, options);
 }
 
 // --------------------------------------------------------------------------- chunks
@@ -186,4 +106,9 @@ export function planFlagChunks(units: FlagUnit[], options: ChunkOptions = {}): F
     while (hi < n && t + tok[hi] <= o.overlapTokens) t += tok[hi++];
     return { coreFrom: a, coreTo: b, contextFrom: lo, contextTo: hi };
   });
+}
+
+/** The chapter pipeline's chunk plan in the flag ranker's terms (same units, same state). */
+export function flagChunksFromPlan(chunks: Chunk[]): FlagChunk[] {
+  return chunks.map((c) => ({ coreFrom: c.coreStart, coreTo: c.coreEnd, contextFrom: c.start, contextTo: c.end }));
 }

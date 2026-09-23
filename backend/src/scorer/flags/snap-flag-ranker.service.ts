@@ -56,7 +56,7 @@ import {
   rankFromRatingMap,
   selectPass2Categories,
 } from './flag-spans';
-import { ChunkOptions, FlagChunk, UnitOptions, buildFlagUnits, planFlagChunks } from './flag-units';
+import { ChunkOptions, FlagChunk, FlagUnit, UnitOptions, buildFlagUnits, planFlagChunks } from './flag-units';
 
 /** The one scorer call the ranker needs. A ScorerHandle (withScorer) satisfies it; tests pass a fake. */
 export interface FlagScorer {
@@ -82,6 +82,17 @@ export interface SnapFlagRankOptions {
   params?: Partial<FlagSpanParams>;
   units?: UnitOptions;
   chunks?: ChunkOptions;
+  /**
+   * The unit list to score, built ONCE per video by assembleUnits(segments) and
+   * shared with the chapter pass (plan §3.2). Its sentence ranges must index
+   * `sentences`. Absent: built here from `sentences` (buildFlagUnits).
+   */
+  unitList?: FlagUnit[];
+  /**
+   * The chunk plan to score against, shared with the chapter pass
+   * (flagChunksFromPlan). Absent: planned here (planFlagChunks, estimated tokens).
+   */
+  chunkPlan?: FlagChunk[];
   /** Questions per decide() call (each call primes once, a cache hit after the first). Default 64. */
   batchSize?: number;
   /** Engine top-n. Default 100 (plan §3.4); missing letters are floored, never refused. */
@@ -166,8 +177,8 @@ export class SnapFlagRanker {
     const { plan, notes } = buildFlagPlan(categories, { includeMisinformation: options.includeMisinformation });
     for (const note of notes) this.logger.log(`[SnapFlags] ${note}`);
 
-    const units = plan.length && sentences.length ? buildFlagUnits(sentences, options.units) : [];
-    const chunks = planFlagChunks(units, options.chunks);
+    const units = !plan.length || !sentences.length ? [] : (options.unitList ?? buildFlagUnits(sentences, options.units));
+    const chunks = !units.length ? [] : (options.chunkPlan ?? planFlagChunks(units, options.chunks));
     const map: FlagRatingMap = {
       version: RATING_MAP_VERSION,
       ranker: 'snap-v1',

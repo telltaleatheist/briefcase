@@ -257,7 +257,7 @@ describe('SnapChapterService', () => {
   it('builds units from whisper segments', () => {
     const svc = new SnapChapterService({} as ScorerServerService);
     expect(svc.unitsFromSegments([{ start: 0, end: 2, text: 'Hi. This is a whole sentence.' }])).toEqual([
-      { start: 0, end: 2, text: 'Hi. This is a whole sentence.' },
+      { index: 0, start: 0, end: 2, text: 'Hi. This is a whole sentence.', sentenceFrom: 0, sentenceTo: 1 },
     ]);
   });
 });
