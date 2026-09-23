@@ -18,3 +18,13 @@ export { loadScorerConfig, resolveScorerBinary, buildScorerArgs, SCORER_BINARY_E
 export { ScorerServerService, type ScorerHandle, type ScorerServerStatus } from './scorer-server.service';
 export { ScorerModule } from './scorer.module';
 export { buildSnapTranscript, chunkTranscript, type SnapTranscript } from './snap-transcript';
+export { SnapAnalysisService, type SnapStageRequest, type SnapStageResult, type SnapStageProgress } from './snap-analysis.service';
+export { SnapAnalysisModule } from './snap-analysis.module';
+export {
+  resolveAnalysisEngine,
+  snapFallbackMessage,
+  wantsScorer,
+  engineLabel,
+  ANALYSIS_ENGINE_ENV,
+  type AnalysisEngineSetting,
+} from './analysis-engine';
