@@ -103,7 +103,7 @@ export function installRefusalOf(err: unknown): CrucibleHostRefusal {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// WHICH Crucible gets installed: the channel's latest, and never an older one
+// WHICH Crucible gets installed: the newest release, and never an older one
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -112,7 +112,7 @@ export function installRefusalOf(err: unknown): CrucibleHostRefusal {
  * 1.0.23 and watch nothing spawn.
  */
 export interface CrucibleReleaseSources {
-  /** What the release channel calls latest (`releases/latest`). Refuses `release_channel_unreadable`. */
+  /** The newest Crucible release, prereleases included (channel.ts). Refuses `release_channel_unreadable`. */
   latest(): Promise<string>;
   /**
    * The version of the Crucible answering on THIS machine, or null when none
@@ -129,8 +129,8 @@ export interface CrucibleReleaseSources {
  * WHICH RELEASE TO INSTALL, or the refusal that says not to
  * (crucible docs/INSTALL-UNINSTALL.md §6.5.3). Runs BEFORE anything is spawned:
  *
- *   nothing running   → the channel's latest
- *   channel newer     → the channel's latest (the upgrade path)
+ *   nothing running   → the newest release
+ *   channel newer     → the newest release (the upgrade path)
  *   channel the same  → `crucible_already_latest`
  *   channel older     → `install_older_than_running`
  */
@@ -141,7 +141,7 @@ export async function releaseToInstall(sources: CrucibleReleaseSources): Promise
   if (sources.compare(latest, running) < 0) {
     throw new CrucibleInstallError(
       'install_older_than_running',
-      `the release channel's latest is ${latest} and Crucible ${running} is running on this computer; `
+      `the newest Crucible release is ${latest} and Crucible ${running} is running on this computer; `
         + 'refusing to install an older engine over it. There is one Crucible per computer, shared with '
         + 'BookForge and Foundry, and Briefcase never takes it backwards.',
     );
@@ -149,7 +149,7 @@ export async function releaseToInstall(sources: CrucibleReleaseSources): Promise
   if (sources.compare(latest, running) === 0) {
     throw new CrucibleInstallError(
       'crucible_already_latest',
-      `Crucible ${running} is running on this computer and is the release channel's latest. There is nothing to install.`,
+      `Crucible ${running} is running on this computer and is the newest release. There is nothing to install.`,
     );
   }
   return latest;

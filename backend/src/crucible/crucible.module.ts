@@ -11,7 +11,7 @@
  * nothing outside it uses Crucible yet.
  */
 import { Module } from '@nestjs/common';
-import { compareReleases, latestRelease } from '@crucible/bootstrap';
+import { compareReleases } from '@crucible/bootstrap';
 import { getBriefcaseConfigDir } from '../bridges/runtime-paths';
 import { CrucibleAutoConnectService } from './auto-connect.service';
 import { CrucibleClientFactory } from './client-factory';
@@ -33,6 +33,7 @@ import { processLocalControls } from './install/engine-presence';
 import { crucibleProcessRunner } from './install/host-runner';
 import { HostInstallDoor } from './install/install-door';
 import { loadBootstrap, processInstallHost } from './install/install';
+import { newestRelease } from './install/channel';
 import { CRUCIBLE_INSTALL_DEPS, CrucibleInstallService, type InstallDeps } from './install/install.service';
 
 /**
@@ -46,7 +47,8 @@ function processInstallDeps(registry: CrucibleRegistryService, factory: Crucible
   return {
     host: processInstallHost(() => discoveredRow(registry.list(), pairingHost)),
     sources: {
-      latest: () => latestRelease(),
+      // The NEWEST release, prereleases included, not GitHub's promoted `latest` (channel.ts).
+      latest: () => newestRelease(),
       running: async () => {
         const found = readCruciblePairingFile(pairingHost);
         if (found === null) return null;

@@ -11,6 +11,7 @@ import {
   type BootstrapSurface,
   type CrucibleReleaseSources,
 } from '../../src/crucible/install/install';
+import { newestRelease, parseNewestRelease, RELEASES_URL } from '../../src/crucible/install/channel';
 import './helpers';
 
 const sources = (latest: string, running: string | null): CrucibleReleaseSources => ({
@@ -100,5 +101,52 @@ describe('driveCrucibleInstall and the gate', () => {
     };
     await driveCrucibleInstall({ jobTypes: ['echo'], onLine: () => undefined, release: '0.0.1' }, { bootstrap, runner, sources: sources('1.0.24', '1.0.23') });
     expect(seen).toEqual(['1.0.24']);
+  });
+});
+
+describe('the release channel: the NEWEST release, prereleases included', () => {
+  const page = (rows: Array<{ tag_name: string; prerelease?: boolean; draft?: boolean }>) => JSON.stringify(rows);
+  const fetchOf = (status: number, body: string): typeof fetch =>
+    (async (url: string) => {
+      expect(url).toBe(RELEASES_URL);
+      return new Response(body, { status });
+    }) as unknown as typeof fetch;
+
+  it('a prerelease newer than GitHub\'s promoted latest is the one offered', async () => {
+    const body = page([
+      { tag_name: 'v1.0.23', prerelease: true },
+      { tag_name: 'v1.0.22', prerelease: false },
+      { tag_name: 'v1.0.21', prerelease: false },
+    ]);
+    await expect(newestRelease(fetchOf(200, body))).resolves.toBe('1.0.23');
+  });
+
+  it('with that channel, nothing running installs the prerelease, and 1.0.23 running is already latest', async () => {
+    const latest = () => newestRelease(fetchOf(200, page([{ tag_name: 'v1.0.23', prerelease: true }, { tag_name: 'v1.0.22' }])));
+    await expect(releaseToInstall({ latest, running: async () => null, compare: compareReleases })).resolves.toBe('1.0.23');
+    await expect(releaseToInstall({ latest, running: async () => '1.0.22', compare: compareReleases })).resolves.toBe('1.0.23');
+    expect(await refusalCode(releaseToInstall({ latest, running: async () => '1.0.23', compare: compareReleases }))).toBe('crucible_already_latest');
+  });
+
+  it('the never-older gate still refuses when a newer engine runs than even the newest release', async () => {
+    const latest = () => newestRelease(fetchOf(200, page([{ tag_name: 'v1.0.23', prerelease: true }])));
+    expect(await refusalCode(releaseToInstall({ latest, running: async () => '1.0.24', compare: compareReleases }))).toBe('install_older_than_running');
+  });
+
+  it('drafts are skipped, and newest is by version, not by list order', () => {
+    expect(parseNewestRelease(page([
+      { tag_name: 'v1.0.25', draft: true },
+      { tag_name: 'v1.0.9' },
+      { tag_name: 'v1.0.24', prerelease: true },
+      { tag_name: 'nightly' },
+    ]))).toBe('1.0.24');
+  });
+
+  it('an unreadable list is release_channel_unreadable, never a fallback', async () => {
+    await expect(newestRelease(fetchOf(503, 'down'))).rejects.toMatchObject({ code: 'release_channel_unreadable' });
+    await expect(newestRelease(fetchOf(200, '{"message":"rate limited"}'))).rejects.toMatchObject({ code: 'release_channel_unreadable' });
+    await expect(newestRelease(fetchOf(200, '[]'))).rejects.toMatchObject({ code: 'release_channel_unreadable' });
+    const thrown = (async () => { throw new Error('ENOTFOUND api.github.com'); }) as unknown as typeof fetch;
+    await expect(newestRelease(thrown)).rejects.toMatchObject({ code: 'release_channel_unreadable' });
   });
 });
