@@ -548,6 +548,14 @@ function getModelLimits(modelName: string, contextTokens: number): ModelLimits {
 // SERVICE
 // =============================================================================
 
+/**
+ * Whether a section belongs in the human-readable .txt report: accepted flags
+ * and legacy/discovery rows (no verdict) only, never 'skip' or 'candidate'.
+ */
+export function isReportedFinding(section: Pick<AnalyzedSection, 'verdict'>): boolean {
+  return !section.verdict || section.verdict === 'flag';
+}
+
 @Injectable()
 export class AIAnalysisService {
   private readonly logger = new Logger(AIAnalysisService.name);
@@ -1379,9 +1387,14 @@ export class AIAnalysisService {
         );
       }
 
-      // Write chapter flags to file
+      // Write the FINDINGS to the report. The ranked paths also return rows
+      // that are not findings: 'skip' (the verifier rejected that reading) and
+      // 'candidate' (snap: ranked but never verified). Those stay in the
+      // database, where the UI shows them only at the filter positions that ask
+      // for them; the .txt report has no such filter and no verdict column, so
+      // writing them would present them as confirmed flags.
       for (const flag of flags) {
-        this.writeSectionToFile(outputFile, flag);
+        if (isReportedFinding(flag)) this.writeSectionToFile(outputFile, flag);
       }
 
       // =========================================================================

@@ -194,6 +194,28 @@ describe('AIAnalysisService: the analysis engine setting', () => {
     expect(res.warnings).toBeUndefined();
   });
 
+  it('the .txt report holds findings only: no candidate and no skip rows', async () => {
+    process.env.BRIEFCASE_ANALYSIS_ENGINE = 'snap';
+    const h = new Harness();
+    const svc = h.service();
+    // The verifier rejects the second sub-passage (sentences 4-5; its prompt's
+    // context does not reach sentence 2): a 'skip' row.
+    const provider = (svc as any).aiProviderService;
+    const base = provider.generateText;
+    provider.generateText = async (prompt: string, cfg: unknown, task: string) =>
+      task === 'flags' && !prompt.includes('communists')
+        ? { text: '{"verdict":"skip"}', inputTokens: 1, outputTokens: 1 }
+        : base(prompt, cfg, task);
+    const res = await svc.analyzeTranscript(options());
+    expect(res.sections.some((s) => s.verdict === 'skip')).toBe(true);
+    expect(res.sections.some((s) => s.verdict === 'candidate')).toBe(true);
+
+    const report = fs.readFileSync(path.join(tmp, 'analysis.txt'), 'utf8');
+    expect(report).toContain('communists'); // the accepted flag
+    expect(report).not.toContain('destroy everything'); // the skip row
+    expect(report).not.toContain('deep state'); // the unverified candidate
+  });
+
   it('snap + cloud flag verifier: the scorer stays warm', async () => {
     process.env.BRIEFCASE_ANALYSIS_ENGINE = 'snap';
     const h = new Harness();
