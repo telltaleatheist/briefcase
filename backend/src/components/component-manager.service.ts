@@ -8,13 +8,14 @@
  * AI is not here (P7): transcription, the LLM stages and the analysis engine
  * all run on Crucible, which installs its own models. The published
  * binaries-v1 manifest still carries whisper and llama entries for older
- * builds; Briefcase lists only {@link BRIEFCASE_COMPONENTS}.
+ * builds; Briefcase lists only {@link BRIEFCASE_COMPONENTS}. What older builds
+ * installed for AI is removed once, after boot (retired-components.ts).
  *
  * Progress is emitted via EventEmitter2 ('component.download.*') and relayed to
  * the frontend by AppGateway → WebsocketService.
  */
 
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -30,6 +31,7 @@ import {
   InstalledManifest,
   InstalledRecord,
 } from './component.types';
+import { retireOnce } from './retired-components';
 
 const MANIFEST_URL =
   'https://github.com/telltaleatheist/briefcase/releases/download/binaries-v1/manifest.json';
@@ -37,8 +39,11 @@ const MANIFEST_URL =
 /** The manifest components this build uses. Everything else in the manifest is another build's. */
 export const BRIEFCASE_COMPONENTS: ReadonlySet<string> = new Set(['ffmpeg-tools', 'yt-dlp']);
 
+/** How long after boot the one-time retirement of P7's components starts. */
+const RETIREMENT_DELAY_MS = 15_000;
+
 @Injectable()
-export class ComponentManagerService implements OnModuleInit {
+export class ComponentManagerService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ComponentManagerService.name);
 
   private readonly configDir: string;
@@ -48,6 +53,7 @@ export class ComponentManagerService implements OnModuleInit {
   private readonly tmpDir: string;
 
   private activeDownload: { componentId: string; controller: AbortController } | null = null;
+  private retirementTimer: NodeJS.Timeout | null = null;
 
   constructor(private readonly eventEmitter: EventEmitter2) {
     const userDataPath =
@@ -68,6 +74,25 @@ export class ComponentManagerService implements OnModuleInit {
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     }
     this.logger.log(`Components directory: ${this.componentsDir}`);
+
+    // Remove what P7 retired (whisper, llama, the NLI env, the scorer GGUF)
+    // once, in the background: boot never waits on it and it never throws.
+    // BRIEFCASE_KEEP_RETIRED=1 skips it (e.g. while a pre-P7 build on the same
+    // machine still uses those files).
+    if (process.env.BRIEFCASE_KEEP_RETIRED === '1') {
+      this.logger.log('BRIEFCASE_KEEP_RETIRED=1: leaving retired components on disk');
+      return;
+    }
+    this.retirementTimer = setTimeout(() => {
+      this.retirementTimer = null;
+      void retireOnce(this.configDir, this.logger);
+    }, RETIREMENT_DELAY_MS);
+    this.retirementTimer.unref?.();
+  }
+
+  onModuleDestroy() {
+    if (this.retirementTimer) clearTimeout(this.retirementTimer);
+    this.retirementTimer = null;
   }
 
   getComponentsDir(): string {

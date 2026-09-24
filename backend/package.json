@@ -21,7 +21,8 @@
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "test:crucible": "jest --roots '<rootDir>/../test/crucible'",
-    "test:no-crucible": "jest --roots '<rootDir>/../test/no-crucible'"
+    "test:no-crucible": "jest --roots '<rootDir>/../test/no-crucible'",
+    "retire:dry-run": "ts-node --transpile-only src/components/retire-dry-run.ts"
   },
   "dependencies": {
     "@crucible/bootstrap": "file:vendor/crucible-bootstrap-1.0.26.tgz",
