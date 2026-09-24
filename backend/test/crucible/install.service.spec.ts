@@ -211,7 +211,7 @@ describe('CrucibleInstallService', () => {
   });
 
   it('the same Crucible already running: crucible_already_latest, nothing spawned', async () => {
-    const r = await rig({ latest: '1.0.23' });
+    const r = await rig({ latest: '1.0.24' });
     fs.writeFileSync(path.join(r.home, 'pairing'), pairingLineFor(r.fake.name, r.fake.url, r.fake.token));
     await expect(r.service.start()).rejects.toMatchObject({ code: 'crucible_already_latest' });
     expect(r.bootstrap.installs).toHaveLength(0);

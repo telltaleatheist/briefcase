@@ -95,7 +95,7 @@ describe('CrucibleController', () => {
     const name = encodeURIComponent('crucible@owens-mac-studio');
     const probe = await http().get(`/crucible/servers/${name}/probe`);
     expect(probe.status).toBe(200);
-    expect(probe.body).toMatchObject({ server: 'crucible@owens-mac-studio', reach: 'ready', probe: { outcome: 'ok', facts: { version: '1.0.23' } } });
+    expect(probe.body).toMatchObject({ server: 'crucible@owens-mac-studio', reach: 'ready', probe: { outcome: 'ok', facts: { version: '1.0.24' } } });
     const test = await http().post(`/crucible/servers/${name}/test`);
     expect(test.body.reach).toBe('ready');
   });

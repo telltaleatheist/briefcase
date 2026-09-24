@@ -136,7 +136,7 @@ describe('transport failure classification', () => {
 
   it('counts an unreachable server and a 5xx as "not now"', () => {
     expect(crucibleUnavailableCause(new CrucibleUnreachable('http://x:1', 'connect ECONNREFUSED'))).toMatch(/unreachable/);
-    expect(crucibleUnavailableCause(new CrucibleServerError(503, 'chat_queue_full', 'full'))).toBe('HTTP 503: full');
+    expect(crucibleUnavailableCause(new CrucibleServerError(503, 'chat_queue_full', 'full', null))).toBe('HTTP 503: full');
     expect(crucibleUnavailableCause(new Error('boom'))).toBeNull();
   });
 

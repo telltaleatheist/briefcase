@@ -51,7 +51,16 @@
  * cancel). `/v1/info` lists asr rows for BOTH engines, as a live mlx-darwin
  * server does, the other engine's uninstalled with an empty revision.
  *
- * Deliberately NOT here yet: decide. It arrives with P6.
+ * P6 adds `POST /v1/decide` (PHASE22): the door's refusals in its order
+ * (act, unknown keys, model, upstream, missing mode, too many options,
+ * residency, the engine's option cap as `503 decide_not_served`), then one
+ * reading per question from `decideProbs` (raw probabilities; an option left
+ * out is outside the top-K), renormalised over the labels returned, with
+ * `logprobs`, `label_mass` and — in report mode only — `missing_labels`.
+ * Load-model takes `params.context` (refused `context_over_limit` above the
+ * ceiling), `/v1/capability` carries `work`, `context_ceilings`, the
+ * `generate` and `decide` classes and the `?class=&context_tokens=` sizing,
+ * and an `ollama/` chat answers `X-Crucible-Context` on 1.0.24+.
  */
 import * as http from 'http';
 import { createHash, randomBytes } from 'crypto';
@@ -139,6 +148,10 @@ export interface FakeModel {
   maxModelLen?: number | null;
   /** Set: not loadable, with this reason. */
   unloadableReason?: string;
+  /** The manifest family; default the id up to its first dash. */
+  family?: string;
+  /** 1.0.24: the base whose weights this alias shares (`weights_of`). */
+  weightsOf?: string | null;
 }
 
 /** A canned chat reply: fixed content, or computed from the request body. */
@@ -218,6 +231,10 @@ export interface FakeCatalogRow {
   jobType: string;
   installed: boolean;
   expectedBytes?: number | null;
+  /** 1.0.24: an alias's base (`shares_weights_of`). */
+  sharesWeightsOf?: string | null;
+  /** 1.0.24: an alias's own files still to download. */
+  missingFiles?: string[] | null;
 }
 
 /** A task this fake has run, for a spec to assert on. */
@@ -281,7 +298,31 @@ export interface FakeCrucibleOptions {
   asrInstalled?: string[];
   /** How asr jobs run. */
   asr?: FakeAsrScript;
+  /**
+   * P6: how `/v1/decide` reads a question. Returns each option's RAW
+   * next-token probability (full vocabulary), keyed by option name (a level,
+   * or `Yes`/`No`); an option left out is outside the engine's top-K. Default:
+   * the first option 0.6, the rest sharing 0.35.
+   */
+  decideProbs?: FakeDecideProbs;
+  /** P6: the most options this engine's top-K can read; more is `503 decide_not_served`. Default 26. */
+  decideMaxOptions?: number;
+  /** P6: what the `decide` capability class selected. Default `qwen3.5-9b`. */
+  decideSelected?: string;
+  /** P6: each candidate's context ceiling for `?class=generate`, by model id. Default 131072 each. */
+  contextCeilings?: Record<string, number>;
 }
+
+/** One decide question as the fake reads it. */
+export interface FakeDecideQuestion {
+  name: string;
+  type: 'choice' | 'score' | 'yesno';
+  instructions: string;
+  /** Option names (choice), levels (score), or `['Yes', 'No']`. */
+  labels: string[];
+}
+
+export type FakeDecideProbs = (question: FakeDecideQuestion, state: unknown) => Record<string, number>;
 
 export interface FakeCrucible {
   readonly url: string;
@@ -329,6 +370,12 @@ export interface FakeCrucible {
   forgetBlobs(): void;
   /** Change how the next asr jobs run. */
   setAsr(script: FakeAsrScript): void;
+  /** P6: change how `/v1/decide` reads questions. */
+  setDecideProbs(fn: FakeDecideProbs | undefined): void;
+  /** P6: bodies of every `/v1/decide` posted, in order. */
+  decideBodies(): Array<Record<string, unknown>>;
+  /** P6: the context the resident model was loaded at (null: its default). */
+  residentContext(): number | null;
   close(): Promise<void>;
 }
 
@@ -356,6 +403,32 @@ const PUBLIC_PATHS = new Set(['/v1/ping', '/v1/pairing/start', '/v1/pairing/poll
 function send(res: http.ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
   res.writeHead(status, { 'Content-Type': 'application/json', ...headers });
   res.end(JSON.stringify(body));
+}
+
+/** Numeric version compare for the fake's own gates. */
+function compareFakeVersions(a: string, b: string): number {
+  const pa = a.split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = b.split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
+
+/**
+ * The fake's token count for a chat: 10 for the template, plus one per
+ * whitespace-separated word of every message (a stand-in tokenizer a spec can
+ * compute by hand).
+ */
+export function promptTokensOf(body: Record<string, unknown>): number {
+  const messages = Array.isArray(body['messages']) ? body['messages'] as Array<Record<string, unknown>> : [];
+  let words = 0;
+  for (const m of messages) {
+    const text = typeof m['content'] === 'string' ? m['content'] : '';
+    words += text.split(/\s+/).filter(Boolean).length;
+  }
+  return 10 + words;
 }
 
 function refusal(res: http.ServerResponse, status: number, code: string, message: string, details: unknown = null, headers: Record<string, string> = {}): void {
@@ -453,6 +526,9 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
   const disabledClasses = options.disabledClasses ?? {};
   const models: FakeModel[] = (options.models ?? [{ id: 'qwen3.5-9b', paramsB: 9, installed: true }]).map((m) => ({ ...m }));
   let resident: string | null = options.resident ?? null;
+  /** The context the resident model was loaded with (`params.context`); null: its default. */
+  let residentCtx: number | null = null;
+  let decideProbs: FakeDecideProbs | undefined = options.decideProbs;
   const jobs: FakeJob[] = [];
   const jobListeners = new Map<string, Set<() => void>>();
   let nextJob = 1;
@@ -489,7 +565,7 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
   };
 
   const infoDoc = (): unknown => ({
-    server: { name, version: options.version ?? '1.0.23', api_version: apiVersion() },
+    server: { name, version: options.version ?? '1.0.24', api_version: apiVersion() },
     role,
     ...(role === 'engine'
       ? { managed_by: null }
@@ -532,7 +608,7 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
       client: busy.client,
     };
     return {
-      server: { name, version: options.version ?? '1.0.23', api_version: apiVersion(), backend, uptime_s: Math.round((Date.now() - startedAt) / 1000) },
+      server: { name, version: options.version ?? '1.0.24', api_version: apiVersion(), backend, uptime_s: Math.round((Date.now() - startedAt) / 1000) },
       resident: resident === null ? null : {
         kind: 'llm', id: resident, since: '2026-09-23T01:00:00Z', memory_bytes_estimate: null,
         held_by: openLease === null ? null : {
@@ -590,11 +666,31 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
     };
   };
 
-  const capabilityDoc = (): unknown => ({
-    backend_kind: backend,
-    total_bytes: 68719476736,
-    desktop_allowance_bytes: 3221225472,
-    classes: [
+  const work = (tokens: number, concurrency: number, from: 'default' | 'request' = 'default'): Record<string, unknown> =>
+    ({ tokens, concurrency, source: 'fake', from });
+  const ceilings = (concurrency: number): unknown[] => models
+    .filter((m) => m.backendSupported !== false && (m.modalities ?? ['text']).includes('text') && m.weightsOf == null && !/^dots/.test(m.id))
+    .map((m) => {
+      const tokens = options.contextCeilings?.[m.id] ?? 131072;
+      return { model: m.id, tokens, bound_by: 'served', served_context: tokens, memory_context: null, concurrency };
+    });
+  const capabilityDoc = (query: URLSearchParams = new URLSearchParams()): { status: number; body: unknown } => {
+    const sizedClass = query.get('class');
+    const sizedTokens = query.get('context_tokens');
+    const sizedConcurrency = query.get('concurrency');
+    if ((sizedTokens !== null || sizedConcurrency !== null) && sizedClass === null) {
+      return { status: 400, body: { error: { code: 'capability_class_required', message: 'a size needs ?class=', details: null } } };
+    }
+    if (sizedClass !== null && sizedClass !== 'generate' && (sizedTokens !== null || sizedConcurrency !== null)) {
+      return { status: 400, body: { error: { code: 'capability_not_client_sized', message: `${sizedClass} is not client-sized`, details: null } } };
+    }
+    const genTokens = sizedTokens === null ? 8192 : Number(sizedTokens);
+    const genConcurrency = sizedConcurrency === null ? 1 : Number(sizedConcurrency);
+    const genCeilings = ceilings(genConcurrency);
+    if (sizedTokens !== null && genCeilings.every((c) => (c as { tokens: number }).tokens < genTokens)) {
+      return { status: 400, body: { error: { code: 'context_over_limit', message: `${genTokens} tokens is over every ceiling`, details: null } } };
+    }
+    const rows: unknown[] = [
       ...LLM_CLASSES.map((c) => (disabledClasses[c] !== undefined ? {
         capability: c,
         enabled: false,
@@ -602,6 +698,8 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
         reason: disabledClasses[c],
         shortfall_bytes: 1,
         route: 'local',
+        work: work(4096, 4),
+        context_ceilings: null,
       } : {
         capability: c,
         enabled: true,
@@ -609,10 +707,30 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
         reason: routes[c] ? `routed to ${routes[c].split('/')[0]}` : 'qwen3.5-9b fits',
         shortfall_bytes: 0,
         route: routes[c] ? 'upstream' : 'local',
+        work: work(4096, 4),
+        context_ceilings: null,
       })),
-      { capability: 'asr', enabled: true, selected: 'mlx-whisper-large-v3-turbo', reason: 'installed', shortfall_bytes: 0, route: 'local' },
-    ],
-  });
+      disabledClasses['generate'] !== undefined
+        ? { capability: 'generate', enabled: false, selected: '', reason: disabledClasses['generate'], shortfall_bytes: 1, route: 'local', work: work(genTokens, genConcurrency, sizedTokens === null ? 'default' : 'request'), context_ceilings: genCeilings }
+        : { capability: 'generate', enabled: true, selected: 'qwen3.5-9b', reason: 'qwen3.5-9b fits', shortfall_bytes: 0, route: 'local', work: work(genTokens, genConcurrency, sizedTokens === null ? 'default' : 'request'), context_ceilings: genCeilings },
+      disabledClasses['decide'] !== undefined
+        ? { capability: 'decide', enabled: false, selected: '', reason: disabledClasses['decide'], shortfall_bytes: 1, route: 'local', work: work(8192, 2), context_ceilings: null }
+        : { capability: 'decide', enabled: true, selected: options.decideSelected ?? 'qwen3.5-9b', reason: 'fits', shortfall_bytes: 0, route: 'local', work: work(8192, 2), context_ceilings: null },
+      { capability: 'asr', enabled: true, selected: 'mlx-whisper-large-v3-turbo', reason: 'installed', shortfall_bytes: 0, route: 'local', work: null, context_ceilings: null },
+    ];
+    if (options.models?.some((m) => /^dots/.test(m.id))) {
+      rows.push({ capability: 'pages', enabled: true, selected: options.models.find((m) => /^dots/.test(m.id))!.id, reason: 'fits', shortfall_bytes: 0, route: 'local', work: work(32768, 12), context_ceilings: null });
+    }
+    return {
+      status: 200,
+      body: {
+        backend_kind: backend,
+        total_bytes: 68719476736,
+        desktop_allowance_bytes: 3221225472,
+        classes: rows,
+      },
+    };
+  };
 
   // ── tasks ────────────────────────────────────────────────────────────
   const foreignTask: FakeTask = {
@@ -881,6 +999,18 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
         });
         return;
       }
+      const wanted = ((body['params'] ?? {}) as Record<string, unknown>)['context'];
+      if (wanted !== undefined) {
+        const ceiling = options.contextCeilings?.[info.id] ?? 131072;
+        if (typeof wanted !== 'number' || !Number.isInteger(wanted) || wanted < 2048) {
+          refusal(res, 400, 'invalid_params', `context must be a whole number >= 2048, got ${JSON.stringify(wanted)}`);
+          return;
+        }
+        if (wanted > ceiling) {
+          refusal(res, 400, 'context_over_limit', `${info.id} serves at most ${ceiling} tokens here; ${wanted} was asked`, { ceiling, asked: wanted });
+          return;
+        }
+      }
     }
     const params = (body['params'] ?? {}) as Record<string, unknown>;
     const client = (req.headers['x-crucible-client'] as string | undefined) ?? null;
@@ -900,11 +1030,13 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
       }
       if (type === 'unload-model') {
         resident = null;
+        residentCtx = null;
         job.status = 'done';
         pushJobEvent(job, 'done', { resident: null });
         return;
       }
       resident = model;
+      residentCtx = typeof params['context'] === 'number' ? params['context'] : null;
       const lease = params['lease'] as { act?: string; ttl_seconds?: number } | undefined;
       if (lease !== undefined) {
         const leaseId = `lease-${nextLease++}`;
@@ -1100,13 +1232,149 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
     sources['thinking'] = kwargs && 'enable_thinking' in kwargs ? (upstreamMatch ? 'dropped' : 'request') : upstreamMatch ? 'engine' : 'manifest';
     const message: Record<string, unknown> = { role: 'assistant', content: shaped.content ?? '' };
     if (shaped.reasoning !== undefined) message['reasoning'] = shaped.reasoning;
+    // 1.0.24: an ollama/ chat carries `context_tokens` to Ollama as options.num_ctx
+    // and says what it sent; absent, the tag's own context. Older servers know nothing of it.
+    const extraHeaders: Record<string, string> = {};
+    const newer = compareFakeVersions(options.version ?? '1.0.24', '1.0.24') >= 0;
+    if (upstreamMatch?.[1] === 'ollama' && newer) {
+      const ctx = body['context_tokens'];
+      extraHeaders['X-Crucible-Context'] = JSON.stringify(typeof ctx === 'number'
+        ? { num_ctx: ctx, source: 'request' }
+        : { num_ctx: 40960, source: 'modelfile' });
+    }
     send(res, 200, {
       id: `chatcmpl-${randomBytes(4).toString('hex')}`,
       object: 'chat.completion',
       model,
       choices: [{ index: 0, message, finish_reason: shaped.finishReason ?? 'stop' }],
-      usage: { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 },
-    }, { 'X-Crucible-Sampling': JSON.stringify(sources) });
+      usage: { prompt_tokens: promptTokensOf(body), completion_tokens: 7, total_tokens: promptTokensOf(body) + 7 },
+    }, { 'X-Crucible-Sampling': JSON.stringify(sources), ...extraHeaders });
+  }
+
+
+  /** Crucible's own act vocabulary, as the server derives it from its classes. */
+  const ACTS = new Set([...LLM_CLASSES, 'generate', 'decide', 'pages', 'asr', 'tts', 'align', 'rvc', 'denoise', 'echo']);
+
+  /** `POST /v1/decide` (PHASE22 §2.2/§2.4): the door's refusals, then one reading per question. */
+  async function decide(req: http.IncomingMessage, res: http.ServerResponse, body: Record<string, unknown>): Promise<void> {
+    const act = req.headers['x-crucible-act'];
+    if (typeof act === 'string' && !ACTS.has(act)) {
+      refusal(res, 400, 'unknown_act', `'${act}' is not a capability class`, { known: [...ACTS] });
+      return;
+    }
+    const known = new Set(['model', 'state', 'images', 'questions', 'missing']);
+    const extra = Object.keys(body).filter((k) => !known.has(k));
+    if (extra.length) {
+      refusal(res, 400, 'invalid_request', `unknown field(s): ${extra.join(', ')}`, { fields: extra });
+      return;
+    }
+    const model = typeof body['model'] === 'string' ? body['model'] : '';
+    if (!model) {
+      refusal(res, 400, 'invalid_request', 'model is required', { field: 'model' });
+      return;
+    }
+    if (/^(anthropic|openai|ollama)\//.test(model)) {
+      refusal(res, 400, 'decide_needs_logprobs', `${model} is an upstream; no upstream returns a distribution`);
+      return;
+    }
+    const missing = body['missing'] ?? 'refuse';
+    if (missing !== 'refuse' && missing !== 'report') {
+      refusal(res, 400, 'invalid_request', `missing must be 'refuse' or 'report', got ${JSON.stringify(missing)}`, { field: 'missing' });
+      return;
+    }
+    const questionsBody = body['questions'];
+    if (questionsBody === null || typeof questionsBody !== 'object' || Array.isArray(questionsBody) || Object.keys(questionsBody).length === 0) {
+      refusal(res, 400, 'invalid_request', 'questions must be a non-empty object', { field: 'questions' });
+      return;
+    }
+    const questions: FakeDecideQuestion[] = [];
+    for (const [name, raw] of Object.entries(questionsBody as Record<string, Record<string, unknown>>)) {
+      const type = raw['type'];
+      const instructions = String(raw['instructions'] ?? '');
+      if (type === 'choice') {
+        const opts = raw['options'] as Record<string, string>;
+        const labels = Object.keys(opts ?? {});
+        if (labels.length > 26) {
+          refusal(res, 400, 'too_many_options', `question '${name}' has ${labels.length} options; the letters are A..Z`, { question: name });
+          return;
+        }
+        if (labels.length < 2) {
+          refusal(res, 400, 'invalid_request', `question '${name}' needs 2-26 options`, { field: `questions.${name}.options` });
+          return;
+        }
+        questions.push({ name, type, instructions, labels });
+      } else if (type === 'score') {
+        questions.push({ name, type, instructions, labels: [...(raw['levels'] as string[])] });
+      } else if (type === 'yesno') {
+        questions.push({ name, type, instructions, labels: ['Yes', 'No'] });
+      } else {
+        refusal(res, 400, 'invalid_request', `question '${name}' has an unknown type`, { field: `questions.${name}.type` });
+        return;
+      }
+    }
+    if (resident !== model) {
+      refusal(res, 409, 'model_not_resident', `'${model}' is not resident${resident ? `; '${resident}' is` : '; nothing is'}`, { resident });
+      return;
+    }
+    const cap = options.decideMaxOptions ?? 26;
+    const over = questions.find((q) => q.labels.length > cap);
+    if (over !== undefined) {
+      refusal(res, 503, 'decide_not_served', `the engine reads at most ${cap} options; question '${over.name}' has ${over.labels.length}`,
+        { engine: 'mlx-lm', max_options: cap, question: over.name });
+      return;
+    }
+    if (named.chatDelayMs !== undefined) {
+      const aborted = await new Promise<boolean>((resolve) => {
+        const t = setTimeout(() => resolve(false), named.chatDelayMs);
+        res.on('close', () => { clearTimeout(t); resolve(true); });
+      });
+      if (aborted || res.destroyed) return;
+    }
+    const report = missing === 'report';
+    const answers: Record<string, unknown> = {};
+    const perQuestion: Record<string, unknown> = {};
+    const tokensPer: Record<string, number> = {};
+    const round = (x: number): number => Math.round(x * 1e6) / 1e6;
+    for (const q of questions) {
+      const raw = decideProbs ? decideProbs(q, body['state'])
+        : Object.fromEntries(q.labels.map((l, i) => [l, i === 0 ? 0.6 : 0.35 / (q.labels.length - 1)]));
+      const returned = q.labels.filter((l) => typeof raw[l] === 'number' && raw[l] > 0);
+      const absent = q.labels.filter((l) => !returned.includes(l));
+      if (returned.length === 0 || (!report && absent.length > 0)) {
+        const letter = returned.length === 0 ? null : String.fromCharCode(65 + q.labels.indexOf(absent[0]));
+        refusal(res, 502, 'label_not_in_probs', `question '${q.name}': label ${letter ?? '(all)'} is not among the top tokens`, { question: q.name, letter });
+        return;
+      }
+      const mass = returned.reduce((sum, l) => sum + raw[l], 0);
+      const probs: Record<string, number | null> = {};
+      const logprobs: Record<string, number | null> = {};
+      for (const l of q.labels) {
+        const p = returned.includes(l) ? raw[l] / mass : null;
+        probs[l] = p === null ? null : round(p);
+        logprobs[l] = p === null || p === 0 ? null : round(Math.log(p));
+      }
+      let best = returned[0];
+      for (const l of returned) if ((probs[l] ?? 0) > (probs[best] ?? 0)) best = l;
+      const common: Record<string, unknown> = { label_mass: round(mass), ...(report ? { missing_labels: absent } : {}) };
+      if (q.type === 'yesno') {
+        const p = probs['Yes'] ?? 0;
+        answers[q.name] = { type: 'yesno', p, logprob: p > 0 ? round(Math.log(p)) : null, ...common };
+      } else if (q.type === 'choice') {
+        answers[q.name] = { type: 'choice', choice: best, probabilities: probs, logprobs, confidence: probs[best], ...common };
+      } else {
+        const score = q.labels.reduce((sum, l, i) => sum + (i + 1) * (probs[l] ?? 0), 0);
+        answers[q.name] = { type: 'score', score: round(score), level: best, probabilities: probs, logprobs, confidence: probs[best], ...common };
+      }
+      perQuestion[q.name] = { wall_ms: 12.5, prompt_tokens: 140, cached_tokens: null };
+      tokensPer[q.name] = 140;
+    }
+    send(res, 200, {
+      model: { id: model, revision: 'abc1234', fingerprint: `${model}@abc1234` },
+      engine: backend === 'cuda-linux' ? 'vllm' : 'mlx-lm',
+      answers,
+      timing_ms: { total: 12.5 * questions.length, per_question: perQuestion, prime: questions.length > 1 ? { wall_ms: 30, prompt_tokens: 100, cached_tokens: null } : null },
+      tokens: { per_question: tokensPer, images: Array.isArray(body['images']) ? body['images'].length : 0 },
+    });
   }
 
   const server = http.createServer((req, res) => {
@@ -1255,7 +1523,8 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
       return;
     }
     if (path === '/v1/capability' && method === 'GET') {
-      send(res, 200, capabilityDoc());
+      const doc = capabilityDoc(url.searchParams);
+      send(res, doc.status, doc.body);
       return;
     }
     if (path === '/v1/settings' && method === 'GET') {
@@ -1306,6 +1575,7 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
           kind: row.kind, id: row.id, name: row.name ?? null, job_type: row.jobType, installed: row.installed,
           installed_bytes: row.installed ? 1024 : null, expected_bytes: row.expectedBytes ?? null, floors: [],
           license: null, source: `hf:fake/${row.id}`, resident: false,
+          shares_weights_of: row.sharesWeightsOf ?? null, missing_files: row.missingFiles ?? null,
         })),
       });
       return;
@@ -1350,13 +1620,16 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
         const installed = m.installed !== false;
         const reason = !supported ? `not served on ${backend}` : !installed ? 'weights are not installed' : m.unloadableReason ?? null;
         return {
-          id: m.id, family: m.id.split('-')[0], params_b: m.paramsB,
+          id: m.id, family: m.family ?? m.id.split('-')[0], params_b: m.paramsB,
           revision: supported ? 'abc1234' : null, fingerprint: supported ? `${m.id}@abc1234` : null,
           modalities: m.modalities ?? ['text'], backend_supported: supported, installed, resident: resident === m.id,
           loadable: reason === null, reason,
           memory_bytes_estimate: supported ? 20950548480 : null,
           context_default: m.contextDefault ?? 32768,
-          max_model_len: supported ? (m.maxModelLen === undefined ? 262144 : m.maxModelLen) : null,
+          max_model_len: !supported ? null
+            : resident === m.id && residentCtx !== null ? residentCtx
+              : (m.maxModelLen === undefined ? 262144 : m.maxModelLen),
+          weights_of: m.weightsOf ?? null,
         };
       }));
       return;
@@ -1430,6 +1703,11 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
     // ── chat (P3) ────────────────────────────────────────────────────────
     if (path === '/v1/openai/chat/completions' && method === 'POST') {
       await chat(req, res, body);
+      return;
+    }
+    // ── decide (P6, PHASE22) ─────────────────────────────────────────────
+    if (path === '/v1/decide' && method === 'POST') {
+      await decide(req, res, body);
       return;
     }
 
@@ -1533,6 +1811,7 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
     resident: () => resident,
     setResident(model: string | null): void {
       resident = model;
+      residentCtx = null;
       if (openLease !== null && openLease.model !== model) openLease = null;
     },
     expireLease(): void {
@@ -1554,6 +1833,13 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
     setAsr(script: FakeAsrScript): void {
       asrScript = { ...script };
     },
+    setDecideProbs(fn: FakeDecideProbs | undefined): void {
+      decideProbs = fn;
+    },
+    decideBodies(): Array<Record<string, unknown>> {
+      return requests.filter((r) => r.path === '/v1/decide' && r.method === 'POST').map((r) => r.body as Record<string, unknown>);
+    },
+    residentContext: () => residentCtx,
     requestsTo(prefix: string, m?: string): RecordedRequest[] {
       return requests.filter((r) => r.path.startsWith(prefix) && (m === undefined || r.method === m));
     },

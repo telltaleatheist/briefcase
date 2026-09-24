@@ -230,10 +230,10 @@ describe('the first-run hold', () => {
 describe('missingForBriefcase', () => {
   const capability = (route: 'local' | 'upstream', selected: string) => ({
     backendKind: 'mlx-darwin',
-    classes: [{ capability: 'analysis', enabled: true, selected, reason: 'fits', shortfallBytes: 0, route }],
+    classes: [{ capability: 'analysis', enabled: true, selected, reason: 'fits', shortfallBytes: 0, route, work: null, contextCeilings: null }],
   });
   const row = (id: string, installed: boolean, kind: 'model' | 'engine' = 'model', jobType = 'llm') => ({
-    kind, id, name: null, jobType, installed, installedBytes: null, expectedBytes: null, floors: [], license: null, source: 'hf', resident: false,
+    kind, id, name: null, jobType, installed, installedBytes: null, expectedBytes: null, floors: [], license: null, source: 'hf', resident: false, sharesWeightsOf: null, missingFiles: null,
   });
 
   it('a class routed upstream needs no weights', () => {
@@ -250,7 +250,7 @@ describe('missingForBriefcase', () => {
     const { missing } = missingForBriefcase(
       ['llm'],
       [row('qwen3.5-9b-gguf', true), row('llama-cpp', false, 'engine')],
-      { backendKind: 'llama-windows', classes: [{ capability: 'analysis', enabled: true, selected: 'qwen3.5-9b-gguf', reason: 'fits', shortfallBytes: 0, route: 'local' }] },
+      { backendKind: 'llama-windows', classes: [{ capability: 'analysis', enabled: true, selected: 'qwen3.5-9b-gguf', reason: 'fits', shortfallBytes: 0, route: 'local', work: null, contextCeilings: null }] },
     );
     expect(missing).toEqual([expect.objectContaining({ what: 'subject', kind: 'engine', id: 'llama-cpp' })]);
   });
