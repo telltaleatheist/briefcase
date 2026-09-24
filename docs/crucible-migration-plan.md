@@ -24,12 +24,12 @@ for them rather than trusting them.
 | 5 | LLM calls | Everything goes through `POST /v1/openai/chat/completions` via SDK `chat()`. A local model is loaded first and held with a lease. `anthropic/…`, `openai/…` and `ollama/…` go straight through with no lane. Cloud calls never get sampling params (§6.1). |
 | 6 | API keys | Move into the local Crucible with `PUT /v1/settings`, then delete `api-keys.json` once the stored `key_hint` has been checked (§6.2). |
 | 7 | Embeddings | **Drop them.** Chapter-boundary scoring goes lexical-only; it already works that way whenever Ollama is missing. Snap replaces the classic path anyway (§6.4). |
-| 8 | NLI | Stays for one more release as the classic flags path. It is deleted in P7, once snap-via-Crucible passes the flag eval (§6.5). |
-| 9 | Whisper | Crucible `asr` becomes the primary transcriber. **whisper-cli stays as a fallback** for three cases: `translate`, which Crucible's asr can't do; hosts where Crucible can't serve asr (native-only Windows, Intel Mac); and no Crucible at all. Whether that fallback is permanent is a question for the user (§6.6, §13). |
+| 8 | NLI | Deleted in P7 with the classic flags path. Existing `ranker='nli'` rows are still displayed (§6.5). |
+| 9 | Whisper | Crucible `asr` is the only transcriber. whisper-cli and the `translate` option were removed in P7. With no server that can transcribe, the task parks (§6.6). |
 | 10 | Snap | Build a `SnapBackend` interface now (P6a). The Crucible `/v1/decide` adapter (P6b) is the one piece that waits. It waits on a Crucible release of the decide door, plus three gaps listed in §12 (§6.7). |
 | 11 | Queue | One **GPU lane per enabled Crucible server**, plus an **upstream lane** (concurrency 2, no GPU). Transcribe moves off the main pool onto a GPU lane. A 409 parks the task with the busy holder's sentence and frees the slot. The queue prefers tasks that use the model already loaded. A ledger and sweep run at quit and at startup (§7). |
 | 12 | Settings | A new **Crucible Servers** pane. The AI pane picks models from the server's catalog and upstreams. The Components pane loses whisper/llama/nli/scorer at P7 and keeps ffmpeg and yt-dlp (§8). |
-| 13 | Feature flag | `app-config.json` gets `"aiBackend": { "llm": "auto"|"legacy"|"crucible", "asr": …, "snap": … }`, with env `BRIEFCASE_AI_BACKEND` taking precedence. `auto` means: use Crucible when at least one server is registered, otherwise the legacy path. Once a server is registered, an unreachable Crucible means **park the task, never fall back quietly**. The whole flag is deleted in P7 (§9). |
+| 13 | Crucible required | There is no legacy path and no flag to reach one. If Crucible is down, AI is down: one readiness service says why and offers the one door (start / install / connect), the backend refuses AI actions with a typed `crucible_required`, and queued AI tasks park until it is back. Everything else is unaffected (§9 “P7 as built”). |
 
 ---
 
@@ -222,7 +222,7 @@ Until step 2 lands, the module is only needed by `coordinate` (P2). P1 does not 
 `frontend-v3/src/app/components/setup-wizard/setup-wizard.component.ts` today has these steps: `welcome | tools | models | ai | review | finishing`. Change it to:
 
 - `welcome | tools | engine | ai | review | finishing`.
-- **`models` (Whisper downloads) is removed.** The transcriber comes from the module in Crucible. If the user turns Crucible down, or Crucible can't serve asr here, a single "Download the offline transcriber (whisper, ~1.5 GB)" card toggle appears inside `engine`. This is the fallback from §6.6.
+- **`models` (Whisper downloads) is removed.** The transcriber comes from the module in Crucible. There is no offline transcriber: without Crucible, transcription is unavailable.
 - **`engine`** mounts `<app-crucible-doors mode="probing">`, which calls `GET /crucible/local` and shows **exactly one face**:
   - **connected**: a registry row answers. Show its name and version, with a "Use a different server" link.
   - **adopt**: a pairing file exists but there is no registry row. Show one button: "Use the Crucible already on this computer". This covers "installed by BookForge or Foundry".
@@ -265,9 +265,9 @@ There is no `--force`. Briefcase **never uninstalls** Crucible, because it is sh
 
 Upstream-only mode **doesn't exist**, because `init` refuses before any server can run. So:
 
-- **Intel Mac:** the connect-only face. Claude or OpenAI still work through a *remote* Crucible. Without one, AI analysis is unavailable, and transcription uses the whisper-cli fallback. Whether to keep a direct-cloud path for this case is **§13 Q1**.
+- **Intel Mac:** the connect-only face. Claude or OpenAI still work through a *remote* Crucible. Without one, AI analysis and transcription are unavailable (there is no direct-cloud path, §13.1).
 - **Linux without NVIDIA:** the same, and there are no Linux manifest artifacts yet anyway.
-- **Windows without NVIDIA:** installs. It serves `llm` on the CPU build (slowly) and upstreams at normal speed, but no asr unless WSL with CUDA appears. So the whisper-cli fallback transcribes there.
+- **Windows without NVIDIA:** installs. It serves `llm` on the CPU build (slowly) and upstreams at normal speed, but no asr unless WSL with CUDA appears. Transcription needs another server that serves asr until then.
 - **Windows with NVIDIA but no WSL:** `llama-windows` gets the GPU for `llm`, with no asr. Bootstrap tries WSL on its own (PHASE19) and may ask for UAC and a restart. The wizard's install face gives BF's sentence word for word: "Windows may ask for permission, and once for a restart."
 
 ---
@@ -324,7 +324,7 @@ A new `CrucibleLlmService.complete(prompt, target, task, overrides)` replaces th
 **Reply handling:**
 
 - `finishReason === 'length'` is logged as a degradation. For JSON tasks it is treated as a parse failure and goes through the existing retry path in `json-utils.ts`.
-- There is **no `reasoning` field** in SDK replies. If a thinking model returns empty `content`, the task fails with the message "the model spent its budget thinking; turn thinking off or raise max tokens". Structured tasks send `thinking:false`, which avoids this on local models. Today's "use the thinking text" fallback for Ollama is lost; §12 A4 covers that.
+- There is **no `reasoning` field** in SDK replies. If a thinking model returns empty `content`, the task fails with the message "the model spent its budget thinking; turn thinking off or raise max tokens". Structured tasks send `thinking:false`, which avoids this on local models. *(As built: Crucible returns `reasoning` on the local door, and the chat service reads it when a structured answer came back empty.)*
 - Token usage and cost: `usage.prompt_tokens` and `completion_tokens` feed the existing `calculateCost` for upstream models.
 
 **Zero-successful-chapters must throw.** Nothing changes here. It is ai-analysis logic, and P3's acceptance tests it again explicitly against the fake: every chapter call gets 500 → the analysis fails and does not complete empty.
@@ -339,7 +339,7 @@ A new `CrucibleLlmService.complete(prompt, target, task, overrides)` replaces th
   4. Record `keysMigratedTo: "<server name>"` in `app-config.json`.
   
   If the write fails, keep the file and try again at the next boot. **Never** push keys to a remote server automatically. For a remote server, the pane offers "Copy my Claude key to <server>" as an explicit action. Ollama gets `upstreams.ollama.url` from the existing `ollamaEndpoint` setting.
-- `config/api-keys.service.ts` and `api-keys.controller.ts` stay until P7 for the legacy path, then go.
+- `config/api-keys.service.ts` and `api-keys.controller.ts` were removed in P7.
 
 ### 6.3 Ollama
 
@@ -352,11 +352,11 @@ Ollama becomes an ordinary upstream of Crucible:
 
 ### 6.4 Embeddings: dropped
 
-Crucible has no embeddings route. `chapter-detection.service.ts` step 2 (`/api/embed`, `nomic-embed-text`, :15-75, :434) already falls back to lexical scoring whenever the embed call fails. In P3, when `aiBackend.llm` resolves to Crucible, the embed call is skipped outright and the pipeline uses the lexical scorer. The step is deleted in P7. We are **not** asking Crucible for an embeddings route: the classic chapter pipeline is on its way out in favour of snap. The quality risk is covered by P3 acceptance (below).
+Crucible has no embeddings route. The classic chapter pipeline that used them (`chapter-detection.service.ts`) was deleted in P7; snap chapters replace it. We are **not** asking Crucible for an embeddings route: the classic chapter pipeline is on its way out in favour of snap. The quality risk is covered by P3 acceptance (below).
 
 ### 6.5 NLI
 
-`analysis/nli-ranker.service.ts` and `common/nli-env.ts` (a Python worker with its own env) are not AI through Crucible, and they don't fit it. They stay as the classic flags path through P6, and they're deleted in P7 **after** snap-via-Crucible passes the flag eval (`scorer/flags/eval/flag-eval.ts`). If the snap adapter is still waiting in P7, NLI stays and P7 is split (see §9).
+`analysis/nli-ranker.service.ts` and `common/nli-env.ts` (a Python worker with its own env) are not AI through Crucible, and they don't fit it. They were deleted in P7 with the classic flags path. `assembleSentences` and the window builder moved to `analysis/flag-windows.ts`.
 
 ### 6.6 Whisper → Crucible `asr`
 
@@ -379,7 +379,7 @@ Crucible has no embeddings route. `chapter-detection.service.ts` step 2 (`/api/e
   
   `word_timestamps` stays false until something in Briefcase uses words.
 - **Model.** The transcription pane shows the server's asr catalog (`GET /v1/catalog` filtered to `asr`). The default comes from the module: `mlx-whisper-large-v3-turbo` or `faster-whisper-large-v3`.
-- **Parity is unproven, so whisper-cli stays as a fallback.** The comparison:
+- **The comparison that was made before P5** (whisper-cli is gone since P7):
 
   | | whisper-cli (today) | Crucible asr |
   |---|---|---|
@@ -391,12 +391,7 @@ Crucible has no embeddings route. `chapter-detection.service.ts` step 2 (`/api/e
   | Windows without WSL | yes | no |
   | Intel Mac | yes | no |
   
-  **Decision for P5:** Crucible asr is primary wherever the selected server serves `asr` (`/v1/capability` asr row available). Fall back to whisper-cli when:
-  - the task asks for `translate`, or
-  - there is no registered server, or
-  - the chosen server has no asr (llama-windows-only, Intel-Mac remote-less).
-  
-  A registered but **unreachable** server **parks** the task and does not fall back, because silently switching engines is exactly what Crucible's own docs warn about. P5 acceptance includes a side-by-side run: 10 library videos, word-error-rate proxy (the diff ratio against a hand-checked transcript for 3 of them) and wall time. Whether whisper-cli ever gets deleted is §13 Q2. We also ask Crucible for `task: "translate"` (§12 A5).
+  **As built (P5 + P7):** Crucible asr is the only engine. A task that no server can take (none registered, none answering, none serving asr) **parks** with the reason and resumes when one can. `translate` is not offered (§13.3).
 
 ### 6.7 Snap: the scorer → Crucible `/v1/decide`
 
@@ -425,11 +420,11 @@ Crucible has no embeddings route. `chapter-detection.service.ts` step 2 (`/api/e
   - `floorsMissingLabels` is false until Crucible adds it.
 - **Error mapping.** `409 model_not_resident` / `leased` → park. `503 chat_queue_full` → honour Retry-After. `502 label_not_in_probs` → **with no floor, count the unit as skipped and record it in `missingLabels`**, the same place the floor count went.
 - **Gating.** `analysisEngine: snap` uses `CrucibleSnapBackend` only when all of these hold:
-  1. the server answers `POST /v1/decide`. A 404 means "not served", so fall back to `LocalScorerBackend` until P7, then to classic.
+  1. the server answers `POST /v1/decide`. A 404 means "not served", and the stage fails by name.
   2. `caps.maxOptions ≥ 26`, or the stage can split.
   3. the flag and chapter evals pass (§9 P6).
   
-  **On the user's Mac Studio this means snap-via-Crucible falls back to classic until Crucible serves more than 11 logprobs on mlx** (§12 A2, §13 Q3).
+  *(As built: there is no classic engine to choose; see P6 and P7 as built.)*
 - **P7** deletes `scorer-server.service.ts`, `scorer-engine.ts`, `scorer-decide.ts`, `scorer-prompt.ts`, `scorer-labels.ts` (move any label constants the chapter and flag code still import into `scorer/backends/`), the scorer model-catalog entries (`config/model-catalog.ts:81,93`), and the scorer's llama-server lifecycle. **Keep `scorer-viterbi.ts`**: the chapter path runs Viterbi over the answers whichever backend produced them.
 
 ### 6.8 LlamaManager, llama-bridge and the `local` provider
@@ -459,8 +454,7 @@ These are already dead (`COGITO_MODELS` is empty).
 |---|---|---|---|
 | `gpu:<server>` | one per **enabled** registered server | `transcribe` (Crucible asr), `analyze` / `analyze-webpage` whose target resolves to a **local** model on that server | 1 |
 | `upstream` | one | `analyze` / `analyze-webpage` whose target is `anthropic/*`, `openai/*`, `ollama/*` (or a class routed to one) | 2 (rate limits pass through as 429 + Retry-After) |
-| `legacy-ai` | one, only while `aiBackend` resolves to legacy | today's AI pool behaviour, unchanged | 1 |
-| `main` | the existing 5 | everything else, **plus** whisper-cli fallback transcribes, capped at **2 of the 5** (today up to 5 whisper processes can run at once) | 5 |
+| `main` | the existing 5 | everything that is not AI | 5 |
 
 The `analyze` task is still one queue task. Inside it, the transcript is already done by the `transcribe` task, and the analysis holds **one lease** on one model for its whole run. That makes a video atomic on the card, as BF's `gpuHoldOf` does.
 
@@ -489,7 +483,7 @@ Within one analysis, the snap stage and the LLM stages default to **the same mod
 
 ### 7.5 Watchdog, cancel and progress
 
-- **Watchdog.** The 90-min wall-clock AI timeout (:69) becomes a **stall** watchdog for Crucible-backed tasks: 15 min without a progress event, an SSE event or a completed chat call → fail as stalled. That is BF's `stream-stall` with Briefcase's number. The 90-min cap stays only on `legacy-ai`.
+- **Watchdog.** The 90-min wall-clock AI timeout (:69) becomes a **stall** watchdog for Crucible-backed tasks: 15 min without a progress event, an SSE event or a completed chat call → fail as stalled. That is BF's `stream-stall` with Briefcase's number. The 90-min cap and the AI pool went in P7.
 - **Cancel.** `cancelJob` → `job.cancel-requested` (unchanged) → the analysis's `AbortSignal`:
   1. it aborts the open chat or decide fetch;
   2. it sends `DELETE` for the open job;
@@ -525,9 +519,9 @@ Within one analysis, the snap stage and the LLM stages default to **the same mod
   - the local catalog, each with a "Download" badge if not yet pulled;
   - Claude models, OpenAI models and Ollama models, from the upstreams.
   
-  The analysis engine (classic/snap) moves here from hand-edited `app-config.json`. Snap shows "unavailable on this server: <reason>" when §6.7's gate fails.
-- **Components pane (`components-pane.component.*`).** It keeps ffmpeg-tools and yt-dlp. **P7 removes** whisper (binary and models), llama, nli-ranker and the scorer section (commit `e93b109`), *unless* §13 Q2 keeps whisper-cli, in which case "Offline transcriber (whisper)" stays as one optional row.
-- **Transcription pane.** "GPU mode" goes away for the Crucible engine. The pane shows the server's asr model choice and a note that translate uses the offline transcriber.
+  Snap is the only analysis engine (P7); there is no engine choice.
+- **Components pane (`components-pane.component.*`).** It keeps ffmpeg-tools and yt-dlp. **P7 removes** whisper (binary and models), llama, nli-ranker and the scorer section (commit `e93b109`). Done in P7.
+- **Transcription pane.** "GPU mode" goes away for the Crucible engine. The pane shows the server's asr model choice.
 - **process-config inspector (`shell/inspector/process-config/`)** and `queue-item-config-modal`: the AI and whisper dropdowns take the same model list source, bound with `ngModel`.
 - **`ai-setup-wizard`** becomes a thin wrapper that opens Settings › Crucible Servers. It's deleted in P7.
 - Visual rules: card toggles with an orange border, and **no emoji**. User-facing strings live in `frontend-v3/src/app/shared/crucible-words.ts`, ported from BF where they apply.
@@ -612,7 +606,6 @@ Each phase is a sequence of commits on `feat/crucible` that ends with `npm run b
 **Acceptance:**
 - The same 3 reference videos analysed four ways: through Crucible local `qwen3.5-9b` (or the Mac's analysis class), through `anthropic/<current sonnet>`, through `openai/<current>`, and through `ollama/qwen3.5:4b`. Every one yields chapters, flags, description, tags and title. Results are stored and visible on the timeline.
 - Chapter counts are within ±30 % of the legacy path on the same model family. The lexical-only boundary is the known risk, and it's recorded in the PR.
-- Setting `aiBackend.llm=legacy` restores today's behaviour.
 - `api-keys.json` is gone after migration, and Claude still works.
 
 ### P4: queue admission, lanes and the sweep
@@ -642,18 +635,17 @@ Each phase is a sequence of commits on `feat/crucible` that ends with `npm run b
 - `backend/src/media/transcription/{transcription-engine,whisper-cli.engine,crucible-asr.engine,transcript-to-srt}.ts`.
 - `media/whisper.service.ts` (engine selection per §6.6).
 - `media/media-operations.service.ts`, `media/media-processing.service.ts`, `analysis/analysis.service.ts`, `analysis/simple-transcribe.controller.ts` (callers keep their signatures; any that bypass `WhisperService` are routed through it).
-- `queue/crucible-lanes.ts` (`transcribe` → a GPU lane when the Crucible engine is chosen; whisper-cli fallback capped at 2 in main).
+- `queue/crucible-lanes.ts` (`transcribe` → a GPU lane; parks when no server can take it).
 - `frontend-v3/.../transcription-pane.component.ts`.
 
 **Tests:**
 - `transcript-to-srt.spec.ts`: overlaps, empty segments, times past 10 h, HH:MM:SS,mmm.
 - `crucible-asr.engine.spec.ts` against the fake: upload bytes, params exactly `{language, vad_filter, word_timestamps}`, SSE progress mapping, the artifact fetch, cancel → DELETE, a failed job → the task fails with the server's message.
-- Selection: translate → cli; no server → cli; server without asr → cli; unreachable registered server → park.
+- Selection: no server, a server without asr, or an unreachable server → park.
 
 **Acceptance:**
-- The 10-video side-by-side from §6.6 is recorded in the PR: time and diff ratio. Crucible asr is **no worse in quality and no slower in wall time per video** on the Mac Studio. Otherwise asr stays behind `aiBackend.asr=legacy` by default and the numbers go to the user.
+- The 10-video side-by-side from §6.6 is recorded in the PR: time and diff ratio. Crucible asr is **no worse in quality and no slower in wall time per video** on the Mac Studio. Otherwise the numbers go to the user.
 - The transcript search and the editor work on Crucible-made transcripts.
-- A translate download still produces an English transcript.
 
 ### P6: snap via Crucible
 
@@ -666,10 +658,10 @@ Each phase is a sequence of commits on `feat/crucible` that ends with `npm run b
 - **Tests:**
   - `crucible-snap.backend.spec.ts` against the fake's `/v1/decide`: key prefixing keeps letter order for names `"1".."12"`; logProbs and rawLogProbs derivation; `label_not_in_probs` → a skipped unit counted in `missingLabels`; 409/503 handling; a 404 decide → "not served".
   - The flag eval harness (`scorer/flags/eval/flag-eval.ts`) gets a `--backend crucible` switch.
-- **Acceptance:** on the PC (vLLM, qwen3.5-9b), the flag eval and chapter eval match or beat `LocalScorerBackend` on the same fixtures (record precision/recall and chapter boundary F1 in the PR). On the Mac, the gate chooses classic with a visible reason until §12 A2 is resolved.
+- **Acceptance:** on the PC (vLLM, qwen3.5-9b), the flag eval and chapter eval match or beat `LocalScorerBackend` on the same fixtures (record precision/recall and chapter boundary F1 in the PR). 
 
 **P6 AS BUILT (2026-09-23, Crucible 1.0.24).** Where it departs from the plan above, the plan is superseded:
-- **No fallback** (the user's rule, 2026-09-23). Under `aiVia: crucible` the scorer is `CrucibleScorerService` (`scorer/crucible-scorer.service.ts`) and only that. A stage it cannot make fails by name (`SnapEngineError`: `decide_not_served`, no decide model, a server older than 1.0.24); a busy or silent server parks the task. The gate above ("fall back to LocalScorerBackend, then classic") is not built. Removing the existing fallbacks is the next phase's.
+- **No fallback** (the user's rule, 2026-09-23). The scorer is `CrucibleScorerService` (`scorer/crucible-scorer.service.ts`) and only that. A stage it cannot make fails by name (`SnapEngineError`: `decide_not_served`, no decide model, a server older than 1.0.24); a busy or silent server parks the task. The gate above ("fall back to LocalScorerBackend, then classic") is not built. The existing fallbacks were removed in P7.
 - **The seam** stayed `ScorerHandle` (`decide`, `generate`, plus `model` and `countTokens`), not a new `SnapBackend`: the one leak (`decider()`) was the model name and the tokenizer.
 - **Names are not prefixed.** Crucible's legend shows the option NAME to the model, so a prefix would change the prompt. Integer-like question or option names are refused by name instead; Briefcase's (`s12`, `section 3`, categories, `p1:…`) never are.
 - **`missing: "report"`** and Briefcase's floor client-side (`scorer/crucible-decide.ts`): a label outside the top-K takes the tighter of the smallest returned label's raw probability and the unreturned mass over the top-K's other entries; a label-mass gate of 0.01 reads an answer as no evidence.
@@ -680,7 +672,7 @@ Each phase is a sequence of commits on `feat/crucible` that ends with `npm run b
 
 ### P7: remove the legacy runtimes
 
-This goes in two parts, because snap may still be waiting.
+The original plan (two parts, because snap might still be waiting) is kept for the record; **P7 as built**, below, supersedes it.
 
 - **P7a (after P5 acceptance)**, delete:
   - `bridges/llama-manager.ts`, `bridges/llama-bridge.ts`;
@@ -694,10 +686,25 @@ This goes in two parts, because snap may still be waiting.
   - `components/ai-setup-wizard/`;
   - the Ollama install step anywhere in the setup wizard.
   
-  Whisper-cli is removed only if §13 Q2 says so.
 - **P7b (after P6b acceptance)**, delete the scorer's llama-server lifecycle (§6.7 list), `analysis/nli-ranker.service.ts`, `common/nli-env.ts`, the nli-ranker python-env component (`config/model-catalog.ts:~280`, `components/component-manager.service.ts:~468`), the scorer model-catalog entries, the scorer section in the Components pane, and the `aiBackend.snap` flag.
 - **Tests:** `npx jest` green with the deleted specs removed. Add a grep test (`legacy-runtime-gone.spec.ts`) asserting that no source file imports `llama-manager`, `ollama.service`, `@anthropic-ai/sdk` or `nli-ranker`.
 - **Acceptance:** a fresh install on a clean arm64 Mac downloads *no* AI binaries from the binaries-v1 manifest. Everything AI arrives through Crucible's module. The DMG is no larger than before.
+
+**P7 AS BUILT (2026-09-23).** The user's rule replaces the two-part plan above: *"No fallbacks. If Crucible is down, Briefcase is down. Briefcase attempts/asks to bring Crucible up. If the user refuses or we otherwise can't, the user just can't take any actions that would require Crucible. They can still browse the clip collection, download clips, etc."* A programmatic fallback (a documented default, bounded retry) is fine; a second code path around Crucible is not. Everything went in one phase.
+
+- **Removed: whisper-cli.** `bridges/whisper-bridge.ts`, `media/whisper-manager.ts`, the `whisper-cli` transcription venue and the **`translate` option** (Crucible's asr has none, and Briefcase does not need it, §13.3), `analysis/simple-transcribe.controller.ts`, the `/media/transcribe` and `/media/analyze` endpoints, the whisper model downloads (`config/model-manager.service.ts`), `scripts/download-whisper-cpp.js` and `add-whisper-models-to-manifest.js`, and the `WHISPER_*` env from `electron/services/backend-service.ts`. `WhisperService` keeps its name and is Crucible-only; a stored `venue: "whisper-cli"` is reported as ignored.
+- **Removed: the direct AI road.** `aiVia` and `crucible/llm/ai-via.ts`, the direct Claude / OpenAI / Ollama providers in `ai-provider.service.ts`, `analysis/ollama.service.ts`, `ollama-capabilities.ts`, the `/analysis/models|pull-model|check-model` endpoints, `config/api-keys.*` and the `/config/*-models` lists, the AI pool of 1 and its 90-minute watchdog, and **`@anthropic-ai/sdk` and `openai`** from `backend/package.json`. Kept: the one-time "copy my keys to Crucible" action, which now reads the old `api-keys.json` through `crucible/llm/legacy-api-keys.ts` and deletes it after the hint check. The renderer's `ai-setup-wizard`, `ai-setup.service`, the chat-model component and the Ollama UI are gone.
+- **Removed: the local llama runtime.** `bridges/llama-manager.ts`, `llama-bridge.ts`, `gpu-info.ts`, `bridges.module.ts`, the `'local'` llama provider, `COGITO_MODELS` and `config/model-catalog.ts`, the llama component, `scripts/download-llama-cpp.js` and `package-llama-extra.js`, and the scorer's own llama-server (`scorer-server.service`, `scorer-engine`, `scorer-decide`, `scorer-prompt`, `scorer-config`, `scorer.module`). Kept: the `ScorerHandle` seam (`scorer/scorer-handle.ts`) with `CrucibleScorerService` its only implementation. `local:<id>` stays as the stored spelling of a Crucible catalog model.
+- **Removed: classic analysis and NLI.** The `analysisEngine` setting and `scorer/analysis-engine.ts`, `chapter-detection.service.ts` and `phrase-matcher.ts`, discovery flags and the `extractChapterFlags` fallback, the boundary / extraction / sensitivity prompts, granularity, `nli-ranker.service.ts`, `python/nli-worker`, `common/nli-env.ts`, `electron/shared/python-config.ts`, the nli component and its UI, and the in-process `/analysis/start` pipeline (a second AI road that bypassed the queue). Kept: the flag VERIFY stage, and existing `ranker='nli'` rows are still displayed. `assembleSentences` moved to `analysis/flag-windows.ts`.
+- **Components** lists only `ffmpeg-tools` and `yt-dlp` (`BRIEFCASE_COMPONENTS`); `assets/manifest.json` and the packaging scripts match. The live binaries-v1 manifest still carries whisper/llama rows; they are filtered, not offered.
+
+**The "Crucible required" state.**
+- **One readiness signal** (`crucible/readiness.service.ts`, wire `crucible/wire/readiness-wire.ts`): `ready | starting | unreachable | not-installed | not-configured`, a sentence of reason, the one door (`start | install | connect`), `busy` (the card's holder, including a foreign engine claim such as "the settlement clearing the card"), `declined` and `aiWaiting`. Pushed on Socket.IO `crucible.readiness`, served at `GET /crucible/readiness`, with `POST …/refresh|start|decline`. It re-derives every 10 s while not ready and 30 s while ready. Boot never waits on it.
+- **Bringing it up.** When AI work is waiting and the local Crucible is installed but stopped, the backend starts it (`startLocal`) once per outage. Otherwise the renderer's prompt card (bottom-left; Start / Install / Connect and "Not now") offers the door; install and connect open Settings › Crucible Servers. "Not now" is remembered for the backend's lifetime.
+- **Gating.** Every AI control is disabled with the reason and the door (the sidebar-footer indicator, the process config, the queue). The backend refuses with HTTP 409 `{code: 'crucible_required', message, readiness}` from the queue's add/start doors and every direct AI endpoint (library insights too); the global exception filter now passes typed `code` fields through, which it had been dropping. A task already queued **parks** while Crucible is unreachable and is re-asked when readiness turns ready. An `engine_in_use` or a foreign claim while reloading waits with bounded backoff, then parks; it never fails the analysis.
+- **Non-AI features are unaffected.** `backend/test/no-crucible/` (`npm run test:no-crucible`) runs boot, downloads, imports, processing at the pool's full width of 5, export and the AI refusal/park paths under three conditions (nothing registered, unreachable, cannot host), plus an import-closure test over the non-AI modules and a grep that the legacy runtimes and their dependencies are gone.
+
+**Also fixed in P7.** A one-item snap outline gives one chapter spanning the video (only an empty or unparseable outline is an error). Answers flattened by the `label_mass < 0.01` gate are counted per pass and surfaced as a run warning.
 
 ---
 
@@ -745,13 +752,13 @@ Jest runs these as ordinary specs (`backend/test/crucible/*.spec.ts`, plus co-lo
 | **Cancel** | An aborted chat fetch may not stop the engine at once (mlx-lm can finish its current generation) | Release the lease, remove the ledger row, and treat cancel as done on the client side. Crucible's `_chat_over` settles the card. The task never waits on the engine. Previous analysis results are kept (the `0378d02` rule). An asr cancel is a real `DELETE`. |
 | **Crucible down** | AI tasks fail in bulk | They **park, they don't fail**, with "Crucible on <name> isn't answering". The lane chip goes red. Downloads, library, editor and Collections are unaffected by construction (§5.3). A **misconfiguration** fails at once with a pointer to settings: bad token, unconfigured upstream, or a `local:` target. |
 | **Crucible down at boot** (a late volume, a service not yet up) | Boot is slow or fails | Nothing awaits Crucible at boot. The probe retries on the queue's `reach()` schedule. Crucible's home is on the internal disk, and the library volume is irrelevant to it. |
-| **Windows/WSL** | UAC, a restart, no asr without WSL, SIGTERM being a hard kill | We use BF's host runner and its sentences. The whisper-cli fallback covers asr. The startup sweep covers the missing quit hook. The first acceptance run on the PC is a required step in P2. |
+| **Windows/WSL** | UAC, a restart, no asr without WSL, SIGTERM being a hard kill | We use BF's host runner and its sentences. Transcription needs a server that serves asr (a Mac or an NVIDIA box elsewhere); until then transcribe tasks park. The startup sweep covers the missing quit hook. The first acceptance run on the PC is a required step in P2. |
 | **Version skew** | Server newer than SDK: additive, fine. Server older than a route we need (decide, a future translate). A server on API 2. | Probe refuses `apiVersion !== 1` with "Crucible <v> speaks a newer protocol; update Briefcase". Features are **detected**, never inferred from the version string (404 on `/v1/decide` → not served). `MIN_CRUCIBLE = '1.0.23'` in `probe.ts` marks older servers "needs update" in the pane and routes nothing to them. SDK repins use the adopt script only. |
 | **Another app's lease** (BookForge narrating for hours) | Briefcase's AI waits a long time | This is by design: the task parks with the holder's sentence. The user can pause the busy server or rank another above it. A Crucible-side lane reservation (which BF also still needs) is not assumed. |
 | **Thrash between models** | Load and unload per video | The same-model preference (§7.3), and one default model for snap and the LLM stages. |
-| **Quality regression** | From losing embeddings (classic chapters), from Ollama's context default, or from asr engine differences | Acceptance gates with recorded numbers in P3, P5 and P6. Every area has a flag back to legacy until P7. |
+| **Quality regression** | From losing embeddings (classic chapters), from Ollama's context default, or from asr engine differences | Acceptance gates with recorded numbers in P3, P5 and P6. There is no path back to a legacy runtime since P7; a regression is fixed forward. |
 | **Keys** | Deleting the old file before the new one is confirmed | The hint check comes before deletion. Nothing is pushed to a remote server without being asked. The file is kept on any failure. |
-| **The download pipeline** | A regression in a business-critical path | P4 includes a main-pool throughput regression spec. Whisper-cli transcribes are capped at 2, and the rest of the pool is unchanged. No Crucible code is on the download → import path. |
+| **The download pipeline** | A regression in a business-critical path | P4 includes a main-pool throughput regression spec. AI tasks never occupy the pool (they run on lanes), and P7's `test/no-crucible` suite pins non-AI features with Crucible absent. No Crucible code is on the download → import path. |
 
 ---
 
@@ -761,7 +768,7 @@ Jest runs these as ordinary specs (`backend/test/crucible/*.spec.ts`, plus co-lo
 - **A2: More than 11 logprobs on mlx-darwin.** Either Crucible's own mlx logprobs path, or a documented option-splitting contract. This is PHASE22 §7.4. Briefcase asks 26-option questions (chapter assign) and 11-option ones (flag pass 1), so without this, snap on the user's Mac Studio stays classic.
 - **A3: `missing_labels: "floor"` on `/v1/decide`**, and per-option raw logprobs in the answer. Briefcase's Viterbi needs a finite log P for every option. Today the door refuses the whole request with `label_not_in_probs`. A caller-set `top_k` ceiling (up to the engine's cap) would also help.
 - **A4: Ollama upstream parity.** Translate `thinking` and `num_ctx` for the `ollama` upstream, by routing to Ollama's native `/api/chat` or by passing `options`. Also surface the `reasoning` text on replies (the SDK `ChatResponse` has no field for it). Without this, `ollama/*` runs at Ollama's default context and with the model's default thinking.
-- **A5: `task: "translate"` on the `asr` job.** Whisper supports it, and Briefcase's downloads use it. This is the main thing keeping whisper-cli around.
+- **A5: `task: "translate"` on the `asr` job.** Whisper supports it, and Briefcase's downloads use it. No longer needed: Briefcase dropped translate in P7 (§13.3).
 - **A6: The `briefcase` module** (§3.4). This is our own PR to `modules/briefcase.toml`.
 - **A7 (nice to have): a `tokenize` or `count_tokens` route** for the resident model, for exact snap chunk planning. chars/4 works meanwhile.
 
@@ -771,8 +778,8 @@ Jest runs these as ordinary specs (`backend/test/crucible/*.spec.ts`, plus co-lo
 
 1. **Intel Mac and non-NVIDIA Linux: no local Crucible, by design.** Crucible installs only on Apple Silicon (darwin) or NVIDIA hosts, and that's expected. On those machines Briefcase skips the install and has the user connect to a Crucible on another computer that they choose. There is no direct cloud path: all AI goes through Crucible.
 2. **Server model: exactly BookForge's.** Briefcase finds the local Crucible automatically. If none is installed, it walks the user through the install. Settings and setup both let the user connect a different Crucible server, remote or LAN. Keys and upstreams live on whichever Crucible serves the call, configured through that server's settings as BookForge does (engine-settings). Briefcase doesn't copy keys between servers.
-3. **Transcription goes through Crucible (P5 is back in scope).** Crucible's `asr` job already transcribes: faster-whisper on NVIDIA, and the user is configuring it for the Mac now and adding **large-v3**. Assume it works on the Mac. P5 routes Briefcase's transcription to the `asr` job with large-v3, and converts the output to SRT so nothing downstream changes. whisper-cli stays as the fallback only until Crucible transcription is verified on both platforms, then goes in P7. Translation is not a Briefcase requirement: videos are transcribed in their spoken language, and any translating would be a separate text step on Crucible (typically Qwen 27B). The existing `--translate` option doesn't need a Crucible equivalent.
-4. **Decide-route limits get fixed in Crucible.** The user is raising the candidate cap on the Mac and adding a lenient mode for missing labels on the decide-door branch (see §12 A2 and the floor policy). Briefcase targets the full option counts: 26 for chapter assign and 11 for flag pass 1. Classic analysis stays the fallback until that lands.
+3. **Transcription goes through Crucible (P5 is back in scope).** Crucible's `asr` job already transcribes: faster-whisper on NVIDIA, and the user is configuring it for the Mac now and adding **large-v3**. Assume it works on the Mac. P5 routes Briefcase's transcription to the `asr` job with large-v3, and converts the output to SRT so nothing downstream changes. whisper-cli was removed in P7. Translation is not a Briefcase requirement: videos are transcribed in their spoken language, and any translating would be a separate text step on Crucible (typically Qwen 27B). The existing `--translate` option doesn't need a Crucible equivalent.
+4. **Decide-route limits get fixed in Crucible.** The user is raising the candidate cap on the Mac and adding a lenient mode for missing labels on the decide-door branch (see §12 A2 and the floor policy). Briefcase targets the full option counts: 26 for chapter assign and 11 for flag pass 1. Classic analysis was removed in P7.
 5. **Still open, with defaults applied:**
    - Transcriber model: large-v3 on both platforms (the user is adding it to Crucible).
-   - Embeddings: the classic chapter path goes lexical-only under Crucible, as a stopgap until snap chapters take over.
+   - Embeddings: moot; the classic chapter path was removed in P7.

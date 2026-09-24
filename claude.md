@@ -8,7 +8,7 @@ Briefcase is a professional media library manager desktop application with AI-po
 - **Backend**: NestJS with TypeScript (in `backend/`)
 - **Desktop**: Electron with TypeScript (in `electron/`)
 - **Database**: SQLite via better-sqlite3
-- **AI Integration**: Ollama (local), Claude API, OpenAI API
+- **AI Integration**: Crucible only (a local or LAN AI server: its own models, plus Claude / OpenAI / Ollama as upstreams it proxies). No Crucible, no AI; everything else still works
 
 ## Project Structure
 
@@ -19,7 +19,7 @@ Briefcase/
 │       ├── database/    # SQLite database service
 │       ├── ffmpeg/      # Video processing with FFmpeg
 │       ├── queue/       # Task queue management
-│       ├── transcription/ # Whisper transcription
+│       ├── crucible/    # Crucible client: registry, readiness, llm, asr
 │       ├── ai-analysis/ # AI video analysis
 │       └── saved-links/ # Save-for-later feature
 ├── electron/            # Electron main process
@@ -33,7 +33,7 @@ Briefcase/
 │       ├── components/  # UI components
 │       ├── services/    # Angular services
 │       └── models/      # TypeScript interfaces
-├── utilities/           # Bundled binaries (yt-dlp, whisper, ffmpeg)
+├── utilities/           # Binaries (yt-dlp, ffmpeg)
 ├── scripts/             # Build and packaging scripts
 └── shared/              # Shared TypeScript types
 ```
@@ -56,8 +56,8 @@ Briefcase/
 - `database/` - SQLite operations, video metadata, libraries
 - `ffmpeg/ffmpeg.service.ts` - Video encoding, thumbnails, waveforms
 - `queue/` - Task queue with progress tracking
-- `transcription/` - Whisper-based audio transcription
-- `ai-analysis/` - LLM-based video content analysis
+- `crucible/` - The Crucible client: server registry and pairing, `readiness.service.ts` (ready / starting / unreachable / not-installed / not-configured, pushed on Socket.IO), `llm/` (chat), `asr/` (transcription)
+- `analysis/` - LLM-based video content analysis (snap engine in `scorer/`), all through Crucible
 
 ### Key Components (frontend-v3/src/app/components/)
 - `cascade/` - Grid/list view for video library
@@ -65,7 +65,7 @@ Briefcase/
 - `queue-tab/` - Processing queue management
 - `save-for-later-tab/` - Bookmarked links
 - `library-manager-modal/` - Library settings
-- `ai-setup-wizard/` - AI provider configuration
+- `crucible-readiness/` - Crucible prompt and status indicator; AI actions are gated on readiness
 
 ## Development Commands
 
@@ -129,10 +129,12 @@ The video editor (`components/video-editor/`) supports:
 ## AI Analysis Flow
 
 1. Video added to queue with `ai-analyze` task
-2. Backend extracts audio, runs transcription
-3. Transcript sent to LLM (Ollama/Claude/OpenAI)
+2. Transcription runs as a Crucible `asr` job (no local whisper)
+3. Snap chapters/flags and text tasks run on Crucible (its own model, or Claude/OpenAI/Ollama upstreams through it)
 4. Analysis stored in `analysis` table as JSON
 5. Frontend displays sections on video timeline
+
+If Crucible is not ready, AI actions are refused (409 `crucible_required`) and queued AI tasks park until it is back; see `docs/crucible-migration-plan.md` (P7 as built).
 
 ## Code Conventions
 
@@ -155,5 +157,5 @@ formatTime(seconds: number): string {
 
 - The app runs backend on a dynamic port (finds available port)
 - Frontend served from backend in packaged app
-- Binaries (ffmpeg, yt-dlp, whisper) bundled in `utilities/`
+- Binaries (ffmpeg, yt-dlp) downloaded into `utilities/` by the first-run wizard; AI runtimes come from Crucible
 - Settings stored via electron-store (not in SQLite)
