@@ -668,6 +668,16 @@ Each phase is a sequence of commits on `feat/crucible` that ends with `npm run b
   - The flag eval harness (`scorer/flags/eval/flag-eval.ts`) gets a `--backend crucible` switch.
 - **Acceptance:** on the PC (vLLM, qwen3.5-9b), the flag eval and chapter eval match or beat `LocalScorerBackend` on the same fixtures (record precision/recall and chapter boundary F1 in the PR). On the Mac, the gate chooses classic with a visible reason until §12 A2 is resolved.
 
+**P6 AS BUILT (2026-09-23, Crucible 1.0.24).** Where it departs from the plan above, the plan is superseded:
+- **No fallback** (the user's rule, 2026-09-23). Under `aiVia: crucible` the scorer is `CrucibleScorerService` (`scorer/crucible-scorer.service.ts`) and only that. A stage it cannot make fails by name (`SnapEngineError`: `decide_not_served`, no decide model, a server older than 1.0.24); a busy or silent server parks the task. The gate above ("fall back to LocalScorerBackend, then classic") is not built. Removing the existing fallbacks is the next phase's.
+- **The seam** stayed `ScorerHandle` (`decide`, `generate`, plus `model` and `countTokens`), not a new `SnapBackend`: the one leak (`decider()`) was the model name and the tokenizer.
+- **Names are not prefixed.** Crucible's legend shows the option NAME to the model, so a prefix would change the prompt. Integer-like question or option names are refused by name instead; Briefcase's (`s12`, `section 3`, categories, `p1:…`) never are.
+- **`missing: "report"`** and Briefcase's floor client-side (`scorer/crucible-decide.ts`): a label outside the top-K takes the tighter of the smallest returned label's raw probability and the unreturned mass over the top-K's other entries; a label-mass gate of 0.01 reads an answer as no evidence.
+- **`countTokens`** is a one-token chat's `prompt_tokens` less the template's (exact to the template seam), not chars/4, so chunk plans match the llama-server path.
+- **Caps.** The Mac's mlx-lm reads 26 options from 1.0.24 (the env patch). An engine past its cap answers `503 decide_not_served`, which fails the stage by name.
+- **The model** is `qwen3.5-9b` (the benchmarked one), its `-vl` alias only when it is already on the card, one form per server session, loaded at 32K (`SCORER_LOAD_CONTEXT`) and leased across the whole chapters + flags pass, on the server the queue run already holds.
+- **Live smoke on the Mac (1.0.24, mlx-lm):** 16/16 sanity cases; u25JYe8E3RA F1@±1 1.000 / Pk 0.058, identical to the llama-server run, but 4.55 s/sentence against 0.68: mlx-lm re-prefills the whole ~3,000-token state for every question (no reuse of the primed prefix on the hybrid Qwen3.5), two at a time. That is Crucible's engine to fix, not Briefcase's.
+
 ### P7: remove the legacy runtimes
 
 This goes in two parts, because snap may still be waiting.
