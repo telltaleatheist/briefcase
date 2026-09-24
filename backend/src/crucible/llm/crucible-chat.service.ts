@@ -14,7 +14,11 @@
  *
  * LOCAL MODELS are made resident with a `load-model` job (its events followed
  * to the end) and, inside a run, held with a lease heartbeaten every 40 s
- * against a 120 s TTL. A chat that meets `409 model_not_resident` (someone
+ * against a 120 s TTL. A heartbeat that fails for weather is retried every 5 s
+ * while the TTL still covers it; only `unknown_lease`, or the TTL running out
+ * unrenewed, loses the lease. A lease given up on that way is released
+ * best-effort, and the next local call re-takes one before it is sent (a local
+ * call is never sent knowingly unleased). A chat that meets `409 model_not_resident` (someone
  * else's load evicted it) re-ensures once and retries. A load or lease refused
  * `409 server_busy` / `leased` is a typed {@link CrucibleBusyError} carrying
  * the holder's sentence; the caller may ask to wait it out (`busyWait`).
@@ -60,6 +64,8 @@ import { buildChatBody, crucibleTargetOf, type ChatBodyInput, type CrucibleTarge
 export const BRIEFCASE_ACT = 'analysis';
 export const LEASE_TTL_SECONDS = 120;
 export const HEARTBEAT_MS = 40_000;
+/** A heartbeat that failed for weather is tried again this soon, while the TTL still covers it. */
+export const HEARTBEAT_RETRY_MS = 5_000;
 /** Queue-full retries before the call gives up. */
 export const MAX_QUEUE_FULL_RETRIES = 30;
 const DEFAULT_RETRY_AFTER_MS = 2_000;
@@ -143,6 +149,14 @@ interface Held {
   leaseId: string | null;
   beat: NodeJS.Timeout | null;
   lost: boolean;
+  /** Lost by this side giving up (heartbeats unanswered), not by the server saying so: it may still be open there. */
+  mayStillHold: boolean;
+  /** Released: a heartbeat in flight must not reschedule itself. */
+  stopped: boolean;
+}
+
+function isUnknownLease(err: unknown): boolean {
+  return err instanceof CrucibleRefused && (err.code === 'unknown_lease' || err.status === 404);
 }
 
 /** How the queue asks for a run (P4). Every field is optional; a bare `withRun(fn)` is P3's run. */
@@ -211,6 +225,16 @@ export class CrucibleChatService {
   /** The clock and the sleeper, replaceable by a spec. */
   now: () => number = Date.now;
   heartbeatMs = HEARTBEAT_MS;
+  /** How soon a heartbeat that failed for weather is tried again. */
+  heartbeatRetryMs = HEARTBEAT_RETRY_MS;
+  /** How long the server keeps a lease nobody renews: the retry budget. */
+  leaseTtlMs = LEASE_TTL_SECONDS * 1000;
+  /**
+   * Leases this side gave up on but could not hand back, per server. Crucible
+   * allows one lease per client per server, so re-leasing is refused `leased`
+   * naming this id; it is then ours to take back, not "another app's".
+   */
+  private readonly staleLeases = new Map<string, string>();
 
   constructor(
     private readonly servers: CrucibleServersService,
@@ -550,8 +574,8 @@ export class CrucibleChatService {
       if (held !== undefined && held.model === model && !held.lost) return;
       if (held !== undefined) await this.releaseHold(scope, held);
       const leaseId = await this.makeResident(server, model, signal, true);
-      const hold: Held = { server, model, leaseId, beat: null, lost: false };
-      if (leaseId !== null) hold.beat = this.startHeartbeat(hold);
+      const hold: Held = { server, model, leaseId, beat: null, lost: false, mayStillHold: false, stopped: false };
+      if (leaseId !== null) this.startHeartbeat(hold);
       scope.held.set(server, hold);
     });
     scope.lock = run.catch(() => undefined);
@@ -577,9 +601,18 @@ export class CrucibleChatService {
       try {
         const held = await client.lease(model, { act: BRIEFCASE_ACT, ttlSeconds: LEASE_TTL_SECONDS });
         this.recordLease(server, model, held.leaseId);
+        this.staleLeases.delete(server);
         this.logger.log(`[${server}] leased resident ${model} (${held.leaseId})`);
         return held.leaseId;
       } catch (err) {
+        // Our own lease, given up on earlier but never handed back: it is
+        // still open, so it is still ours. Take it back and heartbeat it.
+        if (err instanceof CrucibleLeased && this.staleLeases.get(server) === err.leaseId) {
+          this.staleLeases.delete(server);
+          this.recordLease(server, model, err.leaseId);
+          this.logger.log(`[${server}] ${model}: our earlier lease ${err.leaseId} is still open; holding it again`);
+          return err.leaseId;
+        }
         // Another client already holds a lease on the card. If it holds OUR
         // model, the card is pinned where we need it; chat without our own.
         if (err instanceof CrucibleLeased) {
@@ -693,25 +726,74 @@ export class CrucibleChatService {
     return err instanceof Error ? err : new Error(String(err));
   }
 
-  private startHeartbeat(hold: Held): NodeJS.Timeout {
-    const beat = setInterval(() => {
-      void (async () => {
-        try {
-          const client = await this.servers.clientFor(hold.server);
-          await client.heartbeat(hold.leaseId!);
-        } catch (err) {
-          // Not a log-and-continue: the run is unprotected now. The next chat
-          // on this model re-ensures (and re-leases) before it is sent.
+  /**
+   * Renew `hold`'s lease every {@link heartbeatMs}. A beat that fails for
+   * weather is not a lost lease: it is tried again every
+   * {@link heartbeatRetryMs} for as long as the last renewal still covers it.
+   * `unknown_lease` is the server saying it is gone. Running out of TTL
+   * unrenewed is this side giving up: the lease is released best-effort (it may
+   * still be open there) and the next call re-takes one.
+   */
+  private startHeartbeat(hold: Held): void {
+    let renewedAt = this.now();
+    const schedule = (ms: number): void => {
+      if (hold.stopped) return;
+      hold.beat = setTimeout(() => void tick(), ms);
+      hold.beat.unref?.();
+    };
+    const tick = async (): Promise<void> => {
+      if (hold.stopped) return;
+      try {
+        const client = await this.servers.clientFor(hold.server);
+        await client.heartbeat(hold.leaseId!);
+        renewedAt = this.now();
+        schedule(this.heartbeatMs);
+      } catch (err) {
+        if (hold.stopped) return;
+        const why = (err as Error).message;
+        if (isUnknownLease(err)) {
           hold.lost = true;
-          clearInterval(beat);
           // The server no longer holds it for us: nothing left for a sweep to release.
           this.ledger?.settle(hold.server, 'lease', hold.leaseId!);
-          this.logger.warn(`[${hold.server}] lease on ${hold.model} was lost (${(err as Error).message}); the next call re-takes it`);
+          this.logger.warn(`[${hold.server}] lease on ${hold.model} is gone (${why}); the next call re-takes it`);
+          return;
         }
-      })();
-    }, this.heartbeatMs);
-    beat.unref?.();
-    return beat;
+        if (this.now() + this.heartbeatRetryMs < renewedAt + this.leaseTtlMs) {
+          this.logger.warn(`[${hold.server}] heartbeat of ${hold.leaseId} failed (${why}); trying again in ${Math.round(this.heartbeatRetryMs / 100) / 10} s`);
+          schedule(this.heartbeatRetryMs);
+          return;
+        }
+        hold.lost = true;
+        hold.mayStillHold = true;
+        this.logger.warn(`[${hold.server}] lease on ${hold.model} could not be renewed within its TTL (${why}); releasing it, and the next call re-takes one`);
+        await this.releaseGivenUp(hold);
+      }
+    };
+    schedule(this.heartbeatMs);
+  }
+
+  /**
+   * Best-effort release of a lease this side gave up on. When it can't be
+   * told, the ledger keeps the row for the sweep and the id is remembered, so
+   * a re-lease refused `leased` naming it is recognised as ours.
+   */
+  private async releaseGivenUp(hold: Held): Promise<void> {
+    if (!hold.mayStillHold || hold.leaseId === null) return;
+    try {
+      const client = await this.servers.clientFor(hold.server);
+      await client.release(hold.leaseId);
+      hold.mayStillHold = false;
+      this.ledger?.settle(hold.server, 'lease', hold.leaseId);
+      this.logger.log(`[${hold.server}] released given-up lease ${hold.leaseId}`);
+    } catch (err) {
+      if (isUnknownLease(err)) {
+        hold.mayStillHold = false;
+        this.ledger?.settle(hold.server, 'lease', hold.leaseId);
+        return;
+      }
+      this.staleLeases.set(hold.server, hold.leaseId);
+      this.logger.warn(`[${hold.server}] releasing given-up lease ${hold.leaseId} failed: ${(err as Error).message} (kept for the sweep; it expires on its own)`);
+    }
   }
 
   private forgetHold(server: string, model: string): void {
@@ -721,9 +803,15 @@ export class CrucibleChatService {
   }
 
   private async releaseHold(scope: RunScope, hold: Held): Promise<void> {
-    if (hold.beat !== null) clearInterval(hold.beat);
+    hold.stopped = true;
+    if (hold.beat !== null) clearTimeout(hold.beat);
     scope.held.delete(hold.server);
-    if (hold.leaseId === null || hold.lost) return;
+    if (hold.lost) {
+      // Given up on but maybe still open there: one more try, before it is re-taken.
+      await this.releaseGivenUp(hold);
+      return;
+    }
+    if (hold.leaseId === null) return;
     try {
       const client = await this.servers.clientFor(hold.server);
       await client.release(hold.leaseId);

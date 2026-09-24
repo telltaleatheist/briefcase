@@ -128,6 +128,62 @@ describe('CrucibleChatService: one server', () => {
     expect(fake.leases.released).toEqual(['lease-2']);
   });
 
+  it('REGRESSION: one failed heartbeat (a 503) keeps the lease: the next beat renews it and the run ends by releasing it', async () => {
+    await start({ faults: { refuse: [{ match: { method: 'POST', path: /\/heartbeat$/ }, status: 503, code: 'engine_unavailable', times: 1 }] } });
+    chat.heartbeatRetryMs = 10;
+    await chat.withRun(async () => {
+      await chat.chat({ model: 'qwen3.5-9b', prompt: 'a' });
+      await new Promise((r) => setTimeout(r, 120));
+      await chat.chat({ model: 'qwen3.5-9b', prompt: 'b' });
+      expect(chat.heldInRun()).toEqual([{ server: 'mac', model: 'qwen3.5-9b', leaseId: 'lease-1' }]);
+    });
+    const beats = fake.requestsTo('/v1/leases/lease-1/heartbeat').map((r) => r.fault ?? 'ok');
+    expect(beats[0]).toBe('503 engine_unavailable');
+    expect(beats.slice(1)).toContain('ok');
+    expect(fake.leases.taken.map((l) => l.leaseId)).toEqual(['lease-1']);
+    expect(fake.leases.released).toEqual(['lease-1']);
+    expect(fake.openLease()).toBeNull();
+  });
+
+  it('REGRESSION: heartbeats failing past the TTL budget: the lease is released best-effort and re-taken before the next call', async () => {
+    await start({ faults: { refuse: [{ match: { method: 'POST', path: /\/heartbeat$/ }, status: 503, code: 'engine_unavailable', times: 1_000 }] } });
+    chat.heartbeatRetryMs = 10;
+    chat.leaseTtlMs = 150;
+    await chat.withRun(async () => {
+      await chat.chat({ model: 'qwen3.5-9b', prompt: 'a' });
+      await new Promise((r) => setTimeout(r, 300));
+      // Given up by now: the old lease was handed back, not left open unheartbeaten.
+      expect(fake.leases.released).toContain('lease-1');
+      fake.faults.refuse = [];
+      await chat.chat({ model: 'qwen3.5-9b', prompt: 'b' });
+      // Never chatting knowingly unleased: the call re-took one first.
+      expect(chat.heldInRun()).toEqual([{ server: 'mac', model: 'qwen3.5-9b', leaseId: 'lease-2' }]);
+    });
+    expect(fake.leases.taken.map((l) => l.leaseId)).toEqual(['lease-1', 'lease-2']);
+    expect(fake.leases.released).toEqual(['lease-1', 'lease-2']);
+    expect(fake.openLease()).toBeNull();
+  });
+
+  it('REGRESSION: a given-up lease the server still holds (its release failed) is taken back, not chatted "under another app"', async () => {
+    await start({ faults: { refuse: [
+      { match: { method: 'POST', path: /\/heartbeat$/ }, status: 503, code: 'engine_unavailable', times: 1_000 },
+      { match: { method: 'DELETE', path: /^\/v1\/leases\// }, status: 503, code: 'engine_unavailable', times: 1 },
+    ] } });
+    chat.heartbeatRetryMs = 10;
+    chat.leaseTtlMs = 150;
+    await chat.withRun(async () => {
+      await chat.chat({ model: 'qwen3.5-9b', prompt: 'a' });
+      await new Promise((r) => setTimeout(r, 300));
+      expect(fake.openLease()?.leaseId).toBe('lease-1');
+      // Heartbeats answer again; the release before re-taking still can't be sent.
+      fake.faults.refuse = [{ match: { method: 'DELETE', path: /^\/v1\/leases\// }, status: 503, code: 'engine_unavailable', times: 1 }];
+      await chat.chat({ model: 'qwen3.5-9b', prompt: 'b' });
+      expect(chat.heldInRun()).toEqual([{ server: 'mac', model: 'qwen3.5-9b', leaseId: 'lease-1' }]);
+    });
+    expect(fake.leases.taken.map((l) => l.leaseId)).toEqual(['lease-1']);
+    expect(fake.openLease()).toBeNull();
+  });
+
   it('503 chat_queue_full is retried after the server\'s Retry-After, read from the raw response', async () => {
     await start({ resident: 'qwen3.5-9b', faults: { refuse: [{ match: { method: 'POST', path: '/v1/openai/chat/completions' }, status: 503, code: 'chat_queue_full', retryAfter: 0.3, times: 2 }] } });
     const began = Date.now();
