@@ -61,6 +61,12 @@
  * ceiling), `/v1/capability` carries `work`, `context_ceilings`, the
  * `generate` and `decide` classes and the `?class=&context_tokens=` sizing,
  * and an `ollama/` chat answers `X-Crucible-Context` on 1.0.24+.
+ *
+ * 1.0.25 ("any Crucible that answers works") makes the SDK read every
+ * INFORMATIONAL field as null when a server leaves it out. `omit` (see
+ * {@link INFORMATIONAL_FIELDS}) strips named fields from this fake's answers —
+ * JSON bodies and SSE frames alike — so a spec can play an older or leaner
+ * server and pin what Briefcase does with each absence.
  */
 import * as http from 'http';
 import { createHash, randomBytes } from 'crypto';
@@ -247,7 +253,106 @@ export interface FakeTask {
   unmet: Array<{ class: string; reason: string }>;
 }
 
+/**
+ * Fields to leave out of this fake's answers, by route: `"GET /v1/models"`,
+ * `"GET /v1/jobs/:id"`, `"POST /v1/decide"`, … and, for SSE frames,
+ * `"job-event:<event>"` / `"task-event:<event>"`. Each path is dotted wire
+ * (snake_case) keys: `a.b` descends, `a[]` is every element of array `a`, `[]`
+ * alone every element of a root array, and `*` every value of an object.
+ */
+export type FieldOmissions = Readonly<Record<string, readonly string[]>>;
+
+/**
+ * Every field `@crucible/client` 1.0.25 reads as INFORMATIONAL (null when
+ * absent) on the routes Briefcase calls — what a leaner or older server may
+ * leave out without the SDK refusing it. Load-bearing fields (ids, states,
+ * decide answers, resident/loadable/modalities, capability enabled/selected,
+ * chat content) are never here. Note three Briefcase DEPENDS on although the
+ * SDK calls them informational: `host.backend` / `backend_kind` (the module is
+ * filtered to them), decide `logprobs`, and chat `usage.prompt_tokens` for
+ * countTokens; `logprobs` is left out of this set so the scorer can run, the
+ * other two are in it (see {@link informationalExcept}).
+ */
+export const INFORMATIONAL_FIELDS: FieldOmissions = {
+  'GET /v1/info': ['server.version', 'host.platform', 'host.arch', 'host.backend', 'host.gpu',
+    'capabilities[].models[].revision', 'capabilities[].models[].source', 'capabilities[].models[].vram_bytes'],
+  'GET /v1/activity': ['server.version', 'server.api_version', 'server.backend', 'server.uptime_s',
+    'resident.since', 'resident.memory_bytes_estimate', 'chat', 'slots.accelerated.busy', 'slots.accelerated.of',
+    'slots.accelerated.queue_depth', 'running[].progress', 'running[].created', 'queued[].progress', 'queued[].created',
+    'lease.since', 'lease.expires_at'],
+  'GET /v1/models': ['[].family', '[].params_b', '[].revision', '[].fingerprint', '[].backend_supported', '[].installed',
+    '[].reason', '[].memory_bytes_estimate', '[].context_default', '[].max_model_len'],
+  'GET /v1/capability': ['backend_kind', 'total_bytes', 'desktop_allowance_bytes', 'classes[].reason',
+    'classes[].shortfall_bytes', 'classes[].work', 'classes[].context_ceilings'],
+  'GET /v1/settings': ['local_models', 'local_model_choices', 'desktop_allowance_bytes', 'backend_kind'],
+  'POST /v1/uploads': ['bytes', 'sha256'],
+  'GET /v1/jobs/:id': ['progress', 'created'],
+  'GET /v1/tasks/:id': ['request', 'created', 'started', 'finished'],
+  'POST /v1/decide': ['model', 'engine', 'timing_ms', 'tokens', 'answers.*.confidence'],
+  'POST /v1/openai/chat/completions': ['id', 'model', 'usage'],
+  'job-event:queued': ['position'],
+  'job-event:warming': ['message'],
+  'job-event:progress': ['fraction', 'message'],
+  'task-event:step': ['name', 'index', 'total'],
+  'task-event:progress': ['bytes_total', 'file'],
+  'task-event:skipped': ['reason'],
+};
+
+/** {@link INFORMATIONAL_FIELDS} less the paths in `keep` (route → paths still sent). */
+export function informationalExcept(keep: FieldOmissions): FieldOmissions {
+  const out: Record<string, readonly string[]> = {};
+  for (const [route, paths] of Object.entries(INFORMATIONAL_FIELDS)) {
+    const kept = new Set(keep[route] ?? []);
+    out[route] = paths.filter((p) => !kept.has(p));
+  }
+  return out;
+}
+
+/** Delete one dotted path (see {@link FieldOmissions}) from a parsed document, in place. */
+function omitPath(doc: unknown, segments: readonly string[]): void {
+  if (segments.length === 0 || doc === null || typeof doc !== 'object') return;
+  const [head, ...rest] = segments;
+  if (head === '[]') {
+    if (Array.isArray(doc)) for (const item of doc) omitPath(item, rest);
+    return;
+  }
+  if (head === '*') {
+    for (const value of Object.values(doc as Record<string, unknown>)) omitPath(value, rest);
+    return;
+  }
+  const isArray = head.endsWith('[]');
+  const key = isArray ? head.slice(0, -2) : head;
+  const record = doc as Record<string, unknown>;
+  if (!(key in record)) return;
+  if (rest.length === 0 && !isArray) {
+    delete record[key];
+    return;
+  }
+  const next = record[key];
+  if (isArray) {
+    if (Array.isArray(next)) for (const item of next) omitPath(item, rest);
+  } else {
+    omitPath(next, rest);
+  }
+}
+
+function omitAll(doc: unknown, paths: readonly string[] | undefined): unknown {
+  if (paths === undefined || paths.length === 0) return doc;
+  for (const p of paths) omitPath(doc, p.split('.'));
+  return doc;
+}
+
+/** The {@link FieldOmissions} key for a request: its method and path, ids as `:id`. */
+function routeKey(method: string, path: string): string {
+  const generic = path
+    .replace(/^\/v1\/jobs\/[^/]+$/, '/v1/jobs/:id')
+    .replace(/^\/v1\/tasks\/[^/]+$/, '/v1/tasks/:id');
+  return `${method} ${generic}`;
+}
+
 export interface FakeCrucibleOptions {
+  /** Fields left out of every answer (1.0.25's informational fields, say): see {@link FieldOmissions}. */
+  omit?: FieldOmissions;
   /** What the server calls itself. Default `crucible@fake`. */
   name?: string;
   version?: string;
@@ -378,6 +483,8 @@ export interface FakeCrucible {
   decideBodies(): Array<Record<string, unknown>>;
   /** P6: the context the resident model was loaded at (null: its default). */
   residentContext(): number | null;
+  /** Change which fields the next answers leave out (`{}`: none). */
+  setOmit(omit: FieldOmissions): void;
   close(): Promise<void>;
 }
 
@@ -526,6 +633,7 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
   const taskListeners = new Map<string, Set<() => void>>();
   let nextTask = 1;
   const disabledClasses = options.disabledClasses ?? {};
+  let omit: FieldOmissions = options.omit ?? {};
   const models: FakeModel[] = (options.models ?? [{ id: 'qwen3.5-9b', paramsB: 9, installed: true }]).map((m) => ({ ...m }));
   let resident: string | null = options.resident ?? null;
   /** The context the resident model was loaded with (`params.context`); null: its default. */
@@ -1379,6 +1487,36 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
     });
   }
 
+  /**
+   * Strip `omit`'s fields from this response: a 2xx JSON body as it is
+   * ended, and each SSE frame as it is written. Refusals are never touched.
+   */
+  function applyOmissions(res: http.ServerResponse, method: string, path: string): void {
+    const route = routeKey(method, path);
+    const eventKind = /^\/v1\/jobs\/[^/]+\/events$/.test(path) ? 'job-event' : /^\/v1\/tasks\/[^/]+\/events$/.test(path) ? 'task-event' : null;
+    const end = res.end.bind(res) as (...args: unknown[]) => http.ServerResponse;
+    const write = res.write.bind(res) as (...args: unknown[]) => boolean;
+    res.end = ((chunk?: unknown, ...rest: unknown[]) => {
+      const paths = omit[route];
+      // send() passes its headers to writeHead, so the body itself says whether it is JSON.
+      if (paths !== undefined && res.statusCode >= 200 && res.statusCode < 300 && typeof chunk === 'string') {
+        let doc: unknown;
+        try { doc = JSON.parse(chunk); } catch { doc = undefined; }
+        if (doc !== undefined) chunk = JSON.stringify(omitAll(doc, paths));
+      }
+      return end(chunk, ...rest);
+    }) as typeof res.end;
+    if (eventKind === null) return;
+    res.write = ((chunk: unknown, ...rest: unknown[]) => {
+      if (typeof chunk === 'string') {
+        const frame = /^(id: [^\n]*\nevent: ([^\n]*)\ndata: )(.*)(\n\n)$/s.exec(chunk);
+        const paths = frame === null ? undefined : omit[`${eventKind}:${frame[2]}`];
+        if (frame !== null && paths !== undefined) chunk = `${frame[1]}${JSON.stringify(omitAll(JSON.parse(frame[3]), paths))}${frame[4]}`;
+      }
+      return write(chunk, ...rest);
+    }) as typeof res.write;
+  }
+
   const server = http.createServer((req, res) => {
     void handle(req, res).catch((err) => {
       if (!res.headersSent) refusal(res, 500, 'fake_crashed', String((err as Error)?.stack ?? err));
@@ -1403,6 +1541,7 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
       }
     }
     const body = (record.body ?? {}) as Record<string, unknown>;
+    applyOmissions(res, method, path);
 
     // ── the fault layer, before any route ────────────────────────────────
     if (named.stallMs !== undefined) {
@@ -1842,6 +1981,7 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
       return requests.filter((r) => r.path === '/v1/decide' && r.method === 'POST').map((r) => r.body as Record<string, unknown>);
     },
     residentContext: () => residentCtx,
+    setOmit: (next: FieldOmissions) => { omit = next; },
     requestsTo(prefix: string, m?: string): RecordedRequest[] {
       return requests.filter((r) => r.path.startsWith(prefix) && (m === undefined || r.method === m));
     },

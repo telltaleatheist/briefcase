@@ -177,6 +177,20 @@ describe('the sweep', () => {
     expect(cardHeldBy(activity, new Set())).toMatch(/a lease held by foundry/);
     expect(cardHeldBy(activity, new Set([activity.lease!.leaseId]))).toBeNull();
   });
+
+  it('a server that does not count its open chats (1.0.25: activity.chat is informational) is not read as free: nothing is unloaded', async () => {
+    fake.setOmit({ 'GET /v1/activity': ['chat'] });
+    const client = await h.factory.clientFor('mac');
+    fake.setResident('qwen3.5-9b');
+    const held = await client.lease('qwen3.5-9b', { act: 'analysis', ttlSeconds: 120 });
+    ledger.record({ server: 'mac', kind: 'lease', id: held.leaseId, jobType: 'lease', model: 'qwen3.5-9b', localId: 'q1' });
+    const report = await sweepCrucibleInFlight(deps(), { reason: 'quit', deadlineMs: 5_000, timing: FAST });
+    expect(report.rows.map((r) => r.outcome)).toEqual(['released']);
+    expect(fake.resident()).toBe('qwen3.5-9b');
+    expect(fake.jobs.some((j) => j.type === 'unload-model')).toBe(false);
+    expect(report.servers[0].note).toMatch(/does not count/);
+    fake.setOmit({});
+  });
 });
 
 it('the ledger lives in the Briefcase config dir under its documented name', () => {

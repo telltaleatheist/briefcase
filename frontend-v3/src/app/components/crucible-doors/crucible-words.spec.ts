@@ -1,4 +1,4 @@
-import { coordinationBusy, coordinationLine, installHeadline, laneIsProblem, laneOccupancy, laneStateLine, laneWaiting, unmetLine } from './crucible-words';
+import { coordinationBusy, coordinationLine, installHeadline, laneIsProblem, laneOccupancy, laneStateLine, laneWaiting, serverFactsLine, unmetLine } from './crucible-words';
 import type { CrucibleCoordinationState, CrucibleModuleProgress } from '@crucible-wire/coordinate-wire';
 
 // Plain describe/it/expect only, so this runs under Karma/Jasmine (ng test) and Jest alike.
@@ -48,6 +48,40 @@ describe('coordinationLine', () => {
   it('an unmet class is a fact about the machine, in its own words', () => {
     expect(unmetLine([{ class: 'analysis', reason: 'needs 20 GB, this Mac has 16' }])).toBe('Not on this server: video analysis (needs 20 GB, this Mac has 16).');
     expect(unmetLine([])).toBeNull();
+  });
+});
+
+describe('a server that leaves informational fields out (Crucible 1.0.25)', () => {
+  it('a holder the server did not name is said by the fact it holds', () => {
+    const state: CrucibleCoordinationState = {
+      server: 'mac', phase: 'waiting', missing: [], unmet: [], holder: { fact: 'a job', who: null }, attempts: 1, stopped: false,
+    };
+    expect(coordinationLine(state)).toBe('mac is busy: held by a job. Briefcase will prepare it when the card is free.');
+  });
+
+  it('a step with no stated place or name still reads, never "null"', () => {
+    const bare: CrucibleCoordinationState = {
+      server: 'mac', phase: 'preparing', missing: [], unmet: [], followed: false,
+      progress: progress({ step: { name: null, index: null, total: null } }),
+    };
+    expect(coordinationLine(bare)).toBe('mac: preparing what Briefcase needs, a step. This keeps going while you work.');
+    const partial: CrucibleCoordinationState = {
+      server: 'mac', phase: 'preparing', missing: [], unmet: [], followed: false,
+      progress: progress({ step: { name: 'pull', index: 2, total: null }, bytes: { done: 1024 ** 3, total: null, file: null } }),
+    };
+    expect(coordinationLine(partial)).toBe('mac: preparing what Briefcase needs, step 2, pull (1.0 GB). This keeps going while you work.');
+  });
+
+  it('an unmet class with no reason is named alone', () => {
+    expect(unmetLine([{ class: 'analysis', reason: null }])).toBe('Not on this server: video analysis.');
+  });
+
+  it('a server row leaves out what the server did not state, and says the version is unknown', () => {
+    expect(serverFactsLine({ version: '1.0.25', backend: 'mlx-darwin', gpu: { vendor: 'apple', name: 'M2 Ultra', vramBytes: 192 * 1024 ** 3 }, engineUrl: null }))
+      .toBe('Crucible 1.0.25 · mlx-darwin · M2 Ultra (192 GB)');
+    expect(serverFactsLine({ version: null, backend: null, gpu: null, engineUrl: null })).toBe('Crucible, version unknown');
+    expect(serverFactsLine({ version: '1.0.25', backend: 'cuda-linux', gpu: { vendor: null, name: null, vramBytes: 24 * 1024 ** 3 }, engineUrl: 'http://pc:8765' }))
+      .toBe('Crucible 1.0.25 · cuda-linux · 24 GB · engine at http://pc:8765');
   });
 });
 
