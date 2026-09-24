@@ -12,7 +12,6 @@ import {
   crucibleTargetOf,
   responseFormatFor,
 } from '../../src/crucible/llm/target';
-import { AI_VIA_ENV, resolveAiVia, writeAiVia } from '../../src/crucible/llm/ai-via';
 import { tempDir } from './helpers';
 
 const SCHEMA = { type: 'object', properties: { quote: { type: 'string' } }, required: ['quote'] };
@@ -85,26 +84,5 @@ describe('buildChatBody: what crosses, per target', () => {
     expect(responseFormatFor(local, undefined)).toBeNull();
     expect(responseFormatFor(crucibleTargetOf('claude', 'c'), 'json')).toBeNull();
     expect(responseFormatFor(crucibleTargetOf('openai', 'g'), SCHEMA)).toBeNull();
-  });
-});
-
-describe('aiVia: which road', () => {
-  it('defaults to crucible exactly when a server is registered', () => {
-    const dir = tempDir();
-    expect(resolveAiVia({ env: {}, configDir: dir })).toMatchObject({ via: 'direct', source: 'default', registeredServers: 0 });
-    fs.writeFileSync(path.join(dir, 'crucible-servers.json'), JSON.stringify({ servers: [{ name: 'mac', url: 'http://127.0.0.1:7100', token: 't', added: 'x' }] }));
-    expect(resolveAiVia({ env: {}, configDir: dir })).toMatchObject({ via: 'crucible', source: 'default', registeredServers: 1 });
-  });
-
-  it('a stored setting beats the default, and the env beats both', () => {
-    const dir = tempDir();
-    fs.writeFileSync(path.join(dir, 'app-config.json'), JSON.stringify({ taskModels: { tags: 'ollama:x' } }));
-    writeAiVia('crucible', { env: {}, configDir: dir });
-    expect(resolveAiVia({ env: {}, configDir: dir })).toMatchObject({ via: 'crucible', source: 'setting' });
-    expect(JSON.parse(fs.readFileSync(path.join(dir, 'app-config.json'), 'utf8')).taskModels).toEqual({ tags: 'ollama:x' });
-    expect(resolveAiVia({ env: { [AI_VIA_ENV]: 'direct' }, configDir: dir })).toMatchObject({ via: 'direct', source: 'env', stored: 'crucible' });
-    expect(resolveAiVia({ env: { [AI_VIA_ENV]: 'sideways' }, configDir: dir })).toMatchObject({ via: 'crucible', ignored: `${AI_VIA_ENV}=sideways` });
-    writeAiVia(null, { env: {}, configDir: dir });
-    expect(resolveAiVia({ env: {}, configDir: dir })).toMatchObject({ via: 'direct', source: 'default' });
   });
 });

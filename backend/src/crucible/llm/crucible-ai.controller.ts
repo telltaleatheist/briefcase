@@ -1,5 +1,5 @@
 /**
- * `/crucible/ai/*`: the road (via), the connected server's models, the
+ * `/crucible/ai/*`: the connected server's models, the
  * one-time key copy and per-task models. Every refusal is `{code, message}`,
  * and no response carries a key.
  */
@@ -9,8 +9,7 @@ import { CrucibleError } from '@crucible/client';
 import { failureOutcome } from '../probe';
 import { CrucibleRegistryError, CrucibleRoutingError } from '../errors';
 import { CrucibleSettingsInputError } from '../settings-bridge.service';
-import type { AiModelsView, AiRunsAs, AiTaskModels, AiViaView, KeyCopyOutcome, LegacyKeysView } from '../wire/ai-wire';
-import { parseAiVia, writeAiVia } from './ai-via';
+import type { AiModelsView, AiRunsAs, AiTaskModels, KeyCopyOutcome, LegacyKeysView } from '../wire/ai-wire';
 import { CrucibleAiInputError, CrucibleAiService } from './crucible-ai.service';
 
 @UseGuards(LoopbackOriginGuard)
@@ -35,22 +34,6 @@ export class CrucibleAiController {
       }
       throw new HttpException({ code: 'refused', message: String(err) }, HttpStatus.BAD_GATEWAY);
     }
-  }
-
-  @Get('via')
-  via(): Promise<AiViaView> {
-    return this.guard(() => this.ai.via());
-  }
-
-  /** `{via: 'crucible' | 'direct' | null}`; null clears it back to the default. */
-  @Put('via')
-  setVia(@Body() body: { via?: unknown }): Promise<AiViaView> {
-    return this.guard(() => {
-      const value = body?.via === null ? null : parseAiVia(body?.via);
-      if (value === null && body?.via !== null) throw new CrucibleAiInputError('invalid_via', 'via is "crucible", "direct", or null for the default.');
-      writeAiVia(value);
-      return this.ai.via();
-    });
   }
 
   @Get('models')

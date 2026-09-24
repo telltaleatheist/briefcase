@@ -14,7 +14,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getBriefcaseConfigDir } from '../../bridges/runtime-paths';
-import { ApiKeysService } from '../../config/api-keys.service';
+import { LegacyApiKeys } from './legacy-api-keys';
 import { CRUCIBLE_PAIRING_HOST } from '../crucible.constants';
 import { CrucibleServersService } from '../crucible-servers.service';
 import { discoveredRow } from '../discovery';
@@ -28,17 +28,15 @@ import type {
   AiTaskModels,
   AiTaskName,
   AiUpstreamsView,
-  AiViaView,
   KeyCopyOutcome,
   LegacyKeysView,
 } from '../wire/ai-wire';
-import { AI_VIA_ENV, resolveAiVia } from './ai-via';
 import { CrucibleChatService, OLLAMA_CONTEXT_VERSION, isAnalysisModel } from './crucible-chat.service';
 import { numCtxMaxForModel } from '../../analysis/model-utils';
 import { crucibleTargetOf, type UpstreamName } from './target';
 import { CRUCIBLE_OLLAMA_CONTEXT, servedContextOf } from './ollama-map';
 
-export const AI_TASKS: readonly AiTaskName[] = ['boundary', 'chapter', 'flags', 'description', 'tags', 'title'];
+export const AI_TASKS: readonly AiTaskName[] = ['chapter', 'flags', 'description', 'tags', 'title'];
 const UPSTREAM_LIST_CACHE_MS = 60_000;
 
 export class CrucibleAiInputError extends Error {
@@ -86,14 +84,9 @@ export class CrucibleAiService {
     private readonly probes: CrucibleProbeService,
     private readonly settings: CrucibleSettingsBridge,
     private readonly chat: CrucibleChatService,
-    private readonly apiKeys: ApiKeysService,
+    private readonly apiKeys: LegacyApiKeys,
     @Inject(CRUCIBLE_PAIRING_HOST) private readonly pairingHost: PairingFileHost,
   ) {}
-
-  via(): AiViaView {
-    const setting = resolveAiVia();
-    return { ...setting, envOverride: process.env[AI_VIA_ENV]?.trim() ? process.env[AI_VIA_ENV]!.trim() : null };
-  }
 
   /** The best-ranked running server that answers, or the sentence saying why there is none. */
   async connectedServer(explicit?: string): Promise<{ server: string | null; reach: AiModelsView['reach']; unavailable: string | null }> {
@@ -117,9 +110,8 @@ export class CrucibleAiService {
   }
 
   async models(explicit?: string): Promise<AiModelsView> {
-    const via = this.via();
     const { server, reach, unavailable } = await this.connectedServer(explicit);
-    const empty: AiModelsView = { via, server, reach, unavailable, upstreams: null, models: [], analysisDefault: null, upstreamErrors: {} };
+    const empty: AiModelsView = { server, reach, unavailable, upstreams: null, models: [], analysisDefault: null, upstreamErrors: {} };
     if (server === null) return empty;
 
     const view = await this.settings.get(server);
@@ -163,7 +155,7 @@ export class CrucibleAiService {
       analysisDefault = null;
     }
 
-    return { via, server, reach, unavailable: null, upstreams, models, analysisDefault, upstreamErrors };
+    return { server, reach, unavailable: null, upstreams, models, analysisDefault, upstreamErrors };
   }
 
   /**
@@ -195,7 +187,7 @@ export class CrucibleAiService {
         out.push({ value, server: chosen.server, runsAs: chosen.target.model, contextTokens });
       } else {
         if (connected === undefined) connected = (await this.connectedServer()).server;
-        // 1.0.24+ forwards the window (context_tokens → num_ctx): the direct road's size.
+        // 1.0.24+ forwards the window (context_tokens → num_ctx): sized by the prompt.
         // An older server forwards none, and Ollama runs at its 4096 default.
         const forwards = connected !== null && await this.chat.serverAtLeast(connected, OLLAMA_CONTEXT_VERSION);
         out.push({ value, server: connected, runsAs: null, contextTokens: forwards ? numCtxMaxForModel(target.bareModel) : CRUCIBLE_OLLAMA_CONTEXT });

@@ -18,7 +18,7 @@
  *     ever. Newer Claude and OpenAI models refuse sampling parameters with a
  *     400, and o-series/gpt-5 refuse max_tokens. Crucible passes these through
  *     to Anthropic exactly as sent, so the only safe body is one without them.
- *   - ollama/ keeps its pinned per-task temperature, as the direct path does.
+ *   - ollama/ keeps its pinned per-task temperature.
  *   - a local model gets its per-task temperature, and max_tokens only when the
  *     caller asked for one (the manifest's default applies otherwise).
  *   - `thinking` is sent only when a caller states it for a LOCAL model (the
@@ -32,8 +32,7 @@
  *     checks the version): an older server forwarded no num_ctx and every
  *     Ollama tag ran at 4096.
  *   - response_format: 'json' → json_object and a JSON Schema → json_schema,
- *     for local models and ollama/. Cloud gets none, exactly as the direct path
- *     sends none: Anthropic would turn json_object into nothing and a schema
+ *     for local models and ollama/. Cloud gets none: Anthropic would turn json_object into nothing and a schema
  *     into a forced tool, and OpenAI refuses json_object on a prompt without the
  *     word "json" and json_schema on schemas that are not closed. Turning either
  *     on is a follow-up that needs testing per schema, not a side effect.

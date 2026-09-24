@@ -3,13 +3,13 @@
  * 2026-09-23: "Crucible ultimately is a replacement for Ollama, but Crucible
  * should be capable of using Ollama if it's necessary").
  *
- * Under `aiVia: 'crucible'` a stored `ollama:<tag>` (a task model, the default
+ * A stored `ollama:<tag>` (a task model, the default
  * AI) is read at call time. When the serving Crucible has the same model in its
  * own catalog, the call runs on that; only when it has none does it go to the
- * `ollama/` upstream (sized as the direct road sizes it, with the window sent
+ * `ollama/` upstream (sized by the prompt, with the window sent
  * as `context_tokens`, on Crucible 1.0.24+; at Ollama's 4K default,
  * CRUCIBLE_OLLAMA_CONTEXT, on an older server that forwards no num_ctx).
- * The stored config is never rewritten, so 'direct' mode is unchanged.
+ * The stored config is never rewritten.
  *
  * THE MATCHING RULE, in order:
  *
@@ -57,9 +57,8 @@
  * default: 4096 tokens (its documented default, and the server-side
  * OLLAMA_CONTEXT_LENGTH default; older releases used 2048, but a transcript
  * chunk at that size is too small to chapter). Sizing to numCtxMaxForModel
- * instead (12-16K, what the DIRECT path requests) would hand Ollama a prompt
- * three or four times its window, which it truncates silently. The direct
- * path is unchanged: it sends num_ctx and keeps its larger windows.
+ * instead (12-16K) would hand Ollama a prompt three or four times its
+ * window, which it truncates silently.
  */
 export const CRUCIBLE_OLLAMA_CONTEXT = 4096;
 

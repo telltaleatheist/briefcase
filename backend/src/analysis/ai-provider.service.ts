@@ -1,17 +1,12 @@
 // backend/src/analysis/ai-provider.service.ts
-import { Injectable, Logger, Optional } from '@nestjs/common';
-import Anthropic from '@anthropic-ai/sdk';
-import OpenAI from 'openai';
-import { LlamaManager } from '../bridges';
+import { Injectable, Logger } from '@nestjs/common';
 import {
   AITaskKind,
   temperatureForTask,
   estimateNumCtx,
   stripThinkTags,
 } from './model-utils';
-import { negotiateOllamaThink, markGradedThinkUnsupported } from './ollama-capabilities';
 import { AnalysisCancelledError, ensureNotCancelled } from './cancellation';
-import { resolveAiVia, type AiVia } from '../crucible/llm/ai-via';
 import { CrucibleChatService, OLLAMA_CONTEXT_VERSION, isAnalysisModel, type CrucibleChatResult } from '../crucible/llm/crucible-chat.service';
 import { isVisionAlias } from '../crucible/llm/ollama-map';
 import { CrucibleBusyError, CrucibleChatCancelled, CrucibleChatError, CrucibleNoVenueError, CrucibleParkedError } from '../crucible/llm/errors';
@@ -28,11 +23,15 @@ import { CRUCIBLE_ANALYSIS_CONTEXT } from '../crucible/llm/ollama-map';
 export const CRUCIBLE_BUSY_RETRY_MS = 10_000;
 export const CRUCIBLE_BUSY_WAIT_MS = 30 * 60_000;
 
+/**
+ * A stored model choice: `local` is a model in the Crucible server's own
+ * catalog; `claude`, `openai` and `ollama` are that server's upstreams
+ * (crucible/llm/target.ts). There are no keys and no endpoints here: both are
+ * the serving Crucible's.
+ */
 export interface AIProviderConfig {
   provider: 'local' | 'ollama' | 'claude' | 'openai';
   model: string;
-  apiKey?: string;
-  ollamaEndpoint?: string;
 }
 
 export interface AIResponse {
@@ -44,35 +43,32 @@ export interface AIResponse {
   provider: string;
   model: string;
   /**
-   * Ollama's `done_reason`. 'length' means the generation was CUT OFF at the
-   * num_predict ceiling, so the text is a fragment — callers that need a
+   * The chat door's `finish_reason`. 'length' means the generation was CUT OFF
+   * at the token ceiling, so the text is a fragment — callers that need a
    * complete answer (a verbatim quote, a JSON object) must treat it as a failed
-   * call rather than parse the fragment. Absent for non-Ollama providers.
+   * call rather than parse the fragment.
    */
   doneReason?: string;
 }
 
 /**
- * Per-call overrides for the Ollama path. Both exist for stages that make a RUN
- * of near-identical calls and need them to behave identically; other providers
- * ignore them.
+ * Per-call overrides. They exist for stages that make a RUN of near-identical
+ * calls and need them to behave identically; target.ts decides which of them
+ * cross for a given target (cloud upstreams get none of the sampling ones).
  */
 export interface AIGenerateOverrides {
   /**
-   * Fixed num_ctx for the whole run, instead of per-call estimation. Ollama
-   * fully reloads the model on any num_ctx change, so a stage whose prompts vary
-   * slightly in size sizes ONCE from its largest prompt and passes it here.
+   * Fixed context window for the whole run, instead of per-call estimation.
+   * Sent only to an `ollama/` upstream (as `context_tokens`, Ollama's num_ctx):
+   * Ollama fully reloads the model on any num_ctx change, so a stage whose
+   * prompts vary slightly in size sizes ONCE from its largest prompt.
    */
   numCtx?: number;
   /**
-   * Ollama structured-output mode — constrains decoding to valid JSON.
-   *
-   * `'json'` is free-form JSON. An OBJECT is a full JSON Schema, passed through
-   * verbatim as Ollama's `format` field, which constrains decoding to exactly
-   * that shape (keys, types, required fields). The schema form is strictly
+   * Structured output: `'json'` (json_object) or a JSON Schema object
+   * (json_schema), for local models and `ollama/`. The schema form is strictly
    * stronger: besides guaranteeing the parse, it collapses a thinking model's
-   * output from thousands of reasoning tokens to the answer itself, because the
-   * grammar admits nothing else.
+   * output from thousands of reasoning tokens to the answer itself.
    */
   format?: 'json' | Record<string, unknown>;
   /**
@@ -85,79 +81,48 @@ export interface AIGenerateOverrides {
    * task kind in two (which would fragment `taskModels` routing users already
    * configure), the odd call out passes its own value.
    *
-   * Applies to the ollama and local paths. Cloud providers deliberately send NO
-   * sampling params at all (newer Claude/OpenAI models 400 on them), so this is
-   * ignored there — same as `format`.
+   * Applies to local models and `ollama/`. Cloud upstreams are sent NO
+   * sampling params at all (newer Claude/OpenAI models 400 on them).
    */
   temperature?: number;
   /**
    * Cancellation for THIS call, owned by the caller (one signal per analysis
    * job — see ai-analysis.service's run registry).
    *
-   * Unlike `numCtx`/`format`/`temperature`, this is honored by EVERY provider:
-   * cancelling a job has to stop a Claude or OpenAI generation just as hard as
-   * an Ollama one. When it fires, the call rejects with AnalysisCancelledError
+   * Honoured for every target. When it fires, the call rejects with AnalysisCancelledError
    * rather than a provider error, so no catch block upstream mistakes a
    * cancellation for a failure worth retrying, recording, or degrading around.
    */
   signal?: AbortSignal;
 }
 
+/**
+ * EVERY LLM CALL BRIEFCASE MAKES, through Crucible's chat door (P3, and since
+ * P7 the only road: the direct Claude/OpenAI/Ollama providers and the bundled
+ * llama runtime are gone). A stored `provider:model` choice is read into a
+ * Crucible model string by crucible/llm/target.ts; keys live on the serving
+ * Crucible, never here.
+ */
 @Injectable()
 export class AIProviderService {
   private readonly logger = new Logger(AIProviderService.name);
-  private anthropic: Anthropic | null = null;
-  private openai: OpenAI | null = null;
 
-  /**
-   * Ollama models THIS app has asked to load, as `${endpoint}::${model}`.
-   *
-   * Ollama is a shared daemon: other apps on this machine may have their own
-   * models resident. Releasing on shutdown must therefore be surgical — we
-   * unload only what Briefcase itself loaded, never "everything that is loaded".
-   */
-  private readonly ollamaModelsInUse = new Set<string>();
-
-  /** In-flight Ollama generations, so shutdown can cancel them. */
-  private readonly inFlightOllama = new Set<AbortController>();
-
-  /** True once shutdown has begun, so cancelled calls aren't logged as errors. */
-  private releasingOllama = false;
-
-  constructor(
-    private readonly llamaManager: LlamaManager,
-    /**
-     * Crucible's chat door (P3). Optional so the direct path, and anything
-     * constructing this service by hand, runs exactly as before without it.
-     */
-    @Optional() private readonly crucibleChat?: CrucibleChatService,
-  ) {}
-
-  /**
-   * Which road LLM calls take right now: 'crucible' or 'direct' (ai-via.ts).
-   * Read per call so a change in Settings applies to the next call.
-   */
-  via(): AiVia {
-    return this.crucibleChat === undefined ? 'direct' : resolveAiVia().via;
-  }
+  constructor(private readonly crucibleChat: CrucibleChatService) {}
 
   /**
    * Run a multi-call job (one analysis) as ONE Crucible run: each local model
-   * it uses is loaded once and leased until `fn` settles, then released. On the
-   * direct road it is just `fn()`.
+   * it uses is loaded once and leased until `fn` settles, then released.
    */
   async withRun<T>(fn: () => Promise<T>): Promise<T> {
-    if (this.via() !== 'crucible' || this.crucibleChat === undefined) return fn();
     return this.crucibleChat.withRun(fn);
   }
 
   /**
    * A small model in the connected Crucible's own catalog, installed and
-   * loadable, for boundary placement (the direct road's `qwen3.5:4b` probe).
-   * Returns `local:<id>`, or null when the catalog has none.
+   * loadable, for boundary placement. Returns `local:<id>`, or null when the
+   * catalog has none.
    */
   async smallLocalCrucibleModel(maxParamsB = 5): Promise<string | null> {
-    if (this.via() !== 'crucible' || this.crucibleChat === undefined) return null;
     try {
       const venue = await this.crucibleChat.venueFor(crucibleTargetOf('local', '_'));
       const [models, pageReaders] = await Promise.all([this.crucibleChat.modelsOn(venue), this.crucibleChat.pageReadersOn(venue)]);
@@ -176,9 +141,9 @@ export class AIProviderService {
 
   /**
    * The Crucible model an `ollama:<tag>` choice runs as (ollama-map.ts), or
-   * null when it stays on the `ollama/` upstream, or this isn't the Crucible road.
-   * The same decision chat() makes at call time, so analysis sizes its chunks
-   * for the model that will actually answer.
+   * null when it stays on the `ollama/` upstream. The same decision chat()
+   * makes at call time, so analysis sizes its chunks for the model that will
+   * actually answer.
    */
   async crucibleOllamaStandIn(model: string): Promise<string | null> {
     return (await this.crucibleOllamaStandInChoice(model))?.model ?? null;
@@ -186,7 +151,6 @@ export class AIProviderService {
 
   /** {@link crucibleOllamaStandIn}, with the context the stand-in is loaded at when it is loaded larger than its default. */
   async crucibleOllamaStandInChoice(model: string): Promise<{ model: string; loadContext?: number } | null> {
-    if (this.via() !== 'crucible' || this.crucibleChat === undefined) return null;
     try {
       const chosen = await this.crucibleChat.effectiveTarget(crucibleTargetOf('ollama', model));
       if (chosen.mappedFrom === null) return null;
@@ -198,12 +162,11 @@ export class AIProviderService {
 
   /**
    * True when an `ollama:<tag>` choice reaches Ollama through a Crucible that
-   * forwards the window (`context_tokens` → options.num_ctx, 1.0.24+): it is then
-   * sized exactly as the direct road sizes it. False on an older server, where
-   * Ollama runs at its 4096 default (CRUCIBLE_OLLAMA_CONTEXT), or off this road.
+   * forwards the window (`context_tokens` → options.num_ctx, 1.0.24+). False
+   * on an older server, where Ollama runs at its 4096 default
+   * (CRUCIBLE_OLLAMA_CONTEXT).
    */
   async crucibleOllamaTakesContext(model: string): Promise<boolean> {
-    if (this.via() !== 'crucible' || this.crucibleChat === undefined) return false;
     try {
       const target = crucibleTargetOf('ollama', model);
       const venue = await this.crucibleChat.venueFor(target);
@@ -215,7 +178,6 @@ export class AIProviderService {
 
   /** The context window a Crucible local model is served at, or null when it can't be read. */
   async crucibleContextWindow(model: string, loadContext?: number): Promise<number | null> {
-    if (this.via() !== 'crucible' || this.crucibleChat === undefined) return null;
     try {
       const target = crucibleTargetOf('local', model);
       const venue = await this.crucibleChat.venueFor(target);
@@ -323,32 +285,11 @@ export class AIProviderService {
     // Per-task default, unless this particular call asked for its own.
     const temperature = overrides?.temperature ?? temperatureForTask(task);
 
-    if (this.via() === 'crucible') {
-      return this.generateViaCrucible(prompt, config, temperature, task, overrides);
-    }
-
-    this.logger.log(`Generating text with provider: ${config.provider}, model: ${config.model}, task: ${task ?? 'unspecified'}`);
-
-    switch (config.provider) {
-      case 'local':
-        return this.generateWithLocal(prompt, temperature, overrides?.signal);
-      case 'claude':
-        // Cloud providers get NO sampling params (see generateWithClaude).
-        return this.generateWithClaude(prompt, config, overrides?.signal);
-      case 'openai':
-        // Cloud providers get NO sampling params (see generateWithOpenAI).
-        return this.generateWithOpenAI(prompt, config, overrides?.signal);
-      case 'ollama':
-        return this.generateWithOllama(prompt, config, temperature, task, overrides);
-      default:
-        throw new Error(`Unsupported AI provider: ${config.provider}`);
-    }
+    return this.generateViaCrucible(prompt, config, temperature, task, overrides);
   }
 
   /**
-   * THE CRUCIBLE ROAD (P3). The same AIResponse the direct providers return,
-   * so no caller changes. What differs is what crosses the wire, and that is
-   * decided in crucible/llm/target.ts: cloud upstreams get no sampling
+   * THE ROAD (P3). What crosses the wire is decided in crucible/llm/target.ts: cloud upstreams get no sampling
    * parameters at all, ollama/ and local models keep the per-task temperature,
    * 'json' and schemas become response_format where the target takes one.
    * Keys are the serving Crucible's, so `config.apiKey` is not read here.
@@ -360,7 +301,7 @@ export class AIProviderService {
     task: AITaskKind | undefined,
     overrides: AIGenerateOverrides | undefined,
   ): Promise<AIResponse> {
-    const chat = this.crucibleChat!;
+    const chat = this.crucibleChat;
     const signal = overrides?.signal;
     let target: CrucibleTarget;
     try {
@@ -371,8 +312,8 @@ export class AIProviderService {
     this.logger.log(`Generating via Crucible: ${target.model} (from ${config.provider}:${config.model}), task: ${task ?? 'unspecified'}`);
 
     const parkOnBusy = chat.parksOnBusy();
-    // An ollama/ upstream gets the window the direct road would request as
-    // num_ctx (same bucketing, same per-model cap); the chat service sends it
+    // An ollama/ upstream gets a window sent as num_ctx (bucketed by the
+    // prompt, capped per model); the chat service sends it
     // only to a server that forwards it (1.0.24+). Other targets ignore it.
     const contextTokens = target.upstream === 'ollama'
       ? overrides?.numCtx ?? estimateNumCtx(prompt.length, target.bareModel, 2048)
@@ -454,471 +395,10 @@ export class AIProviderService {
   }
 
   /**
-   * Generate text using Claude API
-   *
-   * NOTE: We deliberately send NO sampling parameters (temperature/top_p/top_k)
-   * on Claude requests. Newer Claude model families (e.g. claude-sonnet-5,
-   * claude-opus-4-7/4-8, claude-fable-*, claude-mythos-*) REMOVE these params —
-   * sending a non-default value returns 400 invalid_request_error
-   * ("`temperature` is deprecated for this model."). Older models accept
-   * temperature but don't require it, so omitting it everywhere is the single
-   * behavior that works across all Claude models. Prompting is the intended
-   * steering mechanism. Do not reintroduce temperature here.
-   */
-  private async generateWithClaude(
-    prompt: string,
-    config: AIProviderConfig,
-    signal?: AbortSignal,
-  ): Promise<AIResponse> {
-    if (!config.apiKey) {
-      throw new Error('Claude API key is required');
-    }
-
-    // Initialize Anthropic client if needed
-    if (!this.anthropic || this.anthropic.apiKey !== config.apiKey) {
-      this.anthropic = new Anthropic({
-        apiKey: config.apiKey,
-      });
-    }
-
-    try {
-      const message = await this.anthropic.messages.create(
-        {
-          model: config.model,
-          max_tokens: 4096,
-          // No temperature / top_p / top_k — removed on newer Claude models (400).
-          messages: [
-            {
-              role: 'user',
-              content: prompt,
-            },
-          ],
-        },
-        // Request option, NOT a body field: the SDK forwards it to fetch, so a
-        // cancelled job tears the HTTP request down instead of paying for a
-        // generation nobody will read.
-        { signal },
-      );
-
-      const textContent = message.content.find((block) => block.type === 'text');
-      const text = stripThinkTags(textContent && 'text' in textContent ? textContent.text : '');
-
-      const inputTokens = message.usage.input_tokens;
-      const outputTokens = message.usage.output_tokens;
-      const estimatedCost = this.calculateCost('claude', config.model, inputTokens, outputTokens);
-
-      this.logger.log(
-        `Claude tokens: ${inputTokens} input + ${outputTokens} output = ${inputTokens + outputTokens} total (≈$${estimatedCost.toFixed(4)})`,
-      );
-
-      return {
-        text,
-        tokensUsed: inputTokens + outputTokens,
-        inputTokens,
-        outputTokens,
-        estimatedCost,
-        provider: 'claude',
-        model: config.model,
-      };
-    } catch (error) {
-      // A cancelled job is not a Claude fault — surface it as a cancellation so
-      // no upstream retry/failure-accounting path treats it as one.
-      if (signal?.aborted) {
-        throw new AnalysisCancelledError('Claude request cancelled: job was cancelled');
-      }
-      this.logger.error(`Claude API error: ${(error as Error).message}`);
-      throw new Error(`Claude API error: ${(error as Error).message}`);
-    }
-  }
-
-  /**
-   * Generate text using OpenAI API
-   *
-   * NOTE: No sampling parameters (temperature) are sent — newer OpenAI models
-   * likewise reject non-default sampling params, and omitting it keeps this
-   * path uniform with the Claude path. Do not reintroduce temperature here.
-   */
-  private async generateWithOpenAI(
-    prompt: string,
-    config: AIProviderConfig,
-    signal?: AbortSignal,
-  ): Promise<AIResponse> {
-    if (!config.apiKey) {
-      throw new Error('OpenAI API key is required');
-    }
-
-    // Initialize OpenAI client if needed
-    if (!this.openai || this.openai.apiKey !== config.apiKey) {
-      this.openai = new OpenAI({
-        apiKey: config.apiKey,
-      });
-    }
-
-    // OpenAI reasoning models (o1/o3/o4/…) reject `max_tokens` (400) and require
-    // `max_completion_tokens`. Match the whole `o<digit>` family, not just o1.
-    // gpt-* models are unaffected and keep using `max_tokens`.
-    const isReasoningModel = /^o\d/.test(config.model);
-
-    try {
-      const completion = await this.openai.chat.completions.create(
-        {
-          model: config.model,
-          messages: [
-            {
-              role: 'user',
-              content: prompt,
-            },
-          ],
-          ...(isReasoningModel ? { max_completion_tokens: 4096 } : { max_tokens: 4096 }),
-          // No temperature — omitted for all cloud providers.
-        },
-        // Request option (see the Claude path): cancellation tears down the HTTP
-        // request rather than waiting out a generation nobody will read.
-        { signal },
-      );
-
-      const text = stripThinkTags(completion.choices[0]?.message?.content || '');
-
-      const inputTokens = completion.usage?.prompt_tokens || 0;
-      const outputTokens = completion.usage?.completion_tokens || 0;
-      const tokensUsed = inputTokens + outputTokens;
-      const estimatedCost = this.calculateCost('openai', config.model, inputTokens, outputTokens);
-
-      this.logger.log(
-        `OpenAI tokens: ${inputTokens} input + ${outputTokens} output = ${tokensUsed} total (≈$${estimatedCost.toFixed(4)})`,
-      );
-
-      return {
-        text,
-        tokensUsed,
-        inputTokens,
-        outputTokens,
-        estimatedCost,
-        provider: 'openai',
-        model: config.model,
-      };
-    } catch (error) {
-      if (signal?.aborted) {
-        throw new AnalysisCancelledError('OpenAI request cancelled: job was cancelled');
-      }
-      this.logger.error(`OpenAI API error: ${(error as Error).message}`);
-      throw new Error(`OpenAI API error: ${(error as Error).message}`);
-    }
-  }
-
-  /**
-   * Generate text using Ollama (existing implementation)
-   */
-  private async generateWithOllama(
-    prompt: string,
-    config: AIProviderConfig,
-    temperature: number,
-    task?: AITaskKind,
-    overrides?: AIGenerateOverrides,
-  ): Promise<AIResponse> {
-    const ollamaEndpoint = config.ollamaEndpoint || 'http://localhost:11434';
-
-    // Negotiate thinking PER TASK: only judgment-heavy tasks (flags, chapter)
-    // ask a capable model to reason, because a thinking call costs ~1,900+
-    // output tokens and generation time tracks output tokens. Capable models on
-    // those tasks get { think: true } and their chain-of-thought lands in the
-    // separate `thinking` response field (verified empirically); every other
-    // task, and every non-thinking model, gets no think field.
-    const { fields: thinkFields, thinking, level } = await negotiateOllamaThink(ollamaEndpoint, config.model, task);
-
-    // num_predict must cover the generation that shares the context window with
-    // the prompt. Thinking burns tokens on reasoning we discard, so budget
-    // generously when active; otherwise these outputs are small JSON/text.
-    const numPredict = thinking ? 8192 : 2048;
-
-    // Bucketed, model-size-capped num_ctx: the old 131072 cap would allocate a
-    // full 128K KV cache and spill any real model to CPU. Bucketing avoids the
-    // full-model reload Ollama does on every num_ctx change.
-    // A caller running a batch of same-shaped calls may pin num_ctx for the whole
-    // batch (it sizes from its largest prompt), which avoids the reload Ollama
-    // does whenever num_ctx changes.
-    const numCtx = overrides?.numCtx ?? estimateNumCtx(prompt.length, config.model, numPredict);
-
-    this.logger.debug(
-      `Ollama request: model=${config.model}, num_ctx=${numCtx}, num_predict=${numPredict}, ` +
-      `temperature=${temperature}, thinking=${thinking}${level ? ` (${level})` : ''}`,
-    );
-
-    // Remember what we loaded so shutdown can release exactly this and no more.
-    this.ollamaModelsInUse.add(`${ollamaEndpoint}::${config.model}`);
-
-    // Own the AbortController rather than using AbortSignal.timeout, so shutdown
-    // can cancel a generation in progress. Ollama serializes requests per model,
-    // so an unload queued behind a running 2-minute call would never land inside
-    // the shutdown budget — cancelling first is what makes release possible.
-    // 10 minutes, not 5. This clock starts when the request is ISSUED, but Ollama
-    // queues requests it cannot serve concurrently — so a queued call spends most
-    // of its budget waiting, not generating. A measured flag call already takes
-    // ~230s of pure generation; at the old 300s a single queued request was
-    // aborted after 69s of real work and retried from scratch, costing more time
-    // than it saved.
-    const controller = new AbortController();
-    const timeoutHandle = setTimeout(() => controller.abort(), 600000);
-    this.inFlightOllama.add(controller);
-
-    // Job cancellation reuses that same controller rather than racing a second
-    // signal: the fetch already honours it, and Ollama cancels the runner's
-    // generation when the client disconnects — which is what makes the model
-    // free within a second instead of finishing the answer first.
-    const jobSignal = overrides?.signal;
-    const onJobCancelled = () => controller.abort();
-    jobSignal?.addEventListener('abort', onJobCancelled, { once: true });
-
-    try {
-      const post = (fields: Record<string, unknown>) =>
-        fetch(`${ollamaEndpoint}/api/generate`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          // A wedged Ollama must not block the serialized pipeline forever.
-          signal: controller.signal,
-          body: JSON.stringify({
-            model: config.model,
-            prompt: prompt,
-            stream: false,
-            // Per-call keep_alive keeps the model resident across the whole job
-            // without needing an out-of-band ping timer.
-            keep_alive: '5m',
-            // Structured output, when the caller needs the answer to parse.
-            ...(overrides?.format ? { format: overrides.format } : {}),
-            ...fields,
-            options: {
-              num_ctx: numCtx,
-              num_predict: numPredict,
-              temperature,
-            },
-          }),
-        });
-
-      let response = await post(thinkFields);
-
-      // Graded think levels are only honored "for supported models" and there is
-      // no capability flag for it. A 4xx while sending one means this model does
-      // not take levels — remember that and retry once with plain think:true,
-      // rather than failing a task over a performance optimization.
-      if (!response.ok && level && response.status >= 400 && response.status < 500) {
-        markGradedThinkUnsupported(ollamaEndpoint, config.model);
-        response = await post({ think: true });
-      }
-
-      if (!response.ok) {
-        throw new Error(`Ollama API returned status ${response.status}`);
-      }
-
-      const data = await response.json();
-
-      // Read ONLY the `response` field — never concatenate `thinking`. Defensively
-      // strip any inline <think>…</think> for models whose template inlines it.
-      let text = stripThinkTags(typeof data.response === 'string' ? data.response : '');
-
-      // STRUCTURED-OUTPUT TRAP, measured on Ollama with qwen3.8:27b:
-      // when `format: 'json'` is sent to a THINKING model, the JSON grammar
-      // constrains the whole output stream from the first token, so the model
-      // never opens an answer channel — the object it emits is classified as
-      // reasoning and arrives in `thinking` with `response` EMPTY:
-      //   format+think:low -> eval_count 29,  response "",  thinking '{"quote": ...}'
-      //   think:low alone  -> eval_count 261, response '{"quote": ...}'
-      // The constrained call is both correct and ~5x cheaper, so it is worth
-      // keeping: when structured output was REQUESTED and `response` came back
-      // empty, the object in `thinking` is the answer. This is deliberately
-      // narrow — no format, or a non-empty `response`, and `thinking` is still
-      // never read, because then it really is reasoning prose.
-      // A JSON SCHEMA in `format` constrains the stream even harder than
-      // `'json'` does, so this fallback matters MORE there, not less.
-      if (!text && overrides?.format && typeof data.thinking === 'string' && data.thinking.trim()) {
-        text = stripThinkTags(data.thinking);
-        this.logger.debug(
-          `Ollama returned the structured (${
-            typeof overrides.format === 'string' ? overrides.format : 'schema'
-          }) answer in the thinking field (empty response) — using it`,
-        );
-      }
-
-      // Ollama returns token counts: prompt_eval_count (input), eval_count (output)
-      const inputTokens = data.prompt_eval_count || 0;
-      const outputTokens = data.eval_count || 0;
-      const tokensUsed = inputTokens + outputTokens;
-
-      this.logger.log(
-        `Ollama tokens: ${inputTokens} input + ${outputTokens} output = ${tokensUsed} total (local, $0.00)`,
-      );
-
-      return {
-        text,
-        tokensUsed,
-        inputTokens,
-        outputTokens,
-        estimatedCost: 0, // Local models are free
-        provider: 'ollama',
-        model: config.model,
-        // Surfaced so callers can reject a truncated answer instead of parsing
-        // a fragment of one (done_reason === 'length').
-        doneReason: typeof data.done_reason === 'string' ? data.done_reason : undefined,
-      };
-    } catch (error) {
-      // A cancelled generation during shutdown is expected, not a fault.
-      if (this.releasingOllama) {
-        throw new Error('Ollama request cancelled: application is shutting down');
-      }
-      // Likewise a job the user cancelled. Checked BEFORE the generic handler
-      // because the abort surfaces here as an ordinary fetch AbortError, which
-      // is indistinguishable from the 10-minute timeout's abort by message —
-      // and the timeout genuinely IS a failure.
-      if (jobSignal?.aborted) {
-        throw new AnalysisCancelledError('Ollama request cancelled: job was cancelled');
-      }
-      this.logger.error(`Ollama API error: ${(error as Error).message}`);
-      throw new Error(`Ollama API error: ${(error as Error).message}`);
-    } finally {
-      clearTimeout(timeoutHandle);
-      this.inFlightOllama.delete(controller);
-      jobSignal?.removeEventListener('abort', onJobCancelled);
-    }
-  }
-
-  /**
-   * Release every Ollama model THIS app loaded, so quitting Briefcase frees the
-   * VRAM instead of leaving 17-25GB resident until Ollama's keep_alive expires.
-   *
-   * Ollama is a shared daemon and other apps may have their own models loaded,
-   * so this unloads only the models tracked in `ollamaModelsInUse` — never a
-   * blanket unload. `keep_alive: 0` with no prompt is Ollama's unload request.
-   *
-   * Never throws: shutdown must proceed even if Ollama is already gone.
-   */
-  async releaseOllamaModels(): Promise<void> {
-    if (this.ollamaModelsInUse.size === 0) return;
-    this.releasingOllama = true;
-
-    // Cancel in-flight generations FIRST. Ollama serializes per model, so an
-    // unload sent while a long call is running would sit in the queue until it
-    // finished — long past the point the process gets killed.
-    for (const controller of this.inFlightOllama) {
-      try { controller.abort(); } catch { /* already settled */ }
-    }
-    this.inFlightOllama.clear();
-
-    const targets = [...this.ollamaModelsInUse];
-    this.ollamaModelsInUse.clear();
-
-    // Must fit inside the parent's shutdown grace period.
-    await this.unloadOllamaKeys(targets, 'Shutdown', 2000);
-  }
-
-  /**
-   * Release a SPECIFIC set of `${endpoint}::${model}` keys — the models one
-   * cancelled job loaded — without touching anything else.
-   *
-   * This is the cancel-time counterpart to `releaseOllamaModels`, and it is
-   * deliberately narrower in two directions:
-   *
-   *  - it never unloads a model this app did not load (the intersection with
-   *    `ollamaModelsInUse`), because the Ollama daemon is shared with another
-   *    app on this machine and a blanket unload would evict its models; and
-   *  - it does not set `releasingOllama` and does not abort in-flight calls,
-   *    because OTHER work may legitimately still be running. The caller aborts
-   *    exactly its own job's calls first, and passes only the keys no other
-   *    live run still needs.
-   *
-   * Never throws.
-   */
-  async releaseOllamaModelKeys(keys: Iterable<string>): Promise<void> {
-    const targets = [...new Set(keys)].filter((key) => this.ollamaModelsInUse.has(key));
-    if (targets.length === 0) return;
-    for (const key of targets) this.ollamaModelsInUse.delete(key);
-
-    // A cancel has no shutdown deadline to beat, but the aborted generation
-    // must have actually let go of the model before the unload is served, so
-    // give it more room than the 2s shutdown budget.
-    await this.unloadOllamaKeys(targets, 'Cancel', 5000);
-  }
-
-  /** `keep_alive: 0` with no prompt — Ollama's unload request. Never throws. */
-  private async unloadOllamaKeys(keys: string[], context: string, timeoutMs: number): Promise<void> {
-    await Promise.all(
-      keys.map(async (key) => {
-        const sep = key.indexOf('::');
-        const endpoint = key.slice(0, sep);
-        const model = key.slice(sep + 2);
-        try {
-          await fetch(`${endpoint}/api/generate`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            signal: AbortSignal.timeout(timeoutMs),
-            body: JSON.stringify({ model, keep_alive: 0 }),
-          });
-          this.logger.log(`[${context}] Released Ollama model: ${model}`);
-        } catch (error) {
-          this.logger.warn(`[${context}] Could not release ${model}: ${(error as Error).message}`);
-        }
-      }),
-    );
-  }
-
-  /**
-   * Generate text using bundled local AI (Cogito 8B via llama.cpp)
-   */
-  private async generateWithLocal(
-    prompt: string,
-    temperature: number,
-    signal?: AbortSignal,
-  ): Promise<AIResponse> {
-    if (!this.llamaManager.isAvailable()) {
-      throw new Error('Local AI model not available. Please reinstall the application.');
-    }
-
-    try {
-      const result = await this.llamaManager.generateText(prompt, { temperature, signal });
-
-      this.logger.log(
-        `Local AI tokens: ${result.inputTokens} input + ${result.outputTokens} output = ${result.totalTokens} total (local, $0.00)`,
-      );
-
-      return {
-        text: stripThinkTags(result.text),
-        tokensUsed: result.totalTokens,
-        inputTokens: result.inputTokens,
-        outputTokens: result.outputTokens,
-        estimatedCost: 0, // Local model is free
-        provider: 'local',
-        model: result.model,
-      };
-    } catch (error) {
-      if (signal?.aborted) {
-        throw new AnalysisCancelledError('Local AI request cancelled: job was cancelled');
-      }
-      this.logger.error(`Local AI error: ${(error as Error).message}`);
-      throw new Error(`Local AI error: ${(error as Error).message}`);
-    }
-  }
-
-  /**
    * Test if an AI provider is accessible and configured correctly
    */
   async testProvider(config: AIProviderConfig): Promise<{ success: boolean; error?: string }> {
-    if (this.via() === 'crucible') return this.testViaCrucible(config);
-    try {
-      await this.generateText('Test connection. Respond with "OK".', config);
-      return { success: true };
-    } catch (error) {
-      this.logger.error(`Provider test failed: ${(error as Error).message}`);
-      return { success: false, error: (error as Error).message };
-    }
-  }
-
-  /**
-   * Test without a billed call (migration plan §6.1): an upstream is tested by
-   * the server's own upstream test, a local model by the catalog saying it is
-   * installed and loadable.
-   */
-  private async testViaCrucible(config: AIProviderConfig): Promise<{ success: boolean; error?: string }> {
-    const chat = this.crucibleChat!;
+    const chat = this.crucibleChat;
     try {
       const chosen = await chat.effectiveTarget(crucibleTargetOf(config.provider, config.model));
       const target = chosen.target;

@@ -1,7 +1,7 @@
 /**
- * AIProviderService.generateText on the Crucible road, against the fake: every
- * provider, every generateText caller's call shape, cost and cancel, a whole
- * analysis run holding one lease, and the direct road left exactly as it was.
+ * AIProviderService.generateText on Crucible (the only road since P7), against
+ * the fake: every provider, every generateText caller's call shape, cost and
+ * cancel, and a whole analysis run holding one lease.
  */
 import * as fs from 'fs';
 import * as path from 'path';
@@ -10,8 +10,8 @@ import { AIProviderService, type AIGenerateOverrides, type AIProviderConfig } fr
 import { AIAnalysisService } from '../../src/analysis/ai-analysis.service';
 import { AnalysisCancelledError } from '../../src/analysis/cancellation';
 import type { AITaskKind } from '../../src/analysis/model-utils';
+import type { SnapStageResult } from '../../src/scorer/snap-analysis.service';
 import { CrucibleServersService } from '../../src/crucible/crucible-servers.service';
-import { AI_VIA_ENV } from '../../src/crucible/llm/ai-via';
 import { CrucibleChatService } from '../../src/crucible/llm/crucible-chat.service';
 import { CLOUD_FORBIDDEN_KEYS } from '../../src/crucible/llm/target';
 import { startFakeCrucible, type FakeCrucible } from '../fake-crucible/fake-crucible';
@@ -19,7 +19,6 @@ import { harness, type Harness } from './harness';
 import { tempDir } from './helpers';
 
 const FLAG_SCHEMA = { type: 'object', properties: { flags: { type: 'array' } }, required: ['flags'] };
-const noLlama = { isAvailable: () => false } as never;
 
 const savedEnv = { ...process.env };
 let fake: FakeCrucible;
@@ -28,7 +27,7 @@ let chat: CrucibleChatService;
 let provider: AIProviderService;
 
 beforeEach(async () => {
-  process.env = { ...savedEnv, APPDATA: tempDir('ai-appdata-'), [AI_VIA_ENV]: 'crucible', BRIEFCASE_PLACE_MODEL: '' };
+  process.env = { ...savedEnv, APPDATA: tempDir('ai-appdata-') };
   fake = await startFakeCrucible({
     // dots-ocr is the live Mac catalog's page reader: 3B, text+image. It must never be picked for placement.
     models: [{ id: 'dots-ocr', paramsB: 3, modalities: ['text', 'image'] }, { id: 'qwen3.5-9b', paramsB: 9 }, { id: 'qwen3.5-4b', paramsB: 4 }],
@@ -37,7 +36,7 @@ beforeEach(async () => {
   h = harness();
   h.registry.add({ name: 'mac', url: fake.url, token: fake.token });
   chat = new CrucibleChatService(new CrucibleServersService(h.registry, h.factory), h.factory, h.probes);
-  provider = new AIProviderService(noLlama, chat);
+  provider = new AIProviderService(chat);
 });
 afterEach(async () => {
   process.env = savedEnv;
@@ -63,7 +62,7 @@ describe('generateText through Crucible: the provider mapping', () => {
     else for (const key of CLOUD_FORBIDDEN_KEYS) expect(body).not.toHaveProperty(key);
   });
 
-  it('prices cloud usage as the direct road does, and local/ollama as free', async () => {
+  it('prices cloud usage, and local/ollama as free', async () => {
     const claude = await provider.generateText('p', { provider: 'claude', model: 'claude-sonnet-4-20250514' }, 'title');
     expect(claude.estimatedCost).toBeCloseTo((11 / 1e6) * 3 + (7 / 1e6) * 15, 10);
     const local = await provider.generateText('p', { provider: 'local', model: 'qwen3.5-9b' }, 'title');
@@ -82,9 +81,7 @@ describe('generateText through Crucible: the provider mapping', () => {
  * for a local model, and what it must NOT carry for Claude.
  */
 const CALL_SITES: Array<{ site: string; task?: AITaskKind; overrides: AIGenerateOverrides; local: Record<string, unknown> }> = [
-  { site: 'chapter-detection boundary placement', task: 'boundary', overrides: { numCtx: 8192, format: 'json' }, local: { temperature: 0, response_format: { type: 'json_object' } } },
   { site: 'ai-analysis chapter', task: 'chapter', overrides: {}, local: { temperature: 0.15 } },
-  { site: 'ai-analysis flags discovery', task: 'flags', overrides: { format: FLAG_SCHEMA, numCtx: 16384 }, local: { temperature: 0.15, response_format: { type: 'json_schema', json_schema: { name: 'flags', schema: FLAG_SCHEMA } } } },
   { site: 'ai-analysis flag verify', task: 'flags', overrides: { format: FLAG_SCHEMA }, local: { temperature: 0.15, response_format: { type: 'json_schema', json_schema: { name: 'flags', schema: FLAG_SCHEMA } } } },
   { site: 'ai-analysis description body', task: 'description', overrides: { temperature: 0.2 }, local: { temperature: 0.2 } },
   { site: 'ai-analysis tags', task: 'tags', overrides: { format: FLAG_SCHEMA }, local: { temperature: 0.15, response_format: { type: 'json_schema', json_schema: { name: 'tags', schema: FLAG_SCHEMA } } } },
@@ -108,7 +105,7 @@ describe('every generateText call site, through Crucible', () => {
     expect(Object.keys(cloud).sort()).toEqual(['messages', 'model', 'stream']);
   });
 
-  it('library insights with a cloud provider and no apiKey works (it failed on the direct road)', async () => {
+  it('library insights with a cloud provider and no apiKey works (the serving Crucible holds the key)', async () => {
     const response = await provider.generateText('insights', { provider: 'claude', model: 'claude-sonnet-5' });
     expect(response.text).toBe('{"ok":true}');
   });
@@ -142,27 +139,6 @@ describe('every generateText call site, through Crucible', () => {
   });
 });
 
-describe('the direct road is untouched', () => {
-  it('BRIEFCASE_AI_VIA=direct: Claude still needs its local key and nothing reaches Crucible', async () => {
-    process.env[AI_VIA_ENV] = 'direct';
-    expect(provider.via()).toBe('direct');
-    await expect(provider.generateText('p', { provider: 'claude', model: 'c' }, 'title')).rejects.toThrow('Claude API key is required');
-    await expect(provider.generateText('p', { provider: 'openai', model: 'g' }, 'title')).rejects.toThrow('OpenAI API key is required');
-    await expect(provider.generateText('p', { provider: 'local', model: 'x' }, 'title')).rejects.toThrow(/Local AI model not available/);
-    expect(fake.requests.filter((r) => r.path.startsWith('/v1/'))).toHaveLength(0);
-  });
-
-  it('BRIEFCASE_AI_VIA=direct: an Ollama choice is never mapped and never looked up on Crucible', async () => {
-    process.env[AI_VIA_ENV] = 'direct';
-    await expect(provider.crucibleOllamaStandIn('qwen3.5:4b')).resolves.toBeNull();
-    expect(fake.requests.filter((r) => r.path.startsWith('/v1/'))).toHaveLength(0);
-  });
-
-  it('without the Crucible service (a hand-built provider) it is always direct', () => {
-    expect(new AIProviderService(noLlama).via()).toBe('direct');
-  });
-});
-
 describe('a whole analysis through Crucible', () => {
   const LINES = [
     'Welcome back everybody, today we are making pasta.',
@@ -172,14 +148,26 @@ describe('a whole analysis through Crucible', () => {
   ];
   const SEGMENTS = LINES.map((text, i) => ({ start: i * 30, end: i * 30 + 30, text }));
 
+  /** The snap engine's scorer stage, faked: two chapters, nothing ranked for flags. The LLM stages are what is under test. */
   function analysis(): AIAnalysisService {
-    const detection = { detectBoundaries: async () => ({ boundaries: [0, 60], placeCalls: 0, scorer: 'lexical' }) };
-    const nli = {
-      captureThreshold: 0.2, rescueFloor: 0.15, unavailable: null,
-      isAvailable: async () => true, rankWindows: async () => [], stop: () => undefined,
-      userFacingUnavailableMessage: (r: string) => r,
+    const snap = {
+      run: async (): Promise<SnapStageResult> => ({
+        transcript: null,
+        model: 'qwen3.5-9b',
+        timings: { startMs: 0, prepareMs: 0, chaptersMs: 0, flagsMs: 0, totalMs: 0 },
+        labelMassGated: { chapters: 0, flags: 0, refine: 0, total: 0 },
+        chapters: {
+          chapters: [
+            { startSeconds: 0, endSeconds: 60, title: 'Pasta', label: 'Pasta', sentenceRange: [0, 2], isAd: false },
+            { startSeconds: 60, endSeconds: 120, title: 'Travel', label: 'Travel', sentenceRange: [2, 4], isAd: false },
+          ],
+          outline: ['Pasta', 'Travel'], chunks: [], seams: [], timings: { outlineMs: 0, assignMs: 0, adsMs: 0, totalMs: 0 },
+        },
+        chapterTree: null,
+        flags: { windows: [], overflow: [], spans: [], ratingMap: {} as never, plan: [], notes: [], stats: { units: 4, spans: 0, verifyBudget: 0 } as never } as never,
+      }),
     };
-    return new AIAnalysisService(provider, {} as never, {} as never, detection as never, nli as never, undefined, undefined);
+    return new AIAnalysisService(provider, snap as never, undefined);
   }
 
   function options(model = 'qwen3.5-9b') {
@@ -307,7 +295,7 @@ describe('a whole analysis through Crucible', () => {
     expect(fake.jobs.filter((j) => j.type === 'load-model').map((j) => [j.model, j.params['context']])).toEqual([['qwen3.8-27b-4bit', undefined]]);
   });
 
-  it('an ollama: choice with no match on the server stays on the ollama/ upstream, sized as the direct road sizes it, the window sent as context_tokens (1.0.24)', async () => {
+  it('an ollama: choice with no match on the server stays on the ollama/ upstream, sized for Ollama, the window sent as context_tokens (1.0.24)', async () => {
     await fake.close();
     fake = await startFakeCrucible({
       // The 27B is known but not downloaded here: no match.
@@ -330,10 +318,10 @@ describe('a whole analysis through Crucible', () => {
     expect(fake.jobs.filter((j) => j.type === 'load-model')).toHaveLength(0);
     const limits = logged.filter((m) => m.startsWith('[Model Limits] effective ctx='));
     expect(limits).toHaveLength(1);
-    // numCtxMaxForModel('qwen3.8:27b'): what the direct road requests as num_ctx.
+    // numCtxMaxForModel('qwen3.8:27b'): the window requested as context_tokens.
     expect(limits[0]).toMatch(/^\[Model Limits\] effective ctx=12288:/);
     expect(logged.some((m) => /Ollama's default context/.test(m))).toBe(false);
-    // Every call states its window, bucketed and capped as the direct road's num_ctx is.
+    // Every call states its window, bucketed and capped.
     const windows = fake.chatBodies().map((b) => b['context_tokens']);
     expect(windows.every((w) => typeof w === 'number' && w >= 4096 && w <= 12288 && (w as number) % 4096 === 0)).toBe(true);
     // The server's X-Crucible-Context is logged once for the model.

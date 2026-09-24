@@ -5,19 +5,6 @@
  */
 import type { ServerReach } from './settings-wire';
 
-export type AiVia = 'crucible' | 'direct';
-
-/** Which road LLM calls take, and why. */
-export interface AiViaView {
-  via: AiVia;
-  source: 'env' | 'setting' | 'default';
-  stored: AiVia | null;
-  registeredServers: number;
-  /** Set when BRIEFCASE_AI_VIA decides it; the pane shows the switch read-only then. */
-  envOverride: string | null;
-  ignored?: string;
-}
-
 /** One pickable model. `value` is Briefcase's stored `provider:model` format. */
 export interface AiModelOption {
   value: string;
@@ -37,7 +24,6 @@ export interface AiUpstreamsView {
 
 /** `GET /crucible/ai/models`: the connected server's catalog and upstreams, as picker options. */
 export interface AiModelsView {
-  via: AiViaView;
   /** The server these came from: the best-ranked running server that answers. */
   server: string | null;
   reach: ServerReach | null;
@@ -89,5 +75,5 @@ export interface KeyCopyOutcome {
 }
 
 /** Per-task model routing (`taskModels` in app-config), `provider:model` values. */
-export type AiTaskName = 'boundary' | 'chapter' | 'flags' | 'description' | 'tags' | 'title';
+export type AiTaskName = 'chapter' | 'flags' | 'description' | 'tags' | 'title';
 export type AiTaskModels = Partial<Record<AiTaskName, string>>;
