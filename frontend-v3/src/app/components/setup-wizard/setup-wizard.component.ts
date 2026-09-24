@@ -43,9 +43,9 @@ type Step = 'welcome' | 'tools' | 'engine' | 'models' | 'ai' | 'review' | 'finis
         </div>
 
         <div class="steps-indicator">
-          <span class="step-count">{{ step() === 'finishing' ? 'Finishing up' : 'Step ' + (stepIndex() + 1) + ' of ' + NUMBERED }}</span>
+          <span class="step-count">{{ step() === 'finishing' ? 'Finishing up' : 'Step ' + (stepIndex() + 1) + ' of ' + numbered() }}</span>
           <div class="step-dots">
-            @for (i of dotIndexes; track i) {
+            @for (i of dotIndexes(); track i) {
               <span class="step-dot" [class.active]="i === stepIndex()" [class.done]="i < stepIndex()"></span>
             }
           </div>
@@ -305,8 +305,19 @@ export class SetupWizardComponent implements OnInit {
   private crucible = inject(CrucibleService);
   dl = inject(SetupDownloadService);
 
-  readonly NUMBERED = 6; // welcome, tools, engine, models, ai, review
-  readonly dotIndexes = [0, 1, 2, 3, 4, 5];
+  /**
+   * P5: whether the offline transcriber (whisper-cli) is what transcribes here.
+   * The `models` step (whisper model downloads) is shown only then: with a
+   * Crucible that offers asr, transcription runs there and needs no local
+   * model. Unknown until asked, so the step shows until the answer says not.
+   */
+  readonly whisperCliInUse = signal(true);
+  private readonly allSteps: Step[] = ['welcome', 'tools', 'engine', 'models', 'ai', 'review', 'finishing'];
+  readonly steps = computed<Step[]>(() =>
+    this.mode === 'setup' && !this.whisperCliInUse() ? this.allSteps.filter((s) => s !== 'models') : this.allSteps);
+  /** The numbered steps (all but `finishing`). */
+  readonly numbered = computed(() => this.steps().length - 1);
+  readonly dotIndexes = computed(() => Array.from({ length: this.numbered() }, (_, i) => i));
 
   readonly step = signal<Step>('welcome');
   readonly all = signal<ComponentStatus[]>([]);
@@ -319,7 +330,6 @@ export class SetupWizardComponent implements OnInit {
   readonly openaiSaved = signal(false);
   readonly savingKey = signal(false);
 
-  private order: Step[] = ['welcome', 'tools', 'engine', 'models', 'ai', 'review', 'finishing'];
 
   /**
    * The AI step's face. 'crucible' unless the user (or BRIEFCASE_AI_VIA)
@@ -334,7 +344,7 @@ export class SetupWizardComponent implements OnInit {
     return view.via;
   });
 
-  readonly stepIndex = computed(() => Math.min(this.order.indexOf(this.step()), this.NUMBERED - 1));
+  readonly stepIndex = computed(() => Math.min(this.steps().indexOf(this.step()), this.numbered() - 1));
   readonly requiredTools = computed(() => this.all().filter((c) => c.kind === 'binary' && c.required && c.supported));
   readonly optionalTools = computed(() =>
     this.all().filter((c) => c.kind === 'binary' && !c.required && c.supported && c.id !== 'llama'),
@@ -392,13 +402,15 @@ export class SetupWizardComponent implements OnInit {
     // First run: hold Crucible's coordination until the user has chosen, so no
     // model download starts under an open wizard. Released in finish().
     if (this.mode === 'setup') this.crucible.holdFirstRun().subscribe({ error: () => undefined });
+    if (this.mode === 'setup') void this.checkTranscriber();
     this.componentService.listComponents().subscribe((components) => {
       this.all.set(components);
       // Pre-select required, not-yet-installed tools.
       const presel = components.filter((c) => c.required && c.supported && !c.installed).map((c) => c.id);
-      // Pre-select a default whisper model (base) if none installed.
+      // Pre-select a default whisper model (base) if none installed, unless
+      // Crucible already transcribes here (P5: then no local model is needed).
       const models = components.filter((c) => c.kind === 'whisper-model');
-      if (models.length && !models.some((m) => m.installed)) {
+      if (this.whisperCliInUse() && models.length && !models.some((m) => m.installed)) {
         const base = models.find((m) => /base/i.test(m.id) || /base/i.test(m.name)) || models[0];
         if (base) presel.push(base.id);
       }
@@ -476,15 +488,42 @@ export class SetupWizardComponent implements OnInit {
   }
 
   next(): void {
-    const i = this.order.indexOf(this.step());
-    this.step.set(this.order[Math.min(i + 1, this.order.length - 1)]);
-    if (this.step() === 'ai') void this.loadAiStep();
+    // Leaving the engine step: a Crucible may just have been connected, and
+    // whether it transcribes decides whether the whisper models step shows.
+    if (this.step() === 'engine' && this.mode === 'setup') {
+      void this.checkTranscriber().then(() => this.advance(1));
+      return;
+    }
+    this.advance(1);
   }
 
   back(): void {
-    const i = this.order.indexOf(this.step());
-    this.step.set(this.order[Math.max(i - 1, 0)]);
+    this.advance(-1);
+  }
+
+  private advance(by: 1 | -1): void {
+    const order = this.steps();
+    const i = order.indexOf(this.step());
+    this.step.set(order[Math.min(Math.max(i + by, 0), order.length - 1)]);
     if (this.step() === 'ai') void this.loadAiStep();
+  }
+
+  /**
+   * Ask the backend where a transcription would run now. When Crucible takes
+   * it, the whisper models step is skipped and its pre-selected download
+   * dropped; when it doesn't (no Crucible, or no asr on it), the step stays.
+   */
+  async checkTranscriber(): Promise<void> {
+    try {
+      const view = await firstValueFrom(this.crucible.transcription());
+      this.whisperCliInUse.set(view.whisperCliInUse);
+    } catch {
+      this.whisperCliInUse.set(true);
+    }
+    if (!this.whisperCliInUse()) {
+      const whisperModels = new Set(this.all().filter((c) => c.kind === 'whisper-model' && !c.installed).map((c) => c.id));
+      this.dl.selected.update((selected) => new Set([...selected].filter((id) => !whisperModels.has(id))));
+    }
   }
 
   /** Where AI runs and, through Crucible, which server the keys would go to. Read on entering the AI step. */
