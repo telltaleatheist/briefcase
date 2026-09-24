@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -6,6 +6,7 @@ import { timer } from 'rxjs';
 import { ErrorSurface } from '../../../core/error-surface.service';
 import { UiButtonComponent } from '../../../ui';
 import { CrucibleService, type CrucibleRefusal } from '../../../services/crucible.service';
+import { CrucibleReadinessService } from '../../../services/crucible-readiness.service';
 import type {
   TranscriptionServerView,
   TranscriptionSettingWire,
@@ -40,6 +41,17 @@ import type {
 
     <div class="pane-section">
       <p class="section-label">Where transcription runs</p>
+      @if (!readiness.ready()) {
+        <div class="row-card route-card waiting">
+          <div class="row-main">
+            <div class="row-name">Transcription needs Crucible</div>
+            <div class="row-desc wrap">{{ readiness.reason() }}</div>
+          </div>
+          @if (readiness.doorLabel(); as door) {
+            <ui-button variant="primary" size="sm" (pressed)="readiness.openDoor()">{{ door }}</ui-button>
+          }
+        </div>
+      }
       @if (servers().length > 0) {
         <label class="field-label" for="transcribe-server">Server</label>
         <select
@@ -66,7 +78,13 @@ import type {
             @for (m of target.models; track m.id) {
               <option [value]="m.id" [disabled]="!m.installed">{{ m.id }}{{ m.installed ? '' : ' (not downloaded)' }}</option>
             }
+            @if (missingModel(); as missing) {
+              <option [value]="missing">{{ missing }} (unavailable)</option>
+            }
           </select>
+          @if (missingModel(); as missing) {
+            <p class="hint">{{ target.name }} does not offer {{ missing }}, so its most accurate downloaded model is used instead. Pick one it offers to change that.</p>
+          }
           @if (target.betterNotInstalled; as better) {
             <p class="hint">{{ better }} is more accurate and can be downloaded on {{ target.name }} from Crucible's catalog.</p>
           }
@@ -119,6 +137,7 @@ export class TranscriptionPaneComponent {
   private destroyRef = inject(DestroyRef);
   private errorSurface = inject(ErrorSurface);
   private crucible = inject(CrucibleService);
+  readonly readiness = inject(CrucibleReadinessService);
 
   readonly view = signal<TranscriptionView | null>(null);
   readonly loadError = signal<string | null>(null);
@@ -144,8 +163,26 @@ export class TranscriptionPaneComponent {
   readonly routeModel = computed(() => { const r = this.view()?.route; return r?.kind === 'crucible' ? r.model : ''; });
   readonly routeReason = computed(() => { const r = this.view()?.route; return r?.kind === 'none' ? r.reason : ''; });
 
+  /** The saved model, when the server the picker lists does not offer it (shown as unavailable, never dropped). */
+  readonly missingModel = computed(() => {
+    const model = this.modelChoice();
+    const target = this.modelServer();
+    if (!model || !target) return null;
+    return target.models.some((m) => m.id === model) ? null : model;
+  });
+
   constructor() {
-    this.reload();
+    // Re-read when readiness or the connected server changes (the crucible.readiness push).
+    let lastKey: string | null = null;
+    effect(() => {
+      const v = this.readiness.view();
+      const key = v === null ? 'unknown' : `${v.state}\n${v.server ?? ''}`;
+      untracked(() => {
+        if (key === lastKey) return;
+        lastKey = key;
+        this.reload();
+      });
+    });
   }
 
   reload(): void {
