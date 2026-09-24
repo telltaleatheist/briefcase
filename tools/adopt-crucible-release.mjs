@@ -2,9 +2,20 @@
 /**
  * Adopt a Crucible release: fetch the two vendored tarballs, repin, relink, prove it.
  *
- *   node tools/adopt-crucible-release.js 0.6.8
- *   node tools/adopt-crucible-release.js --newest
- *   node tools/adopt-crucible-release.js --check        # what is pinned, and what is newest
+ *   node tools/adopt-crucible-release.mjs              # the channel's latest (releases/latest)
+ *   node tools/adopt-crucible-release.mjs --newest     # the same, said out loud
+ *   node tools/adopt-crucible-release.mjs 0.6.8        # exactly this release (the one way DOWN)
+ *   node tools/adopt-crucible-release.mjs --check      # what is pinned, and what the channel says
+ *
+ * "LATEST" HAS ONE OWNER, THE RELEASE CHANNEL (crucible 6807b50,
+ * docs/INSTALL-UNINSTALL.md §6.5.1): GitHub's `releases/latest`, which moves
+ * only when `promote_release.py --publish` promotes a verified cut. Not
+ * `releases?per_page=1`, which answers "the newest tag CREATED": every cut is
+ * created `--prerelease --latest=false`, so between a cut and its promotion
+ * that is the unverified candidate. And NOTHING GOES BACKWARDS: the channel's
+ * latest older than what is vendored is refused, compared number by number (a
+ * string compare puts 1.0.10 before 1.0.2). Naming an exact release is the one
+ * way down, as `rollbackTo` is in the bootstrapper.
  *
  * ADOPTING A RELEASE USED TO BE FOUR EDITS AND A DOWNLOAD, done by hand, and the
  * places do not look alike: two `file:vendor/...tgz` dependency lines that name
@@ -103,17 +114,66 @@ export function pinnedVersion(parsed) {
   return [...found][0];
 }
 
-async function newestRelease() {
-  const response = await fetch(
-    `https://api.github.com/repos/${REPO_SLUG}/releases?per_page=1`,
-    { headers: { Accept: 'application/vnd.github+json' } },
-  );
-  if (!response.ok) die(`GitHub answered ${response.status} asking for the newest release`);
-  const releases = await response.json();
-  if (!Array.isArray(releases) || releases.length === 0) die('the repository has no releases');
-  const tag = releases[0].tag_name;
-  if (!/^v\d+\.\d+\.\d+$/.test(tag)) die(`the newest release is tagged ${tag}, which is not vX.Y.Z`);
+/** The channel's pointer at the promoted release. One URL, spelled once (as crucible's channel.ts). */
+export const LATEST_RELEASE_URL = `https://api.github.com/repos/${REPO_SLUG}/releases/latest`;
+
+/** A refusal this script states and exits on; thrown (not `die`d) so the functions can be tested. */
+export class AdoptRefusal extends Error {}
+
+/**
+ * What `releases/latest` names. No fallback: a channel that can't be read is a
+ * refusal, never "the newest tag" or whatever is vendored.
+ */
+export async function newestRelease(fetchImpl = globalThis.fetch) {
+  let response;
+  try {
+    response = await fetchImpl(LATEST_RELEASE_URL, { headers: { Accept: 'application/vnd.github+json' } });
+  } catch (error) {
+    throw new AdoptRefusal(`could not read the release channel at ${LATEST_RELEASE_URL}: ${error.message}`);
+  }
+  if (!response.ok) throw new AdoptRefusal(`the release channel at ${LATEST_RELEASE_URL} answered HTTP ${response.status}`);
+  const release = await response.json();
+  const tag = release?.tag_name;
+  if (typeof tag !== 'string' || !/^v\d+\.\d+\.\d+$/.test(tag)) {
+    throw new AdoptRefusal(`the channel's latest release is tagged ${JSON.stringify(tag)}, which is not vX.Y.Z`);
+  }
   return tag.slice(1);
+}
+
+/** Negative when `a` is older than `b`, 0 when the same, positive when newer. Number by number. */
+export function compareReleases(a, b) {
+  const left = /^v?(\d+)\.(\d+)\.(\d+)/.exec(String(a).trim());
+  const right = /^v?(\d+)\.(\d+)\.(\d+)/.exec(String(b).trim());
+  if (left === null || right === null) {
+    throw new AdoptRefusal(`${JSON.stringify(left === null ? a : b)} is not a release version, so it can't be compared`);
+  }
+  for (let index = 1; index <= 3; index += 1) {
+    const difference = Number(left[index]) - Number(right[index]);
+    if (difference !== 0) return difference;
+  }
+  return 0;
+}
+
+/**
+ * Which release to adopt, and whether it goes down. An exact version is taken
+ * as named (older included: that is the rollback). With none, the channel's
+ * latest, refused when it is older than the vendored `from`.
+ *
+ * `latest` is a function so the channel is only asked when it is needed.
+ */
+export async function chooseTarget(args, from, latest) {
+  const exact = args.find((value) => SEMVER.test(value));
+  if (exact !== undefined) {
+    return { to: exact, rollback: compareReleases(exact, from) < 0 };
+  }
+  const to = await latest();
+  if (compareReleases(to, from) < 0) {
+    throw new AdoptRefusal(
+      `the channel's latest release is ${to}, older than the vendored ${from}; never going backwards. ` +
+      `To roll back, name the exact release: node tools/adopt-crucible-release.mjs ${to}`,
+    );
+  }
+  return { to, rollback: false };
 }
 
 async function download(version, name, into) {
@@ -234,24 +294,24 @@ async function main() {
   const from = pinnedVersion(manifest.parsed);
   const vendor = path.join(manifest.dir, 'vendor');
 
-  let to;
   if (args.includes('--check')) {
+    const latest = await newestRelease();
+    const order = compareReleases(latest, from);
     console.log(`adopt: ${path.relative(process.cwd(), manifest.file) || 'package.json'} pins ${from}`);
-    console.log(`adopt: the newest published release is ${await newestRelease()}`);
+    console.log(`adopt: the release channel's latest is ${latest}` +
+      (order > 0 ? ' (newer: adopt it with no argument)' : order === 0 ? ' (already pinned)' : ' (OLDER than the pin: not adopted without naming it)'));
     return;
   }
-  if (args.includes('--newest')) {
-    to = await newestRelease();
-  } else {
-    to = args.find((value) => SEMVER.test(value));
-    if (!to) die('name a release (0.6.8), or pass --newest, or --check to see both');
+  if (args.includes('--newest') && args.some((value) => SEMVER.test(value))) {
+    die('--newest and an exact release contradict each other; pass one');
   }
+  const { to, rollback } = await chooseTarget(args, from, () => newestRelease());
 
   if (to === from) {
     console.log(`adopt: already pinned to ${to}; nothing to do`);
     return;
   }
-  console.log(`adopt: ${from} -> ${to}`);
+  console.log(`adopt: ${from} -> ${to}${rollback ? '  (ROLLING BACK: an older release, named exactly)' : ''}`);
 
   if (!fs.existsSync(vendor)) die(`${vendor} does not exist`);
   console.log('adopt: fetching');
@@ -310,5 +370,5 @@ async function main() {
 const invokedDirectly = process.argv[1]
   && pathToFileURL(process.argv[1]).href === import.meta.url;
 if (invokedDirectly) {
-  main().catch((error) => die(error.stack || String(error)));
+  main().catch((error) => die(error instanceof AdoptRefusal ? error.message : (error.stack || String(error))));
 }
