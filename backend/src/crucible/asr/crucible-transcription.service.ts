@@ -32,7 +32,7 @@ import { resolveAiVia, type AiVia } from '../llm/ai-via';
 import { CrucibleProbeService } from '../probe';
 import type { TranscriptionServerView, TranscriptionView } from '../wire/transcription-wire';
 import { asrOfferOf, crucibleAsrLanguage, vadFilterFor, type AsrOffer } from './asr-models';
-import { classifyAsrRefusal, runAsrJob, type AsrJobProgress, type RunAsrJobOptions } from './crucible-asr-job';
+import { classifyAsrRefusal, runAsrJob, type AsrBlobCache, type AsrJobProgress, type RunAsrJobOptions } from './crucible-asr-job';
 import { transcriptToSrt } from './crucible-transcript';
 import {
   parseTranscriptionSettingInput,
@@ -44,6 +44,8 @@ import { decideTranscriptionRoute, type TranscriptionAsk, type TranscriptionRout
 
 /** `/v1/info` is read at most this often per server for the venue rule. */
 export const ASR_OFFER_CACHE_MS = 30_000;
+/** Uploads remembered for reuse (a parked task's video), oldest dropped first. */
+export const ASR_BLOB_CACHE_MAX = 32;
 
 export interface CrucibleTranscriptionRequest {
   readonly server: string;
@@ -112,6 +114,13 @@ export function asrProgressToTask(server: string, p: AsrJobProgress): { percent:
 export class CrucibleTranscriptionService {
   private readonly logger = new Logger('CrucibleTranscription');
   private readonly offers = new Map<string, { at: number; offer: AsrOffer }>();
+  /**
+   * Uploads not yet consumed by a job, per server and file (path, size and
+   * mtime: a changed file is a new key). A task parked at the submit (the lane
+   * busy) keeps its upload here, so its next run names the same blob instead
+   * of sending the whole video again.
+   */
+  private readonly blobs = new Map<string, { blobId: string; sha256: string; bytes: number }>();
 
   /** Replaceable by a spec. */
   now: () => number = Date.now;
@@ -269,6 +278,7 @@ export class CrucibleTranscriptionService {
         last = percent;
         request.onProgress?.(percent, mapped.message);
       },
+      blobCache: this.blobCacheFor(server, request.videoFile),
       ...(this.ledger === undefined ? {} : {
         ledger: {
           record: (jobId: string) => this.ledger!.record({ server, kind: 'job', id: jobId, jobType: 'asr', model, localId }),
@@ -286,6 +296,25 @@ export class CrucibleTranscriptionService {
     fs.renameSync(temp, srtFile);
     log(`${server} transcribed it: ${cues} cue(s)${transcript.durationS !== null ? `, ${hms(transcript.durationS)}` : ''}, language ${transcript.language}, ${transcript.model}${transcript.revision ? `@${transcript.revision.slice(0, 12)}` : ''}`);
     return { srtFile, jobId: outcome.jobId, cues, model: transcript.model, revision: transcript.revision, language: transcript.language };
+  }
+
+  private blobCacheFor(server: string, file: string): AsrBlobCache | undefined {
+    let key: string;
+    try {
+      const stat = fs.statSync(file);
+      key = [server, path.resolve(file), stat.size, stat.mtimeMs].join('\0');
+    } catch {
+      return undefined; // runAsrJob names the missing file
+    }
+    return {
+      get: () => this.blobs.get(key) ?? null,
+      set: (upload) => {
+        this.blobs.delete(key);
+        this.blobs.set(key, { blobId: upload.blobId, sha256: upload.sha256, bytes: upload.bytes });
+        while (this.blobs.size > ASR_BLOB_CACHE_MAX) this.blobs.delete(this.blobs.keys().next().value!);
+      },
+      drop: () => { this.blobs.delete(key); },
+    };
   }
 }
 

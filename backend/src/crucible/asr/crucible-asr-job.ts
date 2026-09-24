@@ -139,6 +139,22 @@ export interface AsrParams {
   readonly word_timestamps: boolean;
 }
 
+/**
+ * Where an upload is kept between runs of one task, so a task parked after
+ * its upload (the lane busy at the submit) sends the video once, not once per
+ * park. A job consumes the blob it names, so it is dropped at admission.
+ */
+export interface AsrBlobCache {
+  get(): { readonly blobId: string; readonly sha256: string } | null;
+  set(upload: { readonly blobId: string; readonly sha256: string; readonly bytes: number }): void;
+  drop(): void;
+}
+
+/** The server no longer has the blob we named: never held (a restart cleaned uploads/), or already taken by a job. */
+function isStaleBlob(err: unknown): boolean {
+  return err instanceof CrucibleRefused && (err.code === 'unknown_blob' || err.code === 'blob_consumed');
+}
+
 export interface AsrJobLedger {
   record(jobId: string): void;
   settle(jobId: string): void;
@@ -164,6 +180,8 @@ export interface RunAsrJobOptions {
   readonly onProgress?: (progress: AsrJobProgress) => void;
   readonly onLog?: (line: string) => void;
   readonly ledger?: AsrJobLedger;
+  /** An earlier run's upload of this file on this server, reused when the server still has it. */
+  readonly blobCache?: AsrBlobCache;
   /** Only a spec overrides these. */
   readonly doorDelaysMs?: readonly number[];
   readonly streamDelaysMs?: readonly number[];
@@ -247,25 +265,41 @@ export async function runAsrJob(options: RunAsrJobOptions): Promise<AsrJobOutcom
   }
 
   // ── Upload. A re-upload is harmless (a second blob), so weather is retried. ──
-  options.onProgress?.({ kind: 'uploading' });
-  let blobId: string | undefined;
-  for (let attempt = 0; blobId === undefined; attempt++) {
-    try {
-      blobId = (await client.upload(await openAsBlob(options.file), { filename: options.filename })).blobId;
-    } catch (err) {
-      // A cancel during the retry wait wakes the sleep early; the attempt that
-      // follows must not turn it into "unreachable", which would fall back.
-      if (signal?.aborted) throw cancelledBeforeSubmit();
-      const classified = classifyAsrRefusal(err, server, 'the upload');
-      if (classified instanceof CrucibleAsrUnavailable && classified.code === 'crucible_unreachable'
-        && attempt < doorDelays.length && !signal?.aborted) {
-        log(`upload to ${server} failed (${classified.message}); trying again in ${doorDelays[attempt]! / 1000}s`);
-        await sleep(doorDelays[attempt]!, signal);
+  const upload = async (): Promise<string> => {
+    options.onProgress?.({ kind: 'uploading' });
+    let uploaded: { blobId: string; sha256: string; bytes: number } | undefined;
+    for (let attempt = 0; uploaded === undefined; attempt++) {
+      try {
+        uploaded = await client.upload(await openAsBlob(options.file), { filename: options.filename });
+      } catch (err) {
+        // A cancel during the retry wait wakes the sleep early; the attempt that
+        // follows must not turn it into "unreachable", which would fall back.
         if (signal?.aborted) throw cancelledBeforeSubmit();
-        continue;
+        const classified = classifyAsrRefusal(err, server, 'the upload');
+        if (classified instanceof CrucibleAsrUnavailable && classified.code === 'crucible_unreachable'
+          && attempt < doorDelays.length && !signal?.aborted) {
+          log(`upload to ${server} failed (${classified.message}); trying again in ${doorDelays[attempt]! / 1000}s`);
+          await sleep(doorDelays[attempt]!, signal);
+          if (signal?.aborted) throw cancelledBeforeSubmit();
+          continue;
+        }
+        throw classified;
       }
-      throw classified;
     }
+    options.blobCache?.set(uploaded);
+    return uploaded.blobId;
+  };
+
+  // A parked task's earlier upload, when there is one: the server is asked for
+  // it by name at the submit, and a refusal saying it is gone uploads once more.
+  const cached = options.blobCache?.get() ?? null;
+  let reusing = cached !== null;
+  let blobId: string;
+  if (cached !== null) {
+    blobId = cached.blobId;
+    log(`reusing the earlier upload of this video on ${server} (blob ${cached.blobId}, sha256 ${cached.sha256.slice(0, 12)})`);
+  } else {
+    blobId = await upload();
   }
   if (signal?.aborted) throw cancelledBeforeSubmit();
 
@@ -297,6 +331,15 @@ export async function runAsrJob(options: RunAsrJobOptions): Promise<AsrJobOutcom
           break;
         }
       }
+      if (reusing && isStaleBlob(err)) {
+        reusing = false;
+        options.blobCache?.drop();
+        log(`${server} no longer holds the earlier upload (${(err as CrucibleRefused).code}); uploading the video again`);
+        blobId = await upload();
+        if (signal?.aborted) throw cancelledBeforeSubmit();
+        attempt -= 1; // the re-upload is not a door retry
+        continue;
+      }
       if (err instanceof CrucibleUnreachable) {
         unanswered = true;
         if (clientRef !== undefined) {
@@ -318,6 +361,8 @@ export async function runAsrJob(options: RunAsrJobOptions): Promise<AsrJobOutcom
     }
   }
   const admitted = jobId;
+  // The job took the blob (an upload is moved into the job that names it).
+  options.blobCache?.drop();
   options.ledger?.record(admitted);
   log(`${server} admitted asr job ${admitted} (${options.model})`);
 

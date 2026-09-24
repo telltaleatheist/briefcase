@@ -205,6 +205,36 @@ describe('the job flow', () => {
     expect(ledger.read()).toEqual([]);
   });
 
+  it('REGRESSION: a parked task that runs again reuses its upload instead of sending the whole video again', async () => {
+    await wire();
+    fake.inject({ serverBusy: { client: 'bookforge', type: 'tts', progress: 0.4 } });
+    expect(isParked(await svc.transcribe(request()).catch((e) => e))).toBe(true);
+    expect(isParked(await svc.transcribe(request()).catch((e) => e))).toBe(true);
+    fake.inject({});
+    const outcome = await svc.transcribe(request());
+    expect(outcome.cues).toBe(3);
+    expect(fake.uploads).toHaveLength(1);
+    expect(fake.jobs[0].inputs).toEqual({ 'My_Video_1080p_.mp4': fake.uploads[0].blobId });
+    // Consumed by that job: the next transcription of the file uploads afresh, with no refused round trip.
+    await svc.transcribe(request({ localId: 'job-2' }));
+    expect(fake.uploads).toHaveLength(2);
+    expect(fake.requestsTo('/v1/jobs', 'POST')).toHaveLength(4); // two parked, two admitted
+    expect(fake.jobs).toHaveLength(2);
+  });
+
+  it('REGRESSION: a reused blob the server no longer holds (unknown_blob) is uploaded again once, and the job runs', async () => {
+    await wire();
+    fake.inject({ serverBusy: { client: 'bookforge', type: 'tts', progress: 0.4 } });
+    expect(isParked(await svc.transcribe(request()).catch((e) => e))).toBe(true);
+    fake.inject({});
+    fake.forgetBlobs(); // a server restart that cleaned uploads/
+    const outcome = await svc.transcribe(request());
+    expect(outcome.cues).toBe(3);
+    expect(fake.uploads).toHaveLength(2);
+    expect(fake.jobs).toHaveLength(1);
+    expect(fake.jobs[0].inputs).toEqual({ 'My_Video_1080p_.mp4': fake.uploads[1].blobId });
+  });
+
   it('an unreachable server is an infrastructure failure, by name', async () => {
     await wire({}, await unusedLoopbackUrl());
     const err = await svc.transcribe(request()).catch((e) => e);
