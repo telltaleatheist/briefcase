@@ -241,6 +241,27 @@ export interface QueueJob {
   createdAt: Date;
   startedAt?: Date;
   completedAt?: Date;
+
+  // ── Crucible lanes (P4). Absent under aiVia 'direct'. ──
+  /** The lane the current AI task was placed on: `gpu:<server>` or `cloud`. */
+  lane?: string;
+  /** The Crucible server it runs (or ran) on. */
+  venue?: string;
+  /**
+   * Why the current AI task is waiting instead of running: the busy holder's
+   * sentence, an unreachable server, no server with that upstream. Set while
+   * parked, cleared when admitted. Shown grey on the row, never as an error.
+   */
+  parkedReason?: string;
+  /** Epoch ms before which a parked task is not asked again. */
+  parkedUntil?: number;
+  /** The server it parked on, so that server's lane freeing re-asks it at once. */
+  parkedServer?: string;
+  /** Parks since the last task that completed: the backoff exponent. */
+  parkCount?: number;
+  /** When the current AI task became runnable (the same-model preference's starvation guard). */
+  aiWaitingSince?: number;
+  aiWaitingIndex?: number;
 }
 
 // Queue status

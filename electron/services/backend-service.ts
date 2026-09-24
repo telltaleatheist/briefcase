@@ -557,13 +557,19 @@ export class BackendService {
         // Try graceful shutdown first
         this.backendProcess.kill('SIGTERM');
 
-        // Wait for graceful shutdown (up to 6 seconds).
+        // Wait for graceful shutdown (up to 12 seconds).
         //
         // Raised from 2s: the backend now uses SIGTERM to cancel in-flight
         // Ollama generations and unload the models it loaded, which frees
         // 17-25GB of VRAM on quit. That needs more than 2s of headroom, and the
         // process still exits as soon as it is done — this is only a ceiling,
         // not a delay. The SIGKILL fallback still guarantees we exit.
+        //
+        // Raised from 6s to 12s for Crucible (migration plan §2, P4): the
+        // backend's quit sweep cancels the jobs and releases the leases
+        // Briefcase holds on a Crucible's card, under its own 8s deadline, so
+        // another app is not locked out by a card held for an app that quit.
+        // (On Windows SIGTERM is a hard kill; the startup sweep covers that.)
         await new Promise<void>((resolve) => {
           const timeout = setTimeout(() => {
             if (this.backendProcess && !this.backendProcess.killed) {
@@ -571,7 +577,7 @@ export class BackendService {
               this.backendProcess.kill('SIGKILL');
             }
             resolve();
-          }, 6000);
+          }, 12000);
 
           if (this.backendProcess) {
             this.backendProcess.once('exit', () => {

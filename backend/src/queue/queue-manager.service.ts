@@ -1,6 +1,6 @@
 // Queue Manager Service - Executes task-based jobs with configurable concurrency
 
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { MediaEventService } from '../media/media-event.service';
 import { MediaOperationsService } from '../media/media-operations.service';
@@ -20,6 +20,18 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { atomicReplaceFile } from '../common/utils/temp-file.util';
+import { isParked } from '../crucible/llm/errors';
+import {
+  CLOUD_LANE,
+  CrucibleLanesService,
+  LANE_STALL_MS,
+  LANE_TASK_TYPES,
+  STARVATION_MS,
+  parkDelayMs,
+  type LanePlacement,
+  type LanesStatus,
+  type LaneTaskView,
+} from './crucible-lanes';
 
 // Active task tracking
 export interface ActiveTask {
@@ -27,7 +39,13 @@ export interface ActiveTask {
   jobId: string;
   taskIndex: number;
   type: string;
-  pool: 'main' | 'ai';
+  /** 'lane' is a Crucible lane (P4): `lane` names which, `server` where it runs. */
+  pool: 'main' | 'ai' | 'lane';
+  lane?: string;
+  server?: string;
+  model?: string;
+  /** Aborts a lane task's reservation and run (cancel, stall, quit). */
+  abort?: AbortController;
   libraryId?: string;    // Resolved library this task operates on. The scheduler
                          // refuses to start a task for a different library while
                          // any task is in flight, so the shared DB connection is
@@ -53,7 +71,18 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
 
   // Task pools - tracks actively running tasks
   private mainPool = new Map<string, ActiveTask>();  // Max 5 concurrent
-  private aiPool: ActiveTask | null = null;           // Max 1 concurrent
+  private aiPool: ActiveTask | null = null;           // Max 1 concurrent (aiVia 'direct')
+  // Crucible lanes (aiVia 'crucible', P4): gpu:<server> ×1 each, cloud ×2.
+  private lanePool = new Map<string, ActiveTask>();
+
+  // Admission into the lanes is async (venue, preflight) and serialised.
+  private admitting = false;
+  private admitAgain = false;
+  private parkTimer: NodeJS.Timeout | null = null;
+  private lanesTimer: NodeJS.Timeout | null = null;
+  private lanesEmitTimer: NodeJS.Timeout | null = null;
+  private unsubscribeServers: (() => void) | null = null;
+  private readonly LANES_REFRESH_MS = 15_000;
 
   // Queue processing state (kept for API compatibility, no longer used as a lock)
   private processing = false;
@@ -88,7 +117,14 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
     private readonly clipExtractor: ClipExtractorService,
     private readonly fileScannerService: FileScannerService,
     private readonly libraryService: LibraryService,
+    /** P4. Absent (a spec, or a build without Crucible): the AI pool, as before. */
+    @Optional() private readonly lanes?: CrucibleLanesService,
   ) {}
+
+  /** 'crucible' routes analyze tasks to Crucible lanes; 'direct' keeps the AI pool of one. */
+  private aiMode(): 'crucible' | 'direct' {
+    return this.lanes === undefined ? 'direct' : this.lanes.mode();
+  }
 
   /**
    * Lifecycle hook - called when the module is initialized
@@ -97,6 +133,26 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
   onModuleInit() {
 
     this.startWatchdog();
+
+    if (this.lanes !== undefined) {
+      // A server added, removed, re-ranked, paused or resumed: parked work is
+      // asked again at once (§7.2 step 4), and the lane strip redrawn.
+      this.unsubscribeServers = this.lanes.onServersChanged(() => {
+        for (const job of this.jobQueue.values()) {
+          if (job.parkedReason !== undefined) job.parkedUntil = 0;
+        }
+        this.processQueue();
+        this.scheduleLanesEmit();
+      });
+      // The lane strip's reach and holder sentences go stale on their own
+      // (another app starts or stops); redraw them, and re-ask parked work
+      // whose server now reads free, every 15 s.
+      this.lanesTimer = setInterval(() => {
+        if (this.aiMode() !== 'crucible') return;
+        this.scheduleLanesEmit();
+      }, this.LANES_REFRESH_MS);
+      this.lanesTimer.unref?.();
+    }
   }
 
   /**
@@ -143,6 +199,19 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       }
     }
 
+    // Crucible lanes: a STALL, not a wall clock (§7.5). A long analysis on a
+    // 27B is healthy as long as chats keep answering; 15 minutes with no
+    // progress event, no load event and no answered chat is the stuck signal.
+    for (const task of [...this.lanePool.values()]) {
+      const silentMs = now.getTime() - task.lastProgressAt.getTime();
+      if (silentMs > LANE_STALL_MS) {
+        this.logger.error(
+          `Lane task ${task.taskId} (${task.type} on ${task.lane}) stalled: nothing from Crucible for ${Math.round(silentMs / 60000)}m. Failing it and freeing the lane.`,
+        );
+        this.failStuckTask(task, 'lane', `Stalled: no progress from Crucible on ${task.server ?? 'the server'} for ${Math.round(silentMs / 60000)} minutes`);
+      }
+    }
+
     // Check main pool
     for (const [taskId, task] of this.mainPool.entries()) {
       const runningMs = now.getTime() - task.startedAt.getTime();
@@ -167,6 +236,12 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
    * finished (each service no-ops on an unknown jobId/processId).
    */
   private abortActiveTask(active: ActiveTask): void {
+    // A lane task's reservation (a model loading) listens to its own signal.
+    try {
+      active.abort?.abort();
+    } catch {
+      // Aborting twice is harmless.
+    }
     try {
       this.eventEmitter.emit('job.cancel-requested', {
         jobId: active.jobId,
@@ -184,7 +259,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
    * waiting work proceeds. `abandoned` guards executeTask from double-emitting if
    * its promise ever settles later.
    */
-  private failStuckTask(active: ActiveTask, pool: 'main' | 'ai', reason: string): void {
+  private failStuckTask(active: ActiveTask, pool: 'main' | 'ai' | 'lane', reason: string): void {
     active.abandoned = true;
 
     // Kill the stuck child so it stops consuming CPU/network instead of only
@@ -202,6 +277,10 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
     if (pool === 'main') {
       if (this.mainPool.get(active.taskId) === active) {
         this.mainPool.delete(active.taskId);
+      }
+    } else if (pool === 'lane') {
+      if (this.lanePool.get(active.taskId) === active) {
+        this.lanePool.delete(active.taskId);
       }
     } else if (this.aiPool === active) {
       this.aiPool = null;
@@ -287,6 +366,13 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       mainTask.lastProgressAt = new Date();
       if (message) mainTask.message = message;
     }
+
+    const laneTask = this.lanePool.get(jobId);
+    if (laneTask) {
+      laneTask.progress = progress;
+      laneTask.lastProgressAt = new Date();
+      if (message) laneTask.message = message;
+    }
   }
 
   /**
@@ -352,6 +438,23 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       clearInterval(this.watchdogInterval);
       this.watchdogInterval = null;
     }
+    for (const timer of [this.parkTimer, this.lanesEmitTimer]) if (timer) clearTimeout(timer);
+    if (this.lanesTimer) clearInterval(this.lanesTimer);
+    this.parkTimer = this.lanesEmitTimer = this.lanesTimer = null;
+    this.unsubscribeServers?.();
+    this.unsubscribeServers = null;
+
+    // Crucible lane tasks: abort each run so its lease is released in the
+    // run's own finally. Whatever that cannot finish (the process is going),
+    // the quit sweep (CrucibleLanesService.beforeApplicationShutdown, which
+    // Nest runs after this) gives back from the ledger.
+    for (const active of this.lanePool.values()) {
+      this.cancelledJobs.add(active.jobId);
+      try { active.abort?.abort(); } catch { /* already aborted */ }
+      try {
+        this.eventEmitter.emit('job.cancel-requested', { jobId: active.jobId, type: active.type });
+      } catch { /* shutting down */ }
+    }
 
     // Mark all pending and processing jobs as failed
     for (const job of this.jobQueue.values()) {
@@ -365,6 +468,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
     this.jobQueue.clear();
     this.mainPool.clear();
     this.aiPool = null;
+    this.lanePool.clear();
 
     // Reset processing flag
     this.processing = false;
@@ -454,7 +558,14 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
    * would swap the shared DB connection out from under it).
    */
   hasActiveTasks(): boolean {
-    return this.mainPool.size > 0 || !!this.aiPool;
+    // Parked tasks are not here: they hold no slot, so a park never blocks a
+    // library switch (§7.2 step 4).
+    return this.mainPool.size > 0 || !!this.aiPool || this.lanePool.size > 0;
+  }
+
+  /** Crucible lane slots (P4), for the API and specs. */
+  getLanePool(): Map<string, ActiveTask> {
+    return this.lanePool;
   }
 
   /**
@@ -483,7 +594,9 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
     // Abort the running child process (download/transcode/transcription) so it
     // stops immediately instead of running to completion. Look the active task
     // up BEFORE freeing the slot below so we still know it's ours to abort.
-    const active = this.mainPool.get(jobId) ?? (this.aiPool?.jobId === jobId ? this.aiPool : undefined);
+    const active = this.mainPool.get(jobId)
+      ?? (this.aiPool?.jobId === jobId ? this.aiPool : undefined)
+      ?? this.lanePool.get(jobId);
     if (active) {
       this.abortActiveTask(active);
     }
@@ -491,12 +604,17 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
     job.status = 'cancelled';
     job.error = 'Cancelled by user';
     job.completedAt = new Date();
+    // A parked task holds nothing on any server: cancelling it is only this.
+    this.clearPark(job);
 
     // Remove from pools if active
     this.mainPool.delete(jobId);
     if (this.aiPool?.jobId === jobId) {
       this.aiPool = null;
     }
+    const lane = this.lanePool.get(jobId);
+    this.lanePool.delete(jobId);
+    if (lane !== undefined) this.scheduleLanesEmit();
 
     this.logger.log(`Cancelled job ${jobId}`);
 
@@ -558,6 +676,13 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         maxConcurrent: this.MAX_AI_CONCURRENT,
         task: this.aiPool,
       },
+      // P4: Crucible lanes. Empty under aiVia 'direct'.
+      lanePool: {
+        mode: this.aiMode(),
+        active: this.lanePool.size,
+        tasks: Array.from(this.lanePool.values()).map(({ abort: _abort, ...rest }) => rest),
+        parked: jobs.filter(j => j.parkedReason !== undefined && (j.status === 'pending' || j.status === 'processing')).length,
+      },
       queue: {
         total: jobs.length,
         paused: jobs.filter(j => j.status === 'paused').length,
@@ -589,6 +714,14 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       dispatched++;
     }
 
+    // AI tasks. Under aiVia 'crucible' they go to Crucible lanes, admitted
+    // asynchronously (venue, activity, reservation) so nothing here waits on
+    // the network. Under 'direct' this is today's AI pool, unchanged.
+    if (this.aiMode() === 'crucible') {
+      this.kickAdmission();
+      return;
+    }
+
     // Fill AI pool (up to 1 concurrent task)
     if (!this.aiPool) {
       const nextTask = this.getNextAITask();
@@ -610,7 +743,9 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
   private getInFlightLibraryId(): string | undefined {
     const first = this.mainPool.values().next().value as ActiveTask | undefined;
     if (first) return first.libraryId;
-    return this.aiPool?.libraryId;
+    if (this.aiPool) return this.aiPool.libraryId;
+    const lane = this.lanePool.values().next().value as ActiveTask | undefined;
+    return lane?.libraryId;
   }
 
   /**
@@ -621,7 +756,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
    * for another library waits until both pools drain.
    */
   private canStartJobLibrary(job: QueueJob): boolean {
-    if (this.mainPool.size === 0 && !this.aiPool) {
+    if (this.mainPool.size === 0 && !this.aiPool && this.lanePool.size === 0) {
       return true;
     }
     const target = job.libraryId ?? this.libraryManager.getActiveLibrary()?.id;
@@ -726,6 +861,11 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       return true;
     }
 
+    const lane = this.lanePool.get(jobId);
+    if (lane !== undefined && lane.taskIndex === taskIndex) {
+      return true;
+    }
+
     return false;
   }
 
@@ -734,7 +874,8 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
    */
   private async executeTask(
     { task, job }: { task: Task; job: QueueJob },
-    pool: 'main' | 'ai',
+    pool: 'main' | 'ai' | 'lane',
+    placement?: LanePlacement,
   ): Promise<void> {
     // Check if job was cancelled before starting
     if (this.isJobCancelled(job.id)) {
@@ -759,6 +900,13 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       message: 'Starting...',
       startedAt: now,
       lastProgressAt: now,
+      ...(placement === undefined ? {} : {
+        lane: placement.lane,
+        server: placement.server,
+        model: placement.target.model,
+        abort: new AbortController(),
+        message: `Reserving ${placement.target.model} on ${placement.server}...`,
+      }),
     };
 
     // IMPORTANT: Register in pool SYNCHRONOUSLY before any async work.
@@ -766,8 +914,16 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
     // same task again while we await the library switch below.
     if (pool === 'main') {
       this.mainPool.set(taskId, activeTask);
+    } else if (pool === 'lane') {
+      this.lanePool.set(taskId, activeTask);
+      job.lane = placement!.lane;
+      job.venue = placement!.server;
+      this.scheduleLanesEmit();
     } else {
       this.aiPool = activeTask;
+      // A task parked under Crucible, now run by the AI pool (the road was
+      // switched to direct): its reason line no longer applies.
+      this.clearPark(job);
     }
 
     // Update job status
@@ -776,34 +932,54 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       job.startedAt = new Date();
     }
 
+    // Set when this task parked: its own lane freeing then says nothing about
+    // the server being free (someone else holds it), so nothing is re-asked.
+    let parkedHere = false;
     try {
-      // Ensure correct library is active for this job (all tasks need the right DB context)
-      if (job.libraryId) {
-        const currentLibrary = this.libraryManager.getActiveLibrary();
-        if (!currentLibrary || currentLibrary.id !== job.libraryId) {
-          this.logger.log(`[${job.id}] Switching to target library: ${job.libraryId} for task ${task.type}`);
-          await this.libraryManager.switchLibrary(job.libraryId);
+      const run = async (): Promise<TaskResult> => {
+        // Ensure correct library is active for this job (all tasks need the right DB context)
+        if (job.libraryId) {
+          const currentLibrary = this.libraryManager.getActiveLibrary();
+          if (!currentLibrary || currentLibrary.id !== job.libraryId) {
+            this.logger.log(`[${job.id}] Switching to target library: ${job.libraryId} for task ${task.type}`);
+            await this.libraryManager.switchLibrary(job.libraryId);
+          }
         }
-      }
 
-      job.currentPhase = `${task.type} (${job.currentTaskIndex + 1}/${job.tasks.length})`;
+        job.currentPhase = `${task.type} (${job.currentTaskIndex + 1}/${job.tasks.length})`;
 
-      this.logger.log(
-        `[${pool.toUpperCase()} POOL] Starting task ${taskId}: ${task.type} for job ${job.id}`,
-      );
+        this.logger.log(
+          `[${pool.toUpperCase()} POOL] Starting task ${taskId}: ${task.type} for job ${job.id}` +
+          (placement ? ` on ${placement.lane} (${placement.target.model})` : ''),
+        );
 
-      // Emit task started event
-      this.eventService.emit('task.started', {
-        taskId,
-        jobId: job.id,
-        videoId: job.videoId,
-        type: task.type,
-        pool,
-        timestamp: new Date().toISOString(),
-      });
+        // Emit task started event
+        this.eventService.emit('task.started', {
+          taskId,
+          jobId: job.id,
+          videoId: job.videoId,
+          type: task.type,
+          pool,
+          ...(placement ? { lane: placement.lane, venue: placement.server } : {}),
+          timestamp: new Date().toISOString(),
+        });
 
-      // Execute the task
-      const result = await this.executeTaskLogic(job, task, taskId);
+        // Execute the task
+        return this.executeTaskLogic(job, task, taskId);
+      };
+
+      // A lane task RESERVES first (load + lease on its server, §7.2 step 3)
+      // and only then switches library and starts, so a task that parks at
+      // the door never touched the shared DB connection. The reservation is
+      // held (heartbeaten) across the whole task and released when it settles.
+      const result = placement === undefined
+        ? await run()
+        : await this.lanes!.runAdmitted({
+            ...placement,
+            signal: activeTask.abort!.signal,
+            localId: job.id,
+            onActivity: () => { activeTask.lastProgressAt = new Date(); },
+          }, run);
 
       // If the watchdog force-failed this task while we were awaiting, it has
       // already finalized the job and freed the slot. Don't double-finalize.
@@ -870,6 +1046,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       });
 
       // Move to next task in job
+      job.parkCount = 0;
       job.currentTaskIndex++;
       job.progress = Math.round((job.currentTaskIndex / job.tasks.length) * 100);
 
@@ -902,6 +1079,16 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       if (this.isJobCancelled(job.id)) {
         this.logger.log(`Job ${job.id} was cancelled during ${task.type} execution (caught abort)`);
         this.cancelledJobs.delete(job.id);
+        return;
+      }
+
+      // P4: "not now" from Crucible (a card held by someone else, a server that
+      // stopped answering). PARK: the task goes back to waiting with the
+      // holder's sentence and gives up its lane; nothing was saved, and the
+      // previous analysis is intact. Never a failure, never a hot loop.
+      if (placement !== undefined && isParked(error) && !activeTask.abandoned) {
+        this.parkJob(job, error.reason, error.server ?? placement.server, activeTask.libraryId);
+        parkedHere = true;
         return;
       }
 
@@ -941,6 +1128,20 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         if (this.mainPool.get(taskId) === activeTask) {
           this.mainPool.delete(taskId);
         }
+      } else if (pool === 'lane') {
+        if (this.lanePool.get(taskId) === activeTask) {
+          this.lanePool.delete(taskId);
+        }
+        // The lane is free: anything parked on this server is asked again at
+        // once (§7.2 step 4), against a fresh read of its activity.
+        const server = placement!.server;
+        this.lanes?.forgetActivity(server);
+        if (!parkedHere) {
+          for (const other of this.jobQueue.values()) {
+            if (other !== job && other.parkedReason !== undefined && other.parkedServer === server) other.parkedUntil = 0;
+          }
+        }
+        this.scheduleLanesEmit();
       } else if (this.aiPool === activeTask) {
         this.aiPool = null;
       }
@@ -948,6 +1149,279 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       // Dispatch next tasks
       this.processQueue();
     }
+  }
+
+  // ── Crucible lanes: admission, parking, the lane strip (P4) ──────────────
+
+  /**
+   * Run an admission pass, or ask the running one to go round again. Passes
+   * are serialised: each takes lane slots synchronously, so two can never
+   * admit the same task, and a slow probe never holds up processQueue.
+   */
+  private kickAdmission(): void {
+    if (this.lanes === undefined) return;
+    if (this.admitting) {
+      this.admitAgain = true;
+      return;
+    }
+    this.admitting = true;
+    void (async () => {
+      try {
+        // The startup sweep gives back what a killed run left on a card
+        // before any lane admits anything (§7.4). The main pool never waits.
+        await this.lanes!.ready;
+        do {
+          this.admitAgain = false;
+          await this.admitPass();
+        } while (this.admitAgain);
+      } catch (err) {
+        this.logger.error(`Crucible admission failed: ${(err as Error)?.message ?? err}`);
+      } finally {
+        this.admitting = false;
+        this.scheduleParkWake();
+      }
+    })();
+  }
+
+  /** Test seam: resolves when no admission pass is running or pending. */
+  async settleAdmission(): Promise<void> {
+    await this.lanes?.ready;
+    for (let i = 0; i < 1000 && (this.admitting || this.admitAgain); i++) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+  }
+
+  /** AI tasks that could go to a lane now, oldest first. */
+  private laneCandidates(now: number): Array<{ task: Task; job: QueueJob }> {
+    const out: Array<{ task: Task; job: QueueJob }> = [];
+    for (const job of this.jobQueue.values()) {
+      if (job.status !== 'pending' && job.status !== 'processing') continue;
+      const task = job.tasks[job.currentTaskIndex];
+      if (!task || !LANE_TASK_TYPES.has(task.type)) continue;
+      if (this.isTaskRunning(job.id, job.currentTaskIndex)) continue;
+      let previousRunning = false;
+      for (let i = 0; i < job.currentTaskIndex; i++) {
+        if (this.isTaskRunning(job.id, i)) { previousRunning = true; break; }
+      }
+      if (previousRunning) continue;
+      if (job.aiWaitingIndex !== job.currentTaskIndex) {
+        job.aiWaitingIndex = job.currentTaskIndex;
+        job.aiWaitingSince = now;
+      }
+      if (job.parkedUntil !== undefined && job.parkedUntil > now) continue;
+      out.push({ task, job });
+    }
+    return out;
+  }
+
+  /** Still the same task, still waiting, not cancelled: safe to admit after an await. */
+  private stillWaiting(job: QueueJob, taskIndex: number): boolean {
+    return this.jobQueue.get(job.id) === job
+      && (job.status === 'pending' || job.status === 'processing')
+      && job.currentTaskIndex === taskIndex
+      && !this.isJobCancelled(job.id)
+      && !this.isTaskRunning(job.id, taskIndex);
+  }
+
+  private async admitPass(): Promise<void> {
+    if (this.aiMode() !== 'crucible') {
+      // The road changed under us: the AI pool takes it from here.
+      this.processQueue();
+      return;
+    }
+    const lanes = this.lanes!;
+    const now = lanes.now();
+    const candidates = this.laneCandidates(now);
+    if (candidates.length === 0) return;
+
+    // 1. Venue, once per model per pass.
+    const decisions = new Map<string, ReturnType<CrucibleLanesService['place']>>();
+    const byLane = new Map<string, Array<{ task: Task; job: QueueJob; index: number; placement: LanePlacement }>>();
+    for (const { task, job } of candidates) {
+      const index = job.currentTaskIndex;
+      if (!this.canStartJobLibrary(job)) continue;
+      let target;
+      try {
+        target = lanes.targetOf(task);
+      } catch (err) {
+        this.failWaitingJob(job, task, (err as Error).message);
+        continue;
+      }
+      if (!decisions.has(target.model)) decisions.set(target.model, lanes.place(target));
+      const answer = await decisions.get(target.model)!;
+      if (!this.stillWaiting(job, index)) continue;
+      if (answer.kind === 'wait') {
+        this.parkJob(job, answer.reason, null);
+        continue;
+      }
+      if (answer.kind === 'fail') {
+        this.failWaitingJob(job, task, answer.reason);
+        continue;
+      }
+      job.lane = answer.placement.lane;
+      job.venue = answer.placement.server;
+      const list = byLane.get(answer.placement.lane) ?? [];
+      list.push({ task, job, index, placement: answer.placement });
+      byLane.set(answer.placement.lane, list);
+    }
+
+    // 2. Fill each lane's free slots. A parked or waiting task on one lane
+    //    never holds up another: each lane is filled on its own.
+    for (const [lane, list] of byLane) {
+      let free = lanes.widthOf(lane) - [...this.lanePool.values()].filter((t) => t.lane === lane).length;
+      if (free <= 0) continue;
+      const isGpu = lane !== CLOUD_LANE;
+      const server = list[0].placement.server;
+      const ordered = isGpu ? this.preferResident(list, await lanes.residentOn(server), now) : list;
+      for (const c of ordered) {
+        if (free <= 0) break;
+        if (!this.stillWaiting(c.job, c.index) || !this.canStartJobLibrary(c.job)) continue;
+        if (isGpu) {
+          const busy = await lanes.preflight(c.placement.server, c.placement.target);
+          if (!this.stillWaiting(c.job, c.index)) continue;
+          if (busy !== null) {
+            this.parkJob(c.job, busy, c.placement.server);
+            continue;
+          }
+          if (!this.canStartJobLibrary(c.job)) continue;
+        }
+        this.admit(c.job);
+        this.executeTask({ task: c.task, job: c.job }, 'lane', c.placement).catch((err) => {
+          this.logger.error(`Lane task failed: ${err?.message || err}`);
+        });
+        free--;
+      }
+    }
+  }
+
+  /**
+   * §7.3: tasks whose model is already on the card go first, so a queue of
+   * mixed models doesn't swap the card per video. FIFO once the oldest has
+   * waited {@link STARVATION_MS}, so nothing starves.
+   */
+  private preferResident<T extends { job: QueueJob; placement: LanePlacement }>(list: T[], resident: string | null, now: number): T[] {
+    if (resident === null || list.length < 2) return list;
+    const oldest = list.reduce((min, c) => Math.min(min, c.job.aiWaitingSince ?? now), now);
+    if (now - oldest >= STARVATION_MS) return list;
+    return [...list.filter((c) => c.placement.target.model === resident), ...list.filter((c) => c.placement.target.model !== resident)];
+  }
+
+  /**
+   * Park a task: back to waiting, holding no slot, with the reason line the
+   * row shows (grey, not red). Asked again after 5 s doubling to 60 s, or at
+   * once when the registry changes or that server's lane frees. The library
+   * it was admitted under is pinned, so it never resumes into another one.
+   */
+  private parkJob(job: QueueJob, reason: string, server: string | null, libraryId?: string): void {
+    const now = this.lanes?.now() ?? Date.now();
+    const changed = job.parkedReason !== reason;
+    job.parkCount = (job.parkCount ?? 0) + 1;
+    job.parkedUntil = now + parkDelayMs(job.parkCount);
+    job.parkedReason = reason;
+    job.parkedServer = server ?? undefined;
+    if (job.libraryId === undefined) {
+      job.libraryId = libraryId ?? this.libraryManager.getActiveLibrary()?.id;
+    }
+    job.status = 'pending';
+    job.currentPhase = reason;
+    if (changed) {
+      this.logger.log(`[${job.id}] parked: ${reason}`);
+      this.eventService.emit('task.parked', {
+        jobId: job.id,
+        videoId: job.videoId,
+        type: job.tasks[job.currentTaskIndex]?.type,
+        reason,
+        server,
+        timestamp: new Date().toISOString(),
+      });
+    }
+    this.scheduleParkWake();
+    this.scheduleLanesEmit();
+  }
+
+  private clearPark(job: QueueJob): void {
+    delete job.parkedReason;
+    delete job.parkedUntil;
+    delete job.parkedServer;
+  }
+
+  /** A parked task admitted to a lane: its reason line goes away. */
+  private admit(job: QueueJob): void {
+    if (job.parkedReason === undefined) return;
+    this.clearPark(job);
+    this.eventService.emit('task.unparked', {
+      jobId: job.id,
+      videoId: job.videoId,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  /** One timer, set for the earliest parked task's next ask. */
+  private scheduleParkWake(): void {
+    if (this.parkTimer) {
+      clearTimeout(this.parkTimer);
+      this.parkTimer = null;
+    }
+    let next = Infinity;
+    for (const job of this.jobQueue.values()) {
+      if (job.parkedReason !== undefined && job.parkedUntil !== undefined && (job.status === 'pending' || job.status === 'processing')) {
+        next = Math.min(next, job.parkedUntil);
+      }
+    }
+    if (next === Infinity) return;
+    const delay = Math.max(0, next - (this.lanes?.now() ?? Date.now()));
+    this.parkTimer = setTimeout(() => {
+      this.parkTimer = null;
+      this.processQueue();
+    }, delay);
+    this.parkTimer.unref?.();
+  }
+
+  /** A task that can never run as configured (a model that is not one, every server refusing this computer). */
+  private failWaitingJob(job: QueueJob, task: Task, reason: string): void {
+    this.clearPark(job);
+    job.status = 'failed';
+    job.error = reason;
+    job.completedAt = new Date();
+    this.logger.error(`[${job.id}] ${task.type} cannot run: ${reason}`);
+    this.emitTaskFailed({ taskId: job.id, jobId: job.id, videoId: job.videoId, type: task.type, message: reason });
+    setTimeout(() => this.jobQueue.delete(job.id), 5000);
+  }
+
+  /** Running (false) or Paused (true) for one server: the routing record's switch (P1). */
+  setServerPaused(server: string, paused: boolean): void {
+    if (this.lanes === undefined) throw new Error('Crucible lanes are not available in this build.');
+    this.lanes.setPaused(server, paused);
+  }
+
+  /** The lane strip, as the queue tab draws it. */
+  async getLanesStatus(): Promise<LanesStatus> {
+    if (this.lanes === undefined) return { mode: 'direct', lanes: [], timestamp: new Date().toISOString() };
+    const running: LaneTaskView[] = [...this.lanePool.values()].map((t) => {
+      const job = this.jobQueue.get(t.jobId);
+      return { jobId: t.jobId, title: job?.displayName ?? job?.videoId ?? t.jobId, model: t.model ?? '', lane: t.lane ?? '' };
+    });
+    const waiting = new Map<string, number>();
+    for (const job of this.jobQueue.values()) {
+      if ((job.status === 'pending' || job.status === 'processing') && job.lane && !this.lanePool.has(job.id)
+        && LANE_TASK_TYPES.has(job.tasks[job.currentTaskIndex]?.type ?? '')) {
+        waiting.set(job.lane, (waiting.get(job.lane) ?? 0) + 1);
+      }
+    }
+    return this.lanes.lanesStatus(running, waiting);
+  }
+
+  /** Redraw the lane strip soon (debounced: a burst of admissions draws once). */
+  private scheduleLanesEmit(): void {
+    if (this.lanes === undefined || this.lanesEmitTimer) return;
+    this.lanesEmitTimer = setTimeout(() => {
+      this.lanesEmitTimer = null;
+      void this.getLanesStatus().then(
+        (status) => this.eventService.emit('queue.lanes', status),
+        (err) => this.logger.warn(`Could not draw the lanes: ${(err as Error).message}`),
+      );
+    }, 250);
+    this.lanesEmitTimer.unref?.();
   }
 
   /**

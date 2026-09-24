@@ -13,13 +13,15 @@ import { negotiateOllamaThink, markGradedThinkUnsupported } from './ollama-capab
 import { AnalysisCancelledError, ensureNotCancelled } from './cancellation';
 import { resolveAiVia, type AiVia } from '../crucible/llm/ai-via';
 import { CrucibleChatService, isTextChatModel, type CrucibleChatResult } from '../crucible/llm/crucible-chat.service';
-import { CrucibleBusyError, CrucibleChatCancelled, CrucibleChatError, CrucibleNoVenueError } from '../crucible/llm/errors';
+import { CrucibleBusyError, CrucibleChatCancelled, CrucibleChatError, CrucibleNoVenueError, CrucibleParkedError } from '../crucible/llm/errors';
 import { crucibleTargetOf, type CrucibleTarget } from '../crucible/llm/target';
 
 /**
- * P3's minimal admission (migration plan §9 P3): a Crucible busy with someone
- * else's work is asked again every 10 s for up to 30 min while the task keeps
- * its AI-pool slot. P4 replaces this with parking.
+ * A Crucible busy with someone else's work, OUTSIDE a queue-admitted run (the
+ * library's insights, a Test button, a standalone analysis): asked again every
+ * 10 s for up to 30 min. Inside a run the queue admitted (P4), a busy card is
+ * never waited out in the task: the run throws `CrucibleParkedError` and the
+ * queue parks the task on the holder's sentence, freeing its lane.
  */
 export const CRUCIBLE_BUSY_RETRY_MS = 10_000;
 export const CRUCIBLE_BUSY_WAIT_MS = 30 * 60_000;
@@ -321,6 +323,7 @@ export class AIProviderService {
     }
     this.logger.log(`Generating via Crucible: ${target.model} (from ${config.provider}:${config.model}), task: ${task ?? 'unspecified'}`);
 
+    const parkOnBusy = chat.parksOnBusy();
     let result: CrucibleChatResult;
     try {
       result = await chat.chat({
@@ -330,7 +333,7 @@ export class AIProviderService {
         responseFormat: overrides?.format,
         schemaName: task ?? 'answer',
         signal,
-        busyWait: {
+        busyWait: parkOnBusy ? undefined : {
           everyMs: CRUCIBLE_BUSY_RETRY_MS,
           forMs: CRUCIBLE_BUSY_WAIT_MS,
           onWait: (line, server) => this.logger.log(`[Crucible] ${server} is busy (${line}); waiting to run ${task ?? 'the call'}`),
@@ -339,6 +342,20 @@ export class AIProviderService {
     } catch (error) {
       if (signal?.aborted || error instanceof CrucibleChatCancelled) {
         throw new AnalysisCancelledError(`Crucible request cancelled: job was cancelled`);
+      }
+      // P4: inside a queue-admitted run, a card someone else holds, a server
+      // that stopped answering, or no server at all PARKS the task (§7.2, §11):
+      // never a failure, never a wait inside the task.
+      if (parkOnBusy) {
+        const parked = error instanceof CrucibleBusyError ? new CrucibleParkedError(error.server, error.busyLine)
+          : error instanceof CrucibleNoVenueError ? new CrucibleParkedError(null, error.message)
+            : error instanceof CrucibleChatError && error.code === 'unreachable' ? new CrucibleParkedError(error.server, `Crucible on ${error.server ?? 'the server'} isn't answering.`)
+              : null;
+        if (parked !== null) {
+          chat.markParked(parked.server, parked.reason);
+          this.logger.log(`[Crucible] parking ${task ?? 'the call'}: ${parked.reason}`);
+          throw parked;
+        }
       }
       if (error instanceof CrucibleBusyError) {
         throw new Error(`Crucible "${error.server}" stayed busy for ${Math.round(CRUCIBLE_BUSY_WAIT_MS / 60_000)} min (${error.busyLine}).`);
