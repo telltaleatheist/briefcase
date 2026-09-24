@@ -95,3 +95,12 @@
 .task-hint {
   margin: -6px 0 10px;
 }
+
+.runs-as {
+  margin: 6px 0 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.task-hint.runs-as {
+  margin: -6px 0 10px;
+}

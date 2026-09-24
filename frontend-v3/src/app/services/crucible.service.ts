@@ -26,7 +26,7 @@ import type {
   UpstreamName,
   UpstreamTestAnswer,
 } from '@crucible-wire/settings-wire';
-import type { AiModelsView, AiTaskModels, AiVia, AiViaView, KeyCopyOutcome, LegacyKeysView } from '@crucible-wire/ai-wire';
+import type { AiModelsView, AiRunsAs, AiTaskModels, AiVia, AiViaView, KeyCopyOutcome, LegacyKeysView } from '@crucible-wire/ai-wire';
 import type { TranscriptionSettingWire, TranscriptionView } from '@crucible-wire/transcription-wire';
 
 /** A refusal from /api/crucible, always with a sentence that carries the fix. */
@@ -240,7 +240,12 @@ export class CrucibleService {
     return this.refusal(this.http.put<AiTaskModels>(`${this.base}/ai/task-models`, changes));
   }
 
-  // ── transcription (P5) ─────────────────────────────────────────────────
+  /** What stored `ollama:<tag>` choices run as through Crucible (the server's own model, or Ollama). */
+  runsAs(values: string[]): Observable<AiRunsAs[]> {
+    return this.refusal(this.http.get<AiRunsAs[]>(`${this.base}/ai/runs-as`, { params: { models: values.join(',') } }));
+  }
+
+    // ── transcription (P5) ─────────────────────────────────────────────────
 
   /** Where transcription runs, each server's asr models, and where a transcription queued now would go. */
   transcription(): Observable<TranscriptionView> {

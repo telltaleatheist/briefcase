@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -13,7 +13,7 @@ import { PipelinePresetsService } from '../../../core/stores/pipeline-presets.se
 import { Router } from '@angular/router';
 import { CrucibleService, type CrucibleRefusal } from '../../../services/crucible.service';
 import { CrucibleUpstreamsComponent } from '../../../components/crucible-upstreams/crucible-upstreams.component';
-import type { AiModelsView, AiTaskModels, AiTaskName, AiViaView, LegacyKeysView } from '@crucible-wire/ai-wire';
+import type { AiModelsView, AiRunsAs, AiTaskModels, AiTaskName, AiViaView, LegacyKeysView } from '@crucible-wire/ai-wire';
 
 interface AnalysisCategory {
   id: string;
@@ -128,6 +128,15 @@ export class AiPaneComponent {
   readonly copyLine = signal<{ ok: boolean; text: string } | null>(null);
   readonly aiTasks = AI_TASKS;
   readonly taskModels = signal<AiTaskModels>({});
+  /** What each chosen `ollama:<tag>` runs as through Crucible, by stored value. */
+  readonly runsAs = signal<Record<string, AiRunsAs>>({});
+  /** The chosen Ollama values to ask about (the default and every task), as one key. */
+  private readonly ollamaChoices = computed<string>(() => {
+    if (this.via() !== 'crucible') return '';
+    const values = [this.selectedModel(), ...Object.values(this.taskModels())]
+      .filter((v): v is string => typeof v === 'string' && v.startsWith('ollama:'));
+    return [...new Set(values)].sort().join(',');
+  });
 
   // Provider status
   providers = signal<ProviderCard[]>([]);
@@ -199,6 +208,10 @@ export class AiPaneComponent {
   readonly promptKeys = PROMPT_KEYS;
 
   constructor() {
+    effect(() => {
+      const choices = this.ollamaChoices();
+      untracked(() => void this.loadRunsAs(choices));
+    });
     void this.refreshStatus();
     void this.loadDefaultModel();
     void this.loadCategories();
@@ -262,6 +275,7 @@ export class AiPaneComponent {
     } catch {
       this.taskModels.set({});
     }
+    void this.loadRunsAs(this.ollamaChoices());
   }
 
   async onViaChange(choice: ViaChoice): Promise<void> {
@@ -305,6 +319,34 @@ export class AiPaneComponent {
     } finally {
       this.copyingKeys.set(false);
     }
+  }
+
+  private async loadRunsAs(choices: string): Promise<void> {
+    if (!choices) {
+      this.runsAs.set({});
+      return;
+    }
+    try {
+      const rows = await firstValueFrom(this.crucible.runsAs(choices.split(',')));
+      if (choices !== this.ollamaChoices()) return;
+      this.runsAs.set(Object.fromEntries(rows.map((row) => [row.value, row])));
+    } catch {
+      this.runsAs.set({});
+    }
+  }
+
+  /**
+   * The line under a picker holding an Ollama choice, through Crucible: the
+   * server's own model it runs as, or Ollama at its default context.
+   */
+  runsAsLine(value: string): string | null {
+    const row = this.runsAs()[value];
+    if (!row) return null;
+    const tag = value.slice('ollama:'.length);
+    const server = row.server ?? 'the Crucible server';
+    if (row.runsAs) return `${tag} (Ollama) → runs as ${row.runsAs} on ${server}`;
+    const context = row.contextTokens ? `, ${Math.round(row.contextTokens / 1024)}K context` : '';
+    return `${tag} (Ollama) → via Ollama on ${server}${context}`;
   }
 
   taskModelFor(task: AiTaskName): string {
