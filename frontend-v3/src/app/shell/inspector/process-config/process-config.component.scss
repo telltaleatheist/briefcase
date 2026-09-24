@@ -320,6 +320,12 @@
     }
   }
 
+  .opt-model {
+    flex: 1;
+    min-width: 0;
+    align-self: flex-start;
+  }
+
   .opt-note {
     font-size: 10.5px;
     color: var(--text-tertiary);

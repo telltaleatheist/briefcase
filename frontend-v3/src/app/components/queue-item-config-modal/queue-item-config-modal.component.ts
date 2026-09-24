@@ -1,4 +1,4 @@
-import { Component, signal, input, output, inject, OnInit, effect, HostListener } from '@angular/core';
+import { Component, signal, input, output, inject, OnInit, effect, HostListener, computed, untracked } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
@@ -12,26 +12,22 @@ import {
 } from '../../models/task.model';
 import { QueueItemTask } from '../../models/queue.model';
 import { LibraryService } from '../../services/library.service';
-import { CrucibleService } from '../../services/crucible.service';
+import { AiModelOptionsService } from '../../services/ai-model-options.service';
+import { AiModelSelectComponent } from '../ai-model-select/ai-model-select.component';
 import { CrucibleReadinessService, taskNeedsCrucible } from '../../services/crucible-readiness.service';
 import { firstValueFrom } from 'rxjs';
 import { PipelinePresetsService } from '../../core/stores/pipeline-presets.service';
 
-interface AIModelOption {
-  value: string;
-  label: string;
-  provider: 'local' | 'ollama' | 'claude' | 'openai';
-}
-
 @Component({
   selector: 'app-queue-item-config-modal',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, AiModelSelectComponent],
   templateUrl: './queue-item-config-modal.component.html',
   styleUrls: ['./queue-item-config-modal.component.scss']
 })
 export class QueueItemConfigModalComponent implements OnInit {
-  private crucible = inject(CrucibleService);
+  /** The connected Crucible's analysis-model options (one source for every picker). */
+  readonly modelOptions = inject(AiModelOptionsService);
   /** Transcribe and AI analyze need Crucible: while it is not ready they can't be turned on. */
   readonly readiness = inject(CrucibleReadinessService);
   private libraryService = inject(LibraryService);
@@ -54,14 +50,15 @@ export class QueueItemConfigModalComponent implements OnInit {
   tasks = signal<Map<TaskType, QueueItemTask>>(new Map());
   expandedTask = signal<TaskType | null>(null);
 
-  // AI Models
-  aiModels = signal<AIModelOption[]>([]);
-  loadingModels = signal(false);
+  // AI model: the stored choice ("provider:model"); the options are the connected Crucible's.
   defaultAIModel = ''; // No fallback - user must have saved a default or select one
   savedAsDefault = signal(false);
 
   // Track selected AI model directly (fixes ngModel binding issues)
   selectedAIModel = signal<string>('');
+
+  /** The chosen model can't run on the connected server: why (blocks Apply). */
+  readonly selectedModelUnavailable = computed(() => this.modelOptions.unavailable(this.selectedAIModel()));
 
   // Custom instructions history
   instructionsHistory = signal<{ id: number; instruction_text: string; used_at: string }[]>([]);
@@ -73,28 +70,36 @@ export class QueueItemConfigModalComponent implements OnInit {
   private initializedForOpen = false;
 
   constructor() {
-    // When modal opens, reload default AI and then initialize tasks
+    // When the modal opens, reload the default AI and then initialize tasks
+    // (once per open, so a mid-edit refresh never discards the user's edits).
     effect(() => {
       const isOpen = this.isOpen();
-      const loading = this.loadingModels();
-
       if (!isOpen) {
         // Closed: arm re-init for the next open.
         this.initializedForOpen = false;
         return;
       }
-
-      // Only initialize once per open, after models have loaded.
-      if (!loading && !this.initializedForOpen) {
+      if (!this.initializedForOpen) {
         this.initializedForOpen = true;
-        // Reload default AI first, then initialize tasks
-        this.reloadDefaultAIModelAndInit();
+        untracked(() => void this.reloadDefaultAIModelAndInit());
       }
+    }, { allowSignalWrites: true });
+
+    // An AI task with no model of its own is seeded once the options (and what
+    // the last-used and default models are among them) have arrived.
+    effect(() => {
+      if (!this.isOpen()) return;
+      const seed = this.preferredSeedModel();
+      const task = this.tasks().get('ai-analyze');
+      if (!seed || !task || task.config?.['aiModel']) return;
+      untracked(() => {
+        this.updateTaskConfig('ai-analyze', { aiModel: seed });
+        this.selectedAIModel.set(seed);
+      });
     }, { allowSignalWrites: true });
   }
 
   ngOnInit() {
-    this.loadAIModels();
     this.loadInstructionsHistory();
   }
 
@@ -138,101 +143,29 @@ export class QueueItemConfigModalComponent implements OnInit {
   }
 
   /**
-   * Reload the default AI model from the backend, then initialize tasks
-   * This ensures tasks use the latest saved default
+   * Reload the default AI model from the backend, then initialize tasks, so
+   * tasks use the latest saved default. The default and the last-used pick are
+   * resolved against the connected Crucible's options like any stored value.
    */
   private async reloadDefaultAIModelAndInit() {
+    this.defaultAIModel = '';
     try {
       const savedDefault = await firstValueFrom(this.libraryService.getDefaultAI());
       if (savedDefault.success && savedDefault.defaultAI) {
-        const fullModelValue = `${savedDefault.defaultAI.provider}:${savedDefault.defaultAI.model}`;
-        // Check if the saved model is still available in our loaded models
-        const models = this.aiModels();
-        if (models.length === 0 || models.some(m => m.value === fullModelValue)) {
-          this.defaultAIModel = fullModelValue;
-          console.log(`Loaded saved default AI model: ${fullModelValue}`);
-        }
+        this.defaultAIModel = `${savedDefault.defaultAI.provider}:${savedDefault.defaultAI.model}`;
       }
     } catch (error) {
       console.warn('Could not load default AI:', error);
     }
-
-    // Now initialize tasks with the updated default
+    this.modelOptions.use([this.defaultAIModel, this.presetsService.lastChosenAiModel()]);
     this.initializeTasks();
   }
 
-  private async loadAIModels() {
-    this.loadingModels.set(true);
-
-    try {
-      // The connected Crucible server's catalog and its configured upstreams.
-      let models: AIModelOption[] = [];
-      try {
-        models = (await firstValueFrom(this.crucible.modelOptions()))
-          .map(m => ({ value: m.value, label: m.label, provider: m.provider }));
-      } catch (error) {
-        console.error("Failed to list the Crucible server's models:", error);
-      }
-      this.aiModels.set(models);
-      console.log('=== QUEUE MODAL: Loading AI models ===');
-      console.log('Available models:', models.map(m => m.value));
-
-      // Load saved default from backend - NO FALLBACK
-      try {
-        const savedDefault = await firstValueFrom(this.libraryService.getDefaultAI());
-        console.log('Saved default response:', JSON.stringify(savedDefault));
-        if (savedDefault.success && savedDefault.defaultAI) {
-          const fullModelValue = `${savedDefault.defaultAI.provider}:${savedDefault.defaultAI.model}`;
-          console.log('Constructed default model value:', fullModelValue);
-          // Check if the saved model is still available
-          const modelExists = models.some(m => m.value === fullModelValue);
-          console.log('Model exists in list?', modelExists);
-          if (modelExists) {
-            this.defaultAIModel = fullModelValue;
-            console.log(`✓ Using saved default AI model: ${fullModelValue}`);
-          } else {
-            // Saved default not available - leave blank, user must select
-            this.defaultAIModel = '';
-            console.warn(`⚠ Saved default model not available: ${fullModelValue}`);
-          }
-        } else {
-          // No saved default - leave blank, user must select
-          this.defaultAIModel = '';
-          console.log('No saved default AI, user must select one');
-        }
-      } catch (error) {
-        console.warn('Could not load saved default AI:', error);
-        this.defaultAIModel = '';
-      }
-      console.log('=== FINAL defaultAIModel:', this.defaultAIModel, '===');
-    } catch (error) {
-      console.error('Failed to load AI models:', error);
-    } finally {
-      this.loadingModels.set(false);
-    }
-  }
-
-  getModelsByProvider(provider: 'local' | 'ollama' | 'claude' | 'openai'): AIModelOption[] {
-    return this.aiModels().filter(m => m.provider === provider);
-  }
-
-  private extractModelSize(modelName: string): number {
-    // Extract size from model names like "qwen2.5:70b", "llama3:8b", etc.
-    const match = modelName.match(/(\d+)b/i);
-    if (match) {
-      return parseInt(match[1], 10);
-    }
-    return 0;
-  }
-
-  hasModelsForProvider(provider: 'local' | 'ollama' | 'claude' | 'openai'): boolean {
-    return this.aiModels().some(m => m.provider === provider);
-  }
-
   async saveAsDefault(modelValue: string) {
+    const value = this.modelOptions.canonical(modelValue);
     try {
-      // Split the model value (e.g., "ollama:qwen2.5:7b" -> provider: "ollama", model: "qwen2.5:7b")
-      const [provider, ...modelParts] = modelValue.split(':');
+      // "provider:model" (e.g. "local:qwen3.5-9b" -> provider "local", model "qwen3.5-9b")
+      const [provider, ...modelParts] = value.split(':');
       const model = modelParts.join(':');
 
       const result = await firstValueFrom(
@@ -240,14 +173,11 @@ export class QueueItemConfigModalComponent implements OnInit {
       );
 
       if (result.success) {
-        console.log(`Saved ${modelValue} as default AI model`);
         // Update the local default so new tasks use this model
-        this.defaultAIModel = modelValue;
+        this.defaultAIModel = value;
         // An explicit default is also a last-used pick — remember it too.
-        this.presetsService.rememberAiModel(modelValue);
-        // Show success feedback
+        this.presetsService.rememberAiModel(value);
         this.savedAsDefault.set(true);
-        // Reset after 1 second
         setTimeout(() => {
           this.savedAsDefault.set(false);
         }, 1000);
@@ -259,17 +189,15 @@ export class QueueItemConfigModalComponent implements OnInit {
 
   /**
    * Preferred value to seed a task's model when it has none of its own, in
-   * order: the model the user last chose (if still installed) → the configured
-   * server-side default (if installed) → none. Mirrors the inspector Process
-   * picker so last-used is honored here too, not only there. Both candidates are
-   * checked against the loaded model list so a stale/uninstalled value is never
-   * selected; values are "provider:model", matching every option value.
+   * order: the model the user last chose → the configured server-side default
+   * → none, each only when it is one of the connected Crucible's options, and
+   * in its Crucible spelling. Mirrors the inspector Process picker.
    */
   private preferredSeedModel(): string {
-    const models = this.aiModels();
-    const remembered = this.presetsService.lastChosenAiModel();
-    if (remembered && models.some(m => m.value === remembered)) return remembered;
-    if (this.defaultAIModel && models.some(m => m.value === this.defaultAIModel)) return this.defaultAIModel;
+    for (const candidate of [this.presetsService.lastChosenAiModel(), this.defaultAIModel]) {
+      const option = this.modelOptions.optionFor(candidate);
+      if (option) return option;
+    }
     return '';
   }
 
@@ -433,7 +361,8 @@ export class QueueItemConfigModalComponent implements OnInit {
     // This is critical - we use the signal as the source of truth for the selected model
     if (currentTasks.has('ai-analyze')) {
       const aiTask = currentTasks.get('ai-analyze')!;
-      const selectedModel = this.selectedAIModel();
+      // Saved in its Crucible spelling: a legacy stored value goes as the option it resolved to.
+      const selectedModel = this.modelOptions.canonical(this.selectedAIModel());
       console.log('[onSave] Ensuring ai-analyze task uses selected model:', selectedModel);
       // Only overwrite when the signal actually holds a model — an empty signal
       // must never clobber a model the task already carries (FC-8).

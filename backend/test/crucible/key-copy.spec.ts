@@ -2,10 +2,11 @@
  * The one-time copy of Briefcase's own keys onto a Crucible, and the AI pane's
  * model list. The file is deleted only after the server's read-back shows each
  * key's hint, and only when the server is the Crucible on THIS computer.
- * Nothing is ever pushed without the call.
+ * Nothing is ever pushed without the call. (The model options are
+ * model-options.spec.ts.)
  */
 import { CrucibleServersService } from '../../src/crucible/crucible-servers.service';
-import { CrucibleAiService, hintMatches, optionValueOf } from '../../src/crucible/llm/crucible-ai.service';
+import { CrucibleAiService, hintMatches } from '../../src/crucible/llm/crucible-ai.service';
 import { CrucibleChatService } from '../../src/crucible/llm/crucible-chat.service';
 import type { PairingFileHost } from '../../src/crucible/pairing-file';
 import { startFakeCrucible, type FakeCrucible, type FakeCrucibleOptions } from '../fake-crucible/fake-crucible';
@@ -105,90 +106,5 @@ describe('copying Briefcase\'s keys to a Crucible', () => {
     expect(hintMatches('…1111', 'sk-ant-aaaa1111')).toBe(true);
     expect(hintMatches('…1111', 'sk-ant-aaaa2222')).toBe(false);
     expect(hintMatches(null, 'x')).toBe(false);
-  });
-});
-
-describe('the AI pane\'s model list, from the connected server', () => {
-  let fake: FakeCrucible;
-  afterEach(() => fake.close());
-
-  it('local catalog models plus configured upstreams, as Briefcase provider:model values', async () => {
-    fake = await startFakeCrucible({
-      models: [
-        { id: 'dots-ocr', paramsB: 3, modalities: ['text', 'image'] },
-        { id: 'qwen3.5-9b', paramsB: 9 }, { id: 'qwen3.8-27b', paramsB: 27, installed: false }, { id: 'cuda-only', paramsB: 7, backendSupported: false },
-      ],
-      upstreams: { anthropic: { key: 'sk-ant-1234' }, openai: { key: 'sk-oa-5678' } },
-      upstreamModels: { anthropic: ['claude-sonnet-5', 'claude-haiku-5'], openai: ['gpt-5.1', 'text-embedding-3-small', 'gpt-4o-realtime-preview', 'o4-mini'] },
-    });
-    const h = harness();
-    h.registry.add({ name: 'mac', url: fake.url, token: fake.token });
-    const servers = new CrucibleServersService(h.registry, h.factory);
-    const ai = new CrucibleAiService(servers, h.probes, h.settings, new CrucibleChatService(servers, h.factory, h.probes), new FakeKeys({}) as never, pairingHost(null));
-    const view = await ai.models();
-    expect(view.server).toBe('mac');
-    expect(view.models.map((m) => [m.value, m.provider, m.installed ?? null])).toEqual([
-      ['local:qwen3.5-9b', 'local', true],
-      ['local:qwen3.8-27b', 'local', false],
-      ['claude:claude-sonnet-5', 'claude', null],
-      ['claude:claude-haiku-5', 'claude', null],
-      ['openai:gpt-5.1', 'openai', null],
-      ['openai:o4-mini', 'openai', null],
-    ]);
-    expect(view.upstreams?.anthropic).toEqual({ configured: true, keyHint: '…1234' });
-    expect(view.analysisDefault).toBe('local:qwen3.5-9b');
-    expect(JSON.stringify(view)).not.toContain('sk-ant-1234');
-  });
-
-  it('with no server answering, says why instead of listing nothing silently', async () => {
-    fake = await startFakeCrucible();
-    const h = harness();
-    const servers = new CrucibleServersService(h.registry, h.factory);
-    const ai = new CrucibleAiService(servers, h.probes, h.settings, new CrucibleChatService(servers, h.factory, h.probes), new FakeKeys({}) as never, pairingHost(null));
-    const view = await ai.models();
-    expect(view.server).toBeNull();
-    expect(view.unavailable).toMatch(/No Crucible server is connected/);
-  });
-
-  it('runs-as: an ollama: choice shows the server\'s own model it runs as (the 8-bit, loaded at 32K, when the host\'s ceiling allows it), or Ollama at the window 1.0.24 forwards; other choices are left out', async () => {
-    fake = await startFakeCrucible({
-      models: [
-        { id: 'qwen3.8-27b-4bit', paramsB: 27, contextDefault: 98304, maxModelLen: 98304 },
-        { id: 'qwen3.8-27b-8bit', paramsB: 27, contextDefault: 12288, maxModelLen: 12288 },
-      ],
-    });
-    const h = harness();
-    h.registry.add({ name: 'mac', url: fake.url, token: fake.token });
-    const servers = new CrucibleServersService(h.registry, h.factory);
-    const ai = new CrucibleAiService(servers, h.probes, h.settings, new CrucibleChatService(servers, h.factory, h.probes), new FakeKeys({}) as never, pairingHost(null));
-    await expect(ai.runsAs(['ollama:qwen3.8:27b', 'ollama:qwen3:14b', 'local:qwen3.8-27b-8bit', 'claude:claude-sonnet-5', 'ollama:qwen3.8:27b'])).resolves.toEqual([
-      { value: 'ollama:qwen3.8:27b', server: 'mac', runsAs: 'qwen3.8-27b-8bit', contextTokens: 32768 },
-      { value: 'ollama:qwen3:14b', server: 'mac', runsAs: null, contextTokens: 16384 },
-    ]);
-  });
-
-  it('runs-as against a Crucible older than 1.0.24: no ceilings, so the 4-bit at its served 98K, and Ollama at its 4K default', async () => {
-    fake = await startFakeCrucible({
-      version: '1.0.23',
-      contextCeilings: { 'qwen3.8-27b-8bit': 12288, 'qwen3.8-27b-4bit': 98304 },
-      models: [
-        { id: 'qwen3.8-27b-4bit', paramsB: 27, contextDefault: 98304, maxModelLen: 98304 },
-        { id: 'qwen3.8-27b-8bit', paramsB: 27, contextDefault: 12288, maxModelLen: 12288 },
-      ],
-    });
-    const h = harness();
-    h.registry.add({ name: 'mac', url: fake.url, token: fake.token });
-    const servers = new CrucibleServersService(h.registry, h.factory);
-    const ai = new CrucibleAiService(servers, h.probes, h.settings, new CrucibleChatService(servers, h.factory, h.probes), new FakeKeys({}) as never, pairingHost(null));
-    await expect(ai.runsAs(['ollama:qwen3.8:27b', 'ollama:qwen3:14b'])).resolves.toEqual([
-      { value: 'ollama:qwen3.8:27b', server: 'mac', runsAs: 'qwen3.8-27b-4bit', contextTokens: 98304 },
-      { value: 'ollama:qwen3:14b', server: 'mac', runsAs: null, contextTokens: 4096 },
-    ]);
-  });
-
-  it('optionValueOf maps Crucible strings back to the stored format', () => {
-    expect(optionValueOf('anthropic/claude-x')).toBe('claude:claude-x');
-    expect(optionValueOf('ollama/qwen3.5:4b')).toBe('ollama:qwen3.5:4b');
-    expect(optionValueOf('qwen3.5-9b')).toBe('local:qwen3.5-9b');
   });
 });

@@ -1,8 +1,9 @@
 <h2 class="pane-title">AI Analysis</h2>
 <p class="pane-lede">
   Every AI action runs on a Crucible server: this computer's, or one you
-  connect. Claude, OpenAI and Ollama are that server's upstreams, and their
-  keys live on it.
+  connect. The models listed below are the ones that server offers: its own,
+  and Claude, OpenAI or Ollama via Crucible when it is set up for them. Their
+  keys and addresses live on the server, not in Briefcase.
 </p>
 
 <div class="pane-section">
@@ -16,7 +17,7 @@
             {{ crucibleView()?.reach === 'busy' ? 'Busy' : 'Connected' }}
           </span>
         </div>
-        <div class="row-desc">Every AI call goes through this server, including Claude, OpenAI and Ollama.</div>
+        <div class="row-desc">Every AI call goes through this server, including Claude, OpenAI and Ollama via Crucible.</div>
       </div>
       <ui-button variant="secondary" size="sm" (pressed)="openCrucibleServers()">Crucible Servers…</ui-button>
     </div>
@@ -33,7 +34,7 @@
 
 @if (connectedServer(); as server) {
   <div class="pane-section">
-    <p class="section-label">Cloud models and Ollama on {{ server }}</p>
+    <p class="section-label">Claude, OpenAI and Ollama via Crucible on {{ server }}</p>
     <app-crucible-upstreams [server]="server" (changed)="onUpstreamsChanged()" />
 
     @if (legacy(); as keys) {
@@ -65,31 +66,19 @@
 <div class="pane-section">
   <p class="section-label">Default model</p>
   <label class="field-label" for="default-model">Used automatically when analyzing videos</label>
-  <select
-    id="default-model"
-    class="select"
-    [ngModel]="selectedModel()"
-    [disabled]="availableModels().length === 0"
-    (ngModelChange)="onDefaultModelChange($event)">
-    <option value="" disabled>
-      {{ availableModels().length === 0 ? 'No models available' : 'Select a model…' }}
-    </option>
-    @for (model of availableModels(); track model.value) {
-      <option [value]="model.value">{{ model.label }}</option>
-    }
-    @if (missingSelectedModel(); as missing) {
-      <option [value]="missing">{{ missing }} (unavailable)</option>
-    }
-  </select>
-  @if (runsAsLine(selectedModel()); as line) {
-    <p class="hint runs-as">{{ line }}</p>
-  }
+  <app-ai-model-select
+    selectId="default-model"
+    ariaLabel="Default AI model"
+    [value]="configuredDefault()"
+    (valueChange)="onDefaultModelChange($event)" />
   @if (savedFlash()) {
-    <span class="save-flash">✓ Saved</span>
+    <span class="save-flash">Saved</span>
   }
-  @if (availableModels().length === 0) {
-    <div class="warn">No AI models available. Add a cloud key above, or download a model on the Crucible server.</div>
-  }
+  <p class="hint">
+    Chapters and flags are found by Crucible's scorer (its decide model, on the server that runs the
+    analysis). The model chosen here writes the chapter titles and summaries, checks each flag, and
+    writes the description, tags and suggested title.
+  </p>
 </div>
 
 <div class="pane-section">
@@ -99,23 +88,13 @@
   </p>
   @for (task of aiTasks; track task.key) {
     <label class="field-label" [attr.for]="'task-model-' + task.key">{{ task.label }}</label>
-    <select
-      class="select task-select"
-      [id]="'task-model-' + task.key"
-      [ngModel]="taskModelFor(task.key)"
-      [disabled]="availableModels().length === 0"
-      (ngModelChange)="onTaskModelChange(task.key, $event)">
-      <option value="">Same as the analysis model</option>
-      @for (model of availableModels(); track model.value) {
-        <option [value]="model.value">{{ model.label }}</option>
-      }
-      @if (missingTaskModel(task.key); as missing) {
-        <option [value]="missing">{{ missing }} (unavailable)</option>
-      }
-    </select>
-    @if (runsAsLine(taskModelFor(task.key)); as line) {
-      <p class="hint task-hint runs-as">{{ line }}</p>
-    }
+    <app-ai-model-select
+      class="task-select"
+      [selectId]="'task-model-' + task.key"
+      [ariaLabel]="task.label"
+      emptyLabel="Same as the analysis model"
+      [value]="taskModelFor(task.key)"
+      (valueChange)="onTaskModelChange(task.key, $event)" />
     @if (task.hint) {
       <p class="hint task-hint">{{ task.hint }}</p>
     }

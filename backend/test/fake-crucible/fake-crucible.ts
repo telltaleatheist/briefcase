@@ -417,6 +417,11 @@ export interface FakeCrucibleOptions {
   decideSelected?: string;
   /** P6: each candidate's context ceiling for `?class=generate`, by model id. Default 131072 each. */
   contextCeilings?: Record<string, number>;
+  /**
+   * `local_model_choices` per LLM class, by model id. Default: every text
+   * model this backend serves that is not a page reader, for every class.
+   */
+  localModelChoices?: Record<string, string[]>;
 }
 
 /** One decide question as the fake reads it. */
@@ -763,9 +768,15 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
     }
     const localModels: Record<string, string | null> = {};
     const choices: Record<string, unknown[]> = {};
+    const servable = models
+      .filter((m) => m.backendSupported !== false && (m.modalities ?? ['text']).includes('text') && !/^dots/.test(m.id))
+      .map((m) => m.id);
     for (const c of LLM_CLASSES) {
       localModels[c] = 'qwen3.5-9b';
-      choices[c] = [{ id: 'qwen3.5-9b', memory_bytes_estimate: 20950548480, fits: true, installed: true }];
+      choices[c] = (options.localModelChoices?.[c] ?? servable).map((id) => {
+        const m = models.find((row) => row.id === id);
+        return { id, memory_bytes_estimate: 20950548480, fits: true, installed: m?.installed ?? true };
+      });
     }
     return {
       routes: routeDoc,

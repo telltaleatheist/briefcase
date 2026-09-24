@@ -129,40 +129,17 @@
               <div class="config-form">
                 <div class="form-group">
                   <label>AI Model</label>
-                  <select [(ngModel)]="settings.aiModel" (change)="onAiModelChange($event)" [disabled]="loadingModels">
-                    <option *ngIf="loadingModels" value="">Loading models...</option>
-                    <option *ngIf="!loadingModels && aiModels.length === 0" value="">No models available</option>
-
-                    <optgroup *ngIf="hasModelsForProvider('local')" label="Crucible models">
-                      <option *ngFor="let model of getModelsByProvider('local')" [value]="model.value">
-                        {{ model.label }}
-                      </option>
-                    </optgroup>
-
-                    <optgroup *ngIf="hasModelsForProvider('ollama')" label="Ollama (through Crucible)">
-                      <option *ngFor="let model of getModelsByProvider('ollama')" [value]="model.value">
-                        {{ model.label }}
-                      </option>
-                    </optgroup>
-
-                    <optgroup *ngIf="hasModelsForProvider('claude')" label="Claude (Anthropic)">
-                      <option *ngFor="let model of getModelsByProvider('claude')" [value]="model.value">
-                        {{ model.label }}
-                      </option>
-                    </optgroup>
-
-                    <optgroup *ngIf="hasModelsForProvider('openai')" label="OpenAI">
-                      <option *ngFor="let model of getModelsByProvider('openai')" [value]="model.value">
-                        {{ model.label }}
-                      </option>
-                    </optgroup>
-                  </select>
+                  <app-ai-model-select
+                    class="model-select"
+                    ariaLabel="AI model"
+                    [value]="settings.aiModel ?? ''"
+                    (valueChange)="onAiModelValue($event)" />
                   <button
                     type="button"
                     class="btn-save-default"
                     [class.saved]="savedAsDefault"
                     (click)="saveAsDefault()"
-                    [disabled]="loadingModels || !settings.aiModel || savedAsDefault"
+                    [disabled]="!settings.aiModel || !!modelOptions.unavailable(settings.aiModel) || savedAsDefault"
                     [title]="savedAsDefault ? 'Saved!' : 'Save this model as your default for future analysis'"
                   >
                     <ng-container *ngIf="savedAsDefault">Saved</ng-container>
@@ -227,7 +204,8 @@
       <button
         class="btn btn-primary"
         (click)="onSubmit()"
-        [disabled]="getUrlCount() === 0"
+        [disabled]="getUrlCount() === 0 || aiModelBlocked()"
+        [attr.title]="aiModelBlocked() ? (modelOptions.unavailable(settings.aiModel) ?? 'Pick an AI model for AI Analyze') : null"
       >
         <span>{{ captureMode === 'webpage' ? 'Save' : 'Add to Queue' }}</span>
         <span class="task-count" *ngIf="getUrlCount() > 0">

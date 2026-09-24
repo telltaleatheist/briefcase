@@ -5,8 +5,9 @@ import { ComponentService, ComponentStatus } from '../../services/component.serv
 import { SetupDownloadService } from '../../services/setup-download.service';
 import { CrucibleService } from '../../services/crucible.service';
 import { CrucibleDoorsComponent } from '../crucible-doors/crucible-doors.component';
-import { CrucibleUpstreamsComponent } from '../crucible-upstreams/crucible-upstreams.component';
-import type { AiModelsView } from '@crucible-wire/ai-wire';
+import { AiModelSelectComponent } from '../ai-model-select/ai-model-select.component';
+import { AiModelOptionsService } from '../../services/ai-model-options.service';
+import { LibraryService } from '../../services/library.service';
 import { firstValueFrom } from 'rxjs';
 
 type Step = 'welcome' | 'tools' | 'engine' | 'ai' | 'review' | 'finishing';
@@ -27,7 +28,7 @@ type Step = 'welcome' | 'tools' | 'engine' | 'ai' | 'review' | 'finishing';
 @Component({
   selector: 'app-setup-wizard',
   standalone: true,
-  imports: [CommonModule, FormsModule, CrucibleDoorsComponent, CrucibleUpstreamsComponent],
+  imports: [CommonModule, FormsModule, CrucibleDoorsComponent, AiModelSelectComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="setup-overlay">
@@ -84,12 +85,15 @@ type Step = 'welcome' | 'tools' | 'engine' | 'ai' | 'review' | 'finishing';
             }
 
             @case ('ai') {
-              @if (crucibleAi()?.server; as server) {
+              @if (connectedServer(); as server) {
                 <div class="step-head">
-                  <h3>Cloud models and Ollama</h3>
-                  <p class="sub">AI runs through Crucible on {{ server }}. A Claude or OpenAI key, or an Ollama address, is saved on that server, not in Briefcase. Local models come from its catalog, and Crucible prepares them when you finish. All of this is optional.</p>
+                  <h3>AI model</h3>
+                  <p class="sub">Analysis runs on Crucible on {{ server }}. Pick the model it uses by default: the list is what that server offers. Claude, OpenAI or Ollama via Crucible are set up on the server, in Settings › AI Analysis. You can change all of this later.</p>
                 </div>
-                <app-crucible-upstreams [server]="server" />
+                <app-ai-model-select ariaLabel="Default AI model" [value]="defaultModel()" (valueChange)="saveDefaultModel($event)" />
+                @if (defaultSaveError(); as error) {
+                  <p class="sub">{{ error }}</p>
+                }
               } @else {
                 <div class="step-head">
                   <h3>AI needs Crucible</h3>
@@ -197,6 +201,8 @@ export class SetupWizardComponent implements OnInit {
 
   private componentService = inject(ComponentService);
   private crucible = inject(CrucibleService);
+  private library = inject(LibraryService);
+  private modelOptions = inject(AiModelOptionsService);
   dl = inject(SetupDownloadService);
 
   private readonly allSteps: Step[] = ['welcome', 'tools', 'engine', 'ai', 'review', 'finishing'];
@@ -207,8 +213,11 @@ export class SetupWizardComponent implements OnInit {
 
   readonly step = signal<Step>('welcome');
   readonly all = signal<ComponentStatus[]>([]);
-  /** The AI step's face: the connected server's upstreams, or the Crucible doors. */
-  readonly crucibleAi = signal<AiModelsView | null>(null);
+  /** The AI step's face: the connected server's default-model picker, or the Crucible doors. */
+  readonly connectedServer = computed(() => this.modelOptions.view()?.server ?? null);
+  /** The configured default ("provider:model"), as stored. */
+  readonly defaultModel = signal('');
+  readonly defaultSaveError = signal<string | null>(null);
 
   readonly stepIndex = computed(() => Math.min(this.steps().indexOf(this.step()), this.numbered() - 1));
   readonly requiredTools = computed(() => this.all().filter((c) => c.kind === 'binary' && c.required && c.supported));
@@ -278,12 +287,29 @@ export class SetupWizardComponent implements OnInit {
     if (this.step() === 'ai') void this.loadAiStep();
   }
 
-  /** Which server the keys would go to. Read on entering the AI step. */
+  /** The connected server's options and the saved default. Read on entering the AI step. */
   async loadAiStep(): Promise<void> {
     try {
-      this.crucibleAi.set(await firstValueFrom(this.crucible.aiModels()));
+      const saved = await firstValueFrom(this.library.getDefaultAI());
+      this.defaultModel.set(saved.success && saved.defaultAI ? `${saved.defaultAI.provider}:${saved.defaultAI.model}` : '');
     } catch {
-      this.crucibleAi.set(null);
+      this.defaultModel.set('');
+    }
+    this.modelOptions.use([this.defaultModel()]);
+    await this.modelOptions.refresh();
+  }
+
+  /** Saved in the Crucible spelling the picker emits. */
+  async saveDefaultModel(value: string): Promise<void> {
+    if (!value) return;
+    const [provider, ...rest] = value.split(':');
+    try {
+      const result = await firstValueFrom(this.library.saveDefaultAI(provider, rest.join(':')));
+      if (!result.success) throw new Error(result.message);
+      this.defaultModel.set(value);
+      this.defaultSaveError.set(null);
+    } catch (error) {
+      this.defaultSaveError.set(`The default model didn't save: ${(error as Error)?.message ?? error}`);
     }
   }
 

@@ -5,15 +5,60 @@
  */
 import type { ServerReach } from './settings-wire';
 
-/** One pickable model. `value` is Briefcase's stored `provider:model` format. */
+/**
+ * WHERE AN OPTION COMES FROM, in the order the server presents them: the
+ * server's own models (`server`), then each upstream it forwards to.
+ */
+export type AiOptionGroupKind = 'server' | 'anthropic' | 'openai' | 'ollama';
+
+/**
+ * One pickable analysis model. `value` is Briefcase's stored spelling, the one
+ * the queue and the analysis read (crucible/llm/target.ts):
+ *   local:<id>     a model on the Crucible server itself
+ *   claude:<id>    Claude, forwarded by the server
+ *   openai:<id>    OpenAI, forwarded by the server
+ *   ollama:<tag>   Ollama, forwarded by the server
+ */
 export interface AiModelOption {
   value: string;
+  /** The id as the server names it. */
   label: string;
-  provider: 'local' | 'claude' | 'openai' | 'ollama';
-  /** Local models only: the weights are on the server; null when the server did not say. */
-  installed?: boolean | null;
-  /** Local models only: why it cannot load right now, in the server's words. */
-  note?: string | null;
+  group: AiOptionGroupKind;
+  /** Parameter count in billions, as the server states it; null = the server did not say (shown as unknown). */
+  sizeB: number | null;
+  /** On the card right now (server models only; null for an upstream). */
+  resident: boolean | null;
+  /** The server's own pick for the `analysis` class. */
+  serverChoice: boolean;
+  /** One line of stated facts for the picker ("27B, loaded now"); unknowns are said as unknown. */
+  detail: string;
+}
+
+/** One `<optgroup>`: a heading, its options, and why it has none when a listing failed. */
+export interface AiOptionGroup {
+  kind: AiOptionGroupKind;
+  /** "On this Crucible", "Claude via Crucible", … with the server's name when it is not this computer's. */
+  label: string;
+  options: AiModelOption[];
+  /** The upstream's listing failed (a key the provider rejected, say): the server's sentence. */
+  error: string | null;
+}
+
+/**
+ * What a STORED choice (a saved default, a task model, a preset, a queued
+ * job's model) is among today's options. Legacy spellings are read through
+ * the same rules the analysis uses at call time (target.ts, ollama-map.ts),
+ * so the picker shows what would actually run.
+ */
+export interface AiResolvedValue {
+  /** The value as stored. */
+  value: string;
+  /** The option it is (the Crucible spelling), or null when the server offers nothing it maps to. */
+  option: string | null;
+  /** When `option` is not `value`: what the stored value was read as, for a line under the picker. */
+  note: string | null;
+  /** When `option` is null: why, as a sentence with the fix. Never silently another model. */
+  unavailable: string | null;
 }
 
 /** The connected server's upstream cards; null for one it does not offer. */
@@ -23,34 +68,25 @@ export interface AiUpstreamsView {
   ollama: { configured: boolean; url: string | null } | null;
 }
 
-/** `GET /crucible/ai/models`: the connected server's catalog and upstreams, as picker options. */
+/**
+ * `GET /crucible/ai/models[?values=a,b]`: THE one source of analysis-model
+ * options, from the connected Crucible (the best-ranked running server that
+ * answers). Every AI model picker in the renderer draws this.
+ */
 export interface AiModelsView {
-  /** The server these came from: the best-ranked running server that answers. */
+  /** The server these came from; null when none answers (see `unavailable`). */
   server: string | null;
+  /** The server is the Crucible on this computer. */
+  local: boolean;
   reach: ServerReach | null;
   /** Why there is no list, as a sentence with the fix. Null when `server` is set. */
   unavailable: string | null;
   upstreams: AiUpstreamsView | null;
-  models: AiModelOption[];
+  groups: AiOptionGroup[];
   /** The server's own choice for the `analysis` class, as an option value. */
   analysisDefault: string | null;
-  /** Per-upstream listing failures (a configured key the provider rejected, say). */
-  upstreamErrors: Partial<Record<'anthropic' | 'openai' | 'ollama', string>>;
-}
-
-/**
- * `GET /crucible/ai/runs-as?models=a,b`: what a stored `ollama:<tag>` choice
- * actually runs as through Crucible (ollama-map.ts). Other values are not listed.
- */
-export interface AiRunsAs {
-  /** The stored `ollama:<tag>` value. */
-  value: string;
-  /** The server that answers for it: the one with a model of its own, else the connected one. */
-  server: string | null;
-  /** The server's own model it runs as, or null: it goes to Ollama through Crucible. */
-  runsAs: string | null;
-  /** The context it is served at: the model's, or Ollama's default when it goes to Ollama. */
-  contextTokens: number | null;
+  /** The `values` asked about, each resolved against these options. */
+  resolved: AiResolvedValue[];
 }
 
 /** `GET /crucible/ai/keys/legacy`: what Briefcase's own api-keys.json still holds. */

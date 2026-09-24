@@ -177,45 +177,21 @@
                   }
                 </div>
 
-                <!-- AI model picker -->
+                <!-- AI model picker: the connected Crucible's options (app-ai-model-select) -->
                 <div class="opt-block">
-                  @if (aiModelsError()) {
-                    <div class="opt-error">
-                      Couldn't load AI models
-                      <button type="button" class="retry-link" (click)="loadAiModels()">Retry</button>
-                    </div>
-                  } @else {
-                    <label class="opt">
-                      <span>Model</span>
-                      <select
-                        [ngModel]="config(def.type)['aiModel']"
-                        [disabled]="aiModelsLoading()"
-                        (ngModelChange)="onAiModelValue($event)">
-                        @if (aiModelsLoading()) {
-                          <option [value]="config(def.type)['aiModel']">Loading models…</option>
-                        } @else {
-                          @if (!config(def.type)['aiModel']) {
-                            <option value="">Select a model…</option>
-                          }
-                          @for (group of modelGroups(); track group.provider) {
-                            <optgroup [label]="group.label">
-                              @for (model of group.models; track model.value) {
-                                <option [value]="model.value">{{ model.label }}</option>
-                              }
-                            </optgroup>
-                          }
-                          @if (missingAiModel(); as missing) {
-                            <option [value]="missing">{{ missing }} (unavailable)</option>
-                          }
-                        }
-                      </select>
-                    </label>
-                    @if (!aiModelsLoading()) {
-                      @if (isCurrentModelDefault()) {
-                        <span class="opt-note">This is your default model</span>
-                      } @else if (config(def.type)['aiModel']) {
-                        <button type="button" class="link-btn" (click)="saveAiAsDefault()">Save as default</button>
-                      }
+                  <label class="opt">
+                    <span>Model</span>
+                    <app-ai-model-select
+                      class="opt-model"
+                      ariaLabel="AI model"
+                      [value]="aiModelValue()"
+                      (valueChange)="onAiModelValue($event)" />
+                  </label>
+                  @if (aiModelValue() && !aiModelUnavailable()) {
+                    @if (isCurrentModelDefault()) {
+                      <span class="opt-note">This is your default model</span>
+                    } @else {
+                      <button type="button" class="link-btn" (click)="saveAiAsDefault()">Save as default</button>
                     }
                   }
                 </div>

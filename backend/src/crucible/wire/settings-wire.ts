@@ -128,6 +128,12 @@ export interface CrucibleSettingsView {
   };
   /** Class → explicit local model (null = the engine's own choice); the whole map null when the server did not state it. */
   localModels: Record<string, string | null> | null;
+  /**
+   * Class → the models the server says can serve it, in its order (an
+   * uninstalled one included); the whole map null when the server did not
+   * state it. Each row's `installed`/`fits` are null where unstated.
+   */
+  localModelChoices: Record<string, Array<{ id: string; installed: boolean | null; fits: boolean | null }>> | null;
   /** Null when the server did not state it. */
   backendKind: string | null;
 }

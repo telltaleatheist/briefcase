@@ -78,13 +78,14 @@ describe('a server that states no informational field', () => {
     expect(answer.probe.facts.capabilities).toContainEqual({ capability: 'analysis', enabled: true, selected: 'qwen3.5-9b', route: 'local', reason: null });
   });
 
-  it('lists its chat models: shown with install unknown and no size, never hidden or marked "not downloaded"', async () => {
+  it('lists its chat models: loadable, so offered, with the size shown as unknown, never hidden or guessed', async () => {
     const { h, servers, chat } = await rig();
     const ai = new CrucibleAiService(servers, h.probes, h.settings, chat, { keysForCopy: () => ({}) } as never, pairingHost(null));
     const view = await ai.models();
     expect(view.unavailable).toBeNull();
-    expect(view.models.find((m) => m.provider === 'local')).toEqual({
-      value: 'local:qwen3.5-9b', label: 'qwen3.5-9b', provider: 'local', installed: null, note: null,
+    expect(view.groups.find((g) => g.kind === 'server')?.options[0]).toEqual({
+      value: 'local:qwen3.5-9b', label: 'qwen3.5-9b', group: 'server', sizeB: null, resident: false, serverChoice: true,
+      detail: "size unknown, Crucible's pick for analysis",
     });
     expect(view.upstreams?.anthropic).toEqual({ configured: true, keyHint: '…1234' });
   });

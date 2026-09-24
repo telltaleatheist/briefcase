@@ -1,10 +1,11 @@
-import { Component, EventEmitter, Input, Output, OnInit, OnChanges, SimpleChanges, inject, ChangeDetectorRef } from '@angular/core';
+import { Component, EventEmitter, Input, Output, OnInit, OnChanges, SimpleChanges, inject, ChangeDetectorRef, effect, signal, untracked } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { VideoJobSettings } from '../../models/video-processing.model';
-import { CrucibleService } from '../../services/crucible.service';
+import { AiModelOptionsService } from '../../services/ai-model-options.service';
+import { AiModelSelectComponent } from '../ai-model-select/ai-model-select.component';
 import { CrucibleReadinessService } from '../../services/crucible-readiness.service';
 import { TourService } from '../../services/tour.service';
 import { LibraryService } from '../../services/library.service';
@@ -18,21 +19,16 @@ interface CustomInstructionHistoryItem {
   use_count: number;
 }
 
-interface AIModelOption {
-  value: string;
-  label: string;
-  provider: 'local' | 'ollama' | 'claude' | 'openai';
-}
-
 @Component({
   selector: 'app-video-config-dialog',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, AiModelSelectComponent],
   templateUrl: './video-config-dialog.component.html',
   styleUrls: ['./video-config-dialog.component.scss']
 })
 export class VideoConfigDialogComponent implements OnInit, OnChanges {
-  private crucible = inject(CrucibleService);
+  /** The connected Crucible's analysis-model options (one source for every picker). */
+  readonly modelOptions = inject(AiModelOptionsService);
   /** Transcribe and AI analyze need Crucible: while it is not ready they are locked off. */
   readonly readiness = inject(CrucibleReadinessService);
   private http = inject(HttpClient);
@@ -50,9 +46,23 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges {
   captureMode: 'video' | 'webpage' = 'video';
 
   urlText = '';
-  loadingModels = false;
   savedAsDefault = false;
-  aiModels: AIModelOption[] = [];
+  /** Stored choices to seed an empty picker from, in preference order: last used, library default, global default. */
+  private readonly seedCandidates = signal<string[]>([]);
+
+  constructor() {
+    // Seed an empty picker once the options (and what each candidate is among them) are known.
+    effect(() => {
+      const candidates = this.seedCandidates();
+      const seed = candidates.map((c) => this.modelOptions.optionFor(c)).find((o): o is string => !!o) ?? '';
+      untracked(() => {
+        if (seed && !this.settings.aiModel) {
+          this.settings.aiModel = seed;
+          this.cdr.markForCheck();
+        }
+      });
+    });
+  }
 
   // Custom instructions history
   instructionsHistory: CustomInstructionHistoryItem[] = [];
@@ -71,7 +81,7 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges {
   };
 
   ngOnInit() {
-    this.loadAIModels();
+    void this.loadDefaultModels();
     this.loadInstructionsHistory();
   }
 
@@ -147,8 +157,7 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges {
   ngOnChanges(changes: SimpleChanges) {
     // Reload models every time the modal opens to get the latest library default
     if (changes['isOpen'] && changes['isOpen'].currentValue === true) {
-      console.log('Modal opened, reloading AI models and library default...');
-      this.loadAIModels();
+      void this.loadDefaultModels();
 
       // Start the video config tour
       setTimeout(() => {
@@ -157,130 +166,45 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges {
     }
   }
 
-  private async loadAIModels() {
-    this.loadingModels = true;
-
-    try {
-      // The connected Crucible server's catalog and its configured upstreams.
-      let models: AIModelOption[] = [];
-      try {
-        models = (await firstValueFrom(this.crucible.modelOptions()))
-          .map(m => ({ value: m.value, label: m.label, provider: m.provider }));
-      } catch (error) {
-        console.error("Failed to list the Crucible server's models:", error);
-      }
-      this.aiModels = models;
-      // Force change detection to update the dropdown
-      this.cdr.detectChanges();
-
-      // Resolve which model to preselect. Precedence: the model the user last
-      // chose (a personal preference, tracked across every picker) → the
-      // library default → the global config default → none. Only honor a
-      // last-used value that's actually installed, so a stale pick never
-      // selects a missing model.
-      let defaultModel: string | null = null;
-      console.log('=== LOADING DEFAULT AI MODEL ===');
-
-      const remembered = this.presetsService.lastChosenAiModel();
-      if (remembered && models.some(m => m.value === remembered)) {
-        defaultModel = remembered;
-        console.log('Step 0 Result - Using last-used AI model:', defaultModel);
-      }
-
-      // If no last-used pick, fall back to the library's saved default
-      if (!defaultModel) {
-        try {
-          console.log('Step 1: Fetching library default from:', `${this.API_BASE}/database/libraries/default-ai-model`);
-          const response = await this.http.get<{ success: boolean; aiModel: string | null }>(
-            `${this.API_BASE}/database/libraries/default-ai-model`
-          ).toPromise();
-          console.log('Step 1 Response:', JSON.stringify(response));
-          defaultModel = response?.aiModel || null;
-          console.log('Step 1 Result - Library default AI model:', defaultModel);
-        } catch (error) {
-          console.error('Step 1 FAILED - Error fetching library default:', error);
-        }
-      }
-
-      // If no library-specific default, try global config default
-      if (!defaultModel) {
-        console.log('Step 2: No library default, checking global config at:', `${this.API_BASE}/config/default-ai`);
-        try {
-          const configResponse = await this.http.get<{ success: boolean; defaultAI: { provider: string; model: string } | null }>(
-            `${this.API_BASE}/config/default-ai`
-          ).toPromise();
-          console.log('Step 2 Response:', JSON.stringify(configResponse));
-          if (configResponse?.defaultAI) {
-            defaultModel = `${configResponse.defaultAI.provider}:${configResponse.defaultAI.model}`;
-            console.log('Step 2 Result - Using global config default AI model:', defaultModel);
-          } else {
-            console.log('Step 2 Result - No global default AI configured');
-          }
-        } catch (error) {
-          console.error('Step 2 FAILED - Error fetching global default:', error);
-        }
-      }
-
-      console.log('Step 3: Available models in dropdown:', models.map(m => m.value));
-      console.log('Step 3: Final default model to apply:', defaultModel);
-
-      // Set default model - NO FALLBACK, user must select or have a saved default
-      if (models.length > 0) {
-        const modelExists = defaultModel && models.some(m => m.value === defaultModel);
-        console.log('Step 4: Does default model exist in list?', modelExists);
-
-        if (modelExists) {
-          this.settings.aiModel = defaultModel!;
-          console.log('✓ Step 4: Successfully set settings.aiModel to:', this.settings.aiModel);
-          // Force change detection
-          this.cdr.detectChanges();
-          console.log('✓ Step 4: Change detection triggered, current value:', this.settings.aiModel);
-        } else {
-          // NO FALLBACK - leave empty, user must select
-          this.settings.aiModel = '';
-          if (defaultModel) {
-            console.warn('⚠ Step 4: Saved default model NOT FOUND in current models list:', defaultModel);
-            console.warn('⚠ Step 4: User must select a model. Available values are:', models.map(m => m.value));
-          } else {
-            console.log('Step 4: No saved default, user must select a model');
-          }
-        }
-      }
-      console.log('=== FINAL settings.aiModel:', this.settings.aiModel, '===');
-    } catch (error) {
-      console.error('Failed to load AI models:', error);
-    } finally {
-      this.loadingModels = false;
-    }
-  }
-
-  private extractModelSize(modelName: string): number {
-    const match = modelName.match(/(\d+)b/i);
-    if (match) {
-      return parseInt(match[1], 10);
-    }
-    return 0;
-  }
-
-  getModelsByProvider(provider: 'local' | 'ollama' | 'claude' | 'openai'): AIModelOption[] {
-    return this.aiModels.filter(m => m.provider === provider);
-  }
-
-  hasModelsForProvider(provider: 'local' | 'ollama' | 'claude' | 'openai'): boolean {
-    return this.aiModels.some(m => m.provider === provider);
-  }
-
   /**
-   * Handle AI model change: record the pick as the user's remembered last model
-   * (a personal preference, honored ahead of the configured default next time
-   * any picker seeds an empty selection), and reset the saved-as-default state.
-   * Reads the authoritative value off the event target so it's independent of
-   * ngModel's write ordering.
+   * The stored choices an empty picker is seeded from, in order: the model the
+   * user last chose (a personal preference, tracked across every picker) → the
+   * library default → the global default. Each is used only when it is one of
+   * the connected Crucible's options (in its Crucible spelling); none is a
+   * fallback for another model. The options themselves are the shared ones.
    */
-  onAiModelChange(event: Event) {
-    const value = (event.target as HTMLSelectElement).value;
+  private async loadDefaultModels(): Promise<void> {
+    const candidates: string[] = [this.presetsService.lastChosenAiModel()];
+    try {
+      const response = await firstValueFrom(this.http.get<{ success: boolean; aiModel: string | null }>(
+        `${this.API_BASE}/database/libraries/default-ai-model`,
+      ));
+      if (response?.aiModel) candidates.push(response.aiModel);
+    } catch (error) {
+      console.error("Couldn't read the library's default AI model:", error);
+    }
+    try {
+      const response = await firstValueFrom(this.http.get<{ success: boolean; defaultAI: { provider: string; model: string } | null }>(
+        `${this.API_BASE}/config/default-ai`,
+      ));
+      if (response?.defaultAI) candidates.push(`${response.defaultAI.provider}:${response.defaultAI.model}`);
+    } catch (error) {
+      console.error("Couldn't read the default AI model:", error);
+    }
+    const stored = candidates.filter(Boolean);
+    this.modelOptions.use(stored);
+    this.seedCandidates.set(stored);
+  }
+
+  /** AI Analyze is on and its model is missing or can't run on the connected server: Add waits for a pick. */
+  aiModelBlocked(): boolean {
+    if (this.captureMode !== 'video' || !this.settings.aiAnalysis || this.aiLocked) return false;
+    return !this.settings.aiModel || this.modelOptions.unavailable(this.settings.aiModel) !== null;
+  }
+
+  onAiModelValue(value: string): void {
+    this.settings.aiModel = value;
     this.presetsService.rememberAiModel(value);
-    // Reset saved state when model changes
     this.savedAsDefault = false;
   }
 
@@ -289,9 +213,11 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges {
    * This ensures consistency across all dialogs and modals
    */
   async saveAsDefault() {
-    if (!this.settings.aiModel) {
+    if (!this.settings.aiModel || this.modelOptions.unavailable(this.settings.aiModel)) {
       return;
     }
+    // Saved in its Crucible spelling.
+    this.settings.aiModel = this.modelOptions.canonical(this.settings.aiModel);
 
     // Saving as default also makes it the remembered last pick, so every picker
     // seeds to it consistently.
@@ -353,7 +279,9 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges {
     }
 
     // A download never waits on Crucible: its steps are left off while it is not ready.
-    const settings = this.aiLocked ? { ...this.settings, transcribe: false, aiAnalysis: false } : { ...this.settings };
+    const settings = this.aiLocked
+      ? { ...this.settings, transcribe: false, aiAnalysis: false }
+      : { ...this.settings, aiModel: this.modelOptions.canonical(this.settings.aiModel) };
     const configs = urls.map(url => ({
       url,
       name: this.extractNameFromUrl(url),

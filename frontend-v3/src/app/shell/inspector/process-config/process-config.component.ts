@@ -4,7 +4,8 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom } from 'rxjs';
 import { ErrorSurface } from '../../../core/error-surface.service';
 import { LibraryService } from '../../../services/library.service';
-import { CrucibleService } from '../../../services/crucible.service';
+import { AiModelOptionsService } from '../../../services/ai-model-options.service';
+import { AiModelSelectComponent } from '../../../components/ai-model-select/ai-model-select.component';
 import { CrucibleReadinessService, taskNeedsCrucible } from '../../../services/crucible-readiness.service';
 import {
   PIPELINE_STEPS,
@@ -15,15 +16,6 @@ import {
   sortPipelineSteps,
   withoutRetiredKeys,
 } from '../../../core/stores/pipeline-presets.service';
-
-type AiProvider = 'local' | 'ollama' | 'claude' | 'openai';
-
-/** A selectable AI model, grouped by provider in the picker. */
-interface AiModelOption {
-  value: string; // "provider:model"
-  label: string;
-  provider: AiProvider;
-}
 
 /** One row from GET /database/custom-instructions-history. */
 interface InstructionHistoryItem {
@@ -49,7 +41,7 @@ interface InstructionHistoryItem {
 @Component({
   selector: 'app-process-config',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, AiModelSelectComponent],
   templateUrl: './process-config.component.html',
   styleUrls: ['./process-config.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -58,7 +50,7 @@ export class ProcessConfigComponent {
   private presetsService = inject(PipelinePresetsService);
   private destroyRef = inject(DestroyRef);
   private library = inject(LibraryService);
-  private crucible = inject(CrucibleService);
+  readonly modelOptions = inject(AiModelOptionsService);
   readonly readiness = inject(CrucibleReadinessService);
   private errorSurface = inject(ErrorSurface);
 
@@ -152,9 +144,9 @@ export class ProcessConfigComponent {
     }, { allowSignalWrites: true });
 
     // A preset apply or stale sticky state can leave ai-analyze without a
-    // model; once the available models are known, seed the empty picker in
-    // preference order — last chosen, then the configured default. A non-empty
-    // value short-circuits, so the user's own pick / a job's saved model wins.
+    // model; once the options are known, seed the empty picker in preference
+    // order — last chosen, then the configured default. A non-empty value
+    // short-circuits, so the user's own pick / a job's saved model wins.
     effect(() => {
       const seed = this.preferredSeedModel();
       if (!seed || !this.isEnabled('ai-analyze')) return;
@@ -230,7 +222,12 @@ export class ProcessConfigComponent {
     const configs = this.configs();
     return this.stepDefs
       .filter(def => this.isEnabled(def.type))
-      .map(def => ({ type: def.type, config: { ...configs[def.type] } }));
+      .map(def => {
+        const config = { ...configs[def.type] };
+        // Queued in its Crucible spelling: a legacy stored value goes as the option it resolved to.
+        if (def.type === 'ai-analyze' && typeof config['aiModel'] === 'string') config['aiModel'] = this.modelOptions.canonical(config['aiModel']);
+        return { type: def.type, config };
+      });
   });
 
   /**
@@ -266,7 +263,7 @@ export class ProcessConfigComponent {
   private ensureAiData(): void {
     if (this.aiDataLoaded) return;
     this.aiDataLoaded = true;
-    void this.loadAiModels();
+    void this.loadDefaultAiModel();
     void this.loadInstructionsHistory();
   }
 
@@ -321,80 +318,39 @@ export class ProcessConfigComponent {
   }
 
   // AI model picker ----------------------------------------------------------
+  // The options are the connected Crucible's (AiModelOptionsService, drawn by
+  // <app-ai-model-select>); a stored value is shown as the option it is.
 
-  aiModels = signal<AiModelOption[]>([]);
-  aiModelsLoading = signal(false);
-  aiModelsError = signal(false);
-  /** The configured default ("provider:model"), when it is an installed model. */
+  /** The configured default ("provider:model") as stored, or ''. */
   defaultAiModel = signal('');
 
-  private readonly providerLabels: Record<AiProvider, string> = {
-    local: 'Crucible',
-    ollama: 'Ollama',
-    claude: 'Claude',
-    openai: 'OpenAI',
-  };
+  /** The step's chosen model, as stored in its config. */
+  readonly aiModelValue = computed(() => String(this.config('ai-analyze')['aiModel'] ?? ''));
 
-  /** Installed models grouped by provider, in a stable provider order. */
-  modelGroups = computed(() => {
-    const models = this.aiModels();
-    const order: AiProvider[] = ['local', 'ollama', 'claude', 'openai'];
-    return order
-      .map(provider => ({
-        provider,
-        label: this.providerLabels[provider],
-        models: models.filter(m => m.provider === provider),
-      }))
-      .filter(group => group.models.length > 0);
-  });
-
-  /** The chosen model isn't in the installed list — shown "(unavailable)". */
-  missingAiModel = computed<string | null>(() => {
-    if (this.aiModelsLoading() || this.aiModelsError()) return null;
-    const current = String(this.config('ai-analyze')['aiModel'] ?? '');
-    if (!current) return null;
-    return this.aiModels().some(m => m.value === current) ? null : current;
-  });
+  /** The chosen model can't run on the connected server: why (blocks submit while the step is on). */
+  readonly aiModelUnavailable = computed(() => this.modelOptions.unavailable(this.aiModelValue()));
 
   isCurrentModelDefault = computed(() => {
-    const current = String(this.config('ai-analyze')['aiModel'] ?? '');
-    return current.length > 0 && current === this.defaultAiModel();
+    const current = this.modelOptions.canonical(this.aiModelValue());
+    return current.length > 0 && current === this.modelOptions.canonical(this.defaultAiModel());
   });
 
-  async loadAiModels(): Promise<void> {
-    this.aiModelsLoading.set(true);
-    this.aiModelsError.set(false);
+  /** The configured default drives the "This is your default model" note and seeding. */
+  async loadDefaultAiModel(): Promise<void> {
     try {
-      // The connected Crucible server's catalog and its configured upstreams.
-      const models: AiModelOption[] = (await firstValueFrom(this.crucible.modelOptions()))
-        .map(m => ({ value: m.value, label: m.label, provider: m.provider }));
-      this.aiModels.set(models);
-
-      // Resolve the configured server-side default — it drives the "This is your
-      // default model" note and Save-as-default, separately from what seeds the
-      // picker.
       const saved = await firstValueFrom(this.library.getDefaultAI());
-      if (saved.success && saved.defaultAI) {
-        const value = `${saved.defaultAI.provider}:${saved.defaultAI.model}`;
-        if (models.some(m => m.value === value)) {
-          this.defaultAiModel.set(value);
-        }
-      }
-
-      // When the step has no explicit model yet, seed it (last chosen, then the
-      // configured default) so submit sends an explicit model — which then wins
-      // over library-page's downstream default injection.
-      this.seedAiModelIfEmpty();
+      const value = saved.success && saved.defaultAI ? `${saved.defaultAI.provider}:${saved.defaultAI.model}` : '';
+      this.defaultAiModel.set(value);
+      this.modelOptions.use([value, this.presetsService.lastChosenAiModel()]);
     } catch {
-      this.aiModelsError.set(true);
-    } finally {
-      this.aiModelsLoading.set(false);
+      this.defaultAiModel.set('');
+      this.modelOptions.use([this.presetsService.lastChosenAiModel()]);
     }
   }
 
-  /** Persist the currently-chosen model as the global default (POST). */
+  /** Persist the chosen model, in its Crucible spelling, as the global default (POST). */
   saveAiAsDefault(): void {
-    const value = String(this.config('ai-analyze')['aiModel'] ?? '');
+    const value = this.modelOptions.canonical(this.aiModelValue());
     const firstColon = value.indexOf(':');
     if (firstColon < 0) return;
     const provider = value.slice(0, firstColon);
@@ -422,27 +378,16 @@ export class ProcessConfigComponent {
 
   /**
    * Preferred value to seed an EMPTY ai-analyze picker, in order: the last model
-   * the user chose (if still available) → the configured server-side default →
-   * none. Reads signals, so effects that call it re-run as models/defaults load.
+   * the user chose (when it is one of the server's options) → the configured
+   * server-side default → none. Seeded in its Crucible spelling. Reads
+   * signals, so effects that call it re-run as options and defaults load.
    */
   private preferredSeedModel(): string {
-    const models = this.aiModels();
-    const remembered = this.presetsService.lastChosenAiModel();
-    if (remembered && models.some(m => m.value === remembered)) return remembered;
-    const configured = this.defaultAiModel();
-    if (configured && models.some(m => m.value === configured)) return configured;
+    for (const candidate of [this.presetsService.lastChosenAiModel(), this.defaultAiModel()]) {
+      const option = this.modelOptions.optionFor(candidate);
+      if (option) return option;
+    }
     return '';
-  }
-
-  /**
-   * Fill ai-analyze's model only when it has none — a fresh compose state or a
-   * preset without a model. An explicit value (a job's saved model in per-job
-   * mode, sticky config) always wins because we short-circuit on non-empty.
-   */
-  private seedAiModelIfEmpty(): void {
-    if (String(this.config('ai-analyze')['aiModel'] ?? '')) return;
-    const seed = this.preferredSeedModel();
-    if (seed) this.setOption('ai-analyze', 'aiModel', seed);
   }
 
   // Normalize-audio target loudness ------------------------------------------
@@ -473,15 +418,15 @@ export class ProcessConfigComponent {
     if (external) return external;
     if (this.selectionCount() === 0) return 'Select at least one video';
     if (this.steps().length === 0) return 'Pick at least one step';
+    if (this.isEnabled('ai-analyze') && this.readiness.ready()) {
+      if (!this.aiModelValue()) return 'Pick an AI model for AI Analyze';
+      const unavailable = this.aiModelUnavailable();
+      if (unavailable) return unavailable;
+    }
     return null;
   });
 
-  canSubmit = computed(
-    () =>
-      this.steps().length > 0 &&
-      this.selectionCount() > 0 &&
-      !this.submitBlockedReason()
-  );
+  canSubmit = computed(() => this.blockReason() === null);
 
   /** A preset chip highlights when it matches the current composition. */
   isPresetActive(preset: PipelinePreset): boolean {

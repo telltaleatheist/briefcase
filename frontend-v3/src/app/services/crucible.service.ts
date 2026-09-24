@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { Observable, catchError, map, throwError } from 'rxjs';
+import { Observable, catchError, throwError } from 'rxjs';
 import { getApiBase } from '../core/runtime-url';
 import type {
   ConnectCodeReading,
@@ -26,7 +26,7 @@ import type {
   UpstreamName,
   UpstreamTestAnswer,
 } from '@crucible-wire/settings-wire';
-import type { AiModelOption, AiModelsView, AiRunsAs, AiTaskModels, KeyCopyOutcome, LegacyKeysView } from '@crucible-wire/ai-wire';
+import type { AiModelsView, AiTaskModels, KeyCopyOutcome, LegacyKeysView } from '@crucible-wire/ai-wire';
 import type { TranscriptionSettingWire, TranscriptionView } from '@crucible-wire/transcription-wire';
 
 /** A refusal from /api/crucible, always with a sentence that carries the fix. */
@@ -37,13 +37,6 @@ export interface CrucibleRefusal {
   command?: string | null;
   /** Install refusals only: verbatim evidence (a stderr tail). */
   detail?: string | null;
-}
-
-/** Picker options from a model listing: installed catalog models (marked Crucible) and upstream models. */
-export function pickerOptions(view: AiModelsView): AiModelOption[] {
-  return view.models
-    .filter((m) => m.provider !== 'local' || m.installed !== false)
-    .map((m) => ({ ...m, label: m.provider === 'local' ? `${m.label} (Crucible)` : m.label }));
 }
 
 /**
@@ -209,20 +202,17 @@ export class CrucibleService {
 
   // ── AI through Crucible (P3) ─────────────────────────────────────────
 
-  /** The connected server's models (catalog + configured upstreams) as picker options. */
-  aiModels(server?: string): Observable<AiModelsView> {
-    const query = server ? `?server=${encodeURIComponent(server)}` : '';
-    return this.refusal(this.http.get<AiModelsView>(`${this.base}/ai/models${query}`));
-  }
-
   /**
-   * THE one list every AI model picker shows: the connected server's
-   * installed catalog models and its configured upstreams' models, as
-   * `provider:model` values. Catalog models not downloaded on the server are
-   * left out (they cannot run).
+   * THE one source of analysis-model options (the connected server's own
+   * models that can serve the analysis class, and its configured upstreams'),
+   * with each stored `values` choice resolved against them. Pickers read it
+   * through AiModelOptionsService.
    */
-  modelOptions(server?: string): Observable<AiModelOption[]> {
-    return this.aiModels(server).pipe(map(pickerOptions));
+  aiModels(server?: string, values: readonly string[] = []): Observable<AiModelsView> {
+    const params: Record<string, string> = {};
+    if (server) params['server'] = server;
+    if (values.length > 0) params['values'] = values.join(',');
+    return this.refusal(this.http.get<AiModelsView>(`${this.base}/ai/models`, { params }));
   }
 
   /** Forget cached model lists after a settings save. */
@@ -246,11 +236,6 @@ export class CrucibleService {
   /** Set (`provider:model`) or clear (null) per-task models. */
   setTaskModels(changes: Partial<Record<keyof AiTaskModels, string | null>>): Observable<AiTaskModels> {
     return this.refusal(this.http.put<AiTaskModels>(`${this.base}/ai/task-models`, changes));
-  }
-
-  /** What stored `ollama:<tag>` choices run as through Crucible (the server's own model, or Ollama). */
-  runsAs(values: string[]): Observable<AiRunsAs[]> {
-    return this.refusal(this.http.get<AiRunsAs[]>(`${this.base}/ai/runs-as`, { params: { models: values.join(',') } }));
   }
 
     // ── transcription (P5) ─────────────────────────────────────────────────

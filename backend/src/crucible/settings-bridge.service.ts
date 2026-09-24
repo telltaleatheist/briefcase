@@ -43,6 +43,9 @@ function viewOf(doc: SettingsDocument): CrucibleSettingsView {
       ollama: ollama === null ? null : { configured: ollama.configured, url: ollama.url ?? null },
     },
     localModels: doc.localModels === null ? null : { ...doc.localModels },
+    localModelChoices: doc.localModelChoices === null
+      ? null
+      : Object.fromEntries(Object.entries(doc.localModelChoices).map(([cls, rows]) => [cls, rows.map((r) => ({ id: r.id, installed: r.installed, fits: r.fits }))])),
     backendKind: doc.backendKind,
   };
 }

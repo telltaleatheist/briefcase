@@ -1,11 +1,14 @@
 import { computed, signal } from '@angular/core';
-import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { ComponentFixture, TestBed, fakeAsync, flushMicrotasks, tick } from '@angular/core/testing';
 import { of } from 'rxjs';
 import type { CrucibleReadinessView } from '@crucible-wire/readiness-wire';
 import { ErrorSurface } from '../../../core/error-surface.service';
 import { CrucibleService } from '../../../services/crucible.service';
 import { CrucibleReadinessService, readinessDoorLabel } from '../../../services/crucible-readiness.service';
 import { readinessView } from '../../../services/crucible-readiness.testing';
+import { modelsView } from '../../../services/ai-model-options.testing';
+import { WebsocketService } from '../../../services/websocket.service';
+import type { AiModelsView } from '@crucible-wire/ai-wire';
 import { LibraryService } from '../../../services/library.service';
 import { ProcessConfigComponent } from './process-config.component';
 
@@ -24,8 +27,14 @@ const STORAGE_KEY = 'briefcase-pipeline-presets';
 describe('ProcessConfigComponent Crucible gate', () => {
   let fixture: ComponentFixture<ProcessConfigComponent>;
   let readiness: FakeReadiness;
+  let answer: AiModelsView;
 
   beforeEach(() => {
+    answer = modelsView({
+      groups: [{ kind: 'anthropic', label: 'Claude via Crucible', error: null, options: [
+        { value: 'claude:sonnet', label: 'sonnet', group: 'anthropic', sizeB: null, resident: null, serverChoice: false, detail: '' },
+      ] }],
+    });
     // Last-used composition: normalize + transcribe + analyze.
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       presets: [],
@@ -39,7 +48,8 @@ describe('ProcessConfigComponent Crucible gate', () => {
       imports: [ProcessConfigComponent],
       providers: [
         { provide: CrucibleReadinessService, useClass: FakeReadiness },
-        { provide: CrucibleService, useValue: { modelOptions: () => of([{ value: 'claude:sonnet', label: 'Sonnet', provider: 'claude' }]) } },
+        { provide: CrucibleService, useValue: { aiModels: () => of(answer) } },
+        { provide: WebsocketService, useValue: { onCrucibleServersChanged: () => () => {}, onCrucibleCoordination: () => () => {} } },
         {
           provide: LibraryService,
           useValue: {
@@ -91,4 +101,49 @@ describe('ProcessConfigComponent Crucible gate', () => {
     expect(steps.map(s => s.type)).toEqual(['normalize-audio', 'transcribe', 'ai-analyze']);
     expect(steps.find(s => s.type === 'transcribe')!.config).toEqual({});
   });
+
+  function ready(): void {
+    readiness.view.set(readinessView({ state: 'ready', action: null, reason: '', server: 'owens-mac-studio' }));
+    fixture.detectChanges();
+    flushMicrotasks();
+    fixture.detectChanges();
+    tick();
+    fixture.detectChanges();
+  }
+
+  function openAnalyzeOptions(): void {
+    (card('AI Analyze').querySelector('.step-chevron') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    flushMicrotasks();
+    fixture.detectChanges();
+    tick();
+    fixture.detectChanges();
+  }
+
+  it('the model picker lists the connected Crucible\'s options and shows a legacy choice as the model it runs as; it is queued in that spelling', fakeAsync(() => {
+    answer = modelsView({
+      resolved: [{ value: 'claude:sonnet', option: 'local:qwen3.5-9b', note: 'Saved as claude:sonnet.', unavailable: null }],
+    });
+    ready();
+    openAnalyzeOptions();
+    const select = fixture.nativeElement.querySelector('app-ai-model-select select') as HTMLSelectElement;
+    expect(Array.from(select.querySelectorAll('optgroup')).map((g) => g.label)).toEqual(['On this Crucible']);
+    expect(select.value).toBe('local:qwen3.5-9b');
+    const analyze = fixture.componentInstance.composedSteps().find(s => s.type === 'ai-analyze')!;
+    expect(analyze.config['aiModel']).toBe('local:qwen3.5-9b');
+    expect(fixture.componentInstance.blockReason()).toBeNull();
+  }));
+
+  it('a saved model the server offers nothing for blocks Add with the reason, and is not swapped for another', fakeAsync(() => {
+    answer = modelsView({
+      resolved: [{ value: 'claude:sonnet', option: null, note: null, unavailable: 'Claude is not set up on owens-mac-studio.' }],
+    });
+    ready();
+    openAnalyzeOptions();
+    const select = fixture.nativeElement.querySelector('app-ai-model-select select') as HTMLSelectElement;
+    expect(select.value).toBe('claude:sonnet');
+    expect(fixture.componentInstance.blockReason()).toBe('Claude is not set up on owens-mac-studio.');
+    expect(fixture.componentInstance.canSubmit()).toBeFalse();
+    expect(fixture.componentInstance.composedSteps().find(s => s.type === 'ai-analyze')!.config['aiModel']).toBe('claude:sonnet');
+  }));
 });

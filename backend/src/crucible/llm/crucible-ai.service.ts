@@ -22,19 +22,24 @@ import type { PairingFileHost } from '../pairing-file';
 import { CrucibleProbeService } from '../probe';
 import { CrucibleSettingsBridge } from '../settings-bridge.service';
 import type {
-  AiModelOption,
   AiModelsView,
-  AiRunsAs,
   AiTaskModels,
   AiTaskName,
   AiUpstreamsView,
   KeyCopyOutcome,
   LegacyKeysView,
 } from '../wire/ai-wire';
-import { CrucibleChatService, OLLAMA_CONTEXT_VERSION, isAnalysisModel } from './crucible-chat.service';
-import { numCtxMaxForModel } from '../../analysis/model-utils';
-import { crucibleTargetOf, type UpstreamName } from './target';
-import { CRUCIBLE_OLLAMA_CONTEXT, servedContextOf } from './ollama-map';
+import { CrucibleChatService } from './crucible-chat.service';
+import type { UpstreamName } from './target';
+import {
+  UPSTREAM_ORDER,
+  UPSTREAM_WORDS,
+  buildAnalysisOptions,
+  optionValues,
+  resolveStoredModel,
+  type AnalysisOptionFacts,
+  type UpstreamListing,
+} from './model-options';
 
 export const AI_TASKS: readonly AiTaskName[] = ['chapter', 'flags', 'description', 'tags', 'title'];
 const UPSTREAM_LIST_CACHE_MS = 60_000;
@@ -51,27 +56,6 @@ export function hintMatches(hint: string | null | undefined, key: string): boole
   if (typeof hint !== 'string') return false;
   const tail = hint.replace(/^[^A-Za-z0-9]+/, '');
   return tail.length >= 2 && key.endsWith(tail);
-}
-
-/** Chat models from a provider's model list; embeddings, audio and image models are not pickable. */
-export function isPickableUpstreamModel(upstream: UpstreamName, id: string): boolean {
-  const lower = id.toLowerCase();
-  if (upstream === 'anthropic') return lower.includes('claude');
-  if (upstream === 'openai') {
-    if (!/^(gpt-|o\d|chatgpt)/.test(lower)) return false;
-    return !/(audio|realtime|transcribe|tts|image|embedding|search|instruct|moderation)/.test(lower);
-  }
-  return !/embed/.test(lower);
-}
-
-const PROVIDER_OF: Record<UpstreamName, AiModelOption['provider']> = { anthropic: 'claude', openai: 'openai', ollama: 'ollama' };
-const UPSTREAM_LABEL: Record<UpstreamName, string> = { anthropic: 'Claude', openai: 'OpenAI', ollama: 'Ollama' };
-
-/** A Crucible model string as Briefcase's stored `provider:model`. */
-export function optionValueOf(crucibleModel: string): string {
-  const m = /^(anthropic|openai|ollama)\/(.+)$/.exec(crucibleModel);
-  if (m) return `${PROVIDER_OF[m[1] as UpstreamName]}:${m[2]}`;
-  return `local:${crucibleModel}`;
 }
 
 @Injectable()
@@ -109,96 +93,87 @@ export class CrucibleAiService {
     return { server: null, reach: null, unavailable: `No Crucible server is answering (${down.join('; ')}).` };
   }
 
-  async models(explicit?: string): Promise<AiModelsView> {
+  /**
+   * THE one source of analysis-model options (model-options.ts): the
+   * connected server's own models that can serve the `analysis` class, and
+   * the models of each upstream it has configured. `values` are stored
+   * choices to resolve against them (a saved default, task models, a job's).
+   */
+  async models(explicit?: string, values: readonly string[] = []): Promise<AiModelsView> {
     const { server, reach, unavailable } = await this.connectedServer(explicit);
-    const empty: AiModelsView = { server, reach, unavailable, upstreams: null, models: [], analysisDefault: null, upstreamErrors: {} };
-    if (server === null) return empty;
+    const asked = [...new Set(values.map((v) => v.trim()).filter(Boolean))];
+    if (server === null) {
+      return {
+        server, local: false, reach, unavailable, upstreams: null, groups: [], analysisDefault: null,
+        resolved: asked.map((value) => ({ value, option: null, note: null, unavailable: unavailable ?? 'No Crucible server is answering.' })),
+      };
+    }
+    const { facts, upstreams } = await this.optionFacts(server);
+    const built = buildAnalysisOptions(facts);
+    const offered = optionValues(built.groups);
+    return {
+      server,
+      local: facts.local,
+      reach,
+      unavailable: null,
+      upstreams,
+      groups: built.groups,
+      analysisDefault: built.analysisDefault,
+      resolved: asked.map((value) => resolveStoredModel(value, facts, offered)),
+    };
+  }
 
+  /** Everything the options are built from, read off one server. A read that fails reads as unstated. */
+  private async optionFacts(server: string): Promise<{ facts: AnalysisOptionFacts; upstreams: AiUpstreamsView }> {
     const view = await this.settings.get(server);
-    const upstreams: AiUpstreamsView = view.upstreams;
-    const models: AiModelOption[] = [];
-    const upstreamErrors: AiModelsView['upstreamErrors'] = {};
-
+    let models: AnalysisOptionFacts['models'] = [];
     try {
-      const pageReaders = await this.chat.pageReadersOn(server);
-      for (const info of await this.chat.modelsOn(server, true)) {
-        // Left out only when the server STATES this backend can't run it; an
-        // unstated support, install or size (null, 1.0.25+) is shown as unknown.
-        if (info.backendSupported === false || !isAnalysisModel(info, pageReaders)) continue;
-        models.push({
-          value: `local:${info.id}`,
-          label: `${info.id}${info.paramsB !== null && info.paramsB > 0 ? ` (${info.paramsB}B)` : ''}`,
-          provider: 'local',
-          installed: info.installed,
-          note: info.installed === false ? 'Not downloaded on this server yet' : info.loadable ? null : info.reason,
-        });
-      }
+      models = await this.chat.modelsOn(server, true);
     } catch (err) {
       this.logger.warn(`[${server}] model list failed: ${(err as Error).message}`);
     }
-
-    for (const upstream of ['anthropic', 'openai', 'ollama'] as const) {
-      if (upstreams[upstream]?.configured !== true) continue;
-      const listed = await this.upstreamIds(server, upstream);
-      if (listed.error !== null) upstreamErrors[upstream] = listed.error;
-      for (const id of listed.ids ?? []) {
-        if (!isPickableUpstreamModel(upstream, id)) continue;
-        models.push({ value: `${PROVIDER_OF[upstream]}:${id}`, label: `${id} (${UPSTREAM_LABEL[upstream]})`, provider: PROVIDER_OF[upstream] });
-      }
+    let pageReaders: string[] | null = null;
+    let ceilings: Map<string, number> | null = null;
+    try {
+      const classFacts = await this.chat.classFactsOn(server);
+      pageReaders = classFacts.readers;
+      ceilings = classFacts.ceilings;
+    } catch {
+      // unstated
     }
-
-    let analysisDefault: string | null = null;
+    let analysis: AnalysisOptionFacts['analysis'] = null;
     try {
       const client = await this.servers.clientFor(server);
       const record = await client.capability({ timeoutMs: 5_000 });
       const row = record.classes.find((r) => r.capability === 'analysis');
-      if (row?.enabled && row.selected) analysisDefault = optionValueOf(row.selected);
+      if (row) analysis = { selected: row.selected, route: row.route, enabled: row.enabled };
     } catch {
-      analysisDefault = null;
+      analysis = null;
     }
-
-    return { server, reach, unavailable: null, upstreams, models, analysisDefault, upstreamErrors };
+    const listings: Partial<Record<UpstreamName, UpstreamListing>> = {};
+    for (const upstream of UPSTREAM_ORDER) {
+      if (view.upstreams[upstream]?.configured === true) listings[upstream] = await this.upstreamIds(server, upstream);
+    }
+    const candidates = view.localModelChoices?.['analysis'];
+    const facts: AnalysisOptionFacts = {
+      server,
+      local: this.localServer() === server,
+      models,
+      classCandidates: candidates === undefined || candidates === null ? null : candidates.map((c) => c.id),
+      pageReaders,
+      ceilings,
+      analysis,
+      upstreams: {
+        anthropic: view.upstreams.anthropic === null ? null : { configured: view.upstreams.anthropic.configured },
+        openai: view.upstreams.openai === null ? null : { configured: view.upstreams.openai.configured },
+        ollama: view.upstreams.ollama === null ? null : { configured: view.upstreams.ollama.configured },
+      },
+      listings,
+    };
+    return { facts, upstreams: view.upstreams };
   }
 
-  /**
-   * What each stored `ollama:<tag>` value runs as through Crucible: the
-   * decision chat() makes at call time (CrucibleChatService.effectiveTarget),
-   * for Settings › AI to show beside the choice. Values that aren't Ollama
-   * choices are left out.
-   */
-  async runsAs(values: string[]): Promise<AiRunsAs[]> {
-    const out: AiRunsAs[] = [];
-    let connected: string | null | undefined;
-    for (const value of [...new Set(values.map((v) => v.trim()).filter(Boolean))]) {
-      let target;
-      try {
-        target = crucibleTargetOf(undefined, value);
-      } catch {
-        continue;
-      }
-      if (target.upstream !== 'ollama') continue;
-      const chosen = await this.chat.effectiveTarget(target);
-      if (chosen.mappedFrom !== null && chosen.server !== null) {
-        let contextTokens: number | null = null;
-        try {
-          const info = (await this.chat.modelsOn(chosen.server)).find((m) => m.id === chosen.target.model);
-          contextTokens = chosen.loadContext ?? (info ? servedContextOf(info) : null);
-        } catch {
-          contextTokens = chosen.loadContext ?? null;
-        }
-        out.push({ value, server: chosen.server, runsAs: chosen.target.model, contextTokens });
-      } else {
-        if (connected === undefined) connected = (await this.connectedServer()).server;
-        // 1.0.24+ forwards the window (context_tokens → num_ctx): sized by the prompt.
-        // An older server forwards none, and Ollama runs at its 4096 default.
-        const forwards = connected !== null && await this.chat.serverAtLeast(connected, OLLAMA_CONTEXT_VERSION);
-        out.push({ value, server: connected, runsAs: null, contextTokens: forwards ? numCtxMaxForModel(target.bareModel) : CRUCIBLE_OLLAMA_CONTEXT });
-      }
-    }
-    return out;
-  }
-
-  private async upstreamIds(server: string, upstream: UpstreamName): Promise<{ ids: string[] | null; error: string | null }> {
+  private async upstreamIds(server: string, upstream: UpstreamName): Promise<UpstreamListing> {
     const key = `${server}\n${upstream}`;
     const cached = this.upstreamLists.get(key);
     if (cached !== undefined && Date.now() - cached.at < UPSTREAM_LIST_CACHE_MS) return cached;
@@ -247,13 +222,13 @@ export class CrucibleAiService {
     for (const [upstream, key] of pairs) {
       const current = before.upstreams[upstream];
       if (current === null) {
-        outcome.skipped.push({ upstream, reason: `"${server}" does not offer ${UPSTREAM_LABEL[upstream]}, so the key was not copied there.` });
+        outcome.skipped.push({ upstream, reason: `"${server}" does not offer ${UPSTREAM_WORDS[upstream]}, so the key was not copied there.` });
       } else if (current.configured && hintMatches(current.keyHint, key)) {
         outcome.alreadyThere.push(upstream);
       } else if (current.configured) {
         outcome.skipped.push({
           upstream,
-          reason: `"${server}" already has a different ${UPSTREAM_LABEL[upstream]} key (${current.keyHint ?? 'set'}), so it was left as it is.`,
+          reason: `"${server}" already has a different ${UPSTREAM_WORDS[upstream]} key (${current.keyHint ?? 'set'}), so it was left as it is.`,
         });
       } else {
         patch.upstreams[upstream] = { key };
@@ -270,7 +245,7 @@ export class CrucibleAiService {
       const key = pairs.find(([u]) => u === upstream)![1];
       const card = after.upstreams[upstream];
       if (card !== null && card.configured && hintMatches(card.keyHint, key)) outcome.copied.push(upstream);
-      else outcome.skipped.push({ upstream, reason: `"${server}" did not confirm the ${UPSTREAM_LABEL[upstream]} key after saving it.` });
+      else outcome.skipped.push({ upstream, reason: `"${server}" did not confirm the ${UPSTREAM_WORDS[upstream]} key after saving it.` });
     }
     this.forget(server);
 

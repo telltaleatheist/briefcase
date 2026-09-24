@@ -9,7 +9,7 @@ import { CrucibleError } from '@crucible/client';
 import { failureOutcome } from '../probe';
 import { CrucibleRegistryError, CrucibleRoutingError } from '../errors';
 import { CrucibleSettingsInputError } from '../settings-bridge.service';
-import type { AiModelsView, AiRunsAs, AiTaskModels, KeyCopyOutcome, LegacyKeysView } from '../wire/ai-wire';
+import type { AiModelsView, AiTaskModels, KeyCopyOutcome, LegacyKeysView } from '../wire/ai-wire';
 import { CrucibleAiInputError, CrucibleAiService } from './crucible-ai.service';
 
 @UseGuards(LoopbackOriginGuard)
@@ -36,15 +36,10 @@ export class CrucibleAiController {
     }
   }
 
+  /** The analysis-model options, and what each stored `values` choice is among them: `?values=a,b`. */
   @Get('models')
-  models(@Query('server') server?: string): Promise<AiModelsView> {
-    return this.guard(() => this.ai.models(server || undefined));
-  }
-
-  /** What stored `ollama:<tag>` choices run as through Crucible: `?models=ollama:a,ollama:b`. */
-  @Get('runs-as')
-  runsAs(@Query('models') models?: string): Promise<AiRunsAs[]> {
-    return this.guard(() => this.ai.runsAs(typeof models === 'string' ? models.split(',') : []));
+  models(@Query('server') server?: string, @Query('values') values?: string): Promise<AiModelsView> {
+    return this.guard(() => this.ai.models(server || undefined, typeof values === 'string' && values !== '' ? values.split(',') : []));
   }
 
   /** Drop cached model lists after the pane saved a server's settings. */

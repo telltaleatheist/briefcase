@@ -8,9 +8,11 @@ import { getApiBase } from '../../../core/runtime-url';
 import { ErrorSurface } from '../../../core/error-surface.service';
 import { PipelinePresetsService } from '../../../core/stores/pipeline-presets.service';
 import { Router } from '@angular/router';
-import { CrucibleService, pickerOptions, type CrucibleRefusal } from '../../../services/crucible.service';
+import { CrucibleService, type CrucibleRefusal } from '../../../services/crucible.service';
+import { AiModelOptionsService } from '../../../services/ai-model-options.service';
+import { AiModelSelectComponent } from '../../../components/ai-model-select/ai-model-select.component';
 import { CrucibleUpstreamsComponent } from '../../../components/crucible-upstreams/crucible-upstreams.component';
-import type { AiModelsView, AiRunsAs, AiTaskModels, AiTaskName, LegacyKeysView } from '@crucible-wire/ai-wire';
+import type { AiTaskModels, AiTaskName, LegacyKeysView } from '@crucible-wire/ai-wire';
 
 interface AnalysisCategory {
   id: string;
@@ -34,18 +36,12 @@ interface PromptsResponse {
   hasCustom: Record<keyof AnalysisPrompts, boolean>;
 }
 
-interface ModelOption {
-  value: string;
-  label: string;
-  provider: string;
-}
-
 const PROMPT_KEYS: (keyof AnalysisPrompts)[] = ['description', 'title', 'tags', 'quotes'];
 
 /** The tasks that can each have their own model (app-config `taskModels`). */
 const AI_TASKS: { key: AiTaskName; label: string; hint: string }[] = [
-  { key: 'chapter', label: 'Chapter titles and summaries', hint: '' },
-  { key: 'flags', label: 'Flags', hint: '' },
+  { key: 'chapter', label: 'Chapter titles and summaries', hint: 'Names and summarises the chapters the scorer found.' },
+  { key: 'flags', label: 'Flag checks', hint: 'Checks each flag the scorer ranked, and keeps or drops it.' },
   { key: 'description', label: 'Description', hint: '' },
   { key: 'tags', label: 'Tags', hint: '' },
   { key: 'title', label: 'Suggested title', hint: '' },
@@ -86,7 +82,7 @@ const DEFAULT_CATEGORIES: AnalysisCategory[] = [
 @Component({
   selector: 'app-ai-pane',
   standalone: true,
-  imports: [FormsModule, UiButtonComponent, CrucibleUpstreamsComponent],
+  imports: [FormsModule, UiButtonComponent, CrucibleUpstreamsComponent, AiModelSelectComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styleUrls: ['./panes-shared.scss', './ai-pane.component.scss'],
   templateUrl: './ai-pane.component.html'
@@ -101,7 +97,9 @@ export class AiPaneComponent {
   private readonly apiBase = getApiBase();
 
   // ── The connected Crucible (P3) ─────────────────────────────────────────
-  readonly crucibleView = signal<AiModelsView | null>(null);
+  /** The analysis-model options every picker shows, from the connected Crucible. */
+  readonly modelOptions = inject(AiModelOptionsService);
+  readonly crucibleView = this.modelOptions.view;
   /** The server whose upstreams the pane edits: the connected one. */
   readonly connectedServer = computed(() => this.crucibleView()?.server ?? null);
   readonly legacy = signal<LegacyKeysView | null>(null);
@@ -109,58 +107,11 @@ export class AiPaneComponent {
   readonly copyLine = signal<{ ok: boolean; text: string } | null>(null);
   readonly aiTasks = AI_TASKS;
   readonly taskModels = signal<AiTaskModels>({});
-  /** What each chosen `ollama:<tag>` runs as through Crucible, by stored value. */
-  readonly runsAs = signal<Record<string, AiRunsAs>>({});
-  /** The chosen Ollama values to ask about (the default and every task), as one key. */
-  private readonly ollamaChoices = computed<string>(() => {
-    const values = [this.selectedModel(), ...Object.values(this.taskModels())]
-      .filter((v): v is string => typeof v === 'string' && v.startsWith('ollama:'));
-    return [...new Set(values)].sort().join(',');
-  });
 
   // Default model
-  /** The configured server-side default ("provider:model"), or null. */
-  private configuredDefault = signal<string | null>(null);
-  /**
-   * The model the user explicitly saved this session — wins over any seed so a
-   * fresh pick shows immediately, without waiting on a reload.
-   */
-  private userSelectedModel = signal<string | null>(null);
-  availableModels = signal<ModelOption[]>([]);
+  /** The configured server-side default ("provider:model"), as stored, or ''. */
+  readonly configuredDefault = signal('');
   savedFlash = signal(false);
-
-  /**
-   * The value shown in the picker. An explicit save wins; otherwise it is seeded
-   * by preference (see preferredSeedModel): last-used first, then the configured
-   * server default, then none.
-   */
-  readonly selectedModel = computed<string>(
-    () => this.userSelectedModel() ?? this.preferredSeedModel() ?? ''
-  );
-
-  /** The selected value isn't among the loaded options — render it as "(unavailable)" so the native select still reflects it instead of dropping to the first option. Null while there are genuinely no models (the "No models available" guidance covers that). */
-  readonly missingSelectedModel = computed<string | null>(() => {
-    const current = this.selectedModel();
-    if (!current) return null;
-    const models = this.availableModels();
-    if (models.length === 0) return null;
-    return models.some(m => m.value === current) ? null : current;
-  });
-
-  /**
-   * Preferred value to seed the picker, in order: the model the user last chose
-   * in ANY picker (if it's still an installed option) → the configured
-   * server-side default (the legitimate first-run state) → none. Reads signals,
-   * so the picker re-seeds as the model list and default load in.
-   */
-  private preferredSeedModel(): string | null {
-    const models = this.availableModels();
-    const remembered = this.presetsService.lastChosenAiModel();
-    if (remembered && models.some(m => m.value === remembered)) return remembered;
-    // Keep the configured server default as-is (membership unchecked, unchanged
-    // behavior) — a stale value simply falls through to the placeholder.
-    return this.configuredDefault();
-  }
 
   // Categories
   categories = signal<AnalysisCategory[]>([]);
@@ -181,9 +132,10 @@ export class AiPaneComponent {
   readonly promptKeys = PROMPT_KEYS;
 
   constructor() {
+    // Stored choices the pickers show are resolved against the server's options.
     effect(() => {
-      const choices = this.ollamaChoices();
-      untracked(() => void this.loadRunsAs(choices));
+      const values = [this.configuredDefault(), ...Object.values(this.taskModels())];
+      untracked(() => this.modelOptions.use(values));
     });
     void this.refreshStatus();
     void this.loadDefaultModel();
@@ -203,15 +155,7 @@ export class AiPaneComponent {
 
   /** The connected server and its models, Briefcase's leftover keys and the per-task models. */
   private async refreshStatus(): Promise<void> {
-    try {
-      const view = await firstValueFrom(this.crucible.aiModels());
-      this.crucibleView.set(view);
-      this.availableModels.set(pickerOptions(view).map((m) => ({ value: m.value, label: m.label, provider: m.provider })));
-    } catch (error) {
-      this.crucibleView.set(null);
-      this.availableModels.set([]);
-      this.errorSurface.surfaceError("Couldn't list the Crucible server's models", error);
-    }
+    await this.modelOptions.refresh();
     try {
       this.legacy.set(await firstValueFrom(this.crucible.legacyKeys()));
     } catch {
@@ -222,7 +166,6 @@ export class AiPaneComponent {
     } catch {
       this.taskModels.set({});
     }
-    void this.loadRunsAs(this.ollamaChoices());
   }
 
   openCrucibleServers(): void {
@@ -258,35 +201,6 @@ export class AiPaneComponent {
     }
   }
 
-  private async loadRunsAs(choices: string): Promise<void> {
-    if (!choices) {
-      this.runsAs.set({});
-      return;
-    }
-    try {
-      const rows = await firstValueFrom(this.crucible.runsAs(choices.split(',')));
-      if (choices !== this.ollamaChoices()) return;
-      this.runsAs.set(Object.fromEntries(rows.map((row) => [row.value, row])));
-    } catch {
-      this.runsAs.set({});
-    }
-  }
-
-  /**
-   * The line under a picker holding an Ollama choice, through Crucible: the
-   * server's own model it runs as, or Ollama at the window it runs at (the
-   * direct road's size from Crucible 1.0.24, else Ollama's 4K default).
-   */
-  runsAsLine(value: string): string | null {
-    const row = this.runsAs()[value];
-    if (!row) return null;
-    const tag = value.slice('ollama:'.length);
-    const server = row.server ?? 'the Crucible server';
-    if (row.runsAs) return `${tag} (Ollama) → runs as ${row.runsAs} on ${server}`;
-    const context = row.contextTokens ? `, ${Math.round(row.contextTokens / 1024)}K context` : '';
-    return `${tag} (Ollama) → via Ollama on ${server}${context}`;
-  }
-
   taskModelFor(task: AiTaskName): string {
     return this.taskModels()[task] ?? '';
   }
@@ -300,14 +214,6 @@ export class AiPaneComponent {
     }
   }
 
-  /** A stored per-task model that is not among the options, shown as "(unavailable)" rather than dropped. */
-  missingTaskModel(task: AiTaskName): string | null {
-    const current = this.taskModelFor(task);
-    if (!current) return null;
-    const models = this.availableModels();
-    return models.length === 0 || models.some((m) => m.value === current) ? null : current;
-  }
-
   // ── Default model ───────────────────────────────────────────────────────
 
   private async loadDefaultModel(): Promise<void> {
@@ -316,22 +222,23 @@ export class AiPaneComponent {
       this.configuredDefault.set(
         result.success && result.defaultAI
           ? `${result.defaultAI.provider}:${result.defaultAI.model}`
-          : null
+          : ''
       );
     } catch (error) {
       // A failed lookup is not "no default configured" — surface it.
-      this.configuredDefault.set(null);
+      this.configuredDefault.set('');
       this.errorSurface.surfaceError("Couldn't load the default AI model setting", error);
     }
   }
 
+  /** Saved in the Crucible spelling the picker emits. */
   async onDefaultModelChange(value: string): Promise<void> {
     if (!value) return;
     const [provider, ...rest] = value.split(':');
     try {
       const result = await firstValueFrom(this.libraryService.saveDefaultAI(provider, rest.join(':')));
       if (result.success) {
-        this.userSelectedModel.set(value);
+        this.configuredDefault.set(value);
         // Keep last-used in sync with the explicit default so every other picker
         // (inspector Process, Add popover) seeds to the same model next time.
         this.presetsService.rememberAiModel(value);
