@@ -44,7 +44,6 @@ const PROMPT_KEYS: (keyof AnalysisPrompts)[] = ['description', 'title', 'tags', 
 
 /** The tasks that can each have their own model (app-config `taskModels`). */
 const AI_TASKS: { key: AiTaskName; label: string; hint: string }[] = [
-  { key: 'boundary', label: 'Chapter boundaries', hint: 'Short quote-copying calls; a small model is plenty.' },
   { key: 'chapter', label: 'Chapter titles and summaries', hint: '' },
   { key: 'flags', label: 'Flags', hint: '' },
   { key: 'description', label: 'Description', hint: '' },

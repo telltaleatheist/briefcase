@@ -7,6 +7,7 @@ export function readinessView(patch: Partial<CrucibleReadinessView> = {}): Cruci
     reason: 'The Crucible on this computer is not running.',
     action: 'start',
     server: null,
+    busy: null,
     progress: null,
     declined: false,
     aiWaiting: 0,

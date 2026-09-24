@@ -42,7 +42,9 @@ export class CrucibleStatusComponent {
     const view = this.readiness.view();
     if (!view) return 'Crucible: checking…';
     switch (view.state) {
-      case 'ready': return view.server ? `Crucible: ready on ${view.server}` : 'Crucible: ready';
+      case 'ready':
+        if (view.busy) return 'Crucible: busy (AI work waits)';
+        return view.server ? `Crucible: ready on ${view.server}` : 'Crucible: ready';
       case 'starting': return 'Crucible: starting…';
       case 'unreachable': return 'Crucible: not running';
       case 'not-installed': return 'Crucible: not installed';
@@ -51,13 +53,15 @@ export class CrucibleStatusComponent {
   });
 
   readonly tone = computed(() => {
-    const state = this.readiness.view()?.state;
-    return state === 'ready' ? 'ok' : state === 'starting' ? 'busy' : 'off';
+    const view = this.readiness.view();
+    if (view?.state === 'ready') return view.busy ? 'busy' : 'ok';
+    return view?.state === 'starting' ? 'busy' : 'off';
   });
 
   readonly tooltip = computed(() => {
     const view = this.readiness.view();
     if (!view) return 'Checking whether Crucible is running';
+    if (view.state === 'ready' && view.busy) return `${view.reason} The card is busy: ${view.busy}. AI work waits for it.`;
     const door = this.readiness.doorLabel();
     return door ? `${view.reason} Click to ${door.charAt(0).toLowerCase()}${door.slice(1)}.` : view.reason;
   });
