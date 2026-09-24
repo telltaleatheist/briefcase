@@ -353,3 +353,52 @@ async function until(check: () => boolean | undefined, ms = 3000): Promise<void>
     await new Promise((r) => setTimeout(r, 5));
   }
 }
+
+describe('REGRESSION: a cancel during a door retry is a cancel, never an unreachable (which would fall back)', () => {
+  function stubClient(overrides: Record<string, unknown>) {
+    return overrides as unknown as import('@crucible/client').CrucibleClient;
+  }
+  function tmpVideo(): string {
+    const dir = tempDir('asr-cancel-');
+    const file = path.join(dir, 'v.mp4');
+    fs.writeFileSync(file, Buffer.alloc(1024, 1));
+    return file;
+  }
+
+  it('the upload: cancelled while waiting to retry, the retry failing again', async () => {
+    const { runAsrJob } = await import('../../src/crucible/asr/crucible-asr-job');
+    const { CrucibleUnreachable } = await import('@crucible/client');
+    let uploads = 0;
+    const controller = new AbortController();
+    const client = stubClient({
+      upload: async () => { uploads += 1; throw new CrucibleUnreachable('', 'connection refused'); },
+      submit: jest.fn(),
+    });
+    setTimeout(() => controller.abort(), 20);
+    const err = await runAsrJob({
+      client, server: 'mac', model: 'm', params: { language: 'auto', vad_filter: false, word_timestamps: false } as never,
+      file: tmpVideo(), filename: 'v.mp4', signal: controller.signal, doorDelaysMs: [5_000, 5_000],
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(CrucibleAsrCancelled);
+    expect(uploads).toBe(1);
+    expect((client as unknown as { submit: jest.Mock }).submit).not.toHaveBeenCalled();
+  });
+
+  it('the submit: cancelled while waiting to retry', async () => {
+    const { runAsrJob } = await import('../../src/crucible/asr/crucible-asr-job');
+    const { CrucibleUnreachable } = await import('@crucible/client');
+    let submits = 0;
+    const controller = new AbortController();
+    const client = stubClient({
+      upload: async () => ({ blobId: 'b1' }),
+      submit: async () => { submits += 1; throw new CrucibleUnreachable('', 'connection refused'); },
+    });
+    setTimeout(() => controller.abort(), 20);
+    const err = await runAsrJob({
+      client, server: 'mac', model: 'm', params: { language: 'auto', vad_filter: false, word_timestamps: false } as never,
+      file: tmpVideo(), filename: 'v.mp4', signal: controller.signal, doorDelaysMs: [5_000, 5_000],
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(CrucibleAsrCancelled);
+    expect(submits).toBe(1);
+  });
+});

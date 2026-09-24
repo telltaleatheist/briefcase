@@ -211,11 +211,15 @@ export async function runAsrJob(options: RunAsrJobOptions): Promise<AsrJobOutcom
     try {
       blobId = (await client.upload(await openAsBlob(options.file), { filename: options.filename })).blobId;
     } catch (err) {
+      // A cancel during the retry wait wakes the sleep early; the attempt that
+      // follows must not turn it into "unreachable", which would fall back.
+      if (signal?.aborted) throw cancelledBeforeSubmit();
       const classified = classifyAsrRefusal(err, server, 'the upload');
       if (classified instanceof CrucibleAsrUnavailable && classified.code === 'crucible_unreachable'
         && attempt < doorDelays.length && !signal?.aborted) {
         log(`upload to ${server} failed (${classified.message}); trying again in ${doorDelays[attempt]! / 1000}s`);
         await sleep(doorDelays[attempt]!, signal);
+        if (signal?.aborted) throw cancelledBeforeSubmit();
         continue;
       }
       throw classified;
@@ -235,9 +239,11 @@ export async function runAsrJob(options: RunAsrJobOptions): Promise<AsrJobOutcom
         ...(options.clientRef === undefined ? {} : { clientRef: options.clientRef }),
       });
     } catch (err) {
-      if (err instanceof CrucibleUnreachable && attempt < doorDelays.length && !signal?.aborted) {
+      if (signal?.aborted) throw cancelledBeforeSubmit();
+      if (err instanceof CrucibleUnreachable && attempt < doorDelays.length) {
         log(`${server} did not answer the asr submit (${err.message}); asking again in ${doorDelays[attempt]! / 1000}s`);
         await sleep(doorDelays[attempt]!, signal);
+        if (signal?.aborted) throw cancelledBeforeSubmit();
         continue;
       }
       throw classifyAsrRefusal(err, server, 'the asr job');
