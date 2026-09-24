@@ -5,7 +5,9 @@ import { aiViaCrucible } from '../crucible/llm/ai-via';
 import { Injectable, Logger } from '@nestjs/common';
 import { MediaEventService } from './media-event.service';
 import { MediaProcessingService } from './media-processing.service';
-import { WhisperService } from './whisper.service';
+import { WhisperService, type WhisperRoute } from './whisper.service';
+import { isAsrUnavailable } from '../crucible/asr/crucible-asr-job';
+import { isParked } from '../crucible/llm/errors';
 import { DownloaderService } from '../downloader/downloader.service';
 import { FileScannerService } from '../database/file-scanner.service';
 import { DatabaseService } from '../database/database.service';
@@ -464,6 +466,8 @@ export class MediaOperationsService {
       translate?: boolean;
     } = {},
     jobId?: string,
+    /** P5: the engine the queue placed this task on. Absent: the venue rule decides, falling back in place. */
+    route?: WhisperRoute,
   ): Promise<TranscribeResult> {
     try {
       this.logger.log(`[${jobId || 'standalone'}] Transcribing video: ${videoIdOrPath}`);
@@ -491,11 +495,13 @@ export class MediaOperationsService {
 
       this.eventService.emitTaskProgress(jobId || '', 'transcribe', 0, 'Starting transcription...');
 
-      const transcriptFile = await this.whisperService.transcribeVideo(videoPath, jobId, options.model, options.translate);
-
-      if (!transcriptFile) {
-        throw new Error('Transcription failed');
-      }
+      const outcome = await this.whisperService.transcribe(videoPath, {
+        jobId,
+        model: options.model,
+        translate: options.translate,
+        route,
+      });
+      const transcriptFile = outcome.srtPath;
 
       this.eventService.emitTaskProgress(jobId || '', 'transcribe', 95, 'Saving transcript...');
 
@@ -512,8 +518,8 @@ export class MediaOperationsService {
           videoId,
           plainText: transcriptText,
           srtFormat: transcriptSrt,
-          whisperModel: options.model || 'base',
-          language: options.language || 'en',
+          whisperModel: outcome.engine === 'crucible' ? (outcome.model ?? 'crucible') : (options.model || 'base'),
+          language: options.language || outcome.language || 'en',
         });
         this.logger.log(`[${jobId || 'standalone'}] Transcript saved to database for video ${videoId}`);
 
@@ -529,8 +535,12 @@ export class MediaOperationsService {
         data: {
           transcriptPath: videoId ? undefined : transcriptFile, // Only return path if not saved to DB
         },
+        ...(outcome.warnings.length > 0 ? { warnings: outcome.warnings } : {}),
       };
     } catch (error) {
+      // The queue's to act on, not a failure: a busy Crucible card parks the
+      // task, and an unavailable Crucible re-routes it to whisper-cli (P5).
+      if (isParked(error) || isAsrUnavailable(error)) throw error;
       this.logger.error(`Transcription failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
       return {
         success: false,

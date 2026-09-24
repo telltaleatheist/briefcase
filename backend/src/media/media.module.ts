@@ -14,6 +14,7 @@ import { DownloaderModule } from '../downloader/downloader.module';
 import { AnalysisModule } from '../analysis/analysis.module';
 import { ApiKeysModule } from '../config/config.module';
 import { WebArchiveModule } from '../web-archive/web-archive.module';
+import { CrucibleAsrModule } from '../crucible/asr/crucible-asr.module';
 
 @Module({
   imports: [
@@ -24,6 +25,8 @@ import { WebArchiveModule } from '../web-archive/web-archive.module';
     forwardRef(() => AnalysisModule),
     ApiKeysModule,
     WebArchiveModule,
+    // P5: transcription through Crucible's asr job (WhisperService picks the engine).
+    CrucibleAsrModule,
   ],
   controllers: [MediaController],
   providers: [

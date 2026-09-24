@@ -1,0 +1,224 @@
+/**
+ * transcript.json → SRT (migration plan §6.6 step 5).
+ *
+ * A Crucible `asr` job hands back `transcript.json` (crucible
+ * docs/PHASE4-AUDIO.md §3): whisper's own segments in ABSOLUTE time, window
+ * overlaps already removed, words attached when `word_timestamps` was asked
+ * for. Everything downstream in Briefcase reads an SRT (transcript search, the
+ * editor, analysis, snap), so this is the one place that turns one into the
+ * other, and the SRT it writes is the shape whisper.cpp writes:
+ *
+ *   <n>\n<HH:MM:SS,mmm> --> <HH:MM:SS,mmm>\n<text>\n\n
+ *
+ * which is what `AnalysisService.parseSrtToSegments` (blocks split on a blank
+ * line, line 1 the timestamp, two-digit hours) and the frontend readers need.
+ *
+ * Salvaged from the reference branch (bbb7ef6, ported there from BookForge's
+ * electron/crucible/asr.ts). Changed here:
+ *  - the metadata fields past `segments`, `model` and `language` are read
+ *    leniently (a transcript is not lost over a missing `revision`), the
+ *    segments strictly;
+ *  - an overlapping cue is DROPPED only when it lies inside the kept one (a
+ *    true boundary duplicate); one that overlaps and runs on is kept with its
+ *    start moved to the kept cue's end. BookForge dropped every cue starting
+ *    0.1 s inside the previous one, which for a video transcript loses words;
+ *  - a cue's text is one line (no blank line can split an SRT block);
+ *  - hours are at least two digits (`100:00:00,000` past 99 h, never wrapped).
+ */
+import { CrucibleAsrRefused } from './asr-models';
+
+export interface TranscriptWord {
+  readonly start: number;
+  readonly end: number;
+  readonly word: string;
+}
+
+export interface TranscriptSegment {
+  readonly start: number;
+  readonly end: number;
+  readonly text: string;
+  readonly words?: readonly TranscriptWord[];
+}
+
+/** The document Crucible's `asr` job writes. */
+export interface CrucibleTranscript {
+  readonly model: string;
+  readonly revision: string;
+  readonly language: string;
+  readonly languageRequested: string;
+  readonly durationS: number | null;
+  readonly segments: readonly TranscriptSegment[];
+}
+
+export interface TranscriptCue {
+  readonly start: number;
+  readonly end: number;
+  readonly text: string;
+}
+
+/** Sentence-final punctuation, with closing quotes/brackets after the mark. BookForge's. */
+const SENTENCE_END_RE = /[.!?…]["”’')\]]*$/;
+/** A cue that grew this long without punctuation is flushed. BookForge's `_MAX_CUE_CHARS`. */
+const MAX_CUE_CHARS = 240;
+/** Two cues overlapping by less than this are not an overlap (whisper's timestamps jitter). */
+const OVERLAP_TOLERANCE_S = 0.1;
+
+function unreadable(message: string): CrucibleAsrRefused {
+  return new CrucibleAsrRefused('crucible_asr_transcript_unreadable', `transcript.json from Crucible is unreadable: ${message}`);
+}
+
+function num(obj: Record<string, unknown>, key: string, where: string): number {
+  const value = obj[key];
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw unreadable(`${where}.${key} is not a number`);
+  return value;
+}
+
+function str(obj: Record<string, unknown>, key: string, where: string): string {
+  const value = obj[key];
+  if (typeof value !== 'string') throw unreadable(`${where}.${key} is not a string`);
+  return value;
+}
+
+function optStr(obj: Record<string, unknown>, key: string): string {
+  const value = obj[key];
+  return typeof value === 'string' ? value : '';
+}
+
+/**
+ * Read `transcript.json` (already JSON-parsed). The segments are read
+ * strictly: a segment with no `end` is a server that changed, and an SRT
+ * built around it would be a transcript with a hole.
+ */
+export function readCrucibleTranscript(parsed: unknown): CrucibleTranscript {
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw unreadable('it is not an object');
+  const doc = parsed as Record<string, unknown>;
+  const rawSegments = doc['segments'];
+  if (!Array.isArray(rawSegments)) throw unreadable('it has no segments list');
+  const segments: TranscriptSegment[] = rawSegments.map((raw, i) => {
+    const where = `segments[${i}]`;
+    if (typeof raw !== 'object' || raw === null) throw unreadable(`${where} is not an object`);
+    const seg = raw as Record<string, unknown>;
+    const row: { start: number; end: number; text: string; words?: TranscriptWord[] } = {
+      start: num(seg, 'start', where),
+      end: num(seg, 'end', where),
+      text: str(seg, 'text', where),
+    };
+    if ('words' in seg && seg['words'] !== null && seg['words'] !== undefined) {
+      const rawWords = seg['words'];
+      if (!Array.isArray(rawWords)) throw unreadable(`${where}.words is not a list`);
+      row.words = rawWords.map((w, j) => {
+        const wwhere = `${where}.words[${j}]`;
+        if (typeof w !== 'object' || w === null) throw unreadable(`${wwhere} is not an object`);
+        const word = w as Record<string, unknown>;
+        return { start: num(word, 'start', wwhere), end: num(word, 'end', wwhere), word: str(word, 'word', wwhere) };
+      });
+    }
+    return row;
+  });
+  const duration = doc['duration_s'];
+  return {
+    model: str(doc, 'model', 'transcript'),
+    revision: optStr(doc, 'revision'),
+    language: str(doc, 'language', 'transcript'),
+    languageRequested: optStr(doc, 'language_requested'),
+    durationS: typeof duration === 'number' && Number.isFinite(duration) ? duration : null,
+    segments,
+  };
+}
+
+/** One line of cue text: every run of whitespace (newlines included) folded to a space. */
+function oneLine(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Segments → cues. With word timings, words accumulate into a cue that ends at
+ * a word carrying sentence-final punctuation or once the cue holds 240
+ * characters (BookForge's grouping). A segment with no words is one cue of its
+ * own text. Empty text is never a cue. Then the cues are ordered by start and
+ * overlaps resolved: a cue inside the kept one is a boundary duplicate and is
+ * dropped; one that overlaps and runs on starts where the kept one ends.
+ */
+export function groupTranscriptCues(segments: readonly TranscriptSegment[]): TranscriptCue[] {
+  const cues: TranscriptCue[] = [];
+  let words: string[] = [];
+  let start: number | null = null;
+  let end: number | null = null;
+  const flush = (): void => {
+    if (words.length > 0 && start !== null && end !== null) {
+      const text = oneLine(words.join(''));
+      if (text !== '') cues.push({ start, end: Math.max(start, end), text });
+    }
+    words = [];
+    start = null;
+    end = null;
+  };
+  for (const segment of segments) {
+    if (segment.words !== undefined && segment.words.length > 0) {
+      for (const w of segment.words) {
+        if (start === null) start = w.start;
+        end = w.end;
+        words.push(w.word);
+        const chars = words.reduce((n, x) => n + x.length, 0);
+        if (SENTENCE_END_RE.test(w.word.trim()) || chars >= MAX_CUE_CHARS) flush();
+      }
+    } else {
+      flush();
+      const text = oneLine(segment.text);
+      if (text !== '') cues.push({ start: segment.start, end: Math.max(segment.start, segment.end), text });
+    }
+  }
+  flush();
+
+  const ordered = cues
+    .map((cue, index) => ({ cue, index }))
+    .sort((a, b) => a.cue.start - b.cue.start || a.index - b.index)
+    .map(({ cue }) => cue);
+  const kept: TranscriptCue[] = [];
+  for (const cue of ordered) {
+    const last = kept[kept.length - 1];
+    if (last === undefined || cue.start >= last.end - OVERLAP_TOLERANCE_S) {
+      kept.push(cue);
+      continue;
+    }
+    if (cue.end <= last.end + OVERLAP_TOLERANCE_S) continue; // inside the kept cue: a boundary duplicate
+    kept.push({ start: last.end, end: cue.end, text: cue.text });
+  }
+  return kept;
+}
+
+/**
+ * `HH:MM:SS,mmm`, rounded to the millisecond FIRST and then split, so 59.9996 s
+ * carries into the minute rather than printing `00:00:60,000`. Hours are at
+ * least two digits and never wrap.
+ */
+export function srtTimestamp(seconds: number): string {
+  const totalMs = Math.round(Math.max(0, seconds) * 1000);
+  const h = Math.floor(totalMs / 3_600_000);
+  const m = Math.floor((totalMs % 3_600_000) / 60_000);
+  const s = Math.floor((totalMs % 60_000) / 1000);
+  const ms = totalMs % 1000;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(ms).padStart(3, '0')}`;
+}
+
+/** SRT text: sequential 1-based indices, a blank line after every cue, `\n` line endings. */
+export function renderSrt(cues: readonly TranscriptCue[]): string {
+  let out = '';
+  cues.forEach((cue, i) => {
+    out += `${i + 1}\n${srtTimestamp(cue.start)} --> ${srtTimestamp(cue.end)}\n${cue.text}\n\n`;
+  });
+  return out;
+}
+
+/**
+ * `transcript.json` (parsed) → SRT text and its cue count.
+ *
+ * A transcript with no speech is an EMPTY SRT, not a refusal: a library holds
+ * music videos and silent clips, for which "no speech" is the true
+ * transcript, and it is what whisper.cpp writes for them.
+ */
+export function transcriptToSrt(parsed: unknown): { srt: string; cues: number; transcript: CrucibleTranscript } {
+  const transcript = readCrucibleTranscript(parsed);
+  const cues = groupTranscriptCues(transcript.segments);
+  return { srt: renderSrt(cues), cues: cues.length, transcript };
+}

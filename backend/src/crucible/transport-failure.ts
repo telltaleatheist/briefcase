@@ -49,14 +49,18 @@ function causeOf(err: unknown): MaybeCause | null {
  * when this was not the wire. Never a category invented here.
  */
 export function transportFailureCause(err: unknown): string | null {
-  if (!(err instanceof Error)) return null;
+  // Duck-typed, not `instanceof Error`: undici's errors come from Node's own
+  // realm, which is not the realm a Jest sandbox (or a vm context) calls Error.
+  if (typeof err !== 'object' || err === null) return null;
+  const e = err as { name?: unknown; message?: unknown };
+  if (typeof e.name !== 'string' || typeof e.message !== 'string') return null;
   const cause = causeOf(err);
   const code = typeof cause?.code === 'string' ? cause.code : null;
   const codeIsTransport = code !== null && TRANSPORT_CODES.has(code);
-  const messageIsUndici = err.name === 'TypeError' && UNDICI_MESSAGES.has(err.message);
+  const messageIsUndici = e.name === 'TypeError' && UNDICI_MESSAGES.has(e.message);
   if (!codeIsTransport && !messageIsUndici) return null;
   const detail = code ?? (typeof cause?.message === 'string' && cause.message !== '' ? cause.message : null);
-  return detail === null || detail === err.message ? err.message : `${err.message} (${detail})`;
+  return detail === null || detail === e.message ? e.message : `${e.message} (${detail})`;
 }
 
 export function isTransportFailure(err: unknown): boolean {

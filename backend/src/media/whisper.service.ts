@@ -1,5 +1,5 @@
 // backend/src/media/whisper.service.ts
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { MediaEventService } from './media-event.service';
 import * as path from 'path';
@@ -12,6 +12,40 @@ import {
   verifyBinary,
   type FfmpegProgress,
 } from '../bridges';
+import { CrucibleTranscriptionService } from '../crucible/asr/crucible-transcription.service';
+import { CrucibleAsrUnavailable, isAsrUnavailable } from '../crucible/asr/crucible-asr-job';
+import type { TranscriptionRoute } from '../crucible/asr/transcription-venue';
+import { isParked } from '../crucible/llm/errors';
+
+/**
+ * Which engine one transcription uses (P5). `cli` carries the warning to put
+ * on the task when it is whisper-cli only because Crucible couldn't be used.
+ */
+export type WhisperRoute =
+  | { kind: 'cli'; warning?: string | null }
+  | { kind: 'crucible'; server: string; model: string; fallback: 'inline' | 'defer'; signal?: AbortSignal };
+
+export interface TranscriptionOutcome {
+  srtPath: string;
+  engine: 'whisper-cli' | 'crucible';
+  /** The model that transcribed: the Crucible asr id, or the whisper model asked for. */
+  model: string | null;
+  /** The language the engine detected, when it said. */
+  language: string | null;
+  /** Non-fatal: e.g. transcribed with whisper-cli because Crucible couldn't be used. */
+  warnings: string[];
+}
+
+/** Crucible couldn't take the job for an infrastructure reason, or its card is busy: whisper-cli may stand in. */
+export function isCrucibleFallbackCause(error: unknown): boolean {
+  return isAsrUnavailable(error) || isParked(error);
+}
+
+function crucibleFallbackReason(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const trimmed = message.replace(/[.\s]+$/, '');
+  return `${trimmed.charAt(0).toLowerCase()}${trimmed.slice(1)}.`;
+}
 
 @Injectable()
 export class WhisperService {
@@ -22,9 +56,13 @@ export class WhisperService {
   private ffmpegBinaryPath?: string;
   /** Active transcriptions keyed by jobId, so a cancelled job aborts its child. */
   private activeTranscriptions: Map<string, WhisperManager> = new Map();
+  /** Crucible transcriptions keyed by jobId: a cancel aborts the job's signal, which DELETEs it. */
+  private activeCrucible: Map<string, AbortController> = new Map();
 
   constructor(
     private readonly eventService: MediaEventService,
+    /** P5. Absent (a spec, or a build without Crucible): whisper-cli only, as before. */
+    @Optional() private readonly crucibleAsr?: CrucibleTranscriptionService,
   ) {
     // Resolve the binary paths but DEFER verification to use time
     // (ensureFfmpegReady). Verifying (and throwing) here would take the whole Nest
@@ -78,6 +116,13 @@ export class WhisperService {
     const jobId = payload?.jobId;
     if (!jobId) return;
 
+    // A Crucible job: aborting sends DELETE /v1/jobs/{id} (the job is cooperative mid-file).
+    const crucible = this.activeCrucible.get(jobId);
+    if (crucible) {
+      this.logger.log(`Cancelling Crucible transcription for job ${jobId}`);
+      crucible.abort();
+    }
+
     const manager = this.activeTranscriptions.get(jobId);
     if (manager) {
       this.logger.log(`Cancelling transcription for job ${jobId}`);
@@ -95,7 +140,144 @@ export class WhisperService {
     }
   }
 
+  /**
+   * The one transcription seam (callers keep this signature). Picks the engine
+   * by the venue rule (Crucible asr, or whisper-cli), falls back to whisper-cli
+   * in place when Crucible can't take the job, and resolves with the SRT path,
+   * or null when transcription failed, exactly as before P5.
+   */
   async transcribeVideo(videoFile: string, jobId?: string, model?: string, translate?: boolean): Promise<string | null> {
+    try {
+      return (await this.transcribe(videoFile, { jobId, model, translate })).srtPath;
+    } catch (error) {
+      this.logger.error(`Transcription failed: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
+  }
+
+  /**
+   * Transcribe with the engine `route` names, or the venue rule's choice when
+   * it names none. Throws on failure (the message says why).
+   *
+   *   route cli                         whisper-cli, unchanged since before P5.
+   *   route crucible, fallback 'inline'  Crucible; an infrastructure failure or a
+   *                                     busy card falls back to whisper-cli here,
+   *                                     with a warning (no queue to park in).
+   *   route crucible, fallback 'defer'   Crucible; a busy card throws
+   *                                     CrucibleParkedError and an infrastructure
+   *                                     failure CrucibleAsrUnavailable, for the
+   *                                     queue to park or re-route the task.
+   *
+   * A cancel never falls back.
+   */
+  async transcribe(
+    videoFile: string,
+    options: { jobId?: string; model?: string; translate?: boolean; route?: WhisperRoute } = {},
+  ): Promise<TranscriptionOutcome> {
+    const { jobId, model, translate } = options;
+    let route = options.route;
+    if (route === undefined) {
+      const decided: TranscriptionRoute = this.crucibleAsr === undefined
+        ? { kind: 'cli', reason: 'Crucible transcription is not available in this build.', warning: null }
+        : await this.crucibleAsr.route({ translate });
+      route = decided.kind === 'crucible'
+        ? { kind: 'crucible', server: decided.server, model: decided.model, fallback: 'inline' }
+        : { kind: 'cli', warning: decided.warning };
+    }
+
+    if (route.kind === 'crucible') {
+      try {
+        return await this.transcribeOnCrucible(videoFile, jobId, route);
+      } catch (error) {
+        if (route.fallback === 'defer' || !isCrucibleFallbackCause(error)) throw error;
+        const warning = `Transcribed with the offline transcriber (whisper) because ${crucibleFallbackReason(error)}`;
+        this.logger.warn(`[${jobId || 'standalone'}] ${warning}`);
+        this.eventService.emitTaskProgress(jobId || '', 'transcribe', 1, 'Crucible unavailable, using the offline transcriber...');
+        route = { kind: 'cli', warning };
+      }
+    }
+
+    const srtPath = await this.transcribeWithCli(videoFile, jobId, model, translate);
+    if (!srtPath) throw new Error('Transcription failed');
+    return {
+      srtPath,
+      engine: 'whisper-cli',
+      model: model ?? null,
+      language: null,
+      warnings: route.warning ? [route.warning] : [],
+    };
+  }
+
+  /** Crucible's asr job on the video itself. The SRT lands where the whisper-cli path puts its own. */
+  private async transcribeOnCrucible(
+    videoFile: string,
+    jobId: string | undefined,
+    route: Extract<WhisperRoute, { kind: 'crucible' }>,
+  ): Promise<TranscriptionOutcome> {
+    if (this.crucibleAsr === undefined) {
+      throw new CrucibleAsrUnavailable('crucible_asr_unavailable', route.server, 'Crucible transcription is not available in this build.');
+    }
+    if (!fs.existsSync(videoFile)) {
+      throw new Error(`Video file not found: ${videoFile}`);
+    }
+    const key = jobId || 'standalone';
+    const os = require('os');
+    const crypto = require('crypto');
+    const outputDir = path.join(os.tmpdir(), `whisper-${crypto.randomBytes(8).toString('hex')}`);
+    fs.mkdirSync(outputDir, { recursive: true });
+
+    // Our own cancel (job.cancel-requested), joined with the caller's signal.
+    const controller = new AbortController();
+    const onCallerAbort = (): void => controller.abort();
+    if (route.signal?.aborted) controller.abort();
+    route.signal?.addEventListener('abort', onCallerAbort, { once: true });
+    if (jobId) this.activeCrucible.set(jobId, controller);
+
+    const started = Date.now();
+    try {
+      this.eventService.emitTaskProgress(jobId || '', 'transcribe', 2, `Transcribing on Crucible (${route.server})...`);
+      this.eventService.emitTranscriptionStarted(videoFile, jobId);
+      const outcome = await this.crucibleAsr.transcribe({
+        server: route.server,
+        model: route.model,
+        videoFile,
+        outputDir,
+        baseName: `${key}_audio`,
+        localId: key,
+        signal: controller.signal,
+        onProgress: (percent, message) => {
+          const elapsedMs = Date.now() - started;
+          const eta = percent > 15 && percent < 95
+            ? Math.round((elapsedMs * ((95 - percent) / (percent - 15))) / 1000)
+            : undefined;
+          this.eventService.emitTranscriptionProgress(percent, message, jobId);
+          if (jobId) this.eventService.emitTaskProgress(jobId, 'transcribe', percent, message, { eta, elapsedMs });
+        },
+      });
+      this.eventService.emitTranscriptionCompleted(outcome.srtFile, jobId);
+      // The same relocation as the whisper-cli path: a standalone temp SRT, the job dir removed.
+      const standaloneSrt = path.join(os.tmpdir(), `${path.basename(outputDir)}.srt`);
+      fs.copyFileSync(outcome.srtFile, standaloneSrt);
+      fs.rmSync(outputDir, { recursive: true, force: true });
+      return { srtPath: standaloneSrt, engine: 'crucible', model: outcome.model, language: outcome.language, warnings: [] };
+    } catch (error) {
+      try {
+        fs.rmSync(outputDir, { recursive: true, force: true });
+      } catch {
+        // A temp dir left behind is not worth masking the real error for.
+      }
+      if (!isCrucibleFallbackCause(error) && !isParked(error)) {
+        this.eventService.emitTranscriptionFailed(videoFile, error instanceof Error ? error.message : String(error), jobId);
+      }
+      throw error;
+    } finally {
+      route.signal?.removeEventListener('abort', onCallerAbort);
+      if (jobId) this.activeCrucible.delete(jobId);
+    }
+  }
+
+  /** whisper-cli (whisper.cpp), exactly as it ran before P5. Resolves with the SRT path, or null on failure. */
+  private async transcribeWithCli(videoFile: string, jobId?: string, model?: string, translate?: boolean): Promise<string | null> {
     console.log(`[WHISPER SERVICE] Transcription started`);
     console.log(`[WHISPER SERVICE] Video file: ${videoFile}`);
     console.log(`[WHISPER SERVICE] Job ID: ${jobId}`);
