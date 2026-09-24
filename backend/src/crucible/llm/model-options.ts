@@ -115,13 +115,6 @@ function textModels(facts: AnalysisOptionFacts): string[] {
   return facts.models.filter((m) => isAnalysisModel({ ...m, classes: null }, facts.pageReaders)).map((m) => m.id);
 }
 
-function serverDetail(model: OptionModel, serverChoice: boolean): string {
-  const parts = [model.paramsB !== null && model.paramsB > 0 ? `${model.paramsB}B` : 'size unknown'];
-  if (model.resident) parts.push('loaded now');
-  if (serverChoice) parts.push("Crucible's pick for analysis");
-  return parts.join(', ');
-}
-
 /** The options, grouped as the server presents them. */
 export function buildAnalysisOptions(facts: AnalysisOptionFacts): AnalysisOptions {
   const analysisDefault = facts.analysis?.enabled && facts.analysis.selected ? optionValueOf(facts.analysis.selected) : null;
@@ -134,7 +127,7 @@ export function buildAnalysisOptions(facts: AnalysisOptionFacts): AnalysisOption
     if (model === undefined || !canRun(model)) continue;
     const value = `local:${id}`;
     const serverChoice = value === analysisDefault;
-    serverOptions.push({ value, label: id, group: 'server', sizeB: model.paramsB, resident: model.resident, serverChoice, detail: serverDetail(model, serverChoice) });
+    serverOptions.push({ value, label: id, group: 'server', sizeB: model.paramsB, resident: model.resident, serverChoice });
   }
   const groups: AiOptionGroup[] = [];
   if (serverOptions.length > 0) groups.push({ kind: 'server', label: groupLabel('server', facts.server, facts.local), options: serverOptions, error: null });
@@ -147,7 +140,7 @@ export function buildAnalysisOptions(facts: AnalysisOptionFacts): AnalysisOption
       if (!isPickableUpstreamModel(upstream, id)) continue;
       const value = `${PROVIDER_OF[upstream]}:${id}`;
       const serverChoice = value === analysisDefault;
-      options.push({ value, label: id, group: upstream, sizeB: null, resident: null, serverChoice, detail: serverChoice ? "Crucible's pick for analysis" : '' });
+      options.push({ value, label: id, group: upstream, sizeB: null, resident: null, serverChoice });
     }
     groups.push({ kind: upstream, label: groupLabel(upstream, facts.server, facts.local), options, error: listing.error });
   }

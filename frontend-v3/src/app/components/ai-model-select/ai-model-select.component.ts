@@ -1,6 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, input, output, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import type { AiModelOption } from '@crucible-wire/ai-wire';
 import { AiModelOptionsService } from '../../services/ai-model-options.service';
 import { CrucibleReadinessService } from '../../services/crucible-readiness.service';
 
@@ -57,7 +56,7 @@ import { CrucibleReadinessService } from '../../services/crucible-readiness.serv
           @for (group of store.groups(); track group.kind) {
             <optgroup [label]="group.label">
               @for (option of group.options; track option.value) {
-                <option [value]="option.value">{{ optionText(option) }}</option>
+                <option [value]="option.value">{{ option.label }}</option>
               }
               @if (group.error) {
                 <option disabled>Couldn't list: {{ group.error }}</option>
@@ -157,10 +156,6 @@ export class AiModelSelectComponent {
     if (this.store.loaded() && this.store.options().length === 0) return { text: this.emptyReason(), warn: true, retry: false };
     return null;
   });
-
-  optionText(option: AiModelOption): string {
-    return option.detail ? `${option.label} (${option.detail})` : option.label;
-  }
 
   pick(value: string): void {
     this.valueChange.emit(value ?? '');

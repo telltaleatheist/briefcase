@@ -72,7 +72,7 @@ describe('AiModelSelectComponent', () => {
       groups: [
         ...modelsView().groups,
         { kind: 'anthropic', label: 'Claude via Crucible', error: null, options: [
-          { value: 'claude:claude-sonnet-5', label: 'claude-sonnet-5', group: 'anthropic', sizeB: null, resident: null, serverChoice: false, detail: '' },
+          { value: 'claude:claude-sonnet-5', label: 'claude-sonnet-5', group: 'anthropic', sizeB: null, resident: null, serverChoice: false },
         ] },
       ],
     });
@@ -80,9 +80,9 @@ describe('AiModelSelectComponent', () => {
     const groups = Array.from(select().querySelectorAll('optgroup')).map((g) => g.label);
     expect(groups).toEqual(['On this Crucible', 'Claude via Crucible']);
     expect(Array.from(select().options).map((o) => o.textContent!.trim())).toEqual([
-      "qwen3.8-27b-8bit (27B, Crucible's pick for analysis)",
-      'qwen3.8-27b-4bit (27B)',
-      'qwen3.5-9b (9B)',
+      'qwen3.8-27b-8bit',
+      'qwen3.8-27b-4bit',
+      'qwen3.5-9b',
       'claude-sonnet-5',
     ]);
     expect(select().value).toBe('local:qwen3.5-9b');

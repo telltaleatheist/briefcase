@@ -85,24 +85,24 @@ describe('the analysis options a server offers', () => {
   it('a server with no upstream (the Mac as it is): only its analysis candidates that can load, under "On this Crucible"', () => {
     const built = buildAnalysisOptions(macFacts());
     expect(built.groups.map((g) => g.label)).toEqual(['On this Crucible']);
-    expect(built.groups[0].options.map((o) => [o.value, o.detail])).toEqual([
-      ['local:qwen3.8-27b-8bit', "27B, Crucible's pick for analysis"],
-      ['local:qwen3.8-27b-4bit', '27B'],
-      ['local:qwen3.5-9b', '9B'],
+    expect(built.groups[0].options.map((o) => [o.value, o.label, o.serverChoice])).toEqual([
+      ['local:qwen3.8-27b-8bit', 'qwen3.8-27b-8bit', true],
+      ['local:qwen3.8-27b-4bit', 'qwen3.8-27b-4bit', false],
+      ['local:qwen3.5-9b', 'qwen3.5-9b', false],
     ]);
     expect(built.analysisDefault).toBe('local:qwen3.8-27b-8bit');
     // No Claude, OpenAI or Ollama group at all: nothing the server does not offer.
     expect(JSON.stringify(built)).not.toMatch(/claude|openai|ollama/i);
   });
 
-  it('a candidate the server cannot load is left out; a resident one says so', () => {
+  it('a candidate the server cannot load is left out; a resident one is kept', () => {
     const facts = macFacts({
       classCandidates: ['qwen3.8-27b-8bit', 'qwen3.5-9b-vl', 'qwen3.5-9b'],
       models: MAC_MODELS.map((m) => (m.id === 'qwen3.5-9b' ? { ...m, resident: true, loadable: false } : m)),
     });
     const options = buildAnalysisOptions(facts).groups[0].options;
     expect(options.map((o) => o.value)).toEqual(['local:qwen3.8-27b-8bit', 'local:qwen3.5-9b']);
-    expect(options[1].detail).toBe('9B, loaded now');
+    expect(options[1].resident).toBe(true);
   });
 
   it('a server with every upstream: its own models, then Claude, OpenAI and Ollama via Crucible, named for the server when it is not this computer', () => {
@@ -114,7 +114,7 @@ describe('the analysis options a server offers', () => {
       ['ollama', 'Ollama via Crucible on owens-pc', ['ollama:qwen3:14b', 'ollama:gemma3:27b']],
     ]);
     // Upstream models state no size: none is invented.
-    expect(built.groups[1].options[0]).toMatchObject({ sizeB: null, resident: null, detail: '' });
+    expect(built.groups[1].options[0]).toMatchObject({ sizeB: null, resident: null });
   });
 
   it('an upstream routed as the analysis pick is marked; a listing failure is the group\'s error, not an empty silence', () => {
@@ -123,7 +123,7 @@ describe('the analysis options a server offers', () => {
       listings: { anthropic: { ids: ['claude-sonnet-5'], error: null }, openai: { ids: null, error: 'The key was refused (401).' }, ollama: { ids: [], error: null } },
     }));
     expect(built.analysisDefault).toBe('claude:claude-sonnet-5');
-    expect(built.groups[1].options[0]).toMatchObject({ serverChoice: true, detail: "Crucible's pick for analysis" });
+    expect(built.groups[1].options[0]).toMatchObject({ serverChoice: true });
     expect(built.groups[2]).toMatchObject({ kind: 'openai', options: [], error: 'The key was refused (401).' });
   });
 
@@ -135,7 +135,7 @@ describe('the analysis options a server offers', () => {
     expect(built.groups.map((g) => g.kind)).toEqual(['server', 'anthropic']);
   });
 
-  it('a server that states no candidates: its loadable text models that are not page readers, with unstated sizes shown as unknown', () => {
+  it('a server that states no candidates: its loadable text models that are not page readers, with unstated sizes left null', () => {
     const built = buildAnalysisOptions(macFacts({
       classCandidates: null,
       models: MAC_MODELS.map((m) => ({ ...m, paramsB: null })),
@@ -143,7 +143,7 @@ describe('the analysis options a server offers', () => {
     expect(built.groups[0].options.map((o) => o.value)).toEqual([
       'local:qwen3.5-0.8b', 'local:qwen3.5-2b', 'local:qwen3.5-4b', 'local:qwen3.5-9b', 'local:qwen3.8-27b-4bit', 'local:qwen3.8-27b-8bit',
     ]);
-    expect(built.groups[0].options[0].detail).toBe('size unknown');
+    expect(built.groups[0].options[0].sizeB).toBeNull();
   });
 
   it('labels, values and the upstream filter', () => {

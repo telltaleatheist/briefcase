@@ -17,9 +17,9 @@ export function modelsView(patch: Partial<AiModelsView> = {}): AiModelsView {
       label: 'On this Crucible',
       error: null,
       options: [
-        { value: 'local:qwen3.8-27b-8bit', label: 'qwen3.8-27b-8bit', group: 'server', sizeB: 27, resident: false, serverChoice: true, detail: "27B, Crucible's pick for analysis" },
-        { value: 'local:qwen3.8-27b-4bit', label: 'qwen3.8-27b-4bit', group: 'server', sizeB: 27, resident: false, serverChoice: false, detail: '27B' },
-        { value: 'local:qwen3.5-9b', label: 'qwen3.5-9b', group: 'server', sizeB: 9, resident: false, serverChoice: false, detail: '9B' },
+        { value: 'local:qwen3.8-27b-8bit', label: 'qwen3.8-27b-8bit', group: 'server', sizeB: 27, resident: false, serverChoice: true },
+        { value: 'local:qwen3.8-27b-4bit', label: 'qwen3.8-27b-4bit', group: 'server', sizeB: 27, resident: false, serverChoice: false },
+        { value: 'local:qwen3.5-9b', label: 'qwen3.5-9b', group: 'server', sizeB: 9, resident: false, serverChoice: false },
       ],
     }],
     analysisDefault: 'local:qwen3.8-27b-8bit',

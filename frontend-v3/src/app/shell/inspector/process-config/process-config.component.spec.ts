@@ -32,7 +32,7 @@ describe('ProcessConfigComponent Crucible gate', () => {
   beforeEach(() => {
     answer = modelsView({
       groups: [{ kind: 'anthropic', label: 'Claude via Crucible', error: null, options: [
-        { value: 'claude:sonnet', label: 'sonnet', group: 'anthropic', sizeB: null, resident: null, serverChoice: false, detail: '' },
+        { value: 'claude:sonnet', label: 'sonnet', group: 'anthropic', sizeB: null, resident: null, serverChoice: false },
       ] }],
     });
     // Last-used composition: normalize + transcribe + analyze.

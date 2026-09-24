@@ -30,8 +30,6 @@ export interface AiModelOption {
   resident: boolean | null;
   /** The server's own pick for the `analysis` class. */
   serverChoice: boolean;
-  /** One line of stated facts for the picker ("27B, loaded now"); unknowns are said as unknown. */
-  detail: string;
 }
 
 /** One `<optgroup>`: a heading, its options, and why it has none when a listing failed. */
