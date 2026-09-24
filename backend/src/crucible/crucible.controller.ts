@@ -21,7 +21,9 @@ import {
   Param,
   Post,
   Put,
+  UseGuards,
 } from '@nestjs/common';
+import { LoopbackOriginGuard } from './loopback-origin.guard';
 import { CrucibleConnectionError, CrucibleError } from '@crucible/client';
 import { CrucibleConnectService } from './connect.service';
 import { CrucibleProbeService, failureOutcome } from './probe';
@@ -77,6 +79,7 @@ function badRequest(message: string): HttpException {
   return refusal('invalid_request', message);
 }
 
+@UseGuards(LoopbackOriginGuard)
 @Controller('crucible')
 export class CrucibleController {
   private readonly logger = new Logger('CrucibleController');

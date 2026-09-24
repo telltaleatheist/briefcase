@@ -19,7 +19,8 @@
  * Refusals come back as `{code, message, command, detail}` in the bootstrap
  * package's own words, never renamed.
  */
-import { Controller, Get, HttpCode, HttpException, HttpStatus, Param, Post } from '@nestjs/common';
+import { Controller, Get, HttpCode, HttpException, HttpStatus, Param, Post, UseGuards } from '@nestjs/common';
+import { LoopbackOriginGuard } from './loopback-origin.guard';
 import { CrucibleCoordinationService } from './coordinate.service';
 import { CrucibleRegistryService } from './registry.service';
 import { CrucibleInstallService } from './install/install.service';
@@ -46,6 +47,7 @@ const STATUS_BY_CODE: Record<string, HttpStatus> = {
   no_install_outcome: HttpStatus.CONFLICT,
 };
 
+@UseGuards(LoopbackOriginGuard)
 @Controller('crucible')
 export class CrucibleSetupController {
   constructor(

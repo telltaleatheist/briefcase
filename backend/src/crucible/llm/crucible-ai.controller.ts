@@ -3,7 +3,8 @@
  * one-time key copy and per-task models. Every refusal is `{code, message}`,
  * and no response carries a key.
  */
-import { Body, Controller, Get, HttpException, HttpStatus, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpException, HttpStatus, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { LoopbackOriginGuard } from '../loopback-origin.guard';
 import { CrucibleError } from '@crucible/client';
 import { failureOutcome } from '../probe';
 import { CrucibleRegistryError, CrucibleRoutingError } from '../errors';
@@ -12,6 +13,7 @@ import type { AiModelsView, AiTaskModels, AiViaView, KeyCopyOutcome, LegacyKeysV
 import { parseAiVia, writeAiVia } from './ai-via';
 import { CrucibleAiInputError, CrucibleAiService } from './crucible-ai.service';
 
+@UseGuards(LoopbackOriginGuard)
 @Controller('crucible/ai')
 export class CrucibleAiController {
   constructor(private readonly ai: CrucibleAiService) {}

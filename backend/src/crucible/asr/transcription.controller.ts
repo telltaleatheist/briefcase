@@ -2,11 +2,13 @@
  * `/crucible/transcription`: Settings › Transcription and the setup wizard (P5).
  * Every refusal is `{code, message}`; no response carries a token.
  */
-import { Body, Controller, Get, HttpException, HttpStatus, Put } from '@nestjs/common';
+import { Body, Controller, Get, HttpException, HttpStatus, Put, UseGuards } from '@nestjs/common';
+import { LoopbackOriginGuard } from '../loopback-origin.guard';
 import type { TranscriptionView } from '../wire/transcription-wire';
 import { CrucibleTranscriptionService } from './crucible-transcription.service';
 import { TranscriptionSettingError } from './transcription-setting';
 
+@UseGuards(LoopbackOriginGuard)
 @Controller('crucible/transcription')
 export class CrucibleTranscriptionController {
   constructor(private readonly transcription: CrucibleTranscriptionService) {}
