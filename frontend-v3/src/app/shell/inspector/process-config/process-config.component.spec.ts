@@ -134,16 +134,16 @@ describe('ProcessConfigComponent Crucible gate', () => {
     expect(fixture.componentInstance.blockReason()).toBeNull();
   }));
 
-  it('a saved model the server offers nothing for blocks Add with the reason, and is not swapped for another', fakeAsync(() => {
+  it('a saved model the server offers nothing for is replaced by the server\'s pick, so Add is not blocked and queues what is shown', fakeAsync(() => {
     answer = modelsView({
       resolved: [{ value: 'claude:sonnet', option: null, note: null, unavailable: 'Claude is not set up on owens-mac-studio.' }],
     });
     ready();
     openAnalyzeOptions();
     const select = fixture.nativeElement.querySelector('app-ai-model-select select') as HTMLSelectElement;
-    expect(select.value).toBe('claude:sonnet');
-    expect(fixture.componentInstance.blockReason()).toBe('Claude is not set up on owens-mac-studio.');
-    expect(fixture.componentInstance.canSubmit()).toBeFalse();
-    expect(fixture.componentInstance.composedSteps().find(s => s.type === 'ai-analyze')!.config['aiModel']).toBe('claude:sonnet');
+    expect(select.value).toBe('local:qwen3.8-27b-8bit');
+    expect(fixture.componentInstance.blockReason()).toBeNull();
+    expect(fixture.componentInstance.canSubmit()).toBeTrue();
+    expect(fixture.componentInstance.composedSteps().find(s => s.type === 'ai-analyze')!.config['aiModel']).toBe('local:qwen3.8-27b-8bit');
   }));
 });

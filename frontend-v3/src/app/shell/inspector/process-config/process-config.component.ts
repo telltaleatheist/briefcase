@@ -427,8 +427,9 @@ export class ProcessConfigComponent {
    */
   readonly aiModelProblem = computed<string | null>(() => {
     if (!this.isEnabled('ai-analyze') || !this.readiness.ready()) return null;
-    if (!this.aiModelValue()) return 'Pick an AI model for AI Analyze';
-    return this.aiModelUnavailable();
+    // The picker says why a model can't run; this only says what to do.
+    if (!this.aiModelValue() || this.aiModelUnavailable()) return 'Pick an AI model for AI Analyze';
+    return null;
   });
 
   canSubmit = computed(() => this.blockReason() === null);

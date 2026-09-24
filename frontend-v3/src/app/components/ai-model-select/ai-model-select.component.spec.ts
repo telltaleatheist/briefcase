@@ -89,24 +89,34 @@ describe('AiModelSelectComponent', () => {
     expect(el().textContent).not.toMatch(/Ollama/);
   }));
 
-  it('a legacy Ollama choice is shown as the server model it runs as, with a line saying so', fakeAsync(() => {
+  it('a legacy Ollama choice becomes the server model it runs as, handed to the host, with no extra line', fakeAsync(() => {
     answer = modelsView({
       resolved: [resolved('ollama:qwen3.8:27b', 'local:qwen3.8-27b-8bit', { note: 'Saved as qwen3.8:27b (Ollama). It runs as qwen3.8-27b-8bit.' })],
     });
     render('ollama:qwen3.8:27b');
     expect(aiModels).toHaveBeenCalledWith(undefined, ['ollama:qwen3.8:27b']);
     expect(select().value).toBe('local:qwen3.8-27b-8bit');
-    expect(lines()).toEqual(['Saved as qwen3.8:27b (Ollama). It runs as qwen3.8-27b-8bit.']);
+    expect(fixture.componentInstance.picked).toEqual(['local:qwen3.8-27b-8bit']);
+    expect(lines()).toEqual([]);
   }));
 
-  it('a saved choice the server offers nothing for stays selected, marked unavailable, with the reason: never another model', fakeAsync(() => {
+  it('a saved choice the server offers nothing for is not listed: it becomes the server\'s pick for analysis, with no message', fakeAsync(() => {
     answer = modelsView({
       resolved: [resolved('claude:claude-sonnet-5', null, { unavailable: 'Claude is not set up on owens-mac-studio.' })],
     });
     render('claude:claude-sonnet-5');
-    expect(select().value).toBe('claude:claude-sonnet-5');
-    expect(select().selectedOptions[0].textContent!.trim()).toBe('claude:claude-sonnet-5 (unavailable)');
-    expect(lines()).toEqual(['Claude is not set up on owens-mac-studio.']);
+    expect(select().value).toBe('local:qwen3.8-27b-8bit');
+    expect(Array.from(select().options).map((o) => o.textContent!.trim())).not.toContain('claude:claude-sonnet-5 (unavailable)');
+    expect(fixture.componentInstance.picked).toEqual(['local:qwen3.8-27b-8bit']);
+    expect(lines()).toEqual([]);
+  }));
+
+  it('where the picker has an empty choice, an unavailable saved choice becomes that', fakeAsync(() => {
+    fixture.componentInstance.emptyLabel.set('Same as the analysis model');
+    answer = modelsView({ resolved: [resolved('claude:claude-haiku-5', null, { unavailable: 'Claude is not set up.' })] });
+    render('claude:claude-haiku-5');
+    expect(fixture.componentInstance.picked).toEqual(['']);
+    expect(select().value).toBe('');
   }));
 
   it('an empty choice is offered when the host names one, and a pick emits the option value', fakeAsync(() => {

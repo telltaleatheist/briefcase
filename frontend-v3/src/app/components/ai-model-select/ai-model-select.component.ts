@@ -11,15 +11,17 @@ import { CrucibleReadinessService } from '../../services/crucible-readiness.serv
  *
  *   - Bound with ngModel, never [value]: a native select bound by value
  *     shows its first option until the options render (model-picker-select-binding).
- *   - A stored value is shown as the option it is: a legacy spelling
- *     (`ollama:qwen3.8:27b`) as the server model it runs as, with a line
- *     saying so. One the server offers nothing for is shown as itself,
- *     "(unavailable)", with the reason: never silently another model.
+ *   - The list is only what the server offers. A stored value that is an
+ *     option under another spelling (`ollama:qwen3.8:27b`) is replaced by that
+ *     option; one the server offers nothing for (Claude with no Claude
+ *     upstream, a model it dropped) is replaced by the server's own pick for
+ *     analysis (or the empty choice, where there is one). Either way the
+ *     replacement is emitted, so what the host queues is what is shown.
  *   - While Crucible is not ready, it shows the readiness reason and the one
  *     door that repairs it (Start / Install / Connect), not a stale list.
  *
- * `valueChange` emits only on a pick, with the option's value (the Crucible
- * spelling), or '' for the empty choice.
+ * `valueChange` emits on a pick, and when a stored value is replaced as above,
+ * with the option's value (the Crucible spelling), or '' for the empty choice.
  */
 @Component({
   selector: 'app-ai-model-select',
@@ -29,7 +31,7 @@ import { CrucibleReadinessService } from '../../services/crucible-readiness.serv
   template: `
     @if (!readiness.ready()) {
       <select class="ams-select" [attr.id]="selectId()" disabled [attr.aria-label]="ariaLabel()">
-        <option>{{ value() || 'AI needs Crucible' }}</option>
+        <option>AI needs Crucible</option>
       </select>
       <p class="ams-line ams-warn">
         {{ readiness.reason() }}
@@ -64,9 +66,6 @@ import { CrucibleReadinessService } from '../../services/crucible-readiness.serv
                 <option disabled>Lists no models</option>
               }
             </optgroup>
-          }
-          @if (unavailableValue(); as missing) {
-            <option [value]="missing">{{ missing }} ({{ resolution() === null ? 'checking…' : 'unavailable' }})</option>
           }
         }
       </select>
@@ -122,22 +121,41 @@ export class AiModelSelectComponent {
       const value = this.value();
       untracked(() => this.store.use([value]));
     });
+    // A stored value the list doesn't hold as spelled: hand the host the option it is, or the replacement.
+    effect(() => {
+      const replacement = this.replacement();
+      if (replacement !== null) untracked(() => this.valueChange.emit(replacement));
+    });
   }
 
   readonly resolution = computed(() => this.store.resolution(this.value()));
 
-  /** What the select shows: the option the stored value is, else the value itself. */
-  readonly shown = computed(() => this.resolution()?.option ?? (this.value() ?? '').trim());
-
-  /** A stored value that is no option: drawn as itself, marked unavailable. */
-  readonly unavailableValue = computed(() => {
-    const shown = this.shown();
-    if (!shown) return null;
-    return this.store.options().some((o) => o.value === shown) ? null : shown;
+  /**
+   * What the stored value becomes, once the server has answered for it; null
+   * when it stays as it is (or it is not known yet). An option under another
+   * spelling becomes that option. One the server can't run becomes the
+   * empty choice where the picker has one, else the server's pick for
+   * analysis, else its first option; with no option at all it stays, and the
+   * line says the list is empty.
+   */
+  readonly replacement = computed<string | null>(() => {
+    const value = (this.value() ?? '').trim();
+    if (!value || !this.readiness.ready() || !this.store.loaded() || this.store.error()) return null;
+    const resolution = this.resolution();
+    if (resolution === null) return null;
+    if (resolution.option !== null) return resolution.option === value ? null : resolution.option;
+    if (this.emptyLabel() !== null) return '';
+    const options = this.store.options();
+    const pick = this.store.view()?.analysisDefault;
+    if (pick && options.some((o) => o.value === pick)) return pick;
+    return options[0]?.value ?? null;
   });
 
-  readonly reason = computed(() => (this.unavailableValue() ? this.store.unavailable(this.value()) : null));
-  readonly note = computed(() => this.resolution()?.note ?? null);
+  /** What the select shows: the replacement while it is on its way to the host, else the stored value when it is an option, else the placeholder. */
+  readonly shown = computed(() => {
+    const value = this.replacement() ?? (this.value() ?? '').trim();
+    return this.store.options().some((o) => o.value === value) ? value : '';
+  });
 
   readonly emptyReason = computed(() => {
     const view = this.store.view();
@@ -145,14 +163,10 @@ export class AiModelSelectComponent {
     return `${view?.server ?? 'The Crucible server'} offers no model that can analyse. Download one on it, or connect Claude, OpenAI or Ollama via Crucible in Settings › AI Analysis.`;
   });
 
-  /** The one line under the picker: a listing failure, why the choice can't run, what it was read as, or why the list is empty. */
+  /** The one line under the picker: a listing failure, or why the list is empty. */
   readonly line = computed<{ text: string; warn: boolean; retry: boolean } | null>(() => {
     const error = this.store.error();
     if (error) return { text: error, warn: true, retry: true };
-    const why = this.reason();
-    if (why) return { text: why, warn: true, retry: false };
-    const note = this.note();
-    if (note) return { text: note, warn: false, retry: false };
     if (this.store.loaded() && this.store.options().length === 0) return { text: this.emptyReason(), warn: true, retry: false };
     return null;
   });
