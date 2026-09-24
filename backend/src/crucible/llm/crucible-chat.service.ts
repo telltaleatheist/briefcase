@@ -65,7 +65,7 @@ import {
 import { crucibleUnavailableCause } from '../transport-failure';
 import { CrucibleClientFactory } from '../client-factory';
 import { CrucibleServersService } from '../crucible-servers.service';
-import { CrucibleProbeService } from '../probe';
+import { CrucibleProbeService, compareVersions } from '../probe';
 import type { InFlightLedger } from '../in-flight-ledger';
 import { CRUCIBLE_IN_FLIGHT_LEDGER } from '../crucible.constants';
 import {
@@ -76,7 +76,7 @@ import {
   parseRetryAfter,
 } from './errors';
 import { buildChatBody, crucibleTargetOf, type ChatBodyInput, type CrucibleTarget, type UpstreamName } from './target';
-import { crucibleModelForOllama } from './ollama-map';
+import { crucibleChoiceForOllama, isPageReader, type MappableModel } from './ollama-map';
 
 /** Capability class sent as `X-Crucible-Act` and as every lease's act. */
 export const BRIEFCASE_ACT = 'analysis';
@@ -96,13 +96,26 @@ export function localTimeoutMs(promptChars: number): number {
   return 120_000 + 5 * promptChars;
 }
 /**
- * A model Briefcase can give a transcript to: text in, text out. The catalog
- * also serves page readers (dots-ocr, modalities text+image) through the same
- * llm door; those are not offered for analysis or picked for placement.
+ * A model Briefcase can give a transcript to. The catalog also serves page
+ * readers (dots-ocr) through the same llm door; those are never offered for
+ * analysis or picked for placement. BY CAPABILITY CLASS, NOT MODALITY: a page
+ * reader is what the server's `pages` class selected (`pageReaders`, from
+ * {@link CrucibleChatService.pageReadersOn}). The `-vl` aliases of 1.0.24
+ * (`qwen3.5-9b-vl`) are text+image too and CAN analyse, so an image modality
+ * alone never excludes a model. Only when the server gave no class record does
+ * ollama-map's modality rule (image-capable and not an alias) stand in.
  */
-export function isTextChatModel(model: Pick<ModelInfo, 'modalities'>): boolean {
-  return model.modalities.includes('text') && !model.modalities.includes('image');
+export function isAnalysisModel(
+  model: Pick<ModelInfo, 'id' | 'modalities'> & { readonly weightsOf?: string | null },
+  pageReaders: Iterable<string> | null,
+): boolean {
+  if (!model.modalities.includes('text')) return false;
+  const readers = pageReaders === null ? null : new Set(pageReaders);
+  return !isPageReader(model as MappableModel, readers);
 }
+
+/** The first Crucible whose chat door takes `context_tokens` for an `ollama/` model (PHASE15-HOST §3.4a). */
+export const OLLAMA_CONTEXT_VERSION = '1.0.24';
 
 const SETTINGS_CACHE_MS = 30_000;
 const MODELS_CACHE_MS = 15_000;
@@ -138,6 +151,17 @@ export interface CrucibleChatRequest {
   /** Overrides the per-route timeout. */
   timeoutMs?: number;
   busyWait?: BusyWait;
+  /** `X-Crucible-Act`: the capability class this chat is. Default {@link BRIEFCASE_ACT}. */
+  act?: string;
+  /** Local models only: state `enable_thinking` (target.ts). Absent: the manifest's default. */
+  thinking?: boolean;
+  /**
+   * `ollama/` only: the window the call needs, sent as `context_tokens` (Ollama's
+   * num_ctx) when the server is 1.0.24 or newer; an older server is sent nothing.
+   */
+  contextTokens?: number;
+  /** Local models only: the context the model must be loaded with at least (load-model `params.context`). */
+  loadContext?: number;
 }
 
 export interface CrucibleChatUsage {
@@ -160,11 +184,15 @@ export interface CrucibleChatResult {
   fromReasoning: boolean;
   /** Chat attempts, including queue-full retries. */
   attempts: number;
+  /** `X-Crucible-Context`, parsed: the num_ctx an `ollama/` chat was sent with and where it came from. */
+  context: Record<string, unknown> | null;
 }
 
 interface Held {
   server: string;
   model: string;
+  /** The context it was loaded with when a caller asked for one; null: whatever was resident. */
+  context: number | null;
   leaseId: string | null;
   beat: NodeJS.Timeout | null;
   lost: boolean;
@@ -185,6 +213,11 @@ export interface EffectiveTarget {
   server: string | null;
   /** The `ollama/<tag>` this target stands in for, or null when it was not mapped. */
   mappedFrom: string | null;
+  /**
+   * The context the mapped model is loaded with, when its default is under the
+   * analysis window but this host can serve it there (ollama-map.ts rule 4).
+   */
+  loadContext?: number;
 }
 
 /** How the queue asks for a run (P4). Every field is optional; a bare `withRun(fn)` is P3's run. */
@@ -251,9 +284,11 @@ export class CrucibleChatService {
   private readonly runs = new AsyncLocalStorage<RunScope>();
   private readonly settingsCache = new Map<string, { at: number; configured: Record<UpstreamName, boolean> }>();
   private readonly modelsCache = new Map<string, { at: number; models: ModelInfo[] }>();
-  private readonly pagesCache = new Map<string, { at: number; readers: string[] | null }>();
+  private readonly pagesCache = new Map<string, { at: number; readers: string[] | null; ceilings: Map<string, number> | null }>();
   /** `server\nollama/<tag>` already said in the log (once per model per process). */
   private readonly mappingNoted = new Set<string>();
+  /** `server\nollama/<tag>` whose `X-Crucible-Context` was already logged. */
+  private readonly contextNoted = new Set<string>();
 
   /** The clock and the sleeper, replaceable by a spec. */
   now: () => number = Date.now;
@@ -308,7 +343,7 @@ export class CrucibleChatService {
     server: string | undefined,
     model: string,
     fn: (held: { server: string; model: string; target: CrucibleTarget }) => Promise<T>,
-    options: { signal?: AbortSignal; busyWait?: BusyWait; provider?: string } = {},
+    options: { signal?: AbortSignal; busyWait?: BusyWait; provider?: string; loadContext?: number } = {},
   ): Promise<T> {
     return this.withRun(async () => {
       const chosen = await this.effectiveTarget(crucibleTargetOf(options.provider, model), server);
@@ -316,9 +351,36 @@ export class CrucibleChatService {
       const scope = this.runs.getStore()!;
       const venue = server ?? scope.placed.get(target.model) ?? chosen.server ?? await this.venueFor(target);
       scope.placed.set(target.model, venue);
-      if (target.route === 'local') await this.ensureLocal(venue, target.model, options.signal, options.busyWait);
+      if (target.route === 'local') await this.ensureLocal(venue, target.model, options.signal, options.busyWait, options.loadContext ?? chosen.loadContext);
       return fn({ server: venue, model: target.model, target });
     });
+  }
+
+  /**
+   * Inside a run, make `model` held on `server` again after the server said it
+   * is not resident (someone else's load evicted it): the hold is forgotten and
+   * re-taken, loading at `loadContext` when given. For a door the chat service
+   * does not proxy (the scorer's `/v1/decide`).
+   */
+  async reacquire(server: string, model: string, signal?: AbortSignal, loadContext?: number): Promise<void> {
+    this.forgetHold(server, model);
+    await this.ensureLocal(server, model, signal, undefined, loadContext);
+  }
+
+  /** The Crucible release a server reports (the probe's, cached 10 s), or null when it can't be read. */
+  async serverVersion(server: string): Promise<string | null> {
+    try {
+      const answer = await this.probes.reach(server);
+      return answer.probe.outcome === 'ok' ? answer.probe.facts.version : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** True when `server` is at least `version` (a server whose version can't be read is not). */
+  async serverAtLeast(server: string, version: string): Promise<boolean> {
+    const running = await this.serverVersion(server);
+    return running !== null && compareVersions(running, version) >= 0;
   }
 
   /** True inside a run the queue admitted: a busy card parks the task instead of being waited out. */
@@ -369,26 +431,37 @@ export class CrucibleChatService {
     const server = request.server ?? scope?.placed.get(target.model) ?? chosen.server ?? await this.venueFor(target);
     scope?.placed.set(target.model, server);
 
+    // Ollama's num_ctx crosses only to a server that forwards it (1.0.24+); an
+    // older one would pass an unknown key to its OpenAI shim for nothing.
+    const contextTokens = target.upstream === 'ollama' && request.contextTokens !== undefined
+      && await this.serverAtLeast(server, OLLAMA_CONTEXT_VERSION) ? request.contextTokens : undefined;
     const body = buildChatBody(target, {
       messages,
       temperature: request.temperature,
       maxTokens: request.maxTokens,
       format: request.responseFormat,
       schemaName: request.schemaName,
+      thinking: request.thinking,
+      contextTokens,
     } satisfies ChatBodyInput);
     const promptChars = messages.reduce((sum, m) => sum + m.content.length, 0);
     const timeoutMs = request.timeoutMs ?? (target.route === 'local' ? localTimeoutMs(promptChars) : UPSTREAM_TIMEOUT_MS);
 
-    if (target.route === 'local') await this.ensureLocal(server, target.model, signal, request.busyWait);
+    const loadContext = request.loadContext ?? chosen.loadContext;
+    if (target.route === 'local') await this.ensureLocal(server, target.model, signal, request.busyWait, loadContext);
 
     let attempts = 0;
     let reloaded = false;
     for (;;) {
       throwIfAborted(signal);
       attempts += 1;
-      const response = await this.post(server, body, timeoutMs, signal);
+      const response = await this.post(server, body, timeoutMs, signal, request.act);
       if (response.ok) {
         const result = await this.readReply(response, target, server, request.responseFormat !== undefined);
+        if (result.context !== null && !this.contextNoted.has(`${server}\n${target.model}`)) {
+          this.contextNoted.add(`${server}\n${target.model}`);
+          this.logger.log(`[${server}] ${target.model} runs with ${JSON.stringify(result.context)} (X-Crucible-Context)`);
+        }
         this.touch();
         return { ...result, attempts };
       }
@@ -403,14 +476,14 @@ export class CrucibleChatService {
         reloaded = true;
         this.logger.warn(`[${server}] ${target.model} is no longer resident (${failure.message}); loading it again`);
         this.forgetHold(server, target.model);
-        await this.ensureLocal(server, target.model, signal, request.busyWait);
+        await this.ensureLocal(server, target.model, signal, request.busyWait, loadContext);
         continue;
       }
       throw failure;
     }
   }
 
-  private async post(server: string, body: Record<string, unknown>, timeoutMs: number, signal?: AbortSignal): Promise<Response> {
+  private async post(server: string, body: Record<string, unknown>, timeoutMs: number, signal?: AbortSignal, act: string = BRIEFCASE_ACT): Promise<Response> {
     const timeout = AbortSignal.timeout(timeoutMs);
     const combined = signal === undefined ? timeout : AbortSignal.any([signal, timeout]);
     try {
@@ -419,7 +492,7 @@ export class CrucibleChatService {
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify(body),
         signal: combined,
-        act: BRIEFCASE_ACT,
+        act,
       });
     } catch (err) {
       if (signal?.aborted) throw new CrucibleChatCancelled();
@@ -446,6 +519,10 @@ export class CrucibleChatService {
     }
     if (code === 'upstream_unconfigured') {
       message = `${message} Add it on "${server}" in Settings › AI.`;
+    }
+    if (code === 'upstream_field_unsupported') {
+      // 1.0.24's Ollama translation refuses a field it cannot carry to /api/chat by name.
+      message = `${message} (Crucible "${server}" cannot carry that field to Ollama.)`;
     }
     return new CrucibleChatError(response.status, code, message, server, retryAfterMs, details);
   }
@@ -490,6 +567,16 @@ export class CrucibleChatService {
     if (header) {
       try { sampling = JSON.parse(header) as Record<string, string>; } catch { sampling = null; }
     }
+    let context: Record<string, unknown> | null = null;
+    const contextHeader = response.headers.get('x-crucible-context');
+    if (contextHeader) {
+      try {
+        const parsed = JSON.parse(contextHeader) as unknown;
+        context = parsed !== null && typeof parsed === 'object' ? parsed as Record<string, unknown> : { value: parsed };
+      } catch {
+        context = { value: contextHeader };
+      }
+    }
     return {
       text,
       model: target.model,
@@ -499,6 +586,7 @@ export class CrucibleChatService {
       usage,
       sampling,
       fromReasoning,
+      context,
     };
   }
 
@@ -535,21 +623,29 @@ export class CrucibleChatService {
     }
     let chosen: EffectiveTarget = { target, server: null, mappedFrom: null };
     for (const name of candidates) {
-      let local: string | null;
+      let local: ReturnType<typeof crucibleChoiceForOllama>;
       try {
-        const [models, pageReaders] = await Promise.all([this.modelsOn(name), this.pageReadersOn(name)]);
-        local = crucibleModelForOllama(target.bareModel, models, { pageReaders });
+        const [models, facts] = await Promise.all([this.modelsOn(name), this.classFactsOn(name)]);
+        local = crucibleChoiceForOllama(target.bareModel, models, { pageReaders: facts.readers, ceilings: facts.ceilings });
       } catch {
         continue;
       }
       if (local === null) continue;
-      chosen = { target: { model: local, route: 'local', upstream: null, bareModel: local }, server: name, mappedFrom: target.model };
+      chosen = {
+        target: { model: local.id, route: 'local', upstream: null, bareModel: local.id },
+        server: name,
+        mappedFrom: target.model,
+        ...(local.loadContext === undefined ? {} : { loadContext: local.loadContext }),
+      };
       break;
     }
     const note = `${chosen.server ?? '*'}\n${target.model}`;
     if (!this.mappingNoted.has(note)) {
       this.mappingNoted.add(note);
-      if (chosen.mappedFrom !== null) this.logger.log(`[${chosen.server}] ${target.model} runs as ${chosen.target.model}, this server's own copy of that model`);
+      if (chosen.mappedFrom !== null) {
+        this.logger.log(`[${chosen.server}] ${target.model} runs as ${chosen.target.model}, this server's own copy of that model`
+          + (chosen.loadContext === undefined ? '' : `, loaded at ${chosen.loadContext} tokens`));
+      }
       else this.logger.log(`${target.model}: no Crucible server has that model of its own, so it goes to Ollama through Crucible`);
     }
     scope?.mapped.set(key, chosen);
@@ -562,18 +658,32 @@ export class CrucibleChatService {
    * the mapping falls back to its modality rule.
    */
   async pageReadersOn(server: string): Promise<string[] | null> {
+    return (await this.classFactsOn(server)).readers;
+  }
+
+  /**
+   * One read of a server's capability record (cached with the models): its page
+   * readers (the `pages` class's selection) and each model's context ceiling
+   * (the `generate` class's `context_ceilings`, 1.0.24+). Nulls when the record
+   * can't be read or carries no ceilings.
+   */
+  async classFactsOn(server: string): Promise<{ readers: string[] | null; ceilings: Map<string, number> | null }> {
     const cached = this.pagesCache.get(server);
-    if (cached !== undefined && this.now() - cached.at < MODELS_CACHE_MS) return cached.readers;
+    if (cached !== undefined && this.now() - cached.at < MODELS_CACHE_MS) return cached;
     let readers: string[] | null;
+    let ceilings: Map<string, number> | null = null;
     try {
       const client = await this.servers.clientFor(server);
       const record = await client.capability({ timeoutMs: 5_000 });
       readers = record.classes.filter((row) => row.capability === 'pages' && row.selected !== '').map((row) => row.selected);
+      const generate = record.classes.find((row) => row.capability === 'generate');
+      if (generate?.contextCeilings) ceilings = new Map(generate.contextCeilings.map((c) => [c.model, c.tokens]));
     } catch {
       readers = null;
     }
-    this.pagesCache.set(server, { at: this.now(), readers });
-    return readers;
+    const entry = { at: this.now(), readers, ceilings };
+    this.pagesCache.set(server, entry);
+    return entry;
   }
 
   // ── venue ──────────────────────────────────────────────────────────────
@@ -664,11 +774,11 @@ export class CrucibleChatService {
    * run's previous hold on that server released first, since a lease pins the
    * card to one model). Outside a run it is only loaded.
    */
-  private async ensureLocal(server: string, model: string, signal?: AbortSignal, busyWait?: BusyWait): Promise<void> {
+  private async ensureLocal(server: string, model: string, signal?: AbortSignal, busyWait?: BusyWait, loadContext?: number): Promise<void> {
     const started = this.now();
     for (;;) {
       try {
-        await this.ensureLocalOnce(server, model, signal);
+        await this.ensureLocalOnce(server, model, signal, loadContext);
         return;
       } catch (err) {
         if (!(err instanceof CrucibleBusyError) || busyWait === undefined) throw err;
@@ -680,18 +790,25 @@ export class CrucibleChatService {
     }
   }
 
-  private async ensureLocalOnce(server: string, model: string, signal?: AbortSignal): Promise<void> {
+  private async ensureLocalOnce(server: string, model: string, signal?: AbortSignal, loadContext?: number): Promise<void> {
     const scope = this.runs.getStore();
     if (scope === undefined) {
-      await this.makeResident(server, model, signal, false).catch((err: unknown) => { throw this.asUnreachable(err, server); });
+      await this.makeResident(server, model, signal, false, loadContext).catch((err: unknown) => { throw this.asUnreachable(err, server); });
       return;
     }
     const run = scope.lock.then(async () => {
       const held = scope.held.get(server);
-      if (held !== undefined && held.model === model && !held.lost) return;
+      if (held !== undefined && held.model === model && !held.lost) {
+        // Held already; a caller that needs a bigger window than it was taken at gets a reload.
+        if (loadContext === undefined || (held.context !== null && held.context >= loadContext)) return;
+        if (!(await this.residentTooSmall(server, model, loadContext))) {
+          held.context = loadContext;
+          return;
+        }
+      }
       if (held !== undefined) await this.releaseHold(scope, held);
-      const leaseId = await this.makeResident(server, model, signal, true).catch((err: unknown) => { throw this.asUnreachable(err, server); });
-      const hold: Held = { server, model, leaseId, beat: null, lost: false, mayStillHold: false, stopped: false };
+      const leaseId = await this.makeResident(server, model, signal, true, loadContext).catch((err: unknown) => { throw this.asUnreachable(err, server); });
+      const hold: Held = { server, model, context: loadContext ?? null, leaseId, beat: null, lost: false, mayStillHold: false, stopped: false };
       if (leaseId !== null) this.startHeartbeat(hold);
       scope.held.set(server, hold);
     });
@@ -704,7 +821,17 @@ export class CrucibleChatService {
    * lease id that holds it (taken on the load, or separately when it was
    * already resident), or null when another client's lease already pins it.
    */
-  private async makeResident(server: string, model: string, signal: AbortSignal | undefined, lease: boolean): Promise<string | null> {
+  /** True when `model` is resident on `server` at a context under `loadContext` (a reload would be needed). */
+  private async residentTooSmall(server: string, model: string, loadContext: number): Promise<boolean> {
+    try {
+      const info = (await this.modelsOn(server, true)).find((m) => m.id === model);
+      return info !== undefined && info.resident && (info.maxModelLen ?? 0) < loadContext;
+    } catch {
+      return false;
+    }
+  }
+
+  private async makeResident(server: string, model: string, signal: AbortSignal | undefined, lease: boolean, loadContext?: number): Promise<string | null> {
     throwIfAborted(signal);
     const client = await this.servers.clientFor(server);
     const models = await this.modelsOn(server, true);
@@ -712,6 +839,12 @@ export class CrucibleChatService {
     if (info === undefined) {
       throw new CrucibleChatError(404, 'unknown_model',
         `"${model}" is not a model Crucible "${server}" knows. Pick one from its catalog in Settings › AI.`, server);
+    }
+    // Resident at a smaller context than this run needs: a same-id reload with
+    // `context` (1.0.24 load-time context), never a request past its window.
+    if (info.resident && loadContext !== undefined && (info.maxModelLen ?? 0) < loadContext) {
+      this.logger.log(`[${server}] ${model} is resident at ${info.maxModelLen ?? '?'} tokens; reloading it at ${loadContext}`);
+      return this.load(client, server, model, signal, lease, loadContext);
     }
     if (info.resident) {
       if (!lease) return null;
@@ -736,7 +869,7 @@ export class CrucibleChatService {
           this.logger.log(`[${server}] ${model} is resident and leased by ${err.holder ?? 'another app'}; chatting under their lease`);
           return null;
         }
-        if (err instanceof CrucibleRefused && err.code === 'not_resident') return this.load(client, server, model, signal, lease);
+        if (err instanceof CrucibleRefused && err.code === 'not_resident') return this.load(client, server, model, signal, lease, loadContext);
         throw this.mapRefusal(err, server);
       }
     }
@@ -745,13 +878,17 @@ export class CrucibleChatService {
         `"${model}" ${info.installed ? `can't run on "${server}"` : `isn't downloaded on "${server}"`}`
           + `${info.reason ? ` (${info.reason})` : ''}. Pick another model, or download it in Settings › AI.`, server);
     }
-    return this.load(client, server, model, signal, lease);
+    return this.load(client, server, model, signal, lease, loadContext);
   }
 
-  private async load(client: CrucibleClient, server: string, model: string, signal: AbortSignal | undefined, lease: boolean): Promise<string | null> {
+  private async load(client: CrucibleClient, server: string, model: string, signal: AbortSignal | undefined, lease: boolean, context?: number): Promise<string | null> {
     let loadId: string;
     try {
-      loadId = await client.loadModel(model, lease ? { lease: { act: BRIEFCASE_ACT, ttlSeconds: LEASE_TTL_SECONDS } } : undefined);
+      const options = {
+        ...(lease ? { lease: { act: BRIEFCASE_ACT, ttlSeconds: LEASE_TTL_SECONDS } } : {}),
+        ...(context === undefined ? {} : { context }),
+      };
+      loadId = await client.loadModel(model, Object.keys(options).length > 0 ? options : undefined);
     } catch (err) {
       throw this.mapRefusal(err, server);
     }
@@ -759,7 +896,7 @@ export class CrucibleChatService {
     // (after, never before: BookForge's rule), so a kill mid-load leaves the
     // startup sweep something to cancel.
     this.ledger?.record({ server, kind: 'job', id: loadId, jobType: 'load-model', model, localId: this.localId() });
-    this.logger.log(`[${server}] loading ${model} (job ${loadId})`);
+    this.logger.log(`[${server}] loading ${model}${context === undefined ? '' : ` at ${context} tokens`} (job ${loadId})`);
     let settled = false;
     const onAbort = (): void => {
       void client.cancel(loadId).then(() => this.ledger?.settle(server, 'job', loadId), () => undefined);

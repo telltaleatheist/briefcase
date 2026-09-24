@@ -314,6 +314,63 @@ describe('CrucibleChatService: one server', () => {
     expect(fake.chatBodies()).toHaveLength(0);
   });
 
+  it('P6: an ollama/ chat states its window as context_tokens on 1.0.24, and the server\'s X-Crucible-Context comes back', async () => {
+    await start();
+    const result = await chat.chat({ model: 'ollama:qwen3:14b', prompt: 'hello', temperature: 0.15, contextTokens: 16384 });
+    expect(fake.chatBodies().at(-1)).toMatchObject({ model: 'ollama/qwen3:14b', context_tokens: 16384 });
+    expect(result.context).toEqual({ num_ctx: 16384, source: 'request' });
+    // Never on a local model or a cloud upstream.
+    await chat.chat({ model: 'local:qwen3.5-9b', prompt: 'hello', contextTokens: 16384 });
+    await chat.chat({ model: 'claude:claude-sonnet-5', prompt: 'hello', contextTokens: 16384 });
+    expect(fake.chatBodies().slice(1).some((b) => 'context_tokens' in b)).toBe(false);
+  });
+
+  it('P6 version gate: a Crucible older than 1.0.24 is sent no context_tokens', async () => {
+    await start({ version: '1.0.23' });
+    const result = await chat.chat({ model: 'ollama:qwen3:14b', prompt: 'hello', contextTokens: 16384 });
+    expect(fake.chatBodies().at(-1)).not.toHaveProperty('context_tokens');
+    expect(result.context).toBeNull();
+  });
+
+  it('P6: 400 upstream_field_unsupported is an error by name, saying Ollama cannot take the field', async () => {
+    await start({ faults: { refuse: [{ match: { path: '/v1/openai/chat/completions' }, status: 400, code: 'upstream_field_unsupported', message: 'seed cannot cross to /api/chat' }] } });
+    const err = await chat.chat({ model: 'ollama:qwen3:14b', prompt: 'hello' }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(CrucibleChatError);
+    expect(err).toMatchObject({ code: 'upstream_field_unsupported' });
+    expect((err as Error).message).toMatch(/cannot carry that field to Ollama/);
+  });
+
+  it('P6: a chat names its act, and states thinking only for a local model', async () => {
+    await start();
+    await chat.chat({ model: 'local:qwen3.5-9b', prompt: 'outline', act: 'generate', thinking: false, maxTokens: 64, temperature: 0 });
+    const req = fake.requestsTo('/v1/openai/chat/completions', 'POST').at(-1)!;
+    expect(req.headers['x-crucible-act']).toBe('generate');
+    expect(req.body).toMatchObject({ chat_template_kwargs: { enable_thinking: false }, max_tokens: 64, temperature: 0 });
+    await chat.chat({ model: 'ollama:qwen3:14b', prompt: 'x', thinking: false });
+    expect(fake.chatBodies().at(-1)).not.toHaveProperty('chat_template_kwargs');
+    expect(fake.requestsTo('/v1/openai/chat/completions', 'POST').at(-1)!.headers['x-crucible-act']).toBe('analysis');
+  });
+
+  it('P6: loadContext loads at that context, and a resident model under it is reloaded larger (never chatted past its window)', async () => {
+    await start({ resident: 'qwen3.5-9b', models: [{ id: 'qwen3.5-9b', paramsB: 9, contextDefault: 16384, maxModelLen: 16384 }] });
+    await chat.withModel('mac', 'local:qwen3.5-9b', async () => {
+      await chat.chat({ model: 'local:qwen3.5-9b', prompt: 'x', loadContext: 32768 });
+      // Held at 32K now: a second call needs no reload.
+      await chat.chat({ model: 'local:qwen3.5-9b', prompt: 'y', loadContext: 32768 });
+    });
+    const loads = fake.jobs.filter((j) => j.type === 'load-model');
+    expect(loads.map((j) => j.params['context'])).toEqual([32768]);
+    expect(fake.residentContext()).toBe(32768);
+    expect(fake.leases.released).toEqual(fake.leases.taken.map((l) => l.leaseId));
+  });
+
+  it('P6: a load context over the host ceiling is refused by name before anything is evicted', async () => {
+    await start({ contextCeilings: { 'qwen3.5-9b': 65536 } });
+    const err = await chat.withModel('mac', 'local:qwen3.5-9b', async () => undefined, { loadContext: 131072 }).catch((e: unknown) => e);
+    expect(err).toMatchObject({ code: 'context_over_limit' });
+    expect(fake.resident()).toBeNull();
+  });
+
   it('structured output from a reasoning channel: content empty, reasoning carries the object', async () => {
     await start({ resident: 'qwen3.5-9b', chatReplies: { 'qwen3.5-9b': { content: '', reasoning: '{"quote":"here"}' } } });
     const structured = await chat.chat({ model: 'qwen3.5-9b', prompt: 'x', responseFormat: 'json' });

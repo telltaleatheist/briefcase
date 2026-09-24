@@ -1169,6 +1169,7 @@ export class AIAnalysisService {
       // as that model (ollama-map.ts, decided again by chat() at call time):
       // sized at that model's context. `null`: it stays on the ollama/ upstream.
       const crucibleStandIn = new Map<string, string | null>();
+      const crucibleStandInLoad = new Map<string, number>();
       const ollamaTagOf = (cfg: AIProviderConfig): string | null => {
         if (!viaCrucible) return null;
         try {
@@ -1178,20 +1179,30 @@ export class AIAnalysisService {
           return null;
         }
       };
-      // An Ollama model forwarded by Crucible runs at Ollama's default
-      // context, since Crucible has no num_ctx to send (CRUCIBLE_OLLAMA_CONTEXT).
+      // An Ollama model forwarded by Crucible: from 1.0.24 Crucible forwards
+      // the window (context_tokens → num_ctx), so it is sized as the direct
+      // road sizes it; an older server sends none, and Ollama runs at its 4096
+      // default (CRUCIBLE_OLLAMA_CONTEXT).
       const isCrucibleOllama = (cfg: AIProviderConfig): boolean => {
         const tag = ollamaTagOf(cfg);
         return tag !== null && !crucibleStandIn.get(tag);
       };
+      const crucibleOllamaSized = new Map<string, boolean>();
       if (viaCrucible) {
         const sized = [aiConfig, ...(['chapter', 'flags'] as AITaskKind[]).map((t) => this.resolveTaskConfig(aiConfig, t, taskModels))];
         for (const cfg of sized) {
           const tag = ollamaTagOf(cfg);
-          if (tag !== null && !crucibleStandIn.has(tag)) crucibleStandIn.set(tag, await this.aiProviderService.crucibleOllamaStandIn(tag));
+          if (tag !== null && !crucibleStandIn.has(tag)) {
+            const choice = await this.aiProviderService.crucibleOllamaStandInChoice(tag);
+            crucibleStandIn.set(tag, choice?.model ?? null);
+            if (choice?.loadContext !== undefined) crucibleStandInLoad.set(choice.model, choice.loadContext);
+          }
+          if (tag !== null && !crucibleStandIn.get(tag) && !crucibleOllamaSized.has(tag)) {
+            crucibleOllamaSized.set(tag, await this.aiProviderService.crucibleOllamaTakesContext(tag));
+          }
           const local = tag !== null ? crucibleStandIn.get(tag) ?? null : cfg.provider === 'local' ? cfg.model : null;
           if (local === null || crucibleLocalContext.has(local)) continue;
-          const window = await this.aiProviderService.crucibleContextWindow(local);
+          const window = await this.aiProviderService.crucibleContextWindow(local, crucibleStandInLoad.get(local));
           crucibleLocalContext.set(local, window ?? CRUCIBLE_LOCAL_CONTEXT_FALLBACK);
         }
       }
@@ -1199,10 +1210,11 @@ export class AIAnalysisService {
         const standIn = crucibleStandIn.get(ollamaTagOf(cfg) ?? '');
         if (standIn && crucibleLocalContext.has(standIn)) return crucibleLocalContext.get(standIn)!;
         if (isCrucibleOllama(cfg)) {
+          if (crucibleOllamaSized.get(ollamaTagOf(cfg) ?? '') === true) return numCtxMaxForModel(cfg.model);
           if (!this.crucibleOllamaNoted.has(cfg.model)) {
             this.crucibleOllamaNoted.add(cfg.model);
             this.logger.warn(
-              `[Model Limits] ${cfg.model} goes to Ollama through Crucible, which can't set num_ctx: ` +
+              `[Model Limits] ${cfg.model} goes to Ollama through a Crucible older than 1.0.24, which can't set num_ctx: ` +
               `chunking for Ollama's default context (${CRUCIBLE_OLLAMA_CONTEXT} tokens) so no prompt is truncated`,
             );
           }

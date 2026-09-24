@@ -21,10 +21,16 @@
  *   - ollama/ keeps its pinned per-task temperature, as the direct path does.
  *   - a local model gets its per-task temperature, and max_tokens only when the
  *     caller asked for one (the manifest's default applies otherwise).
- *   - `thinking` is never sent. Local models declare `thinking=false` in their
- *     manifest defaults, and Crucible drops `chat_template_kwargs` for every
- *     upstream (reporting it as `dropped` in X-Crucible-Sampling).
- *   - `num_ctx` has no spelling here: Crucible never forwards it to Ollama.
+ *   - `thinking` is sent only when a caller states it for a LOCAL model (the
+ *     scorer's outline states `false`, as its own llama-server path did).
+ *     Otherwise local models run their manifest's `thinking=false`, and
+ *     Crucible drops `chat_template_kwargs` for every upstream anyway
+ *     (reporting it as `dropped` in X-Crucible-Sampling).
+ *   - Ollama's `num_ctx` is `context_tokens` (Crucible 1.0.24+, PHASE15-HOST
+ *     §3.4a: it reaches Ollama as options.num_ctx). Sent for `ollama/` only,
+ *     and only when the caller knows the server takes it (the chat service
+ *     checks the version): an older server forwarded no num_ctx and every
+ *     Ollama tag ran at 4096.
  *   - response_format: 'json' → json_object and a JSON Schema → json_schema,
  *     for local models and ollama/. Cloud gets none, exactly as the direct path
  *     sends none: Anthropic would turn json_object into nothing and a schema
@@ -110,6 +116,10 @@ export interface ChatBodyInput {
   format?: 'json' | Record<string, unknown>;
   /** A name for a schema's `json_schema.name`. */
   schemaName?: string;
+  /** Local models only: `chat_template_kwargs.enable_thinking`. Absent: nothing is sent. */
+  thinking?: boolean;
+  /** `ollama/` only: the window, sent as `context_tokens` (Ollama's num_ctx). */
+  contextTokens?: number;
 }
 
 export type ResponseFormatBody =
@@ -133,6 +143,12 @@ export function buildChatBody(target: CrucibleTarget, input: ChatBodyInput): Rec
   if (!isCloudTarget(target)) {
     if (typeof input.temperature === 'number' && Number.isFinite(input.temperature)) body['temperature'] = input.temperature;
     if (target.route === 'local' && typeof input.maxTokens === 'number' && input.maxTokens > 0) body['max_tokens'] = Math.floor(input.maxTokens);
+  }
+  if (target.route === 'local' && typeof input.thinking === 'boolean') {
+    body['chat_template_kwargs'] = { enable_thinking: input.thinking };
+  }
+  if (target.upstream === 'ollama' && typeof input.contextTokens === 'number' && Number.isInteger(input.contextTokens) && input.contextTokens > 0) {
+    body['context_tokens'] = input.contextTokens;
   }
   const format = responseFormatFor(target, input.format, input.schemaName);
   if (format !== null) body['response_format'] = format;

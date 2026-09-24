@@ -6,7 +6,9 @@
  * Under `aiVia: 'crucible'` a stored `ollama:<tag>` (a task model, the default
  * AI) is read at call time. When the serving Crucible has the same model in its
  * own catalog, the call runs on that; only when it has none does it go to the
- * `ollama/` upstream (at Ollama's default 4K context, CRUCIBLE_OLLAMA_CONTEXT).
+ * `ollama/` upstream (sized as the direct road sizes it, with the window sent
+ * as `context_tokens`, on Crucible 1.0.24+; at Ollama's 4K default,
+ * CRUCIBLE_OLLAMA_CONTEXT, on an older server that forwards no num_ctx).
  * The stored config is never rewritten, so 'direct' mode is unchanged.
  *
  * THE MATCHING RULE, in order:
@@ -26,23 +28,32 @@
  *      taken only when no base form matches: switching a card between a base
  *      and its alias is a full engine reload (~20 s on the 9B).
  *   4. The context that fits, then the precision. Among quantisations, those
- *      served at >= the window analysis uses under Crucible (32K,
+ *      that can serve the window analysis uses under Crucible (32K,
  *      CRUCIBLE_ANALYSIS_CONTEXT) come first, and of those the highest
- *      precision wins. When none fits, the largest context wins.
+ *      precision wins. When none fits, the largest context wins. "Can serve"
+ *      is served at >= 32K now, OR (Crucible 1.0.24 load-time context) a host
+ *      ceiling >= 32K: the server's own fit number, the `generate` class's
+ *      `context_ceilings` (min of the manifest's max_context and what this
+ *      host's memory affords). A model that fits only by its ceiling is loaded
+ *      with `context: 32768` ({@link OllamaChoice.loadContext}).
  *
  * WHY CONTEXT BEFORE PRECISION. The window decides how much transcript one call
  * sees: a 12K window cuts an hour into roughly three times as many chunks as a
  * 32K one, and every extra chunk boundary is a place a chapter or a flag is
  * split or lost. The step from 8-bit to 4-bit weights on a 27B costs a small,
  * even degradation of every answer. The first loss is structural and the
- * second is marginal, so context is the tiebreak that matters. On the Mac this
- * picks qwen3.8-27b-4bit (98K) over qwen3.8-27b-8bit (12K); on a host where
- * both quantisations are served at >= 32K, the 8-bit wins.
+ * second is marginal, so context is the tiebreak that matters. On the Mac
+ * before 1.0.24 this picked qwen3.8-27b-4bit (98K) over qwen3.8-27b-8bit
+ * (served at 12K). From 1.0.24 the Mac's own fit data (live, 2026-09-23:
+ * `generate` ceilings 131072 for both, the 8-bit's memory context 375,595 at
+ * one in flight) says the 8-bit can be loaded at 32K, so the 8-bit wins there,
+ * loaded at 32768. Without ceilings (an older server, or none reported) the
+ * served-context rule stands and the 4-bit is kept.
  */
 
 /**
- * The context an `ollama/` model is chunked for THROUGH CRUCIBLE. Crucible
- * forwards no `num_ctx` (target.ts), so Ollama serves the call at its own
+ * The context an `ollama/` model is chunked for through a Crucible OLDER THAN
+ * 1.0.24, which forwards no `num_ctx`, so Ollama serves the call at its own
  * default: 4096 tokens (its documented default, and the server-side
  * OLLAMA_CONTEXT_LENGTH default; older releases used 2048, but a transcript
  * chunk at that size is too small to chapter). Sizing to numCtxMaxForModel
@@ -79,6 +90,19 @@ export interface OllamaMapOptions {
    * class selected. `null`/absent: the server gave no class record.
    */
   pageReaders?: Iterable<string> | null;
+  /**
+   * Each model's longest servable request on this host (the `generate`
+   * class's `context_ceilings`, 1.0.24+). `null`/absent: none reported, and
+   * only the served context counts.
+   */
+  ceilings?: ReadonlyMap<string, number> | null;
+}
+
+/** What an Ollama tag runs as: the model, and the context to load it at when its default is too small. */
+export interface OllamaChoice {
+  id: string;
+  /** Set when the model fits the analysis window only by loading it larger than its default. */
+  loadContext?: number;
 }
 
 /** `qwen3.8:27b` → {family 'qwen3.8', sizeB 27}; null when the tag names no size. */
@@ -126,6 +150,11 @@ export function isPageReader(model: MappableModel, pageReaders: ReadonlySet<stri
  * PURE: see the header for the rule.
  */
 export function crucibleModelForOllama(tag: string, models: readonly MappableModel[], options: OllamaMapOptions = {}): string | null {
+  return crucibleChoiceForOllama(tag, models, options)?.id ?? null;
+}
+
+/** {@link crucibleModelForOllama}, with the load context rule 4 may need. PURE. */
+export function crucibleChoiceForOllama(tag: string, models: readonly MappableModel[], options: OllamaMapOptions = {}): OllamaChoice | null {
   const wanted = parseOllamaTag(tag);
   if (wanted === null) return null;
   const minContext = options.minContext ?? CRUCIBLE_ANALYSIS_CONTEXT;
@@ -142,9 +171,12 @@ export function crucibleModelForOllama(tag: string, models: readonly MappableMod
   const candidates = bases.length > 0 ? bases : same;
   if (candidates.length === 0) return null;
 
+  const ceilingOf = (m: MappableModel): number => options.ceilings?.get(m.id) ?? 0;
+  // What a candidate can serve: its served context, or its host ceiling when that is larger.
+  const reach = (m: MappableModel): number => Math.max(servedContextOf(m), ceilingOf(m));
   const ranked = [...candidates].sort((a, b) => {
-    const ctxA = servedContextOf(a);
-    const ctxB = servedContextOf(b);
+    const ctxA = reach(a);
+    const ctxB = reach(b);
     const fitsA = ctxA >= minContext;
     const fitsB = ctxB >= minContext;
     if (fitsA !== fitsB) return fitsA ? -1 : 1;
@@ -157,5 +189,7 @@ export function crucibleModelForOllama(tag: string, models: readonly MappableMod
     const bits = precisionBitsOf(b.id) - precisionBitsOf(a.id);
     return bits !== 0 ? bits : a.id.localeCompare(b.id);
   });
-  return ranked[0].id;
+  const best = ranked[0];
+  if (servedContextOf(best) < minContext && ceilingOf(best) >= minContext) return { id: best.id, loadContext: minContext };
+  return { id: best.id };
 }

@@ -4,8 +4,10 @@
  * (Crucible 1.0.23, read 2026-09-23) and the 1.0.24 shapes (vision aliases
  * with `weights_of`, a cuda host that serves both 27B quantisations wide).
  */
+import { isAnalysisModel } from '../../src/crucible/llm/crucible-chat.service';
 import {
   CRUCIBLE_ANALYSIS_CONTEXT,
+  crucibleChoiceForOllama,
   crucibleModelForOllama,
   isPageReader,
   parseOllamaTag,
@@ -30,10 +32,12 @@ const MAC: MappableModel[] = [
 /** The Mac's capability record: `pages` selected dots-ocr. */
 const MAC_PAGES = ['dots-ocr'];
 
-/** A cuda host on 1.0.24: every tier, the vision aliases, both 27B quantisations served wide. */
+/**
+ * A cuda host on 1.0.24: every tier and the vision aliases. The 8-bit 27B is
+ * Mac-only from 1.0.24 (its FP8 weights exceed a 24 GB card) and its `-vl`
+ * alias is gone, so neither is listed here.
+ */
 const CUDA: MappableModel[] = [
-  row('qwen3.8-27b-8bit', 'qwen3.8', 27, 65536),
-  row('qwen3.8-27b-8bit-vl', 'qwen3.8', 27, 65536, { modalities: ['text', 'image'], weightsOf: 'qwen3.8-27b-8bit' }),
   row('qwen3.8-27b-4bit', 'qwen3.8', 27, 131072),
   row('qwen3.8-27b-4bit-vl', 'qwen3.8', 27, 131072, { modalities: ['text', 'image'], weightsOf: 'qwen3.8-27b-4bit' }),
   row('qwen3.5-9b', 'qwen3.5', 9, 32768),
@@ -89,8 +93,23 @@ describe('crucibleModelForOllama: choosing among quantisations', () => {
     expect(crucibleModelForOllama('qwen3.8:27b', MAC)).toBe('qwen3.8-27b-4bit');
   });
 
-  it('when both fit, the higher precision wins (cuda: 8-bit at 64K over 4-bit at 128K)', () => {
-    expect(crucibleModelForOllama('qwen3.8:27b', CUDA)).toBe('qwen3.8-27b-8bit');
+  it('when both fit, the higher precision wins (8-bit at 64K over 4-bit at 128K)', () => {
+    const wide = [row('qwen3.8-27b-8bit', 'qwen3.8', 27, 65536), row('qwen3.8-27b-4bit', 'qwen3.8', 27, 131072)];
+    expect(crucibleModelForOllama('qwen3.8:27b', wide)).toBe('qwen3.8-27b-8bit');
+    expect(crucibleModelForOllama('qwen3.8:27b', CUDA)).toBe('qwen3.8-27b-4bit');
+  });
+
+  it('1.0.24 load-time context: a host ceiling >= 32K makes a model fit, loaded at 32768 (the Mac\'s 8-bit, from its own fit data)', () => {
+    // Live Mac, 2026-09-23: generate ceilings 131072 for both 27Bs (the 8-bit's memory context 375,595).
+    const ceilings = new Map([['qwen3.8-27b-8bit', 131072], ['qwen3.8-27b-4bit', 131072], ['qwen3.5-9b', 131072]]);
+    expect(crucibleChoiceForOllama('qwen3.8:27b', MAC, { pageReaders: MAC_PAGES, ceilings })).toEqual({ id: 'qwen3.8-27b-8bit', loadContext: 32768 });
+    // A model already served at the window needs no load context.
+    expect(crucibleChoiceForOllama('qwen3.8:27b', [MAC[2]], { ceilings })).toEqual({ id: 'qwen3.8-27b-4bit' });
+    // A ceiling under the window changes nothing: the served-context rule stands.
+    const tight = new Map([['qwen3.8-27b-8bit', 12288], ['qwen3.8-27b-4bit', 98304]]);
+    expect(crucibleChoiceForOllama('qwen3.8:27b', MAC, { ceilings: tight })).toEqual({ id: 'qwen3.8-27b-4bit' });
+    // No ceilings (an older server): the 4-bit, as before.
+    expect(crucibleChoiceForOllama('qwen3.8:27b', MAC, { ceilings: null })).toEqual({ id: 'qwen3.8-27b-4bit' });
   });
 
   it('when neither fits, the larger context wins, then the higher precision', () => {
@@ -155,6 +174,20 @@ describe('crucibleModelForOllama: never a page reader, never a -vl alias beside 
 
   it('with no class record at all, an image model that is not an alias counts as a page reader', () => {
     expect(isPageReader(MAC[0], null)).toBe(true);
-    expect(isPageReader(CUDA[1], null)).toBe(false);
+    expect(isPageReader(CUDA.find((m) => m.id === 'qwen3.8-27b-4bit-vl')!, null)).toBe(false);
+  });
+});
+
+describe('isAnalysisModel: the pickers filter by capability class, never by modality', () => {
+  it('a -vl alias is offered for analysis; the pages class\'s model is not', () => {
+    const vl = CUDA.find((m) => m.id === 'qwen3.5-9b-vl')!;
+    const dots = CUDA.find((m) => m.id === 'dots-ocr')!;
+    expect(isAnalysisModel(vl, ['dots-ocr'])).toBe(true);
+    expect(isAnalysisModel(dots, ['dots-ocr'])).toBe(false);
+    // The cuda 4B tier (text+image, a base) is an analysis model by class.
+    expect(isAnalysisModel(CUDA.find((m) => m.id === 'qwen3.5-4b')!, ['dots-ocr'])).toBe(true);
+    // No class record: an alias still counts, an image base does not.
+    expect(isAnalysisModel(vl, null)).toBe(true);
+    expect(isAnalysisModel(dots, null)).toBe(false);
   });
 });

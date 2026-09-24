@@ -33,7 +33,8 @@ import type {
   LegacyKeysView,
 } from '../wire/ai-wire';
 import { AI_VIA_ENV, resolveAiVia } from './ai-via';
-import { CrucibleChatService, isTextChatModel } from './crucible-chat.service';
+import { CrucibleChatService, OLLAMA_CONTEXT_VERSION, isAnalysisModel } from './crucible-chat.service';
+import { numCtxMaxForModel } from '../../analysis/model-utils';
 import { crucibleTargetOf, type UpstreamName } from './target';
 import { CRUCIBLE_OLLAMA_CONTEXT, servedContextOf } from './ollama-map';
 
@@ -127,8 +128,9 @@ export class CrucibleAiService {
     const upstreamErrors: AiModelsView['upstreamErrors'] = {};
 
     try {
+      const pageReaders = await this.chat.pageReadersOn(server);
       for (const info of await this.chat.modelsOn(server, true)) {
-        if (!info.backendSupported || !isTextChatModel(info)) continue;
+        if (!info.backendSupported || !isAnalysisModel(info, pageReaders)) continue;
         models.push({
           value: `local:${info.id}`,
           label: `${info.id}${info.paramsB ? ` (${info.paramsB}B)` : ''}`,
@@ -186,14 +188,17 @@ export class CrucibleAiService {
         let contextTokens: number | null = null;
         try {
           const info = (await this.chat.modelsOn(chosen.server)).find((m) => m.id === chosen.target.model);
-          contextTokens = info ? servedContextOf(info) : null;
+          contextTokens = chosen.loadContext ?? (info ? servedContextOf(info) : null);
         } catch {
-          contextTokens = null;
+          contextTokens = chosen.loadContext ?? null;
         }
         out.push({ value, server: chosen.server, runsAs: chosen.target.model, contextTokens });
       } else {
         if (connected === undefined) connected = (await this.connectedServer()).server;
-        out.push({ value, server: connected, runsAs: null, contextTokens: CRUCIBLE_OLLAMA_CONTEXT });
+        // 1.0.24+ forwards the window (context_tokens → num_ctx): the direct road's size.
+        // An older server forwards none, and Ollama runs at its 4096 default.
+        const forwards = connected !== null && await this.chat.serverAtLeast(connected, OLLAMA_CONTEXT_VERSION);
+        out.push({ value, server: connected, runsAs: null, contextTokens: forwards ? numCtxMaxForModel(target.bareModel) : CRUCIBLE_OLLAMA_CONTEXT });
       }
     }
     return out;

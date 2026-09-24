@@ -204,9 +204,10 @@ describe('a whole analysis through Crucible', () => {
     expect(fake.chatBodies().every((b) => b['model'] === 'qwen3.5-9b')).toBe(true);
   });
 
-  it('REGRESSION: an ollama/ model through Crucible is chunked for Ollama\'s default context (Crucible can\'t send num_ctx), said once', async () => {
+  it('REGRESSION (the version gate): an ollama/ model through a Crucible older than 1.0.24 is chunked for Ollama\'s default context (it can\'t send num_ctx), said once', async () => {
     await fake.close();
     fake = await startFakeCrucible({
+      version: '1.0.23',
       models: [{ id: 'qwen3.5-9b', paramsB: 9 }],
       upstreams: { ollama: { url: 'http://127.0.0.1:11434' } },
       chatReplies: { '*': '{"title":"A chapter","summary":"About it.","verdict":"skip","flags":[],"people":[],"topics":["cooking"],"hook":"Hook.","body":"Body.","description":"Desc.","tags":["x"]}' },
@@ -229,7 +230,7 @@ describe('a whole analysis through Crucible', () => {
     expect(limits).toHaveLength(2);
     expect(limits.every((m) => m.startsWith('[Model Limits] effective ctx=4096:'))).toBe(true);
     expect(fake.chatBodies().every((b) => b['model'] === 'ollama/qwen3:14b')).toBe(true);
-    expect(fake.chatBodies().some((b) => 'num_ctx' in b || 'options' in b)).toBe(false);
+    expect(fake.chatBodies().some((b) => 'num_ctx' in b || 'options' in b || 'context_tokens' in b)).toBe(false);
     // Said once, not per run or per chunk.
     expect([...logged, ...warned].filter((m) => /Ollama's default context/.test(m))).toHaveLength(1);
   });
@@ -262,9 +263,11 @@ describe('a whole analysis through Crucible', () => {
       warnSpy.mockRestore();
     }
     expect(fake.chatBodies().length).toBeGreaterThan(1);
-    expect(fake.chatBodies().every((b) => b['model'] === 'qwen3.8-27b-4bit')).toBe(true);
-    // Loaded once (the second run finds it resident), leased and released per run.
-    expect(fake.jobs.filter((j) => j.type === 'load-model').map((j) => j.model)).toEqual(['qwen3.8-27b-4bit']);
+    // 1.0.24: the host's ceiling says the 8-bit serves 32K when loaded at it, so
+    // precision wins (ollama-map.ts rule 4) and the load states the context.
+    expect(fake.chatBodies().every((b) => b['model'] === 'qwen3.8-27b-8bit')).toBe(true);
+    // Loaded once (the second run finds it resident at 32K), leased and released per run.
+    expect(fake.jobs.filter((j) => j.type === 'load-model').map((j) => [j.model, j.params['context']])).toEqual([['qwen3.8-27b-8bit', 32768]]);
     expect(fake.leases.taken).toHaveLength(2);
     expect(fake.leases.released).toEqual(fake.leases.taken.map((l) => l.leaseId));
     // Sized at the local model's context (capped at the 32K analysis window), not Ollama's 4K.
@@ -273,12 +276,38 @@ describe('a whole analysis through Crucible', () => {
     expect(limits.every((m) => m.startsWith('[Model Limits] effective ctx=32768:'))).toBe(true);
     expect(logged.some((m) => /Ollama's default context/.test(m))).toBe(false);
     // Said once per model, not per call or per run.
-    expect(logged.filter((m) => /ollama\/qwen3\.8:27b runs as qwen3\.8-27b-4bit/.test(m))).toHaveLength(1);
+    expect(logged.filter((m) => /ollama\/qwen3\.8:27b runs as qwen3\.8-27b-8bit, this server's own copy of that model, loaded at 32768 tokens/.test(m))).toHaveLength(1);
     // The choice itself is unchanged: still ollama:qwen3.8:27b.
     expect(opts).toMatchObject({ provider: 'ollama', model: 'qwen3.8:27b' });
   });
 
-  it('an ollama: choice with no match on the server stays on the ollama/ upstream at Ollama\'s 4K context', async () => {
+  it('without a host ceiling that reaches 32K, the Mac keeps the 4-bit at its served 98K', async () => {
+    await fake.close();
+    fake = await startFakeCrucible({
+      contextCeilings: { 'qwen3.8-27b-8bit': 12288, 'qwen3.8-27b-4bit': 98304, 'qwen3.5-9b': 16384 },
+      models: [
+        { id: 'qwen3.5-9b', paramsB: 9, contextDefault: 16384, maxModelLen: 16384 },
+        { id: 'qwen3.8-27b-4bit', paramsB: 27, contextDefault: 98304, maxModelLen: 98304 },
+        { id: 'qwen3.8-27b-8bit', paramsB: 27, contextDefault: 12288, maxModelLen: 12288 },
+      ],
+      upstreams: { ollama: { url: 'http://127.0.0.1:11434' } },
+      chatReplies: { '*': '{"title":"A chapter","summary":"About it.","verdict":"skip","flags":[],"people":[],"topics":["cooking"],"hook":"Hook.","body":"Body.","description":"Desc.","tags":["x"]}' },
+    });
+    h.registry.remove('mac');
+    h.registry.add({ name: 'mac', url: fake.url, token: fake.token });
+    const spy = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    try {
+      await analysis().analyzeTranscript({ ...options('qwen3.8:27b'), provider: 'ollama' as never });
+    } finally {
+      spy.mockRestore();
+      warnSpy.mockRestore();
+    }
+    expect(fake.chatBodies().every((b) => b['model'] === 'qwen3.8-27b-4bit')).toBe(true);
+    expect(fake.jobs.filter((j) => j.type === 'load-model').map((j) => [j.model, j.params['context']])).toEqual([['qwen3.8-27b-4bit', undefined]]);
+  });
+
+  it('an ollama: choice with no match on the server stays on the ollama/ upstream, sized as the direct road sizes it, the window sent as context_tokens (1.0.24)', async () => {
     await fake.close();
     fake = await startFakeCrucible({
       // The 27B is known but not downloaded here: no match.
@@ -301,7 +330,14 @@ describe('a whole analysis through Crucible', () => {
     expect(fake.jobs.filter((j) => j.type === 'load-model')).toHaveLength(0);
     const limits = logged.filter((m) => m.startsWith('[Model Limits] effective ctx='));
     expect(limits).toHaveLength(1);
-    expect(limits[0]).toMatch(/^\[Model Limits\] effective ctx=4096:/);
+    // numCtxMaxForModel('qwen3.8:27b'): what the direct road requests as num_ctx.
+    expect(limits[0]).toMatch(/^\[Model Limits\] effective ctx=12288:/);
+    expect(logged.some((m) => /Ollama's default context/.test(m))).toBe(false);
+    // Every call states its window, bucketed and capped as the direct road's num_ctx is.
+    const windows = fake.chatBodies().map((b) => b['context_tokens']);
+    expect(windows.every((w) => typeof w === 'number' && w >= 4096 && w <= 12288 && (w as number) % 4096 === 0)).toBe(true);
+    // The server's X-Crucible-Context is logged once for the model.
+    expect(logged.filter((m) => /ollama\/qwen3\.8:27b runs with .*"source":"request"/.test(m))).toHaveLength(1);
     expect(logged.filter((m) => /no Crucible server has that model of its own/.test(m))).toHaveLength(1);
   });
 

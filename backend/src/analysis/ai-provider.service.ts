@@ -12,7 +12,8 @@ import {
 import { negotiateOllamaThink, markGradedThinkUnsupported } from './ollama-capabilities';
 import { AnalysisCancelledError, ensureNotCancelled } from './cancellation';
 import { resolveAiVia, type AiVia } from '../crucible/llm/ai-via';
-import { CrucibleChatService, isTextChatModel, type CrucibleChatResult } from '../crucible/llm/crucible-chat.service';
+import { CrucibleChatService, OLLAMA_CONTEXT_VERSION, isAnalysisModel, type CrucibleChatResult } from '../crucible/llm/crucible-chat.service';
+import { isVisionAlias } from '../crucible/llm/ollama-map';
 import { CrucibleBusyError, CrucibleChatCancelled, CrucibleChatError, CrucibleNoVenueError, CrucibleParkedError } from '../crucible/llm/errors';
 import { crucibleTargetOf, type CrucibleTarget } from '../crucible/llm/target';
 import { CRUCIBLE_ANALYSIS_CONTEXT } from '../crucible/llm/ollama-map';
@@ -159,10 +160,13 @@ export class AIProviderService {
     if (this.via() !== 'crucible' || this.crucibleChat === undefined) return null;
     try {
       const venue = await this.crucibleChat.venueFor(crucibleTargetOf('local', '_'));
-      const models = await this.crucibleChat.modelsOn(venue);
-      const small = models
-        .filter((m) => m.backendSupported && m.installed && isTextChatModel(m) && m.paramsB > 0 && m.paramsB <= maxParamsB)
-        .sort((a, b) => a.paramsB - b.paramsB);
+      const [models, pageReaders] = await Promise.all([this.crucibleChat.modelsOn(venue), this.crucibleChat.pageReadersOn(venue)]);
+      // By capability class (never a page reader), and the base form over its
+      // `-vl` alias: switching a card between the two is a full reload.
+      const usable = models.filter((m) => m.backendSupported && m.installed && isAnalysisModel(m, pageReaders) && m.paramsB > 0 && m.paramsB <= maxParamsB);
+      const small = usable
+        .filter((m) => !isVisionAlias(m) || !usable.some((b) => b.id === m.weightsOf))
+        .sort((a, b) => a.paramsB - b.paramsB || Number(isVisionAlias(b)) - Number(isVisionAlias(a)));
       return small.length > 0 ? `local:${small[small.length - 1].id}` : null;
     } catch (error) {
       this.logger.debug(`[Placement] Crucible catalog not readable: ${(error as Error).message}`);
@@ -177,17 +181,40 @@ export class AIProviderService {
    * for the model that will actually answer.
    */
   async crucibleOllamaStandIn(model: string): Promise<string | null> {
+    return (await this.crucibleOllamaStandInChoice(model))?.model ?? null;
+  }
+
+  /** {@link crucibleOllamaStandIn}, with the context the stand-in is loaded at when it is loaded larger than its default. */
+  async crucibleOllamaStandInChoice(model: string): Promise<{ model: string; loadContext?: number } | null> {
     if (this.via() !== 'crucible' || this.crucibleChat === undefined) return null;
     try {
       const chosen = await this.crucibleChat.effectiveTarget(crucibleTargetOf('ollama', model));
-      return chosen.mappedFrom !== null ? chosen.target.model : null;
+      if (chosen.mappedFrom === null) return null;
+      return { model: chosen.target.model, ...(chosen.loadContext === undefined ? {} : { loadContext: chosen.loadContext }) };
     } catch {
       return null;
     }
   }
 
+  /**
+   * True when an `ollama:<tag>` choice reaches Ollama through a Crucible that
+   * forwards the window (`context_tokens` → options.num_ctx, 1.0.24+): it is then
+   * sized exactly as the direct road sizes it. False on an older server, where
+   * Ollama runs at its 4096 default (CRUCIBLE_OLLAMA_CONTEXT), or off this road.
+   */
+  async crucibleOllamaTakesContext(model: string): Promise<boolean> {
+    if (this.via() !== 'crucible' || this.crucibleChat === undefined) return false;
+    try {
+      const target = crucibleTargetOf('ollama', model);
+      const venue = await this.crucibleChat.venueFor(target);
+      return await this.crucibleChat.serverAtLeast(venue, OLLAMA_CONTEXT_VERSION);
+    } catch {
+      return false;
+    }
+  }
+
   /** The context window a Crucible local model is served at, or null when it can't be read. */
-  async crucibleContextWindow(model: string): Promise<number | null> {
+  async crucibleContextWindow(model: string, loadContext?: number): Promise<number | null> {
     if (this.via() !== 'crucible' || this.crucibleChat === undefined) return null;
     try {
       const target = crucibleTargetOf('local', model);
@@ -196,7 +223,10 @@ export class AIProviderService {
       if (!info) return null;
       // The context this host serves it at, never more than what is in force,
       // and capped at 32K: a larger chunk is slower on a local card for no gain.
-      const served = Math.min(info.contextDefault, info.maxModelLen ?? Number.POSITIVE_INFINITY);
+      // A model this run loads at a larger context (ollama-map.ts rule 4) is served at that.
+      const served = loadContext !== undefined
+        ? loadContext
+        : Math.min(info.contextDefault, info.maxModelLen ?? Number.POSITIVE_INFINITY);
       return Number.isFinite(served) && served > 0 ? Math.min(served, CRUCIBLE_ANALYSIS_CONTEXT) : null;
     } catch {
       return null;
@@ -341,6 +371,12 @@ export class AIProviderService {
     this.logger.log(`Generating via Crucible: ${target.model} (from ${config.provider}:${config.model}), task: ${task ?? 'unspecified'}`);
 
     const parkOnBusy = chat.parksOnBusy();
+    // An ollama/ upstream gets the window the direct road would request as
+    // num_ctx (same bucketing, same per-model cap); the chat service sends it
+    // only to a server that forwards it (1.0.24+). Other targets ignore it.
+    const contextTokens = target.upstream === 'ollama'
+      ? overrides?.numCtx ?? estimateNumCtx(prompt.length, target.bareModel, 2048)
+      : undefined;
     let result: CrucibleChatResult;
     try {
       result = await chat.chat({
@@ -349,6 +385,7 @@ export class AIProviderService {
         temperature,
         responseFormat: overrides?.format,
         schemaName: task ?? 'answer',
+        contextTokens,
         signal,
         busyWait: parkOnBusy ? undefined : {
           everyMs: CRUCIBLE_BUSY_RETRY_MS,
