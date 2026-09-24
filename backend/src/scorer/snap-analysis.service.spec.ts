@@ -57,11 +57,10 @@ class FakeHandle {
         continue;
       }
       const cq = q as ChoiceQuestion;
-      const sentence = /Sentence from the transcript above: "(.*)"/.exec(cq.instructions)![1].toLowerCase();
+      const sentence = /(?:Sentence|Passage) from the transcript above: "(.*)"/.exec(cq.instructions)![1].toLowerCase();
       const names = cq.options.map((o) => o.name);
       let pick: number;
-      if (cq.name.startsWith('p1:')) pick = sentence.includes('communists') ? names.indexOf('political-demonization') : names.indexOf('none');
-      else if (cq.name.startsWith('p2:')) pick = 0;
+      if (cq.name.startsWith('g:')) pick = sentence.includes('communists') ? names.indexOf('political-demonization') : names.indexOf('none');
       else {
         // Topic sections only (never the ad/plug item): an unmatched sentence leans to section 1.
         const topic = (d: string) => !d.startsWith('An ad') && sentence.includes(d.split(' ')[0].toLowerCase());
@@ -126,7 +125,7 @@ describe('SnapAnalysisService', () => {
     expect(res.labelMassGated).toEqual({ chapters: 0, flags: 0, refine: 0, total: 0 });
     expect(res.chapters!.chapters.map((c) => c.title)).toEqual(['Cooking pasta', 'Travel plans']);
     expect(res.chapters!.chapters[1].startSeconds).toBe(30);
-    expect(res.flags!.windows.map((w) => w.categories[0].category)).toEqual(['political-demonization']);
+    expect(res.flags!.spans.map((sp) => sp.categories[0].category)).toEqual(['political-demonization']);
     // Both passes asked about the same units.
     expect(res.flags!.ratingMap.units).toBe(res.transcript!.units);
     for (let i = 1; i < events.length; i++) expect(events[i].fraction).toBeGreaterThanOrEqual(events[i - 1].fraction);
@@ -154,7 +153,7 @@ describe('SnapAnalysisService', () => {
       segments: segments(), categories: CATEGORIES, chapters: true, flags: true, chapterOptions: { switchCost: 2 },
     });
     expect(res.chapters!.chapters.map((c) => [c.title, c.startSeconds])).toEqual([['Just one section', 0]]);
-    expect(res.flags!.windows.length).toBe(1);
+    expect(res.flags!.spans.length).toBe(1);
   });
 
   it('an outline with no usable item fails the chapters BY NAME', async () => {
@@ -183,7 +182,7 @@ describe('SnapAnalysisService', () => {
 
   it('a flag-pass engine error fails the run by name (the chapters are not shipped without their flags)', async () => {
     const fake = new FakeHandle();
-    fake.failOn = (req) => (req.questions[0].name.startsWith('p1:') ? new ScorerError('engine_error', 'boom') : null);
+    fake.failOn = (req) => (req.questions[0].name.startsWith('g:') ? new ScorerError('engine_error', 'boom') : null);
     const { server } = fakeServer(fake);
     const err = await new SnapAnalysisService(server, new SnapFlagRanker()).run({
       segments: segments(), categories: CATEGORIES, chapters: true, flags: true, chapterOptions: { switchCost: 2 },
@@ -195,13 +194,13 @@ describe('SnapAnalysisService', () => {
 
   it('answers under the label-mass gate are counted per pass, never silently', async () => {
     const fake = new FakeHandle();
-    fake.gate = (name) => name === 's0' || name.startsWith('p1:');
+    fake.gate = (name) => name === 's0' || name.startsWith('g:');
     const { server } = fakeServer(fake);
     const res = await new SnapAnalysisService(server, new SnapFlagRanker()).run({
       segments: segments(), categories: CATEGORIES, chapters: true, flags: true, chapterOptions: { switchCost: 2 },
     });
     expect(res.labelMassGated.chapters).toBe(1);
-    expect(res.labelMassGated.flags).toBe(res.transcript!.units.length);
+    expect(res.labelMassGated.flags).toBe(res.flags!.stats.groupQuestions);
     expect(res.labelMassGated.total).toBe(res.labelMassGated.chapters + res.labelMassGated.flags);
   });
 
@@ -215,7 +214,7 @@ describe('SnapAnalysisService', () => {
       .catch((e) => e);
     expect(err).toBeInstanceOf(AnalysisCancelledError);
     expect(isCancellation(err)).toBe(true);
-    expect(fake.decides.every((d) => !d.questions[0].name.startsWith('p1:'))).toBe(true);
+    expect(fake.decides.every((d) => !d.questions[0].name.startsWith('g:'))).toBe(true);
   });
 
   it("an aborted in-flight request (the scorer's own 'cancelled') is a cancellation, not a failure", async () => {
@@ -269,7 +268,7 @@ describe('SnapAnalysisService', () => {
       const units = res.transcript!.units;
       const cooking = units.slice(0, 21).map((u) => u.text).join('\n');
       const firstRefine = fake.decides.findIndex((d) => d.state === cooking);
-      const lastFlag = fake.decides.map((d) => d.questions[0].name.startsWith('p')).lastIndexOf(true);
+      const lastFlag = fake.decides.map((d) => d.questions[0].name.startsWith('g:')).lastIndexOf(true);
       expect(firstRefine).toBeGreaterThan(lastFlag);
       for (let i = 1; i < events.length; i++) expect(events[i].fraction).toBeGreaterThanOrEqual(events[i - 1].fraction);
       expect(events.some((e) => e.stage === 'refine')).toBe(true);
@@ -330,6 +329,6 @@ describe('SnapAnalysisService', () => {
     });
     expect(fake.generates).toBe(0);
     expect(res.chapters).toBeNull();
-    expect(res.flags!.windows.length).toBe(1);
+    expect(res.flags!.spans.length).toBe(1);
   });
 });

@@ -33,8 +33,7 @@ describe('flag eval harness (pure parts)', () => {
       { video_id: 'v', start_seconds: 12, end_seconds: 14, category: 'hate', verdict: 'skip', nli_score: 0.5 },
     ];
     const m = scoreVideo('v', sentences, rows, [win(2, 3, ['hate'], 0), win(10, 10, ['hate'], 1)], [win(16, 16, ['violence'], 2)], {
-      pass1Questions: 20,
-      pass2Questions: 3,
+      groupQuestions: 10,
       wallMs: 1000,
       scorerMs: 900,
     });

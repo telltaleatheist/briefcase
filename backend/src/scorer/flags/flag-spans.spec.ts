@@ -14,7 +14,6 @@ import {
   onOffPath,
   picketFenceCount,
   rankFromRatingMap,
-  selectPass2Categories,
   unitCategoryScore,
   verifyBudget,
 } from './flag-spans';
@@ -31,10 +30,10 @@ function sentencesOf(n: number, seconds = 4): RankedSentence[] {
   }));
 }
 
-/** One unit per sentence; each hot unit's mass goes to `cat` (default hate). */
+/** One unit per sentence; each hot unit's mass goes to `cat` (default hate), or `row` gives the whole vector. */
 function mapOf(
   hot: number[],
-  opts: { seconds?: number; cat?: (i: number) => number; p2?: Array<Record<string, number>> } = {},
+  opts: { seconds?: number; cat?: (i: number) => number; row?: (i: number) => number[] | null } = {},
 ): { map: FlagRatingMap; sentences: RankedSentence[] } {
   const sentences = sentencesOf(hot.length, opts.seconds);
   const units: FlagUnit[] = sentences.map((s, i) => ({
@@ -46,6 +45,8 @@ function mapOf(
     end: s.end,
   }));
   const p1 = hot.map((h, i) => {
+    const given = opts.row?.(i);
+    if (given) return given;
     const row = new Array(CATS.length + 1).fill(0);
     row[opts.cat ? opts.cat(i) : 0] = h;
     row[CATS.length] = 1 - h;
@@ -54,7 +55,7 @@ function mapOf(
   return {
     sentences,
     map: {
-      version: 1,
+      version: 2,
       ranker: 'snap-v1',
       model: 'fake',
       layout: 'prefix',
@@ -62,36 +63,31 @@ function mapOf(
       categories: CATS,
       units,
       chunks: [{ coreFrom: 0, coreTo: units.length, contextFrom: 0, contextTo: units.length }],
+      groupSize: 3,
+      groupStride: 2,
+      groups: [],
       p1,
       labelMass: hot.map(() => 0.9),
       missingLabels: hot.map(() => 0),
-      p2: opts.p2 ?? hot.map(() => ({})),
     },
   };
 }
 
-describe('hotness and pass-2 gating', () => {
+describe('hotness and per-unit evidence', () => {
   it('hot = 1 - P(none)', () => {
     const { map } = mapOf([0.1, 0.5, 0.97]);
     expect(hotness(map).map((h) => +h.toFixed(6))).toEqual([0.1, 0.5, 0.97]);
   });
 
-  it('asks nothing below the gate; above it, categories with P >= 0.05, strongest first, at most 3', () => {
-    const p = DEFAULT_SPAN_PARAMS;
-    expect(selectPass2Categories([0.1, 0.05, 0.0, 0.85], CATS, p)).toEqual([]); // hot 0.15
-    expect(selectPass2Categories([0.1, 0.3, 0.04, 0.56], CATS, p)).toEqual(['conspiracy', 'hate']);
-    const five = ['a', 'b', 'c', 'd', 'e'];
-    expect(selectPass2Categories([0.2, 0.3, 0.1, 0.15, 0.2, 0.05], five, p)).toEqual(['b', 'a', 'e']);
-  });
-
-  it('per-unit category evidence: pass 2 wins; else share of hot mass above the gate; else raw P', () => {
-    const { map } = mapOf([0.1, 0.6, 0.6], { p2: [{}, { hate: 0.2 }, {}] });
+  it('per-unit category evidence: its share of the hot mass above the gate; else raw P', () => {
+    const { map } = mapOf([0.1, 0.6, 0.6], { row: (i) => (i === 1 ? [0.3, 0.3, 0, 0.4] : null) });
     const hot = hotness(map);
     // cold unit: raw P (0.1), never P/hot (which would be 1.0)
     expect(unitCategoryScore(map, hot, 0, 0, DEFAULT_SPAN_PARAMS)).toBeCloseTo(0.1);
-    // pass 2 answered
-    expect(unitCategoryScore(map, hot, 1, 0, DEFAULT_SPAN_PARAMS)).toBeCloseTo(0.2);
-    // hot, not asked: P/hot
+    // hot, split between two categories: each gets half
+    expect(unitCategoryScore(map, hot, 1, 0, DEFAULT_SPAN_PARAMS)).toBeCloseTo(0.5);
+    expect(unitCategoryScore(map, hot, 1, 1, DEFAULT_SPAN_PARAMS)).toBeCloseTo(0.5);
+    // hot, all on one: P/hot
     expect(unitCategoryScore(map, hot, 2, 0, DEFAULT_SPAN_PARAMS)).toBeCloseTo(1);
   });
 });
@@ -163,27 +159,23 @@ describe('ranking and the co-fire boost', () => {
     expect(noisyOr([0.9, 0.9])).toBeGreaterThan(noisyOr([0.97]));
   });
 
-  it('a co-firing span ranks above a stronger single-category span, end to end', () => {
-    // span A (units 2-3): hate 0.97 only. span B (units 10-11): hate 0.9 + conspiracy 0.9 via pass 2.
+  it('a stretch where the hot mass is split between two categories keeps both; windows come in descending score', () => {
+    // span A (units 2-3): all hate. span B (units 10-11): hate and conspiracy share the mass.
     const hot = [0.01, 0.01, 0.97, 0.97, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.9, 0.9, 0.01, 0.01];
-    const p2: Array<Record<string, number>> = hot.map(() => ({}));
-    p2[2] = { hate: 0.97 };
-    p2[3] = { hate: 0.97 };
-    p2[10] = { hate: 0.9, conspiracy: 0.9 };
-    p2[11] = { hate: 0.9 };
-    const { map, sentences } = mapOf(hot, { p2 });
+    const { map, sentences } = mapOf(hot, { row: (i) => (i === 10 || i === 11 ? [0.45, 0.45, 0, 0.1] : null) });
     const spans = buildSpans(map);
-    expect(spans.map((s) => s.unitFrom)).toEqual([10, 2]);
-    expect(spans[0].categories.map((c) => c.category)).toEqual(['conspiracy', 'hate']);
+    const b = spans.find((sp) => sp.unitFrom === 10)!;
+    expect(b.categories.map((c) => c.category)).toEqual(['conspiracy', 'hate']);
+    expect(spans.find((sp) => sp.unitFrom === 2)!.categories.map((c) => c.category)).toEqual(['hate']);
 
     const { windows } = rankFromRatingMap(map, sentences, PLAN);
-    expect(windows[0].categories.map((c) => c.category).sort()).toEqual(['conspiracy', 'hate']);
-    // Descending noisy-OR, which runRankedFlagStage asserts.
+    expect(windows).toHaveLength(2);
+    // Descending noisy-OR.
     for (let i = 1; i < windows.length; i++) expect(windows[i].score).toBeLessThanOrEqual(windows[i - 1].score + 1e-12);
   });
 
-  it('keeps categories with s_c >= 0.5 and always the top one', () => {
-    const { map } = mapOf([0.01, 0.3, 0.01], { p2: [{}, { hate: 0.3, conspiracy: 0.2 }, {}] });
+  it('keeps categories with s_c >= the floor (a third) and always the top one', () => {
+    const { map } = mapOf([0.01, 0.3, 0.01], { row: (i) => (i === 1 ? [0.2, 0.1, 0, 0.7] : null) });
     const spans = buildSpans(map, { ...DEFAULT_SPAN_PARAMS, tau: -3 });
     expect(spans[0].categories.map((c) => c.category)).toEqual(['hate']);
   });

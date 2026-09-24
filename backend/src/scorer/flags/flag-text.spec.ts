@@ -16,11 +16,8 @@ import {
   customOptionText,
 } from './flag-options';
 import {
-  DOES_NOT_FIT,
-  FITS,
-  START_OF_VIDEO,
-  buildPass1Question,
-  buildPass2Question,
+  GROUP_UNIT_CHARS,
+  buildGroupQuestion,
   clip,
   defaultFlagState,
   flagLegendBlock,
@@ -113,13 +110,12 @@ describe('buildFlagPlan', () => {
 describe('questions', () => {
   const { plan } = buildFlagPlan([{ name: 'hate' }, { name: 'conspiracy' }]);
 
-  it('pass 1, inline layout: the plan text verbatim, the full option texts, none last', () => {
-    const q = buildPass1Question(0, 'They are all communists.', START_OF_VIDEO, plan, 'inline', 'last');
+  it('a group, inline layout: the passage QUOTED (never an index), the full option texts, none last', () => {
+    const q = buildGroupQuestion(0, ['They are all communists.', 'Every one of them.', 'Lock them up.'], plan, 'inline', 'last');
     expect(q.type).toBe('choice');
     expect(q.instructions).toBe(
-      'Sentence from the transcript above: "They are all communists."\n' +
-        '(The sentence just before it: "(start of the video)")\n' +
-        'Which of these does the speaker do in this sentence?',
+      'Passage from the transcript above: "They are all communists. Every one of them. Lock them up."\n' +
+        'Which of these does the speaker do in this passage?',
     );
     expect(q.options).toEqual([
       { name: 'hate', description: SNAP_OPTION_TEXTS.hate },
@@ -128,9 +124,9 @@ describe('questions', () => {
     ]);
   });
 
-  it('pass 1, prefix layout: short labels in the question, full texts once in the state', () => {
-    const q = buildPass1Question(3, 'cur', 'prev', plan, 'prefix', 'first');
-    expect(q.name).toBe('p1:3');
+  it('a group, prefix layout: short labels in the question, full texts once in the state', () => {
+    const q = buildGroupQuestion(3, ['a', 'b', 'c'], plan, 'prefix', 'first');
+    expect(q.name).toBe('g:3');
     expect(q.instructions).toContain('Which of the categories listed above');
     expect(q.options.map((o) => o.name)).toEqual(['none', 'hate', 'conspiracy']);
     expect(q.options[1].description).toBe('Hate');
@@ -140,24 +136,14 @@ describe('questions', () => {
     expect(defaultFlagState(['a', 'b'], legend)).toBe(`a\nb\n\n${legend}`);
     expect(defaultFlagState(['a', 'b'], null)).toBe('a\nb');
     // The prefix layout's question is much shorter than the inline one.
-    const inline = buildPass1Question(3, 'cur', 'prev', plan, 'inline', 'first');
+    const inline = buildGroupQuestion(3, ['a', 'b', 'c'], plan, 'inline', 'first');
     const size = (x: typeof q) => x.instructions.length + x.options.reduce((n, o) => n + o.description.length, 0);
     expect(size(q)).toBeLessThan(size(inline));
   });
 
-  it('pass 2 is a two-option choice with both sides stated positively, never a yesno', () => {
-    const q = buildPass2Question(7, 'cur', 'prev', plan[1]);
-    expect(q.type).toBe('choice');
-    expect(q.name).toBe('p2:7:conspiracy');
-    expect(q.instructions).toContain(`Description: ${SNAP_OPTION_TEXTS.conspiracy}`);
-    expect(q.instructions).toContain('Does this sentence fit the description below?');
-    expect(q.options.map((o) => o.name)).toEqual([FITS, DOES_NOT_FIT]);
-  });
-
-  it('clips the sentence at 300 and the previous sentence at 200 chars', () => {
-    const q = buildPass1Question(1, 'a'.repeat(500), 'b'.repeat(500), plan, 'inline', 'last');
-    expect(q.instructions).toContain(`"${'a'.repeat(299)}…"`);
-    expect(q.instructions).toContain(`"${'b'.repeat(199)}…"`);
+  it('clips each quoted unit at GROUP_UNIT_CHARS', () => {
+    const q = buildGroupQuestion(1, ['a'.repeat(500), 'b'], plan, 'inline', 'last');
+    expect(q.instructions).toContain(`"${'a'.repeat(GROUP_UNIT_CHARS - 1)}… b"`);
     expect(clip('  short   text ', 300)).toBe('short text');
   });
 

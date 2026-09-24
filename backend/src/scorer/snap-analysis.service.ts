@@ -90,13 +90,15 @@ export interface SnapStageResult {
   timings: { startMs: number; prepareMs: number; chaptersMs: number; flagsMs: number; refineMs?: number; totalMs: number };
 }
 
-/** Share of the stage's progress bar the chapter pass takes when both passes run. */
-const CHAPTER_SHARE = 0.55;
+/**
+ * Share of the stage's progress bar the chapter pass takes when both passes
+ * run. Chapters ask once per unit; flags once per group of 3 moving by 2, so
+ * about half as many questions of about the same cost.
+ */
+const CHAPTER_SHARE = 0.65;
 /** Share refinement takes when the video is long enough to need it (with flags / chapters only). */
 const REFINE_SHARE_WITH_FLAGS = 0.25;
 const REFINE_SHARE_ALONE = 0.4;
-/** Within the flag pass: pass 1 vs pass 2. */
-const PASS1_SHARE = 0.85;
 
 function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -263,17 +265,12 @@ export class SnapAnalysisService {
             unitList: transcript.units,
             chunkPlan: transcript.flagChunks,
             signal,
-            onProgress: (p) => {
-              const within = p.total ? p.done / p.total : 1;
-              const f = p.phase === 'pass1' ? within * PASS1_SHARE : PASS1_SHARE + within * (1 - PASS1_SHARE);
+            onProgress: (p) =>
               report(
                 'flags',
-                base + f * span,
-                p.phase === 'pass1'
-                  ? `Scanning for flag candidates: ${p.done}/${p.total} sentences...`
-                  : `Checking flag candidates: ${p.done}/${p.total}...`,
-              );
-            },
+                base + (p.total ? p.done / p.total : 1) * span,
+                `Scanning for flags: ${p.unitsDone}/${p.unitsTotal} sentences...`,
+              ),
           });
         } catch (err) {
           if (isParked(err)) throw err;

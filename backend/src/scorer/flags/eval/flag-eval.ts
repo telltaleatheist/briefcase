@@ -183,8 +183,7 @@ export interface VideoMetrics {
   skipRowsHit: number;
   verifyCalls: number;
   overflowCalls: number;
-  pass1Questions: number;
-  pass2Questions: number;
+  groupQuestions: number;
   wallMs: number;
   scorerMs: number;
   picketFence: number;
@@ -201,7 +200,7 @@ export function scoreVideo(
   rows: SectionRow[],
   windows: SnapFlagWindow[],
   overflow: SnapFlagWindow[],
-  stats: Pick<SnapFlagRankStats, 'pass1Questions' | 'pass2Questions' | 'wallMs' | 'scorerMs'>,
+  stats: Pick<SnapFlagRankStats, 'groupQuestions' | 'wallMs' | 'scorerMs'>,
 ): VideoMetrics {
   const range = (w: SnapFlagWindow) => ({ start: sentences[w.firedFrom].start, end: sentences[w.firedTo].end });
   const hits = (ws: SnapFlagWindow[], row: SectionRow, matchCategory: boolean) =>
@@ -239,8 +238,7 @@ export function scoreVideo(
     skipRowsHit: skips.filter((r) => hits(windows, r, true)).length,
     verifyCalls: windows.reduce((n, w) => n + w.categories.length, 0),
     overflowCalls: overflow.reduce((n, w) => n + w.categories.length, 0),
-    pass1Questions: stats.pass1Questions,
-    pass2Questions: stats.pass2Questions,
+    groupQuestions: stats.groupQuestions,
     wallMs: stats.wallMs,
     scorerMs: stats.scorerMs,
     picketFence: picketFenceCount([...bySpan.values()]),
@@ -345,8 +343,7 @@ function summarise(all: VideoMetrics[]): Record<string, number> {
     verifyCalls: sum((m) => m.verifyCalls),
     nliRows: sum((m) => m.nliRows),
     overflowCalls: sum((m) => m.overflowCalls),
-    pass1Questions: sum((m) => m.pass1Questions),
-    pass2Questions: sum((m) => m.pass2Questions),
+    groupQuestions: sum((m) => m.groupQuestions),
     scorerSecondsPerHour: hours ? +(sum((m) => m.scorerMs) / 1000 / hours).toFixed(1) : 0,
     wallSecondsPerHour: hours ? +(sum((m) => m.wallMs) / 1000 / hours).toFixed(1) : 0,
     picketFence: sum((m) => m.picketFence),
@@ -359,7 +356,7 @@ function printVideo(m: VideoMetrics): void {
     `${m.videoId}  ${(m.durationSeconds / 60).toFixed(1)}min  flags ${m.flagRows}  ` +
       `recall ${pct(m.recallAnyInBudget)} (cat ${pct(m.recallCategoryInBudget)}; all ${pct(m.recallAnyAll)})  ` +
       `verify ${m.verifyCalls} (+${m.overflowCalls} over budget; NLI rows ${m.nliRows})  ` +
-      `q ${m.pass1Questions}+${m.pass2Questions}  ${(m.wallMs / 1000).toFixed(1)}s  fence ${m.picketFence}`,
+      `q ${m.groupQuestions}  ${(m.wallMs / 1000).toFixed(1)}s  fence ${m.picketFence}`,
   );
 }
 

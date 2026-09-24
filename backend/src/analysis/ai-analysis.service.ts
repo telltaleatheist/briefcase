@@ -4,7 +4,8 @@
  *   Scorer stage (SnapAnalysisService, Crucible's decision door): the chapter
  *           outline + assignment + Viterbi, and the flag ranking, in one lease.
  *   Pass 2: each chapter's summary from the LLM (the outline gave its title).
- *   Pass 2b: the snap-ranked flag windows, each verified by the LLM.
+ *   Pass 2b: the flag sections from the decide map (verifyFlagsWithLlm is off:
+ *           no LLM check; turned on, each window is verified by the LLM).
  *
  * Metadata (description, tags, title) is generated from chapter summaries.
  * Snap is the only engine (P7 removed the classic embedding/lexical chaptering,
@@ -273,6 +274,19 @@ const FLAG_VERIFICATION_SCHEMA: Record<string, unknown> = {
 };
 
 /**
+ * Whether the chat model double-checks each flag section the decide map made.
+ *
+ * OFF (2026-09-24, the user: "decide only for now. see how it turns out"): the
+ * sections come straight from the decide map, strongest first, all stored as
+ * flags. Turning it back on restores the verified path below unchanged
+ * (budget, verdict cache, ghosted rejections, unverified overflow).
+ */
+const VERIFY_FLAGS_WITH_LLM = false;
+
+/** Where the analysis engine's share of the progress bar ends (it starts at 3). */
+const ENGINE_BAND_END = 70;
+
+/**
  * Output budget for one verification call, used only to SIZE num_ctx.
  *
  * A verdict is ~10 tokens of JSON and the constrained decode measured 27-30
@@ -425,6 +439,8 @@ export class AIAnalysisService {
   private readonly logger = new Logger(AIAnalysisService.name);
   /** `ollama/` models already told they are chunked for Ollama's default context (said once per process). */
   private readonly crucibleOllamaNoted = new Set<string>();
+  /** Whether the chat model double-checks each flag section (VERIFY_FLAGS_WITH_LLM; a spec turns it on to test that path). */
+  verifyFlagsWithLlm = VERIFY_FLAGS_WITH_LLM;
 
   constructor(
     private readonly aiProviderService: AIProviderService,
@@ -832,7 +848,7 @@ export class AIAnalysisService {
         chapters: true,
         flags: true,
         signal,
-        onProgress: (p) => sendProgress('analysis', 3 + Math.round(p.fraction * 22), p.message),
+        onProgress: (p) => sendProgress('analysis', 3 + Math.round(p.fraction * (ENGINE_BAND_END - 3)), p.message),
       });
       const engineWarnings: string[] = [];
       if (snap.chapterTreeError) engineWarnings.push(`Sub-chapters were skipped: ${snap.chapterTreeError}`);
@@ -852,7 +868,7 @@ export class AIAnalysisService {
 
       // The chapters: the scorer's outline + Viterbi path, the outline labels as titles.
       const boundaries = snapChapters.map((c) => c.startSeconds);
-      sendProgress('analysis', 25, `Found ${boundaries.length} chapter${boundaries.length === 1 ? '' : 's'}`);
+      sendProgress('analysis', ENGINE_BAND_END, `Found ${boundaries.length} chapter${boundaries.length === 1 ? '' : 's'}`);
 
       // Calculate total API calls for accurate progress reporting: one summary
       // call per chapter + one verification call per (window, category) + the
@@ -891,9 +907,13 @@ export class AIAnalysisService {
       // smooth: a stage that has not started occupies none of the bar, and a
       // stage that discovers more work slows down inside its own band instead
       // of stealing another stage's.
-      const PASS2_BAND: [number, number] = [26, 60];
-      const FLAG_BAND: [number, number] = [60, 90];
-      const METADATA_BAND: [number, number] = [90, 96];
+      //
+      // The analysis engine (3 -> ENGINE_BAND_END) is most of a run's time: it
+      // asks the model about every sentence. The chat stages after it are a few
+      // calls each.
+      const PASS2_BAND: [number, number] = this.verifyFlagsWithLlm ? [ENGINE_BAND_END + 1, 80] : [ENGINE_BAND_END + 1, 92];
+      const FLAG_BAND: [number, number] = this.verifyFlagsWithLlm ? [80, 92] : [92, 92];
+      const METADATA_BAND: [number, number] = [92, 98];
       const bandProgress = ([start, end]: [number, number], done: number, total: number) =>
         Math.round(start + (Math.min(done, total) / Math.max(1, total)) * (end - start));
       // Message-only ticks (stage announcements) report where their stage
@@ -904,7 +924,7 @@ export class AIAnalysisService {
       // =========================================================================
       // PASS 2: Analyze each chapter (title, summary), then extract flags (2b)
       // =========================================================================
-      sendProgress('analysis', 26, `Analyzing ${boundaries.length} chapters (0/${totalApiCalls} API calls)...`);
+      sendProgress('analysis', PASS2_BAND[0], `Analyzing ${boundaries.length} chapters (0/${totalApiCalls} API calls)...`);
       const { chapters, flags, warnings: flagWarnings } = await this.analyzeChaptersPass2(
         aiConfig,
         segments,
@@ -1488,6 +1508,22 @@ export class AIAnalysisService {
     const verifierModel = `${flagConfig.provider}:${flagConfig.model}`;
     const passageOf = (window: FlagWindow) =>
       sentences.slice(window.contextFrom, window.contextTo + 1).map((s) => s.text);
+
+    if (!this.verifyFlagsWithLlm) {
+      // Decide only: every window the map produced is a flag, as ranked. A long
+      // span split into <= 40 s sub-passages is stored as one section again.
+      const all: FlagWindow[] = [...snapRanking.windows, ...snapRanking.overflow];
+      const verified = mergeSpanSubPassages(all, new Map(all.map((w) => [w, w.categories])));
+      const sections = this.buildWindowSections(verified, sentences, ranker).sort(
+        (a, b) => this.parseDisplayTime(a.start_time) - this.parseDisplayTime(b.start_time),
+      );
+      this.logger.log(
+        `[Pass 2b] Decide only (no LLM check): ${sentences.length} sentences (${snapRanking.stats.units} units, ` +
+        `${snapRanking.stats.groupQuestions} group questions) -> ${snapRanking.stats.spans} spans -> ` +
+        `${sections.length} flag sections`,
+      );
+      return sections;
+    }
 
     let windows: FlagWindow[] = snapRanking.windows;
     // Over-budget snap windows that stay unverified ('candidate' rows).

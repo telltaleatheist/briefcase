@@ -1,7 +1,7 @@
 /**
  * From the rating map to ranked verification windows. Pure: no scorer, no I/O.
  *
- *   rating map  (pass 1 vectors + pass 2 fits)            -> hotness per unit
+ *   rating map  (group vectors, averaged per unit)        -> hotness per unit
  *   hotness     -> 2-state Viterbi (plan §5.3)            -> on/off runs
  *   runs        -> category-blind merge                   -> paragraph spans
  *   spans       -> per-category span scores s_c           -> co-fire strength
@@ -34,17 +34,21 @@ export interface FlagSpanParams {
    * spans easier to open. See DEFAULT_SPAN_PARAMS for the arithmetic.
    */
   tau: number;
-  /** Pass-2 gate: units with hot >= this get the per-category two-option check. */
-  pass2HotGate: number;
-  /** ...for every category with P_i(c) >= this... */
-  pass2MinCategoryP: number;
-  /** ...at most this many per unit (strongest first). */
-  pass2MaxCategories: number;
+  /**
+   * A unit at least this hot reads its category evidence as its share of the
+   * hot mass, P_i(c) / hot_i (the categories compete in one softmax); a colder
+   * one reads the raw P_i(c). See unitCategoryScore.
+   */
+  shareGate: number;
   /** Category-blind post-merge: spans separated by <= this many units... */
   mergeGapUnits: number;
   /** ...or <= this many seconds join (nli-ranker WINDOW_MERGE_GAP_*). */
   mergeGapSeconds: number;
-  /** A span keeps categories with s_c >= this, and always its top one. */
+  /**
+   * A span keeps categories with s_c >= this, and always its top one. A third,
+   * not a half: a group holding two things splits its mass between them (one
+   * softmax), so each carries ~0.5 of it, just under a half-floor.
+   */
   categoryFloor: number;
   /** Spans longer than this are verified as sub-passages (WINDOW_MAX_MERGED_SECONDS). */
   maxPassageSeconds: number;
@@ -72,12 +76,10 @@ export interface FlagSpanParams {
 export const DEFAULT_SPAN_PARAMS: FlagSpanParams = {
   switchCost: 0.5,
   tau: -1,
-  pass2HotGate: 0.2,
-  pass2MinCategoryP: 0.05,
-  pass2MaxCategories: 3,
+  shareGate: 0.2,
   mergeGapUnits: 1,
   mergeGapSeconds: 5,
-  categoryFloor: 0.5,
+  categoryFloor: 0.34,
   maxPassageSeconds: 40,
   minVerifyCalls: 20,
   verifyCallsPerHour: 60,
@@ -85,7 +87,15 @@ export const DEFAULT_SPAN_PARAMS: FlagSpanParams = {
 
 // --------------------------------------------------------------------------- rating map
 
-export const RATING_MAP_VERSION = 1;
+/** 2: group questions (3 units, overlapping by 1) replaced per-unit pass 1 + pass 2. */
+export const RATING_MAP_VERSION = 2;
+
+/** One judged group: consecutive units [unitFrom, unitTo], and its vector [...categories, none]. */
+export interface FlagGroup {
+  unitFrom: number;
+  unitTo: number;
+  p: number[];
+}
 
 /**
  * Everything the scorer said, kept whole (never argmaxed), so spans can be
@@ -102,14 +112,17 @@ export interface FlagRatingMap {
   categories: string[];
   units: FlagUnit[];
   chunks: FlagChunk[];
-  /** Pass-1 probability vector per unit: [...categories, none]. */
+  /** Units per group, and how far each group moves on (size 3, stride 2: consecutive groups share one unit). */
+  groupSize: number;
+  groupStride: number;
+  /** Every group asked, in transcript order, with the model's whole vector. */
+  groups: FlagGroup[];
+  /** Per unit: the mean of the vectors of the groups that contain it, [...categories, none]. */
   p1: number[][];
-  /** Pass-1 label mass per unit (how much of the model's mass was on any letter). */
+  /** Per unit: the mean label mass of its groups (how much of the model's mass was on any letter). */
   labelMass: number[];
-  /** Pass-1 letters floored because they were outside the engine's top-n, per unit. */
+  /** Per unit: the most letters floored (outside the engine's top-n) in any of its groups. */
   missingLabels: number[];
-  /** Pass-2 q_{i,c} = P(Fits), per unit, only for the categories that were asked. */
-  p2: Array<Record<string, number>>;
 }
 
 export function noneIndex(map: Pick<FlagRatingMap, 'categories'>): number {
@@ -123,47 +136,22 @@ export function hotness(map: Pick<FlagRatingMap, 'categories' | 'p1'>): number[]
 }
 
 /**
- * Pass-2 gating for one unit (plan §5.2): nothing unless hot >= gate; then the
- * categories with P(c) >= minP, strongest first, at most maxN.
- */
-export function selectPass2Categories(
-  p1Row: number[],
-  categories: string[],
-  params: Pick<FlagSpanParams, 'pass2HotGate' | 'pass2MinCategoryP' | 'pass2MaxCategories'>,
-): string[] {
-  const hot = 1 - p1Row[categories.length];
-  if (!(hot >= params.pass2HotGate)) return [];
-  return categories
-    .map((c, j) => ({ c, p: p1Row[j] }))
-    .filter((x) => x.p >= params.pass2MinCategoryP)
-    .sort((a, b) => b.p - a.p)
-    .slice(0, params.pass2MaxCategories)
-    .map((x) => x.c);
-}
-
-/**
  * Per-unit evidence for category c:
- *   - pass 2's q_{i,c} where it was asked (independent, no competition);
- *   - else, on a unit that cleared the pass-2 gate, P_i(c)/hot_i (its share of
- *     the hot mass; c was not asked because P_i(c) < minP or it was outside
- *     the top pass2MaxCategories);
- *   - else, on a cold unit, the raw P_i(c).
- * DEVIATION: the plan says "no pass-2 value -> P_i(c)/hot_i" without the
- * cold-unit case. On a cold unit (hot 0.1, P(c) 0.09) the ratio is 0.9, which
- * would let a lukewarm context sentence outrank the sentence that fired.
+ *   - on a unit that cleared the share gate, P_i(c)/hot_i: its share of the hot
+ *     mass (categories compete in one softmax, so two that both apply split it);
+ *   - on a cold unit, the raw P_i(c). (On a cold unit, hot 0.1 and P(c) 0.09,
+ *     the ratio is 0.9, which would let a lukewarm context sentence outrank the
+ *     sentence that fired.)
  */
 export function unitCategoryScore(
-  map: Pick<FlagRatingMap, 'categories' | 'p1' | 'p2'>,
+  map: Pick<FlagRatingMap, 'categories' | 'p1'>,
   hot: number[],
   unit: number,
   catIndex: number,
-  params: Pick<FlagSpanParams, 'pass2HotGate'>,
+  params: Pick<FlagSpanParams, 'shareGate'>,
 ): number {
-  const c = map.categories[catIndex];
-  const q = map.p2[unit]?.[c];
-  if (q !== undefined) return q;
   const p = map.p1[unit][catIndex];
-  if (hot[unit] >= params.pass2HotGate && hot[unit] > 0) return clamp01(p / hot[unit]);
+  if (hot[unit] >= params.shareGate && hot[unit] > 0) return clamp01(p / hot[unit]);
   return p;
 }
 
@@ -234,11 +222,11 @@ export function mergedRuns(
 
 /** s_c for every category over units [from, to], strongest first. */
 export function scoreRange(
-  map: Pick<FlagRatingMap, 'categories' | 'p1' | 'p2'>,
+  map: Pick<FlagRatingMap, 'categories' | 'p1'>,
   hot: number[],
   from: number,
   to: number,
-  params: Pick<FlagSpanParams, 'pass2HotGate'>,
+  params: Pick<FlagSpanParams, 'shareGate'>,
 ): SpanCategory[] {
   const out: SpanCategory[] = [];
   for (let j = 0; j < map.categories.length; j++) {

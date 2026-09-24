@@ -35,7 +35,7 @@ class RecordingScorer {
         continue;
       }
       const cq = q as ChoiceQuestion;
-      if (cq.name.startsWith('p1:') || cq.name.startsWith('p2:')) pass = 'flags';
+      if (cq.name.startsWith('g:')) pass = 'flags';
       const names = cq.options.map((o) => o.name);
       const pick = names.includes('none') ? names.indexOf('none') : 0;
       const probs = names.map((_, k) => (k === pick ? 0.97 : 0.03 / (names.length - 1)));

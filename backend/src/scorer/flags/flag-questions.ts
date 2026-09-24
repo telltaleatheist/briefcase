@@ -1,17 +1,21 @@
 /**
  * Question and state text for the snap flag ranker. Pure.
  *
+ * One kind of question: a GROUP of consecutive units, quoted, asked over the
+ * enabled categories + "none" ("do these apply?"). Its probability vector is
+ * the rating map's raw material (snap-flag-ranker.ts).
+ *
  * TWO LAYOUTS, selectable per run so they can be A/B-tested live (plan §3.2,
  * §6.4, §7):
  *
- *   'inline'  snap's contract layout: every pass-1 question carries the full
+ *   'inline'  snap's contract layout: every question carries the full
  *             lettered legend of option texts (~330 tokens per question for 10
  *             categories + none). Measured configuration; ~345 s/h in §7.
  *
  *   'prefix'  legend-in-prefix: the option texts are written ONCE into the
  *             primed state, after the transcript, and each question's legend
  *             carries only the short category labels (~100 tokens per
- *             question). §7 estimates ~130 s/h for pass 1. Unmeasured for
+ *             question). §7 estimates ~130 s/h per-unit. Unmeasured for
  *             accuracy; the default until §6.4 says otherwise is 'prefix',
  *             because only it fits the 9 min/h budget.
  *
@@ -28,12 +32,7 @@ import { FlagOptionPlan, NONE_KEY, NONE_OPTION_TEXT, categoryTitle } from './fla
 export type FlagLayout = 'inline' | 'prefix';
 export type NonePosition = 'first' | 'last';
 
-export const START_OF_VIDEO = '(start of the video)';
 export const CONTENT_FREE_SENTENCE = '(no sentence)';
-
-/** Pass-2 option names. q_{i,c} = P(FITS). */
-export const FITS = 'Fits';
-export const DOES_NOT_FIT = 'Does not fit';
 
 /** Truncate to `max` characters, marking the cut with an ellipsis. */
 export function clip(text: string, max: number): string {
@@ -54,8 +53,8 @@ export function defaultFlagState(unitTexts: string[], legend: string | null): st
   return legend ? `${transcript}\n\n${legend}` : transcript;
 }
 
-/** Pass-1 options in label order. Names are the category keys (and 'none'). */
-export function pass1Options(plan: FlagOptionPlan[], layout: FlagLayout, nonePosition: NonePosition): ChoiceOption[] {
+/** The options in label order. Names are the category keys (and 'none'). */
+export function groupOptions(plan: FlagOptionPlan[], layout: FlagLayout, nonePosition: NonePosition): ChoiceOption[] {
   const cats: ChoiceOption[] = plan.map((p) => ({
     name: p.category,
     description: layout === 'inline' ? p.optionText : categoryTitle(p.category),
@@ -67,57 +66,40 @@ export function pass1Options(plan: FlagOptionPlan[], layout: FlagLayout, nonePos
   return nonePosition === 'first' ? [none, ...cats] : [...cats, none];
 }
 
-function sentenceLines(cur: string, prev: string): string {
-  return `Sentence from the transcript above: "${clip(cur, 300)}"\n(The sentence just before it: "${clip(prev, 200)}")`;
-}
+/** How long one quoted unit may be inside a group question. */
+export const GROUP_UNIT_CHARS = 300;
 
-export function pass1Instructions(cur: string, prev: string, layout: FlagLayout): string {
+/**
+ * The group question's instructions. It QUOTES the passage it judges (never an
+ * index into the transcript above: a model asked "sentence 212" judges
+ * whichever one it lands on), and the whole chunk is in the primed state
+ * around it, so the passage is read in context.
+ */
+export function groupInstructions(texts: string[], layout: FlagLayout): string {
+  const passage = texts.map((t) => clip(t, GROUP_UNIT_CHARS)).join(' ');
   const ask =
     layout === 'inline'
-      ? 'Which of these does the speaker do in this sentence?'
-      : 'Which of the categories listed above does the speaker do in this sentence?';
-  return `${sentenceLines(cur, prev)}\n${ask}`;
+      ? 'Which of these does the speaker do in this passage?'
+      : 'Which of the categories listed above does the speaker do in this passage?';
+  return `Passage from the transcript above: "${passage}"\n${ask}`;
 }
 
-export function pass1QuestionName(unitIndex: number): string {
-  return `p1:${unitIndex}`;
+export function groupQuestionName(groupIndex: number): string {
+  return `g:${groupIndex}`;
 }
 
-export function buildPass1Question(
-  unitIndex: number,
-  cur: string,
-  prev: string,
+/** One group of consecutive units, judged together over the categories + "none". */
+export function buildGroupQuestion(
+  groupIndex: number,
+  texts: string[],
   plan: FlagOptionPlan[],
   layout: FlagLayout,
   nonePosition: NonePosition,
 ): ChoiceQuestion {
   return {
     type: 'choice',
-    name: pass1QuestionName(unitIndex),
-    instructions: pass1Instructions(cur, prev, layout),
-    options: pass1Options(plan, layout, nonePosition),
+    name: groupQuestionName(groupIndex),
+    instructions: groupInstructions(texts, layout),
+    options: groupOptions(plan, layout, nonePosition),
   };
-}
-
-/**
- * Pass 2 (plan §5.2): a two-option choice with both sides stated positively,
- * the form that fixed acquiescence in ContentStudio. NOT a yesno.
- */
-export function buildPass2Question(unitIndex: number, cur: string, prev: string, entry: FlagOptionPlan): ChoiceQuestion {
-  return {
-    type: 'choice',
-    name: pass2QuestionName(unitIndex, entry.category),
-    instructions:
-      `${sentenceLines(cur, prev)}\n` +
-      `Does this sentence fit the description below?\n` +
-      `Description: ${entry.optionText}`,
-    options: [
-      { name: FITS, description: 'the speaker does what the description says in this sentence' },
-      { name: DOES_NOT_FIT, description: 'the sentence is about something else' },
-    ],
-  };
-}
-
-export function pass2QuestionName(unitIndex: number, category: string): string {
-  return `p2:${unitIndex}:${category}`;
 }

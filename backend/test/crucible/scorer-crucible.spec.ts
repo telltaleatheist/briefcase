@@ -332,7 +332,7 @@ describe('one lease across the pass, and every "can\'t" by name', () => {
     const bodies = fake.decideBodies();
     expect(asked.mock.calls).toHaveLength(bodies.length);
     bodies.forEach((b, i) => expect(wireContent(b)).toEqual(seamContent(asked.mock.calls[i][1])));
-    expect(bodies.some((b) => Object.keys(b['questions'] as object).some((n) => n.startsWith('p1:')))).toBe(true);
+    expect(bodies.some((b) => Object.keys(b['questions'] as object).some((n) => n.startsWith('g:')))).toBe(true);
     asked.mockRestore();
     expect(res.chapters?.chapters.length).toBeGreaterThan(1);
     expect(res.flags).not.toBeNull();

@@ -80,6 +80,8 @@ function snapResult(over: Partial<SnapStageResult> = {}): SnapStageResult {
 }
 
 class Harness {
+  /** The LLM check on flag sections (off in the app for now; the verified-path tests turn it on). */
+  verify = false;
   generated: Array<{ prompt: string; task: string }> = [];
   snapRuns: SnapStageRequest[] = [];
   snapRun: (req: SnapStageRequest) => Promise<SnapStageResult> = async () => snapResult();
@@ -106,7 +108,9 @@ class Harness {
         return this.snapRun(req);
       },
     };
-    return new AIAnalysisService(provider as any, snap as any, undefined);
+    const service = new AIAnalysisService(provider as any, snap as any, undefined);
+    service.verifyFlagsWithLlm = this.verify;
+    return service;
   }
 }
 
@@ -132,8 +136,22 @@ describe('AIAnalysisService: snap is the analysis engine', () => {
     process.env = savedEnv;
   });
 
-  it('outline titles and scorer boundaries, snap windows verified, sub-passages merged, candidates stored', async () => {
+  it('decide only (the default): every window of the map is a flag section, sub-passages merged, no LLM check', async () => {
     const h = new Harness();
+    const res = await h.service().analyzeTranscript(options());
+    expect(h.generated.filter((g) => g.task === 'flags')).toHaveLength(0);
+    const flags = res.sections.filter((s) => s.verdict === 'flag');
+    expect(flags.map((s) => [s.start_time, s.end_time, s.category, s.ranker])).toEqual([
+      ['00:00:20', '00:00:50', 'political-demonization', 'snap-v1'],
+      ['00:01:10', '00:01:20', 'conspiracy', 'snap-v1'],
+    ]);
+    expect(flags[0].description).toContain('[also: dehumanization]');
+    expect(res.sections.every((s) => s.verdict === 'flag')).toBe(true);
+  });
+
+  it('with the LLM check on: snap windows verified, sub-passages merged, candidates stored', async () => {
+    const h = new Harness();
+    h.verify = true;
     const res = await h.service().analyzeTranscript(options());
     expect(h.snapRuns).toHaveLength(1);
     expect(h.snapRuns[0]).toMatchObject({ chapters: true, flags: true });
@@ -162,8 +180,9 @@ describe('AIAnalysisService: snap is the analysis engine', () => {
     expect(res.warnings).toBeUndefined();
   });
 
-  it('the .txt report holds findings only: no candidate and no skip rows', async () => {
+  it('with the LLM check on, the .txt report holds findings only: no candidate and no skip rows', async () => {
     const h = new Harness();
+    h.verify = true;
     const svc = h.service();
     // The verifier rejects the second sub-passage (sentences 4-5; its prompt's
     // context does not reach sentence 2): a 'skip' row.
@@ -201,8 +220,9 @@ describe('AIAnalysisService: snap is the analysis engine', () => {
     expect(h.generated).toHaveLength(0);
   });
 
-  it('a park mid-verification stops the whole run (never a quietly degraded flag)', async () => {
+  it('with the LLM check on, a park mid-verification stops the whole run (never a quietly degraded flag)', async () => {
     const h = new Harness();
+    h.verify = true;
     const base = h.answer;
     h.answer = async (prompt, task) => {
       if (task === 'flags') throw new CrucibleParkedError('mac', "Crucible on mac isn't answering.");

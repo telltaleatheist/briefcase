@@ -1,14 +1,18 @@
 /**
- * SnapFlagRanker: stage 1 of the flag pipeline on the snap scorer, feeding the
- * verifier stage (plan §5). It replaced the NLI (DeBERTa) ranker, deleted in P7.
+ * SnapFlagRanker: the flag pipeline on the snap scorer's decide verb. It
+ * replaced the NLI (DeBERTa) ranker, deleted in P7.
  *
- *   pass 1  one `choice` per unit (with the previous unit as context) over the
- *           enabled categories + "none"; the whole probability vector is kept.
- *   pass 2  hot units only (hot = 1 - P(none) >= 0.2): a two-option `choice`
- *           per plausible category, restoring independent per-category
- *           evidence where the pass-1 softmax made categories compete.
- *   spans   pure, in flag-spans.ts: Viterbi on/off, category-blind merge,
- *           co-fire strength, <= 40 s passages, buildWindows, budget.
+ *   groups  the transcript in groups of GROUP_SIZE consecutive units, each
+ *           group sharing a unit with the next (stride GROUP_STRIDE), so a
+ *           sentence is judged with the sentences around it. One `choice` per
+ *           group over the enabled categories + "none" ("do these apply?"),
+ *           the group's text QUOTED in the question (never an index). The
+ *           whole probability vector is kept.
+ *   map     each unit's vector is the mean of its groups' vectors: a
+ *           per-category probability per sentence, the rating map.
+ *   spans   pure, in flag-spans.ts: Viterbi on/off, category-blind merge (a
+ *           run of scored sentences becomes ONE section), co-fire strength,
+ *           <= 40 s passages, buildWindows, budget.
  *
  * SHAPE. `rankWindows(sentences, categories)` returns FlagWindow[]
  * (SnapFlagWindow adds fields only), indexed by the `assembleSentences`
@@ -34,26 +38,22 @@ import {
 } from '../scorer.types';
 import { FlagOptionPlan, NONE_KEY, buildFlagPlan } from './flag-options';
 import {
-  FITS,
   FlagLayout,
   NonePosition,
-  START_OF_VIDEO,
-  buildPass1Question,
-  buildPass2Question,
+  buildGroupQuestion,
   defaultFlagState,
   flagLegendBlock,
-  pass1QuestionName,
-  pass2QuestionName,
+  groupQuestionName,
 } from './flag-questions';
 import {
   DEFAULT_SPAN_PARAMS,
   FlagRatingMap,
   FlagSpan,
   FlagSpanParams,
+  FlagGroup,
   RATING_MAP_VERSION,
   SnapFlagWindow,
   rankFromRatingMap,
-  selectPass2Categories,
 } from './flag-spans';
 import { ChunkOptions, FlagChunk, FlagUnit, UnitOptions, buildFlagUnits, planFlagChunks } from './flag-units';
 
@@ -62,13 +62,13 @@ export interface FlagScorer {
   decide(req: DecideRequest, options?: DecideOptions): Promise<DecideResponse>;
 }
 
-export type FlagRankPhase = 'pass1' | 'pass2';
-
 export interface FlagRankProgress {
-  phase: FlagRankPhase;
-  /** Questions answered so far in this phase. */
+  /** Groups answered so far. */
   done: number;
   total: number;
+  /** Units covered by the answered groups, of `unitsTotal` (what the progress line counts). */
+  unitsDone: number;
+  unitsTotal: number;
 }
 
 export interface SnapFlagRankOptions {
@@ -113,8 +113,7 @@ export interface SnapFlagRankStats {
   sentences: number;
   units: number;
   chunks: number;
-  pass1Questions: number;
-  pass2Questions: number;
+  groupQuestions: number;
   hotUnits: number;
   spans: number;
   passages: number;
@@ -123,7 +122,7 @@ export interface SnapFlagRankStats {
   verifyCalls: number;
   overflowWindows: number;
   overflowCalls: number;
-  /** Units whose pass-1 answer had floored (missing) letters. */
+  /** Units whose groups' answers had floored (missing) letters. */
   unitsWithMissingLabels: number;
   /** Sum of the scorer's own per-request totals (ms). */
   scorerMs: number;
@@ -146,6 +145,9 @@ export interface SnapFlagRankResult {
 }
 
 export const DEFAULT_LAYOUT: FlagLayout = 'prefix';
+/** Units per group, and the step between groups: consecutive groups share GROUP_SIZE - GROUP_STRIDE units. */
+export const GROUP_SIZE = 3;
+export const GROUP_STRIDE = 2;
 export const DEFAULT_BATCH_SIZE = 64;
 export const DEFAULT_N_PROBS = 100;
 
@@ -185,15 +187,17 @@ export class SnapFlagRanker {
       categories: plan.map((p) => p.category),
       units,
       chunks,
+      groupSize: GROUP_SIZE,
+      groupStride: GROUP_STRIDE,
+      groups: [],
       p1: [],
       labelMass: [],
       missingLabels: [],
-      p2: units.map(() => ({})),
     };
-    const counters = { pass1: 0, pass2: 0, scorerMs: 0 };
+    const counters = { groups: 0, scorerMs: 0 };
 
     if (units.length) {
-      const work = (scorer: FlagScorer) => this.score(scorer, map, plan, params, options, counters);
+      const work = (scorer: FlagScorer) => this.score(scorer, map, plan, options, counters);
       if (!options.scorer) throw new Error('SnapFlagRanker: no scorer (pass options.scorer, a lease the caller holds)');
       await work(options.scorer);
     }
@@ -203,9 +207,8 @@ export class SnapFlagRanker {
       sentences: sentences.length,
       units: units.length,
       chunks: chunks.length,
-      pass1Questions: counters.pass1,
-      pass2Questions: counters.pass2,
-      hotUnits: map.p1.filter((row) => 1 - row[plan.length] >= params.pass2HotGate).length,
+      groupQuestions: counters.groups,
+      hotUnits: map.p1.filter((row) => 1 - row[plan.length] >= params.shareGate).length,
       spans: ranked.spans.length,
       passages: ranked.passages.length,
       windows: ranked.windows.length,
@@ -219,7 +222,7 @@ export class SnapFlagRanker {
     };
     this.logger.log(
       `[SnapFlags] ${stats.sentences} sentences -> ${stats.units} units in ${stats.chunks} chunk(s), ` +
-        `layout ${layout}: ${stats.pass1Questions} pass-1 + ${stats.pass2Questions} pass-2 questions ` +
+        `layout ${layout}: ${stats.groupQuestions} group questions (${GROUP_SIZE} units, stride ${GROUP_STRIDE}) ` +
         `(${stats.hotUnits} hot units) -> ${stats.spans} spans / ${stats.passages} passages -> ` +
         `${stats.windows} windows, ${stats.verifyCalls} verify calls (budget ${stats.verifyBudget}; ` +
         `${stats.overflowWindows} windows / ${stats.overflowCalls} calls over it) in ${(stats.wallMs / 1000).toFixed(1)}s` +
@@ -239,13 +242,27 @@ export class SnapFlagRanker {
 
   // ------------------------------------------------------------------ scoring (I/O)
 
+  /**
+   * The groups of one chunk's owned units [from, to): GROUP_SIZE units each,
+   * starting every GROUP_STRIDE units, the last one ending exactly at `to`
+   * (never past the chunk: its state is that chunk's transcript).
+   */
+  static groupsOf(from: number, to: number): Array<[number, number]> {
+    const out: Array<[number, number]> = [];
+    for (let a = from; a < to; a += GROUP_STRIDE) {
+      const b = Math.min(a + GROUP_SIZE, to);
+      out.push([a, b - 1]);
+      if (b === to) break;
+    }
+    return out;
+  }
+
   private async score(
     scorer: FlagScorer,
     map: FlagRatingMap,
     plan: FlagOptionPlan[],
-    params: FlagSpanParams,
     options: SnapFlagRankOptions,
-    counters: { pass1: number; pass2: number; scorerMs: number },
+    counters: { groups: number; scorerMs: number },
   ): Promise<void> {
     const units = map.units;
     const legend = map.layout === 'prefix' ? flagLegendBlock(plan) : null;
@@ -254,7 +271,7 @@ export class SnapFlagRanker {
     const nProbs = options.nProbs ?? DEFAULT_N_PROBS;
     const signal = options.signal;
     const catIndex = new Map(map.categories.map((c, j) => [c, j]));
-    const prevOf = (i: number) => (i === 0 ? START_OF_VIDEO : units[i - 1].text);
+    const width = plan.length + 1;
     const states = map.chunks.map((chunk) =>
       buildState(
         units.slice(chunk.contextFrom, chunk.contextTo).map((u) => u.text),
@@ -278,62 +295,55 @@ export class SnapFlagRanker {
       }
     };
 
-    // ---- pass 1: every owned unit, per chunk, in batches.
-    const p1Total = units.length;
-    options.onProgress?.({ phase: 'pass1', done: 0, total: p1Total });
+    // Every chunk's groups, planned up front so progress has a total.
+    const perChunk = map.chunks.map((chunk) => SnapFlagRanker.groupsOf(chunk.coreFrom, chunk.coreTo));
+    const total = perChunk.reduce((n, g) => n + g.length, 0);
+    const unitsTotal = units.length;
+    let unitsDone = 0;
+    options.onProgress?.({ done: 0, total, unitsDone: 0, unitsTotal });
+
+    // Per-unit sums, averaged at the end.
+    const sum = units.map(() => new Array<number>(width).fill(0));
+    const massSum = units.map(() => 0);
+    const seen = units.map(() => 0);
+    const missing = units.map(() => 0);
+
     for (let c = 0; c < map.chunks.length; c++) {
-      const chunk = map.chunks[c];
-      for (let from = chunk.coreFrom; from < chunk.coreTo; from += batchSize) {
-        const to = Math.min(from + batchSize, chunk.coreTo);
-        const questions: ChoiceQuestion[] = [];
-        for (let i = from; i < to; i++) {
-          questions.push(buildPass1Question(i, units[i].text, prevOf(i), plan, map.layout, map.nonePosition));
-        }
-        const res = await ask(states[c], questions, `flag pass 1 (units ${from + 1}-${to}/${p1Total})`);
-        for (let i = from; i < to; i++) {
-          const answer = res.answers[pass1QuestionName(i)] as ChoiceAnswer;
-          const row = new Array<number>(plan.length + 1).fill(0);
+      const groups = perChunk[c];
+      for (let k = 0; k < groups.length; k += batchSize) {
+        const batch = groups.slice(k, k + batchSize);
+        const firstIndex = map.groups.length;
+        const questions = batch.map(([a, b], n) =>
+          buildGroupQuestion(firstIndex + n, units.slice(a, b + 1).map((u) => u.text), plan, map.layout, map.nonePosition),
+        );
+        const res = await ask(states[c], questions, `flag groups ${counters.groups + 1}-${counters.groups + batch.length}/${total}`);
+        batch.forEach(([a, b], n) => {
+          const answer = res.answers[groupQuestionName(firstIndex + n)] as ChoiceAnswer;
+          const row = new Array<number>(width).fill(0);
           for (const [name, p] of Object.entries(answer.probabilities)) {
             if (name === NONE_KEY) row[plan.length] = p;
             else row[catIndex.get(name) as number] = p;
           }
-          map.p1[i] = row;
-          map.labelMass[i] = answer.labelMass;
-          map.missingLabels[i] = answer.missingLabels?.length ?? 0;
-        }
-        counters.pass1 += to - from;
-        options.onProgress?.({ phase: 'pass1', done: counters.pass1, total: p1Total });
+          const group: FlagGroup = { unitFrom: a, unitTo: b, p: row };
+          map.groups.push(group);
+          for (let i = a; i <= b; i++) {
+            for (let j = 0; j < width; j++) sum[i][j] += row[j];
+            massSum[i] += answer.labelMass;
+            seen[i] += 1;
+            missing[i] = Math.max(missing[i], answer.missingLabels?.length ?? 0);
+          }
+          unitsDone = Math.max(unitsDone, b + 1);
+        });
+        counters.groups += batch.length;
+        options.onProgress?.({ done: counters.groups, total, unitsDone, unitsTotal });
       }
     }
 
-    // ---- pass 2: hot units x plausible categories.
-    const byChunk = map.chunks.map((chunk) => {
-      const qs: Array<{ q: ChoiceQuestion; unit: number; cat: string }> = [];
-      for (let i = chunk.coreFrom; i < chunk.coreTo; i++) {
-        for (const cat of selectPass2Categories(map.p1[i], map.categories, params)) {
-          qs.push({ q: buildPass2Question(i, units[i].text, prevOf(i), plan[catIndex.get(cat) as number]), unit: i, cat });
-        }
-      }
-      return qs;
-    });
-    const p2Total = byChunk.reduce((n, qs) => n + qs.length, 0);
-    options.onProgress?.({ phase: 'pass2', done: 0, total: p2Total });
-    for (let c = 0; c < map.chunks.length; c++) {
-      const qs = byChunk[c];
-      for (let k = 0; k < qs.length; k += batchSize) {
-        const batch = qs.slice(k, k + batchSize);
-        const res = await ask(
-          states[c],
-          batch.map((b) => b.q),
-          `flag pass 2 (${counters.pass2 + 1}/${p2Total})`,
-        );
-        for (const { unit, cat } of batch) {
-          const answer = res.answers[pass2QuestionName(unit, cat)] as ChoiceAnswer;
-          map.p2[unit][cat] = answer.probabilities[FITS];
-        }
-        counters.pass2 += batch.length;
-        options.onProgress?.({ phase: 'pass2', done: counters.pass2, total: p2Total });
-      }
+    for (let i = 0; i < units.length; i++) {
+      // Every unit is in at least one group (groupsOf covers [from, to) whole).
+      map.p1[i] = sum[i].map((v) => v / Math.max(1, seen[i]));
+      map.labelMass[i] = massSum[i] / Math.max(1, seen[i]);
+      map.missingLabels[i] = missing[i];
     }
   }
 }
