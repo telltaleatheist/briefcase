@@ -1,6 +1,6 @@
 /**
- * SnapChapterService — chapters from the snap scorer, a port of
- * ContentStudio's segment.py (docs/snap-analysis-plan.md §4):
+ * Snap chapters — chapters from the snap scorer, a port of ContentStudio's
+ * segment.py (docs/snap-analysis-plan.md §4):
  *
  *   1. outline  the scorer model writes the video's sections in order
  *               (generation, thinking off, temperature 0, <= 25 items, deduped);
@@ -14,11 +14,10 @@
  * Transcripts over ~16k tokens are chunked with overlap and stitched
  * (chunks.ts). In the analysis pipeline this runs through SnapAnalysisService
  * (one scorer lease with the flag pass, on a shared unit list and chunk plan),
- * behind the analysisEngine setting.
+ * on Crucible's decision door.
  */
 
-import { Injectable, Logger } from '@nestjs/common';
-import { ScorerServerService } from '../scorer-server.service';
+import { Logger } from '@nestjs/common';
 import { ChoiceAnswer, DecideOptions, DecideRequest, DecideResponse, GenerateOptions, GenerateResult, ScorerError, YesNoAnswer } from '../scorer.types';
 import { viterbi } from '../scorer-viterbi';
 import { Chunk, ChunkPath, ChunkPlanOptions, Seam, planChunks, stitchChunks } from './chunks';
@@ -39,7 +38,7 @@ import { SentenceUnit, SnapUnit, TranscriptSegment, assembleUnits } from './unit
 export interface ChapterScorer {
   decide(req: DecideRequest, options?: DecideOptions): Promise<DecideResponse>;
   generate(messages: string, options: GenerateOptions): Promise<GenerateResult>;
-  /** Token count of `text` (llama-server /tokenize). Absent: ~4 characters per token. */
+  /** Token count of `text` on the scorer's model. Absent: ~4 characters per token. */
   countTokens?(text: string, signal?: AbortSignal): Promise<number>;
 }
 
@@ -167,6 +166,20 @@ export async function runSnapChapters(
     let t = Date.now();
     let items = parseOutline(await writeOutline(outlinePrompt(text), signal));
     timings.outlineMs += Date.now() - t;
+
+    // A single-topic chunk (a one-item outline): there is nothing to choose
+    // between, so no assignment and no ad pass. The chunk is one run of that
+    // item: ONE chapter spanning it, titled from the outline.
+    if (items.length === 1) {
+      logger?.log(`[snap-chapters] chunk ${k}: one-item outline ("${items[0]}"): one chapter spanning it`);
+      const path = sents.map(() => 0);
+      unitsDone += sents.length;
+      doneWeight += (chunk.end - chunk.start) / unitsTotal;
+      results.push({ ...chunk, items, logProbs: sents.map(() => [0]), path, plugVerdicts: [], flooredUnits: 0 });
+      paths.push({ chunk, path, items, plug: -1 });
+      continue;
+    }
+
     if (detectAds) items = [...items, PLUG];
     const plug = detectAds ? items.length - 1 : -1;
 
@@ -255,34 +268,4 @@ export async function unitTokens(
   const totalChars = chars.reduce((a, b) => a + b, 0);
   const total = scorer.countTokens ? await scorer.countTokens(texts.join('\n'), signal) : totalChars / 4;
   return chars.map((c) => (c / totalChars) * total);
-}
-
-@Injectable()
-export class SnapChapterService {
-  private readonly logger = new Logger(SnapChapterService.name);
-
-  constructor(private readonly scorer: ScorerServerService) {}
-
-  /** Whisper segments -> sentence units (assembleSentences + fold + run-on cap); the same list flags use. */
-  unitsFromSegments(segments: TranscriptSegment[]): SnapUnit[] {
-    return assembleUnits(segments);
-  }
-
-  /**
-   * Chapters for one transcript. Holds the scorer for the whole run so the idle
-   * timer cannot stop it between calls. Throws OutlineError when the outline
-   * has fewer than 2 items (the caller falls back), ScorerError('cancelled')
-   * when `signal` fires, and any other ScorerError from the engine.
-   */
-  buildChapters(units: SentenceUnit[], opts: BuildChaptersOptions = {}): Promise<BuildChaptersResult> {
-    if (units.length === 0) return runSnapChapters({} as ChapterScorer, units, opts);
-    return this.scorer.withScorer(async (handle) => {
-      const scorer: ChapterScorer = {
-        decide: (req, o) => handle.decide(req, o),
-        generate: (messages, o) => handle.generate(messages, o),
-        countTokens: (text, signal) => handle.countTokens(text, signal),
-      };
-      return runSnapChapters(scorer, units, opts, this.logger);
-    }, opts.signal);
-  }
 }

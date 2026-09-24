@@ -44,8 +44,12 @@ const STRIP = ' -*•\t';
 
 /**
  * segment.py:49-58: strip " -*•\t" from each line, drop empties, de-duplicate
- * case-insensitively (first occurrence wins, order kept), cap at `maxItems`,
- * and refuse fewer than 2 items.
+ * case-insensitively (first occurrence wins, order kept) and cap at `maxItems`.
+ *
+ * ONE item is a real answer, not an error: a single-topic video (or section)
+ * has a one-item outline, and it becomes one chapter spanning it
+ * (runSnapChapters). Only an outline with NO usable item is refused
+ * (OutlineError): there is nothing to title a chapter with.
  *
  * Plan §4.1 defensive additions (no effect on what the measured model writes):
  * a leading "1." / "2)" and markdown "**" are also removed, and labels are
@@ -65,8 +69,8 @@ export function parseOutline(content: string, maxItems: number = MAX_ITEMS): str
     }
   }
   const capped = items.slice(0, maxItems);
-  if (capped.length < 2) {
-    throw new OutlineError(`outline came back with ${capped.length} items: ${JSON.stringify(content.slice(0, 300))}`);
+  if (capped.length === 0) {
+    throw new OutlineError(`outline came back with no items: ${JSON.stringify(content.slice(0, 300))}`);
   }
   return capped;
 }

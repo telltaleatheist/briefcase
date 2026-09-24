@@ -1,6 +1,5 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { ScorerServerService } from '../scorer-server.service';
 import {
   ChoiceAnswer,
   ChoiceQuestion,
@@ -11,7 +10,7 @@ import {
   YesNoAnswer,
 } from '../scorer.types';
 import { OutlineError } from './segmenter';
-import { ChapterProgress, ChapterScorer, SnapChapterService, runSnapChapters } from './snap-chapter.service';
+import { ChapterProgress, ChapterScorer, runSnapChapters } from './snap-chapter.service';
 import { PLUG } from './snap-prompts';
 import { SentenceUnit } from './units';
 
@@ -185,8 +184,19 @@ describe('runSnapChapters (fake scorer)', () => {
     expect(fake.prompts).toHaveLength(0);
   });
 
-  it('propagates an unusable outline as OutlineError', async () => {
-    await expect(runSnapChapters(new FakeScorer(() => 'Everything'), unitsOf(video))).rejects.toBeInstanceOf(OutlineError);
+  it('a one-item outline (a single-topic video) is ONE chapter spanning the video, titled from the item, with no decides', async () => {
+    const fake = new FakeScorer(() => 'Everything about cooking');
+    const units = unitsOf(video);
+    const res = await runSnapChapters(fake, units, { totalSeconds: units[units.length - 1].end });
+    expect(res.chapters).toHaveLength(1);
+    expect(res.chapters[0]).toMatchObject({ label: 'Everything about cooking', sentenceRange: [0, units.length] });
+    expect(res.chapters[0].startSeconds).toBe(0);
+    expect(res.outline).toEqual(['Everything about cooking']);
+    expect(fake.decides).toHaveLength(0);
+  });
+
+  it('an outline with no usable item fails by name (OutlineError)', async () => {
+    await expect(runSnapChapters(new FakeScorer(() => '\n - \n'), unitsOf(video))).rejects.toBeInstanceOf(OutlineError);
   });
 
   it('can route the outline to another writer', async () => {
@@ -225,40 +235,5 @@ describe('runSnapChapters (fake scorer)', () => {
     expect(ch.map((c) => c.sentenceRange[0])).toEqual([0, 40, 80, 120]);
     expect(ch.map((c) => c.label)).toEqual(['Cooking', 'Travel', 'Cooking', 'Travel']);
     expect(res.seams).toHaveLength(3);
-  });
-});
-
-describe('SnapChapterService', () => {
-  it('holds the scorer for the run and counts tokens with the engine tokenizer', async () => {
-    const fake = new FakeScorer();
-    let leases = 0;
-    const tokenized: string[] = [];
-    const server = {
-      withScorer: async (fn: (h: unknown) => Promise<unknown>) => {
-        leases++;
-        return fn({
-          decide: (req: DecideRequest) => fake.decide(req),
-          generate: (m: string) => fake.generate(m),
-          model: 'fake',
-          countTokens: async (t: string) => (tokenized.push(t), 3),
-        });
-      },
-    } as unknown as ScorerServerService;
-    const svc = new SnapChapterService(server);
-    const units = unitsOf(video);
-    const res = await svc.buildChapters(units);
-    expect(leases).toBe(1);
-    expect(tokenized).toEqual([units.map((u) => u.text).join('\n')]);
-    expect(res.chapters).toHaveLength(4);
-
-    expect((await svc.buildChapters([])).chapters).toEqual([]);
-    expect(leases).toBe(1);
-  });
-
-  it('builds units from whisper segments', () => {
-    const svc = new SnapChapterService({} as ScorerServerService);
-    expect(svc.unitsFromSegments([{ start: 0, end: 2, text: 'Hi. This is a whole sentence.' }])).toEqual([
-      { index: 0, start: 0, end: 2, text: 'Hi. This is a whole sentence.', sentenceFrom: 0, sentenceTo: 1 },
-    ]);
   });
 });

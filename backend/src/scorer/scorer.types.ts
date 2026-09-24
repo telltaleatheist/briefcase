@@ -3,7 +3,7 @@
  * (snap/schema.py, snap/errors.py, docs/CONTRACT.md).
  *
  * The scorer makes decisions from text without generating any: one forward
- * pass per question on a local llama-server, reading the next-token
+ * pass per question on Crucible's decision door, reading the next-token
  * distribution at the answer position restricted to the label tokens A..Z.
  *
  * Differences from snap's wire schema, all deliberate:
@@ -140,6 +140,14 @@ interface AnswerBase {
   labelMass: number;
   /** Labels absent from top-n that were floored (only with missingLabels: 'floor'). */
   missingLabels?: string[];
+  /**
+   * True when `labelMass` fell under the label-mass gate (crucible-decide.ts
+   * LABEL_MASS_GATE, 0.01): the model put almost none of its probability on
+   * any answer letter, so the answer was flattened to uniform (no evidence
+   * either way). Counted per run (SnapStageResult.labelMassGated) and said on
+   * the job, never silent.
+   */
+  gated?: true;
 }
 
 export interface ChoiceAnswer extends AnswerBase {
@@ -165,9 +173,9 @@ export interface YesNoAnswer extends AnswerBase {
 export type ScorerAnswer = ChoiceAnswer | ScoreAnswer | YesNoAnswer;
 
 export interface QuestionTiming {
-  /** llama-server: timings.prompt_ms. Crucible: the door's wall clock for that completion. */
+  /** The decision door's wall clock for that completion. */
   promptMs: number;
-  /** llama-server: timings.prompt_n (tokens actually processed). Crucible: usage.prompt_tokens (the whole prompt). */
+  /** usage.prompt_tokens (the whole prompt). */
   promptTokens: number;
   /** Tokens reused from the KV cache; null when the engine did not say (Crucible never reports an unmeasured 0). */
   cachedTokens: number | null;

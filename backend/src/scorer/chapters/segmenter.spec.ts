@@ -52,9 +52,13 @@ describe('outline prompt and parsing', () => {
     ]);
   });
 
-  it('throws OutlineError with fewer than two items', () => {
-    expect(() => parseOutline('Only one\nonly ONE\n')).toThrow(OutlineError);
-    expect(() => parseOutline('')).toThrow(/0 items/);
+  it('a one-item outline is an answer (a single-topic video), not an error', () => {
+    expect(parseOutline('Only one\nonly ONE\n')).toEqual(['Only one']);
+  });
+
+  it('throws OutlineError only when no item is usable', () => {
+    expect(() => parseOutline('')).toThrow(OutlineError);
+    expect(() => parseOutline('  \n - \n**\n')).toThrow(/no items/);
   });
 });
 

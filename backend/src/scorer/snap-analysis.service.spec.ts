@@ -3,8 +3,9 @@ import { Logger } from '@nestjs/common';
 
 import { AnalysisCancelledError, isCancellation } from '../analysis/cancellation';
 import { SnapFlagRanker } from './flags/snap-flag-ranker.service';
-import { SnapAnalysisService, SnapStageProgress } from './snap-analysis.service';
-import { ScorerHandle, ScorerServerService } from './scorer-server.service';
+import type { CrucibleScorerService } from './crucible-scorer.service';
+import { SnapAnalysisService, SnapEngineError, SnapStageProgress } from './snap-analysis.service';
+import type { ScorerHandle } from './scorer-handle';
 import {
   ChoiceAnswer,
   ChoiceQuestion,
@@ -24,6 +25,8 @@ class FakeHandle {
   outlineFor?: (prompt: string) => string;
   failOn?: (req: DecideRequest, n: number) => Error | null;
   onDecide?: (n: number) => void;
+  /** Mark answers as under the label-mass gate (flattened, no evidence). */
+  gate?: (questionName: string) => boolean;
 
   handle(): ScorerHandle {
     return {
@@ -70,23 +73,23 @@ class FakeHandle {
         probabilities: Object.fromEntries(names.map((n, k) => [n, probs[k]])),
         logProbs: probs.map(Math.log), rawLogProbs: probs.map(Math.log), labelMass: 0.99,
       };
-      answers[q.name] = a;
+      answers[q.name] = this.gate?.(q.name) ? { ...a, gated: true } : a;
     }
     return { model: 'fake-qwen', answers, timingMs: { total: 1, perQuestion: {} }, tokens: { perQuestion: {}, images: 0 } };
   }
 }
 
+/** Crucible's scorer seam, faked: one lease per `withScorer`. */
 function fakeServer(fake: FakeHandle, startError?: Error) {
   let leases = 0;
   const server = {
-    availability: () => ({ available: true, binarySource: 'homebrew' }),
     withScorer: async <T>(fn: (h: ScorerHandle) => Promise<T>) => {
       leases++;
       if (startError) throw startError;
       return fn(fake.handle());
     },
   };
-  return { server: server as unknown as ScorerServerService, leases: () => leases };
+  return { server: server as unknown as CrucibleScorerService, leases: () => leases };
 }
 
 function segments() {
@@ -119,9 +122,8 @@ describe('SnapAnalysisService', () => {
       onProgress: (p) => events.push(p),
     });
     expect(leases()).toBe(1);
-    expect(res.chaptersError).toBeUndefined();
-    expect(res.flagsError).toBeUndefined();
     expect(res.model).toBe('fake-qwen');
+    expect(res.labelMassGated).toEqual({ chapters: 0, flags: 0, refine: 0, total: 0 });
     expect(res.chapters!.chapters.map((c) => c.title)).toEqual(['Cooking pasta', 'Travel plans']);
     expect(res.chapters!.chapters[1].startSeconds).toBe(30);
     expect(res.flags!.windows.map((w) => w.categories[0].category)).toEqual(['political-demonization']);
@@ -133,52 +135,74 @@ describe('SnapAnalysisService', () => {
     expect(events.some((e) => e.stage === 'flags')).toBe(true);
   });
 
-  it('a scorer that cannot start is a per-stage error for BOTH passes, never a throw', async () => {
+  it('a scorer that cannot start fails the run BY NAME: there is no other engine', async () => {
     const fake = new FakeHandle();
-    const { server } = fakeServer(fake, new ScorerError('engine_unreachable', 'scorer llama-server exited with code 1'));
-    const res = await new SnapAnalysisService(server, new SnapFlagRanker()).run({
+    const { server } = fakeServer(fake, new ScorerError('engine_unreachable', 'Crucible "mac" stayed busy'));
+    const err = await new SnapAnalysisService(server, new SnapFlagRanker()).run({
       segments: segments(), categories: CATEGORIES, chapters: true, flags: true, chapterOptions: { switchCost: 2 },
-    });
-    expect(res.chapters).toBeNull();
-    expect(res.flags).toBeNull();
-    expect(res.chaptersError).toMatch(/could not start.*exited with code 1/);
-    expect(res.flagsError).toMatch(/could not start/);
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(SnapEngineError);
+    expect((err as SnapEngineError).stage).toBe('start');
+    expect((err as Error).message).toMatch(/stayed busy/);
   });
 
-  it('an unusable outline fails chapters only; flags still run', async () => {
+  it('a one-item outline (a single-topic video) is one chapter spanning the video; flags still run', async () => {
     const fake = new FakeHandle();
     fake.outline = 'Just one section';
     const { server } = fakeServer(fake);
     const res = await new SnapAnalysisService(server, new SnapFlagRanker()).run({
       segments: segments(), categories: CATEGORIES, chapters: true, flags: true, chapterOptions: { switchCost: 2 },
     });
-    expect(res.chapters).toBeNull();
-    expect(res.chaptersError).toMatch(/outline was unusable/);
+    expect(res.chapters!.chapters.map((c) => [c.title, c.startSeconds])).toEqual([['Just one section', 0]]);
     expect(res.flags!.windows.length).toBe(1);
   });
 
-  it('an engine that dies during chaptering is not asked again for flags', async () => {
+  it('an outline with no usable item fails the chapters BY NAME', async () => {
     const fake = new FakeHandle();
-    fake.failOn = () => new ScorerError('engine_unreachable', 'POST /completion: connection refused');
+    fake.outline = '\n - \n';
     const { server } = fakeServer(fake);
-    const res = await new SnapAnalysisService(server, new SnapFlagRanker()).run({
+    const err = await new SnapAnalysisService(server, new SnapFlagRanker()).run({
       segments: segments(), categories: CATEGORIES, chapters: true, flags: true, chapterOptions: { switchCost: 2 },
-    });
-    expect(res.chaptersError).toMatch(/connection refused/);
-    expect(res.flagsError).toMatch(/stopped answering during chaptering/);
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(SnapEngineError);
+    expect((err as SnapEngineError).stage).toBe('chapters');
+    expect((err as Error).message).toMatch(/outline was unusable/);
+  });
+
+  it('an engine error during chaptering fails the run by name and asks nothing more', async () => {
+    const fake = new FakeHandle();
+    fake.failOn = () => new ScorerError('engine_unreachable', 'POST /v1/decide: connection refused');
+    const { server } = fakeServer(fake);
+    const err = await new SnapAnalysisService(server, new SnapFlagRanker()).run({
+      segments: segments(), categories: CATEGORIES, chapters: true, flags: true, chapterOptions: { switchCost: 2 },
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(SnapEngineError);
+    expect((err as Error).message).toMatch(/connection refused/);
     expect(fake.decides).toHaveLength(1);
   });
 
-  it('a flag-pass engine error fails flags only; the chapters stand', async () => {
+  it('a flag-pass engine error fails the run by name (the chapters are not shipped without their flags)', async () => {
     const fake = new FakeHandle();
     fake.failOn = (req) => (req.questions[0].name.startsWith('p1:') ? new ScorerError('engine_error', 'boom') : null);
+    const { server } = fakeServer(fake);
+    const err = await new SnapAnalysisService(server, new SnapFlagRanker()).run({
+      segments: segments(), categories: CATEGORIES, chapters: true, flags: true, chapterOptions: { switchCost: 2 },
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(SnapEngineError);
+    expect((err as SnapEngineError).stage).toBe('flags');
+    expect((err as Error).message).toMatch(/boom/);
+  });
+
+  it('answers under the label-mass gate are counted per pass, never silently', async () => {
+    const fake = new FakeHandle();
+    fake.gate = (name) => name === 's0' || name.startsWith('p1:');
     const { server } = fakeServer(fake);
     const res = await new SnapAnalysisService(server, new SnapFlagRanker()).run({
       segments: segments(), categories: CATEGORIES, chapters: true, flags: true, chapterOptions: { switchCost: 2 },
     });
-    expect(res.chapters!.chapters).toHaveLength(2);
-    expect(res.flags).toBeNull();
-    expect(res.flagsError).toMatch(/boom/);
+    expect(res.labelMassGated.chapters).toBe(1);
+    expect(res.labelMassGated.flags).toBe(res.transcript!.units.length);
+    expect(res.labelMassGated.total).toBe(res.labelMassGated.chapters + res.labelMassGated.flags);
   });
 
   it('cancel during chaptering throws a cancellation and asks nothing more', async () => {
@@ -194,12 +218,12 @@ describe('SnapAnalysisService', () => {
     expect(fake.decides.every((d) => !d.questions[0].name.startsWith('p1:'))).toBe(true);
   });
 
-  it("an aborted in-flight request (the scorer's own 'cancelled') is a cancellation, not a fallback", async () => {
+  it("an aborted in-flight request (the scorer's own 'cancelled') is a cancellation, not a failure", async () => {
     const fake = new FakeHandle();
     const controller = new AbortController();
     fake.failOn = () => {
       controller.abort();
-      return new ScorerError('cancelled', 'POST /completion: cancelled by the caller');
+      return new ScorerError('cancelled', 'decide was cancelled');
     };
     const { server } = fakeServer(fake);
     const err = await new SnapAnalysisService(server, new SnapFlagRanker())
