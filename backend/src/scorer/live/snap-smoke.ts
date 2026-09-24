@@ -79,7 +79,7 @@ import { SnapUnit } from '../chapters/units';
 import type { ScorerHandle } from '../scorer-handle';
 import { viterbi } from '../scorer-viterbi';
 import { ChoiceAnswer, ScoreAnswer, YesNoAnswer } from '../scorer.types';
-import { cardHeldByOther, crucibleServices } from './crucible-standalone';
+import { cardHeldByOther, crucibleServices, exitStandalone, interruptible } from './crucible-standalone';
 import { SANITY_SUITES } from './sanity-cases';
 
 // ------------------------------------------------------------------ reference numbers
@@ -477,13 +477,20 @@ async function main(): Promise<number> {
     a.sanity = false;
     await work(null);
   } else {
-    const { scorer, chat, server, factory } = crucibleServices(a.crucible ?? true);
+    const services = crucibleServices(a.crucible ?? true);
+    const { scorer, chat, server, factory } = services;
+    // ctrl-C / SIGTERM: abort, give back the lease, exit non-zero (crucible-standalone.ts).
+    const interrupt = interruptible(services);
     const held = await cardHeldByOther(factory, server!);
     if (held !== null && !a.forceCard) throw new Error(`the card on "${server}" is in use (${held}); not starting (--force-card to go anyway)`);
     report.transport = { crucible: server, version: await chat.serverVersion(server!) };
     console.log(`# Crucible "${server}" ${String((report.transport as { version: string | null }).version)}: card free; the scorer takes its lease`);
     // One run: the scorer's load + lease is held across sanity AND chapters, released at the end.
-    await chat.withRun(() => scorer.withScorer((h) => work(h)));
+    try {
+      await chat.withRun(() => scorer.withScorer((h) => work(h), interrupt.signal));
+    } finally {
+      if (!interrupt.interrupted()) interrupt.dispose();
+    }
     const after = await (await factory.clientFor(server!)).activity();
     console.log(`# after the run: lease ${after.lease ? `${after.lease.client}/${after.lease.act}` : 'none'}, resident ${after.resident?.id ?? 'none'}`);
   }
@@ -532,11 +539,5 @@ async function main(): Promise<number> {
 
 if (require.main === module) {
   Logger.overrideLogger(['error', 'warn']);
-  main().then(
-    (code) => process.exit(code),
-    (err) => {
-      console.error(err instanceof Error ? err.stack || err.message : err);
-      process.exit(1);
-    },
-  );
+  exitStandalone(main());
 }

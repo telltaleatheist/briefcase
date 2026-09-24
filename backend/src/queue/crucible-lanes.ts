@@ -45,6 +45,7 @@ import { CrucibleServersService } from '../crucible/crucible-servers.service';
 import { InFlightLedger } from '../crucible/in-flight-ledger';
 import {
   QUIT_SWEEP_DEADLINE_MS,
+  QUIT_UNWIND_MS,
   STARTUP_SWEEP_DEADLINE_MS,
   sweepCrucibleInFlight,
   type SweepReport,
@@ -213,6 +214,8 @@ export class CrucibleLanesService implements OnModuleInit, BeforeApplicationShut
   sweepTiming: SweepTiming | undefined;
   startupDeadlineMs = STARTUP_SWEEP_DEADLINE_MS;
   quitDeadlineMs = QUIT_SWEEP_DEADLINE_MS;
+  /** Of that deadline, how long the aborted runs may take to unwind before the sweep. */
+  quitUnwindMs = QUIT_UNWIND_MS;
 
   constructor(
     private readonly servers: CrucibleServersService,
@@ -240,8 +243,24 @@ export class CrucibleLanesService implements OnModuleInit, BeforeApplicationShut
    * spending the kill deadline sweeping again).
    */
   beforeApplicationShutdown(): Promise<void> {
-    this.quitSweep ??= this.sweep('quitting', this.quitDeadlineMs).then(() => undefined, () => undefined);
+    this.quitSweep ??= this.quit().then(() => undefined, () => undefined);
     return this.quitSweep;
+  }
+
+  /**
+   * The runs were aborted by the destroy hooks (the queue's onModuleDestroy)
+   * that Nest runs before this one. Let them unwind first, bounded: each
+   * releases what it holds in its own finally, including a lease the server
+   * granted after the quit began, which is in no ledger row the sweep could
+   * have read. Then sweep what is still listed, in what is left of the
+   * deadline.
+   */
+  private async quit(): Promise<void> {
+    const started = Date.now();
+    if (!await this.chat.runsSettled(Math.min(this.quitUnwindMs, this.quitDeadlineMs))) {
+      this.logger.warn(`Crucible runs still unwinding after ${this.quitUnwindMs} ms; sweeping what the ledger lists`);
+    }
+    await this.sweep('quitting', Math.max(1_000, this.quitDeadlineMs - (Date.now() - started)));
   }
   private quitSweep: Promise<void> | null = null;
 

@@ -160,6 +160,13 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
+/** Aborted when either is: a call's own signal and its run's. */
+function eitherSignal(own: AbortSignal | undefined, run: AbortSignal | undefined): AbortSignal | undefined {
+  if (own === undefined || own === run) return run;
+  if (run === undefined) return own;
+  return AbortSignal.any([own, run]);
+}
+
 function retryAfterMsOf(err: CrucibleServerError): number {
   const details = err.details as { retry_after?: unknown } | null;
   const secs = typeof details?.retry_after === 'number' ? details.retry_after : null;
@@ -257,11 +264,18 @@ export class CrucibleScorerService {
 
   // ── the handle ─────────────────────────────────────────────────────────
 
+  /**
+   * The handle `withScorer`'s `fn` gets. Every call carries the run's signal as
+   * well as its own: a caller that passes none (the live tools) is still
+   * stopped by an abort of the run, so an interrupted run cannot go on to
+   * decide, or reload the model after `model_not_resident`, once its lease is
+   * being given back.
+   */
   private handle(server: string, model: string, runSignal?: AbortSignal): ScorerHandle {
     return {
       model,
-      decide: (req, options) => this.decide(server, model, req, options ?? {}),
-      generate: (messages, options) => this.generate(server, model, messages, options),
+      decide: (req, options) => this.decide(server, model, req, { ...options, signal: eitherSignal(options?.signal, runSignal) }),
+      generate: (messages, options) => this.generate(server, model, messages, { ...options, signal: eitherSignal(options.signal, runSignal) }),
       countTokens: (text, signal) => this.countTokens(server, model, text, signal ?? runSignal),
     };
   }

@@ -45,6 +45,12 @@ export interface SweepTiming {
 export const SWEEP_TIMING: SweepTiming = { confirmForMs: 4_000, pollEveryMs: 400 };
 /** The quit sweep's ceiling (migration plan §2: Electron waits 12 s, the sweep takes at most 8). */
 export const QUIT_SWEEP_DEADLINE_MS = 8_000;
+/**
+ * Of that deadline, how long the quit first waits for the aborted runs to
+ * unwind (each releases what it holds itself, a lease granted mid-quit
+ * included) before sweeping the ledger.
+ */
+export const QUIT_UNWIND_MS = 2_000;
 /** The startup sweep's ceiling: the lanes wait for it, the main pool never does. */
 export const STARTUP_SWEEP_DEADLINE_MS = 15_000;
 

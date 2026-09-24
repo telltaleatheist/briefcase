@@ -354,11 +354,37 @@ export class CrucibleChatService {
   async withRun<T>(fn: () => Promise<T>, options: RunOptions = {}): Promise<T> {
     if (this.runs.getStore() !== undefined) return fn();
     const scope: RunScope = { held: new Map(), placed: new Map(), mapped: new Map(), lock: Promise.resolve(), options, parked: null };
-    try {
-      return await this.runs.run(scope, fn);
-    } finally {
-      await this.releaseScope(scope);
-    }
+    const run = (async () => {
+      try {
+        return await this.runs.run(scope, fn);
+      } finally {
+        await this.releaseScope(scope);
+      }
+    })();
+    const settled = run.then(() => undefined, () => undefined);
+    this.openRuns.add(settled);
+    void settled.then(() => this.openRuns.delete(settled));
+    return run;
+  }
+
+  /** Every top-level run not yet settled (its release included). */
+  private readonly openRuns = new Set<Promise<void>>();
+
+  /**
+   * Wait, at most `ms`, for every open run to settle, its own release
+   * included. The quit path aborts the runs first and then calls this, so a
+   * lease the server grants AFTER the quit began (a request already in flight)
+   * is handed back by its run before the process exits. True when all settled.
+   */
+  async runsSettled(ms: number): Promise<boolean> {
+    if (this.openRuns.size === 0) return true;
+    let timer: NodeJS.Timeout | undefined;
+    const settled = await Promise.race([
+      Promise.all([...this.openRuns]).then(() => true),
+      new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(false), ms); timer.unref?.(); }),
+    ]);
+    if (timer !== undefined) clearTimeout(timer);
+    return settled;
   }
 
   /**

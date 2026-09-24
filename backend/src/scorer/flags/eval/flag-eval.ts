@@ -33,7 +33,7 @@ import { Logger } from '@nestjs/common';
 
 import { RankedSentence, assembleSentences } from '../../../analysis/flag-windows';
 import { AnalysisCategory, DEFAULT_CATEGORIES } from '../../../analysis/prompts/analysis-prompts';
-import { crucibleServices } from '../../live/crucible-standalone';
+import { crucibleServices, exitStandalone, interruptible } from '../../live/crucible-standalone';
 import { FlagOptionPlan } from '../flag-options';
 import { FlagLayout, NonePosition } from '../flag-questions';
 import {
@@ -386,7 +386,10 @@ async function main(): Promise<void> {
   const dbs = args.dbs.length ? args.dbs : defaultLibraryDbs();
   if (!dbs.length) throw new Error('no library databases found; pass --db <path>');
   Logger.overrideLogger(['error', 'warn']);
-  const { scorer, chat } = crucibleServices(args.crucible);
+  const services = crucibleServices(args.crucible);
+  const { scorer, chat } = services;
+  // ctrl-C / SIGTERM: abort, give back the lease, exit non-zero (crucible-standalone.ts).
+  const interrupt = interruptible(services);
   const ranker = new SnapFlagRanker();
 
   try {
@@ -430,7 +433,8 @@ async function main(): Promise<void> {
             includeMisinformation: args.misinfo,
             params,
             batchSize: args.batch,
-          })));
+            signal: interrupt.signal,
+          }), interrupt.signal));
           const m = scoreVideo(videoId, sentences, vrows, res.windows, res.overflow, res.stats);
           printVideo(m);
           results.push(m);
@@ -453,7 +457,8 @@ async function main(): Promise<void> {
       }
     }
   } finally {
-    // Every lease was released as its video's run settled.
+    // Every lease was released as its video's run settled (or, interrupted, by the sweep).
+    if (!interrupt.interrupted()) interrupt.dispose();
   }
   if (!args.dryRun) finish(results, args, params);
 }
@@ -470,8 +475,5 @@ function finish(results: VideoMetrics[], args: Args, params: FlagSpanParams): vo
 }
 
 if (require.main === module) {
-  main().catch((err) => {
-    console.error(err instanceof Error ? err.stack || err.message : err);
-    process.exit(1);
-  });
+  exitStandalone(main());
 }
