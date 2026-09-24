@@ -24,6 +24,7 @@ const emitted: unknown[] = [];
       emitCrucibleCoordination: () => undefined,
       emitCrucibleInstallProgress: () => undefined,
       emitCrucibleInstallDoor: () => undefined,
+      emitCrucibleReadiness: () => undefined,
     },
   }],
   exports: [WebSocketService],

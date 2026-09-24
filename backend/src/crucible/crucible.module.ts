@@ -3,12 +3,15 @@
  * pairing, probing and the settings door (P1 of docs/crucible-migration-plan.md),
  * and installing Crucible, the first-run hold and coordination (P2).
  *
+ * P7 adds the one readiness signal (readiness.service.ts): is Crucible there
+ * for AI work, what repairs it, and the gate every AI door asks.
+ *
  * BOOT TOLERANCE. Nothing here does I/O in a constructor or an awaited
- * `onModuleInit`. What runs at boot is auto-connect and the startup
- * coordination pass, each started in `onApplicationBootstrap` as a timer that
- * is never awaited, and the Windows install-door watch (a no-op elsewhere). The library,
- * downloads, editor and Collections have no import path into this module, and
- * nothing outside it uses Crucible yet.
+ * `onModuleInit`. What runs at boot is auto-connect, the startup coordination
+ * pass and the first readiness derivation, each started in
+ * `onApplicationBootstrap` as a timer that is never awaited, and the Windows
+ * install-door watch (a no-op elsewhere). The library, downloads, imports,
+ * processing, the editor and Collections never wait on anything here.
  */
 import { Module } from '@nestjs/common';
 import { compareReleases, latestRelease } from '@crucible/bootstrap';
@@ -35,6 +38,8 @@ import { crucibleProcessRunner } from './install/host-runner';
 import { HostInstallDoor } from './install/install-door';
 import { loadBootstrap, processInstallHost } from './install/install';
 import { CRUCIBLE_INSTALL_DEPS, CrucibleInstallService, type InstallDeps } from './install/install.service';
+import { CrucibleReadinessController } from './readiness.controller';
+import { CrucibleReadinessService } from './readiness.service';
 
 /**
  * The real machine, the real release channel and the real bootstrap package.
@@ -66,7 +71,7 @@ function processInstallDeps(registry: CrucibleRegistryService, factory: Crucible
 }
 
 @Module({
-  controllers: [CrucibleController, CrucibleSetupController],
+  controllers: [CrucibleController, CrucibleSetupController, CrucibleReadinessController],
   providers: [
     { provide: CRUCIBLE_STATE_DIR, useFactory: () => getBriefcaseConfigDir() },
     { provide: CRUCIBLE_PAIRING_HOST, useFactory: () => processPairingFileHost() },
@@ -86,6 +91,7 @@ function processInstallDeps(registry: CrucibleRegistryService, factory: Crucible
       inject: [CrucibleRegistryService, CrucibleClientFactory, CRUCIBLE_PAIRING_HOST],
     },
     CrucibleInstallService,
+    CrucibleReadinessService,
   ],
   // CrucibleServersService is the seam the rest of the backend uses (list/get/clientFor).
   exports: [
@@ -95,6 +101,8 @@ function processInstallDeps(registry: CrucibleRegistryService, factory: Crucible
     CrucibleSettingsBridge, CRUCIBLE_PAIRING_HOST,
     // P4: the in-flight ledger the chat service writes and the queue's sweeps read.
     CRUCIBLE_IN_FLIGHT_LEDGER,
+    // P7: the readiness signal and the gate every AI door asks.
+    CrucibleReadinessService,
   ],
 })
 export class CrucibleModule {}

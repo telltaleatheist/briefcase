@@ -76,6 +76,13 @@ export class AllExceptionsFilter implements ExceptionFilter {
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let rawMessage = 'An unexpected error occurred';
     let errorLabel = 'Internal Server Error';
+    /**
+     * A typed refusal's own fields, carried through: `code` (what a client
+     * switches on: `crucible_required`, the install door's refusal codes), and
+     * the Crucible doors' `command`/`detail` and `readiness`. Without them every
+     * typed refusal reached the renderer as a bare status.
+     */
+    const typed: Record<string, unknown> = {};
 
     if (exception instanceof HttpException) {
       status = exception.getStatus();
@@ -92,6 +99,12 @@ export class AllExceptionsFilter implements ExceptionFilter {
         if (typeof asObj.error === 'string') {
           errorLabel = asObj.error;
         }
+        const fields = body as Record<string, unknown>;
+        if (typeof fields['code'] === 'string') typed['code'] = fields['code'];
+        for (const key of ['command', 'detail'] as const) {
+          if (typeof fields[key] === 'string' || fields[key] === null) typed[key] = fields[key] === null ? null : this.sanitizeMessage(fields[key] as string, status);
+        }
+        if (fields['readiness'] !== null && typeof fields['readiness'] === 'object') typed['readiness'] = fields['readiness'];
       }
     } else if (exception instanceof Error) {
       rawMessage = exception.message;
@@ -108,6 +121,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       statusCode: status,
       error: errorLabel || this.defaultErrorLabel(status),
       message: safeMessage,
+      ...typed,
     });
   }
 

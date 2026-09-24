@@ -218,6 +218,10 @@ export class WebSocketService {
     this.emit(WebSocketEvent.CRUCIBLE_COORDINATION, payload);
   }
 
+  emitCrucibleReadiness(payload: WebSocketEventMap[WebSocketEvent.CRUCIBLE_READINESS]): void {
+    this.emit(WebSocketEvent.CRUCIBLE_READINESS, payload);
+  }
+
   /**
    * Advanced Methods for Future Use
    */

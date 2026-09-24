@@ -38,6 +38,7 @@ import { parseAnalysisReport, extractCategories, saveAnalysisMetadata } from './
 import { isPathInsideRoots, pathsEqual } from '../common/utils/path-security.util';
 import * as path from 'path';
 import * as os from 'os';
+import { CrucibleReadinessService } from '../crucible/readiness.service';
 
 @Controller('library')
 export class LibraryController {
@@ -54,6 +55,7 @@ export class LibraryController {
     private aiProviderService: AIProviderService,
     private thumbnailService: ThumbnailService,
     private ffmpegService: FfmpegService,
+    private readiness: CrucibleReadinessService,
   ) {}
 
   /**
@@ -2124,6 +2126,8 @@ export class LibraryController {
    */
   @Post('analytics/generate-insights')
   async generateAIInsights(@Body() body: { aiProvider?: string; aiModel?: string }) {
+    // An immediate AI call (no queue to park in): refused by name unless Crucible answers now.
+    this.readiness.assertReadyNow('Library insights');
     try {
       const activeLibrary = this.libraryManagerService.getActiveLibrary();
       if (!activeLibrary) {
@@ -2212,13 +2216,12 @@ export class LibraryController {
         if (jsonMatch) {
           insights = JSON.parse(jsonMatch[1] || jsonMatch[0]);
         } else {
-          // Fallback: use raw text
-          insights = {
-            overview: aiResponseText.substring(0, 500),
-            keyFindings: ['Unable to parse structured insights'],
-            recommendations: [],
-            contentGaps: [],
-          };
+          // Never saved as if it were insights: an answer that is not the
+          // insights object is a failed generation, said as one.
+          throw new HttpException(
+            'The model did not answer with the insights object; nothing was saved. Try again, or pick another model in Settings › AI.',
+            HttpStatus.BAD_GATEWAY,
+          );
         }
       }
 

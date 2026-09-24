@@ -13,7 +13,6 @@ import { Logger } from '@nestjs/common';
 import type { DecideAnswer as WireAnswer, ModelInfo } from '@crucible/client';
 import { AnalysisCancelledError } from '../../src/analysis/cancellation';
 import { CrucibleServersService } from '../../src/crucible/crucible-servers.service';
-import { AI_VIA_ENV } from '../../src/crucible/llm/ai-via';
 import { CrucibleChatService } from '../../src/crucible/llm/crucible-chat.service';
 import { CrucibleParkedError } from '../../src/crucible/llm/errors';
 import { runSnapChapters, type ChapterScorer } from '../../src/scorer/chapters/snap-chapter.service';
@@ -24,7 +23,7 @@ import { DECIDE_TOP_K_MARGIN, LABEL_MASS_GATE, floorAnswer, toWireRequest } from
 import { CrucibleScorerService, SCORER_LOAD_CONTEXT, pickDecideModel } from '../../src/scorer/crucible-scorer.service';
 import { SnapFlagRanker } from '../../src/scorer/flags/snap-flag-ranker.service';
 import { SnapAnalysisService, SnapEngineError } from '../../src/scorer/snap-analysis.service';
-import type { ScorerHandle, ScorerServerService } from '../../src/scorer/scorer-server.service';
+import type { ScorerHandle } from '../../src/scorer/scorer-handle';
 import { ScorerError, type ChoiceAnswer, type DecideRequest, type DecideResponse, type ScorerQuestion } from '../../src/scorer/scorer.types';
 import { startFakeCrucible, type FakeCrucible, type FakeCrucibleOptions, type FakeDecideQuestion } from '../fake-crucible/fake-crucible';
 import { harness } from './harness';
@@ -56,7 +55,7 @@ function rawProbs(q: FakeDecideQuestion): Record<string, number> {
   return Object.fromEntries(q.labels.map((l, k) => [l, k === pick ? 0.9 : 0.08 / (q.labels.length - 1)]));
 }
 
-/** The same numbers as a llama-server-path answer, straight into the seam (no transport). */
+/** The same numbers straight into the seam (no transport). */
 class DirectScorer implements ChapterScorer {
   readonly decides: DecideRequest[] = [];
   async generate(): Promise<{ text: string; promptTokens: number; completionTokens: number; finishReason: string; model: string }> {
@@ -105,7 +104,7 @@ async function rig(options: FakeCrucibleOptions = {}) {
 
 let open: FakeCrucible[] = [];
 beforeEach(() => {
-  process.env = { ...savedEnv, APPDATA: tempDir('scorer-appdata-'), [AI_VIA_ENV]: 'crucible' };
+  process.env = { ...savedEnv, APPDATA: tempDir('scorer-appdata-') };
 });
 afterEach(async () => {
   process.env = savedEnv;
@@ -316,9 +315,8 @@ describe('the transport swap moves no logic', () => {
 });
 
 describe('one lease across the pass, and every "can\'t" by name', () => {
-  function snap(scorer: CrucibleScorerService, own?: Partial<ScorerServerService>) {
-    const ownServer = { availability: () => ({ available: true }), withScorer: jest.fn(async () => { throw new Error('the own llama-server must never be used on Crucible'); }), ...own };
-    return { service: new SnapAnalysisService(ownServer as unknown as ScorerServerService, new SnapFlagRanker(), scorer), own: ownServer };
+  function snap(scorer: CrucibleScorerService) {
+    return { service: new SnapAnalysisService(scorer, new SnapFlagRanker()) };
   }
   const segments = () => unitsOf(VIDEO).map((u) => ({ start: u.start, end: u.end, text: u.text }));
   const CATEGORIES = [{ name: 'political-demonization' }, { name: 'conspiracy' }];
@@ -327,7 +325,7 @@ describe('one lease across the pass, and every "can\'t" by name', () => {
     const { fake, scorer } = await started();
     const underLease: boolean[] = [];
     fake.setDecideProbs((q) => (underLease.push(fake.openLease()?.model === 'qwen3.5-9b'), rawProbs(q)));
-    const { service, own } = snap(scorer);
+    const { service } = snap(scorer);
     const asked = jest.spyOn(crucibleDecide, 'toWireRequest');
     const res = await service.run({ segments: segments(), categories: CATEGORIES, chapters: true, flags: true });
     // Flags as well as chapters: every question the pipelines asked crossed verbatim.
@@ -344,17 +342,15 @@ describe('one lease across the pass, and every "can\'t" by name', () => {
     expect(fake.leases.released).toEqual([fake.leases.taken[0].leaseId]);
     expect(underLease.length).toBeGreaterThan(2);
     expect(underLease.every(Boolean)).toBe(true);
-    expect(own.withScorer).not.toHaveBeenCalled();
   });
 
   it('409 on the load inside a queue run PARKS the task (never waited out, never a fallback)', async () => {
     const { fake, chat, scorer } = await started();
     fake.leaseAsOther('qwen3.8-27b-4bit', 'bookforge');
-    const { service, own } = snap(scorer);
+    const { service } = snap(scorer);
     const err = await chat.withRun(() => service.run({ segments: segments(), categories: CATEGORIES, chapters: true, flags: true }), { parkOnBusy: true })
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(CrucibleParkedError);
-    expect(own.withScorer).not.toHaveBeenCalled();
     expect(fake.decideBodies()).toHaveLength(0);
   });
 
@@ -399,13 +395,12 @@ describe('one lease across the pass, and every "can\'t" by name', () => {
     expect(fake.leases.released).toEqual([fake.leases.taken[0].leaseId]);
   });
 
-  it('decide_not_served (more options than the engine\'s cap) fails the stage BY NAME: no classic, no own llama-server', async () => {
+  it('decide_not_served (more options than the engine\'s cap) fails the stage BY NAME: there is no other engine', async () => {
     const { scorer } = await started({ decideMaxOptions: 2 });
-    const { service, own } = snap(scorer);
+    const { service } = snap(scorer);
     const err = await service.run({ segments: segments(), categories: CATEGORIES, chapters: true, flags: true }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(SnapEngineError);
     expect((err as Error).message).toMatch(/decide_not_served/);
-    expect(own.withScorer).not.toHaveBeenCalled();
   });
 
   it('no model the decide class can use, a disabled class, or a server older than the door: failed by name before anything loads', async () => {
@@ -415,12 +410,11 @@ describe('one lease across the pass, and every "can\'t" by name', () => {
       { version: '1.0.23' },
     ] as FakeCrucibleOptions[]) {
       const { fake, scorer } = await started(options);
-      const { service, own } = snap(scorer);
+      const { service } = snap(scorer);
       const err = await service.run({ segments: segments(), categories: CATEGORIES, chapters: true, flags: true }).catch((e: unknown) => e);
       expect(err).toBeInstanceOf(SnapEngineError);
       expect((err as Error).message).toMatch(/Download it|does not serve decisions|1\.0\.24 or newer/);
       expect(fake.jobs).toHaveLength(0);
-      expect(own.withScorer).not.toHaveBeenCalled();
     }
   });
 
@@ -437,6 +431,46 @@ describe('one lease across the pass, and every "can\'t" by name', () => {
     expect(n).toBe(1);
     expect(res.answers['b'].type).toBe('yesno');
     expect(fake.jobs.filter((j) => j.type === 'load-model').map((j) => j.params['context'])).toEqual([SCORER_LOAD_CONTEXT, SCORER_LOAD_CONTEXT]);
+  });
+
+  it('model_not_resident, then engine_in_use on the reload (Crucible\'s settlement still clearing the card): waited out, bounded, and the pass carries on', async () => {
+    const { fake, chat, scorer } = await started({ models: [{ id: 'qwen3.5-9b', paramsB: 9 }, { id: 'qwen3.5-4b', paramsB: 4 }] });
+    chat.reloadBusyWait = { everyMs: 10, forMs: 2_000 };
+    fake.setDecideProbs((q) => rawProbs(q));
+    const res = await chat.withRun(() => scorer.withScorer(async (h) => {
+      await h.decide({ state: 's', questions: [{ type: 'yesno', name: 'a', instructions: 'x' }] });
+      // The earlier lease lapsed and the settlement unloaded the model, and is
+      // still holding the card for a moment: the reload is refused twice.
+      fake.setResident(null);
+      fake.faults.refuse = [{ match: { method: 'POST', path: '/v1/jobs' }, status: 409, code: 'engine_in_use', message: "held by 'the settlement clearing the card'", times: 2 }];
+      return h.decide({ state: 's', questions: [{ type: 'yesno', name: 'b', instructions: 'y' }] });
+    }), { parkOnBusy: true });
+    expect(res.answers['b'].type).toBe('yesno');
+    expect(fake.requestsTo('/v1/jobs', 'POST').filter((q) => q.fault !== undefined)).toHaveLength(2);
+    expect(fake.jobs.filter((j) => j.type === 'load-model' && j.status === 'done')).toHaveLength(2);
+  });
+
+  it('engine_in_use past the bounded wait inside a queue run PARKS the task: never a failed analysis', async () => {
+    const { fake, chat, scorer } = await started({ models: [{ id: 'qwen3.5-9b', paramsB: 9 }, { id: 'qwen3.5-4b', paramsB: 4 }] });
+    chat.reloadBusyWait = { everyMs: 10, forMs: 50 };
+    fake.setDecideProbs((q) => rawProbs(q));
+    let parked: unknown = null;
+    const err = await chat.withRun(async () => {
+      try {
+        return await scorer.withScorer(async (h) => {
+          await h.decide({ state: 's', questions: [{ type: 'yesno', name: 'a', instructions: 'x' }] });
+          fake.setResident(null);
+          fake.faults.refuse = [{ match: { method: 'POST', path: '/v1/jobs' }, status: 409, code: 'engine_in_use', message: "held by 'the settlement clearing the card'" }];
+          return h.decide({ state: 's', questions: [{ type: 'yesno', name: 'b', instructions: 'y' }] });
+        });
+      } finally {
+        parked = chat.parkedInRun();
+      }
+    }, { parkOnBusy: true }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(CrucibleParkedError);
+    expect(err).not.toBeInstanceOf(ScorerError);
+    expect((err as CrucibleParkedError).reason).toMatch(/settlement clearing the card/);
+    expect(parked).toMatchObject({ server: 'mac' });
   });
 
   it('503 chat_queue_full on the door is waited out after its retry_after', async () => {

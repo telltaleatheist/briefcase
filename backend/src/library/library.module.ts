@@ -1,4 +1,5 @@
 // Briefcase/backend/src/library/library.module.ts
+import { CrucibleModule } from '../crucible/crucible.module';
 import { Module, OnModuleInit, forwardRef } from '@nestjs/common';
 import { LibraryService } from './library.service';
 import { RelinkService } from './relink.service';
@@ -8,7 +9,8 @@ import { AnalysisModule } from '../analysis/analysis.module';
 import { FfmpegModule } from '../ffmpeg/ffmpeg.module';
 
 @Module({
-  imports: [forwardRef(() => AnalysisModule), FfmpegModule],
+  // CrucibleModule: the readiness gate of the one AI endpoint here (library insights).
+  imports: [forwardRef(() => AnalysisModule), FfmpegModule, CrucibleModule],
   providers: [LibraryService, RelinkService, ClipExtractorService],
   controllers: [LibraryController],
   exports: [LibraryService, RelinkService, ClipExtractorService],

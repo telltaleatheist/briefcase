@@ -2,6 +2,7 @@ import type { CrucibleServersChangedPayload } from '../crucible/wire/settings-wi
 import type { CrucibleCoordinationState } from '../crucible/wire/coordinate-wire';
 import type { CrucibleInstallProgress } from '../crucible/wire/install-wire';
 import type { CrucibleInstallDoorEvent } from '../crucible/wire/install-door-wire';
+import type { CrucibleReadinessView } from '../crucible/wire/readiness-wire';
 
 // WebSocket Event Type Definitions
 // Centralized registry of all WebSocket events and their payloads
@@ -206,6 +207,8 @@ export enum WebSocketEvent {
   CRUCIBLE_INSTALL_DOOR = 'crucible.install-door',
   // Coordination: does a server have what Briefcase needs, and where preparing it got to
   CRUCIBLE_COORDINATION = 'crucible.coordination',
+  // Is Crucible there for AI work, and what repairs it (P7)
+  CRUCIBLE_READINESS = 'crucible.readiness',
 
   // Connection Management
   CONNECTION = 'connection',
@@ -281,4 +284,5 @@ export interface WebSocketEventMap {
   [WebSocketEvent.CRUCIBLE_INSTALL_PROGRESS]: CrucibleInstallProgress;
   [WebSocketEvent.CRUCIBLE_INSTALL_DOOR]: CrucibleInstallDoorEvent;
   [WebSocketEvent.CRUCIBLE_COORDINATION]: CrucibleCoordinationState;
+  [WebSocketEvent.CRUCIBLE_READINESS]: CrucibleReadinessView;
 }

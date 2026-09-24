@@ -23,6 +23,7 @@ import { pairingHost, tempDir } from './helpers';
       emitCrucibleCoordination: () => undefined,
       emitCrucibleInstallProgress: () => undefined,
       emitCrucibleInstallDoor: () => undefined,
+      emitCrucibleReadiness: () => undefined,
     },
   }],
   exports: [WebSocketService],

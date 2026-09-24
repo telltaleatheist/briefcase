@@ -89,7 +89,7 @@ export const LOAD_STREAM_RETRY: Readonly<{ firstMs: number; maxMs: number; budge
 export const MAX_QUEUE_FULL_RETRIES = 30;
 const DEFAULT_RETRY_AFTER_MS = 2_000;
 const MAX_RETRY_AFTER_MS = 60_000;
-/** 10 minutes for an upstream, as the direct path allows. */
+/** 10 minutes for an upstream (a cloud or Ollama model). */
 export const UPSTREAM_TIMEOUT_MS = 600_000;
 /** A local call: 120 s plus 5 ms per prompt character (the scorer's measured rule). */
 export function localTimeoutMs(promptChars: number): number {
@@ -266,17 +266,39 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
+/** The wait that keeps asking longer (a caller's own, or the reload's). */
+function longerWait(a: BusyWait | undefined, b: BusyWait): BusyWait {
+  return a !== undefined && a.forMs >= b.forMs ? a : b;
+}
+
 function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new CrucibleChatCancelled();
 }
+
+/**
+ * The refusal codes that mean "the card is briefly someone else's", never "no":
+ * a job on the lane, a lease, and `engine_in_use` (the engine is claimed: a
+ * streaming session, or Crucible's own settlement clearing the card after a
+ * lapsed lease). Each is designed busy-handling: parked in a queue run, waited
+ * out (bounded) otherwise. None may fail an analysis.
+ */
+export const BUSY_REFUSAL_CODES: ReadonlySet<string> = new Set(['server_busy', 'leased', 'engine_in_use']);
 
 function busyLineOfRefusal(err: unknown): string | null {
   if (err instanceof CrucibleBusy) return err.busyLine;
   if (err instanceof CrucibleLeased) return err.leasedLine;
   if (err instanceof CrucibleCardHeld) return `held by ${err.who}: ${err.fact}`;
-  if (err instanceof CrucibleRefused && (err.code === 'server_busy' || err.code === 'leased')) return err.serverMessage;
+  if (err instanceof CrucibleRefused && BUSY_REFUSAL_CODES.has(err.code)) return err.serverMessage;
   return null;
 }
+
+/**
+ * How long a reload after `model_not_resident` waits out a busy card when the
+ * caller set no wait of its own: the eviction usually IS a settlement that
+ * clears within seconds (`engine_in_use`, "held by the settlement clearing the
+ * card"). Past it, the busy error goes up: a queue run parks on it.
+ */
+export const RELOAD_BUSY_WAIT: Readonly<BusyWait> = { everyMs: 2_000, forMs: 60_000 };
 
 @Injectable()
 export class CrucibleChatService {
@@ -303,6 +325,8 @@ export class CrucibleChatService {
    * drop (reset by any event) after which the server counts as unreachable.
    */
   loadStreamRetry = { ...LOAD_STREAM_RETRY };
+  /** The bounded wait of a reload after `model_not_resident` ({@link RELOAD_BUSY_WAIT}). */
+  reloadBusyWait: BusyWait = { ...RELOAD_BUSY_WAIT };
   /**
    * Leases this side gave up on but could not hand back, per server. Crucible
    * allows one lease per client per server, so re-leasing is refused `leased`
@@ -364,7 +388,7 @@ export class CrucibleChatService {
    */
   async reacquire(server: string, model: string, signal?: AbortSignal, loadContext?: number): Promise<void> {
     this.forgetHold(server, model);
-    await this.ensureLocal(server, model, signal, undefined, loadContext);
+    await this.ensureLocal(server, model, signal, this.reloadBusyWait, loadContext);
   }
 
   /** The Crucible release a server reports (the probe's, cached 10 s), or null when it can't be read. */
@@ -481,9 +505,12 @@ export class CrucibleChatService {
         reloaded = true;
         this.logger.warn(`[${server}] ${target.model} is no longer resident (${failure.message}); loading it again`);
         this.forgetHold(server, target.model);
-        await this.ensureLocal(server, target.model, signal, request.busyWait, loadContext);
+        await this.ensureLocal(server, target.model, signal, longerWait(request.busyWait, this.reloadBusyWait), loadContext);
         continue;
       }
+      // The chat door refusing because the card is someone else's right now
+      // (a claim, a lease): busy, the same as at the load. Never a failure.
+      if (failure.status === 409 && BUSY_REFUSAL_CODES.has(failure.code)) throw new CrucibleBusyError(server, failure.message);
       throw failure;
     }
   }
@@ -547,9 +574,8 @@ export class CrucibleChatService {
     let fromReasoning = false;
     // A reasoning model under a grammar can put the whole object in its
     // reasoning channel and leave content empty. Crucible returns `reasoning`
-    // untouched on the local door (PHASE2-LLM.md §5), so the narrow fallback the
-    // direct Ollama path had survives here: structured output was asked for,
-    // content is empty, reasoning is not.
+    // untouched on the local door (PHASE2-LLM.md §5), so read it when
+    // structured output was asked for, content is empty and reasoning is not.
     if (!text.trim() && structured) {
       const reasoning = typeof message['reasoning'] === 'string' ? message['reasoning']
         : typeof message['reasoning_content'] === 'string' ? message['reasoning_content'] : '';

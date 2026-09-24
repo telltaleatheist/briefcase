@@ -308,6 +308,7 @@ describe('the setup door over HTTP', () => {
         emitCrucibleCoordination: (p: unknown) => emitted.push(p),
         emitCrucibleInstallProgress: (p: unknown) => emitted.push(p),
         emitCrucibleInstallDoor: (p: unknown) => emitted.push(p),
+        emitCrucibleReadiness: () => undefined,
       },
     }],
     exports: [WebSocketService],

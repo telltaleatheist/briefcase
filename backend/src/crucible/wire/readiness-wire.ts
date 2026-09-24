@@ -39,6 +39,12 @@ export interface CrucibleReadinessView {
   action: CrucibleReadinessAction;
   /** The server that answers, when ready. */
   server: string | null;
+  /**
+   * When ready but the card is someone else's right now (a job, a lease, an
+   * engine claim such as Crucible's settlement clearing the card): the
+   * holder's sentence. AI work still queues; it waits (parks) for the card.
+   */
+  busy: string | null;
   /** While starting: the latest line of the start or install. */
   progress: string | null;
   /**

@@ -108,8 +108,15 @@ export function failureOutcome(err: unknown, at: string): Failure {
   return { outcome: 'refused', message: err instanceof Error ? err.message : String(err) };
 }
 
-/** The holder of the card, in one sentence, or null when the lane accepts work. */
+/**
+ * The holder of the card, in one sentence, or null when the lane accepts work
+ * and nothing else claims the engine. A claim by anything but Briefcase is busy
+ * even with the lane free: a streaming session, or Crucible's own settlement
+ * clearing the card after a lapsed lease ("the settlement clearing the card").
+ */
 export function busyLineOf(activity: Activity): string | null {
+  const claim = activity.claim?.heldBy?.trim();
+  if (claim && !/^briefcase\b/i.test(claim)) return `busy: the card is held by ${claim}`;
   if (activity.slots.accelerated.acceptsWork) return null;
   const job = activity.running[0];
   if (job !== undefined) {
