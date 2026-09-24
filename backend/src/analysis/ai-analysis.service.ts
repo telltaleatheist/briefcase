@@ -1,43 +1,34 @@
 /**
- * AI Analysis Service - Two-Pass Chapter-Centric Analysis
+ * AI Analysis Service — the snap engine, then the LLM stages, all on Crucible.
  *
- * This service implements a two-pass approach to video analysis:
- *   Pass 1: Detect chapter boundaries (chapter-detection.service — embedding
- *           cohesion scoring, then one small LLM call per selected boundary)
- *   Pass 2: Analyze each chapter with full context (title, summary)
- *   Pass 2b: Extract category flags per chapter, as a dedicated call
+ *   Scorer stage (SnapAnalysisService, Crucible's decision door): the chapter
+ *           outline + assignment + Viterbi, and the flag ranking, in one lease.
+ *   Pass 2: each chapter's summary from the LLM (the outline gave its title).
+ *   Pass 2b: the snap-ranked flag windows, each verified by the LLM.
  *
  * Metadata (description, tags, title) is generated from chapter summaries.
+ * Snap is the only engine (P7 removed the classic embedding/lexical chaptering,
+ * the NLI ranker and LLM chapter discovery): a stage that cannot be made fails
+ * the analysis by name, and a busy or silent Crucible parks the task.
  */
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { AIProviderService, AIProviderConfig } from './ai-provider.service';
-import { ensureNotCancelled, isCancellation } from './cancellation';
-import { OllamaService } from './ollama.service';
+import { ensureNotCancelled, isCancellation, stopsTheRun } from './cancellation';
+import { isParked } from '../crucible/llm/errors';
 import { estimateNumCtx, numCtxMaxForModel, parseProviderModel, AITaskKind } from './model-utils';
 import { crucibleTargetOf } from '../crucible/llm/target';
 import { CRUCIBLE_OLLAMA_CONTEXT } from '../crucible/llm/ollama-map';
-import { ChapterDetectionService } from './chapter-detection.service';
-import {
-  NliRankerService,
-  assembleSentences,
-  FlagWindow,
-  RankedSentence,
-  WindowCategory,
-} from './nli-ranker.service';
-import { findPhraseTimestamp } from './phrase-matcher';
+import { assembleSentences, FlagWindow, RankedSentence, WindowCategory } from './flag-windows';
 import { safeJsonParse } from './json-utils';
-import { ApiKeysService } from '../config/api-keys.service';
 import { DatabaseService } from '../database/database.service';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import {
   buildChapterAnalysisPrompt,
-  buildFlagExtractionPrompt,
   buildFlagVerificationPrompt,
   FLAG_VERIFICATION_PROMPT_VERSION,
-  normalizeSensitivity,
   interpolatePrompt,
   HOOK_FROM_CHAPTERS_PROMPT,
   BODY_FROM_CHAPTERS_PROMPT,
@@ -47,9 +38,8 @@ import {
   TITLE_FROM_WEBPAGE_PROMPT,
   AnalysisCategory,
 } from './prompts/analysis-prompts';
-import { SnapAnalysisService, SnapStageResult } from '../scorer/snap-analysis.service';
+import { SnapAnalysisService } from '../scorer/snap-analysis.service';
 import { leafChapters, nestAnalysisChapters } from '../scorer/chapters/chapter-tree';
-import { resolveAnalysisEngine, snapFallbackMessage, wantsScorer } from '../scorer/analysis-engine';
 import type { SnapFlagRankResult } from '../scorer/flags/snap-flag-ranker.service';
 import { mergeSpanSubPassages, promoteCachedOverflow } from '../scorer/flags/flag-integration';
 import {
@@ -93,8 +83,8 @@ export interface AnalyzedSection {
    * capture-wide-then-filter pipeline that threw its rejections away could never
    * show the user what it decided not to show them.
    *
-   * ABSENT on the discovery fallback path and on everything that is not a flag
-   * (chapter sections, legacy rows). Absent is read as 'flag' everywhere.
+   * ABSENT on everything that is not a flag (chapter sections, legacy rows
+   * from the retired discovery engine). Absent is read as 'flag' everywhere.
    *
    * 'candidate' comes only from the snap engine: a ranked passage beyond the
    * verify budget, stored unverified (plan §5.6) and shown only at All.
@@ -108,7 +98,7 @@ export interface AnalyzedSection {
    * every filter.
    */
   nli_score?: number;
-  /** Which ranker produced the candidate ('nli' | 'snap-v1'). Absent on discovery and legacy rows. */
+  /** Which ranker produced the candidate ('nli' | 'snap-v1'). Absent on legacy rows. 'nli' rows predate P7 and are displayed, never produced. */
   ranker?: 'nli' | 'snap-v1';
 }
 
@@ -169,17 +159,14 @@ export interface AnalysisOptions {
   segments: Segment[];
   outputFile: string;
   customInstructions?: string;
-  analysisGranularity?: number; // 1-5: 1 = strong matches only, 5 = flag everything plausible
   videoTitle?: string;
   categories?: AnalysisCategory[];
-  apiKey?: string;
-  ollamaEndpoint?: string;
   onProgress?: (progress: AnalysisProgress) => void;
   /**
    * Queue job this analysis belongs to. Supplying it is what makes the run
    * CANCELLABLE: the run registers under this id, and `job.cancel-requested`
-   * for the same id aborts its in-flight call, stops its stage loops, kills the
-   * NLI worker and releases the models it loaded.
+   * for the same id aborts its in-flight call and stops its stage loops (the
+   * Crucible run then releases its lease).
    *
    * Optional because the standalone analysis controller and the smoke harnesses
    * have no queue job. Those runs behave exactly as before — uncancellable, but
@@ -207,10 +194,10 @@ export interface AnalysisResult {
   suggested_title?: string;
   tokenStats?: TokenStats;
   /**
-   * Non-fatal degradations the user should know about, carried out to the queue
+   * Non-fatal outcomes the user should know about, carried out to the queue
    * job (TaskResult.warnings -> job.warnings) where the library and queue
-   * surfaces already render them. Currently used for exactly one thing: saying
-   * out loud when flag detection ran the weaker fallback path.
+   * surfaces already render them: sub-chapters skipped, and the scorer's
+   * answers read as no evidence (the label-mass gate), counted.
    */
   warnings?: string[];
 }
@@ -225,35 +212,25 @@ const JSON_PARSE_RETRIES = 2;
 /**
  * Tasks whose model may be overridden via `taskModels` in app-config.json.
  *
- * EVERY task is routable. The two that read long spans of raw transcript
+ * EVERY LLM task is routable. The two that read long spans of raw transcript
  * (chapter, flags) are safe to route because the chapter caps are computed as
  * the MOST CONSERVATIVE limits across whichever models those tasks resolve to —
  * see `perTaskLimits` in analyzeTranscript. Sizing to one model while another
  * does the reading is what would silently truncate prompts, so the caps follow
- * the smallest context in play. 'boundary' now reads only a ~90-second window
- * per call (see chapter-detection.service), so no cap constrains it at all.
+ * the smallest context in play.
  *
  * Tasks are executed grouped by model (chaptering, then Pass 2b, then metadata
  * ordered main-model-first), so each routed model loads once rather than being
  * swapped in and out per call.
  */
-const ROUTABLE_TASKS = ['boundary', 'chapter', 'flags', 'description', 'tags', 'title'] as const;
+const ROUTABLE_TASKS = ['chapter', 'flags', 'description', 'tags', 'title'] as const;
 
 /**
- * Small local models that boundary PLACEMENT automatically prefers, best first.
- *
- * Placement is the one stage where a tiny model is not a compromise: it reads a
- * ~90-second window and copies out one sentence. Measured on identical inputs
- * (docs/chapter-pipeline-handoff.md §6), qwen3.5:4b placed 10/10 boundaries at
- * ~1.2s/call against the 27B's ~5s/call, taking Pass 1 from ~60s to ~17s.
- *
- * The floor is REAL and measured — do not extend this list downward. qwen3.5:2b
- * echoes the task back as JSON instead of answering (0/10) and qwen3.5:0.8b
- * quotes text that maps to the wrong places. Below 4b the failure is instruction
- * collapse, which no prompt fixes. Adding a NEW model here is fine once it has
- * been scored against a reference run the same way.
+ * `taskModels` keys that named a task P7 removed: 'boundary' was the classic
+ * engine's boundary placement. A stored entry is read and ignored quietly
+ * (it is not a mistake the user made), not warned about on every run.
  */
-const PREFERRED_PLACEMENT_MODELS = ['qwen3.5:4b'] as const;
+const RETIRED_TASKS: ReadonlySet<string> = new Set(['boundary']);
 
 /** A Crucible catalog model whose context could not be read is sized as 16K. */
 const CRUCIBLE_LOCAL_CONTEXT_FALLBACK = 16384;
@@ -266,92 +243,15 @@ const CRUCIBLE_LOCAL_CONTEXT_FALLBACK = 16384;
 export { CRUCIBLE_OLLAMA_CONTEXT };
 
 /**
- * How many chapters have their flags extracted at once (Pass 2b).
- *
- * Flag extraction is the only embarrassingly parallel step in the pipeline: each
- * chapter's extraction reads only that chapter's text and threads no state
- * forward. (Chapter analysis cannot be parallelized — it carries
- * previousChapterSummary.) Since LLM generation is memory-bandwidth-bound,
- * concurrent requests against one resident model raise total throughput rather
- * than just splitting it.
- *
- * DEFAULTS TO 1, because concurrency here is only safe once Ollama is allowed to
- * serve the requests in parallel. With OLLAMA_NUM_PARALLEL unset, Ollama QUEUES
- * the extra request — it is not merely a no-op, it is actively harmful: the
- * queued call burns its client-side timeout waiting its turn and gets aborted
- * and retried, which cost ~5 minutes in a measured run.
- *
- * To actually enable it: set OLLAMA_NUM_PARALLEL >= N on the Ollama server AND
- * BRIEFCASE_FLAG_CONCURRENCY=N here. Both, or neither.
- */
-const FLAG_EXTRACTION_CONCURRENCY = Math.max(
-  1,
-  Number(process.env.BRIEFCASE_FLAG_CONCURRENCY) || 1,
-);
-
-/**
- * JSON Schema for the flag-extraction answer, handed to Ollama's `format`.
- *
- * WHY: a flag call on qwen3.8:27b measured ~3,400 output tokens for ~300 tokens
- * of actual JSON — roughly 3,100 tokens (~185s of the ~200s call) spent
- * reasoning. Placement showed the fix: constraining the grammar collapsed that
- * stage to ~25 tokens and ~5s, because the schema admits nothing but the answer.
- * Flags are the single most expensive stage in a run, so the same lever applies
- * here. NOTE the structured-output trap this implies — the answer then arrives
- * in Ollama's `thinking` field with `response` empty; ai-provider.service
- * handles that.
- *
- * Shape matches parseFlagExtractionResponse EXACTLY: an object with a `flags`
- * array, each item carrying category / description / quote.
- *
- * `category` is a plain string, NOT an enum of the enabled category names, on
- * purpose: the prompt explicitly allows the model to coin a new lowercase-dashed
- * category when nothing fits, and an enum would silently delete that affordance.
- * The one thing this change is allowed to alter is the decoding grammar.
- */
-const FLAG_EXTRACTION_SCHEMA: Record<string, unknown> = {
-  type: 'object',
-  properties: {
-    flags: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          category: { type: 'string' },
-          description: { type: 'string' },
-          quote: { type: 'string' },
-        },
-        required: ['category', 'description', 'quote'],
-      },
-    },
-  },
-  required: ['flags'],
-};
-
-/**
- * Opt-in for the schema above: BRIEFCASE_FLAGS_CONSTRAINED=1 sends it as
- * Ollama's `format`, which suppresses the model's reasoning along with its
- * prose. Measured A/B on qwen3.8:27b over the same chapter (3 paired runs,
- * scored against a reference flag set): 5.5x faster (168s -> 30s/call) but
- * recall dropped 7.3 -> 5.7 of 11 and false positives rose 0.7 -> 3.0 per run
- * — the extras were reporting-not-asserting quotes, i.e. the assert-vs-debunk
- * judgment the suppressed reasoning was paying for. Flags are the point of
- * this product and a human reviews them, so quality is the default and speed
- * is the explicit trade.
- */
-const FLAGS_CONSTRAINED = process.env.BRIEFCASE_FLAGS_CONSTRAINED === '1';
-
-/**
  * JSON Schema for ONE flag-verification verdict: `{"verdict": "flag" | "skip"}`.
  *
- * THE CONSTRAINT INVERSION — read this before "fixing" it to match
- * FLAGS_CONSTRAINED above.
+ * THE CONSTRAINT INVERSION — read this before unconstraining it.
  *
- * FLAGS_CONSTRAINED documents that constraining the OLD flag call hurt: recall
- * 7.3 -> 5.7 of 11 and false positives 0.7 -> 3.0 per run, because the
+ * Constraining the OLD open-ended flag DISCOVERY call (removed in P7) hurt:
+ * recall 7.3 -> 5.7 of 11 and false positives 0.7 -> 3.0 per run, because the
  * suppressed reasoning was paying for the assert-vs-debunk judgment. That call
- * is open-ended DISCOVERY: read a whole chapter, decide what is in it, produce
- * a variable-length list of quotes and categories. Reasoning is the work there.
+ * read a whole chapter, decided what was in it and produced a variable-length
+ * list of quotes and categories. Reasoning was the work there.
  *
  * This call is the opposite shape: the candidate is already chosen, the claim is
  * already stated, and the answer is one of two tokens. It is
@@ -364,8 +264,7 @@ const FLAGS_CONSTRAINED = process.env.BRIEFCASE_FLAGS_CONSTRAINED === '1';
  *
  * Unconstrained was WORSE on quality AND ~7x slower: given room to reason about
  * one line, the model talks itself out of real flags and into "misinformation"
- * mislabels. So this stage is constrained by DEFAULT and there is no opt-out —
- * BRIEFCASE_FLAGS_DISCOVERY=1 switches to the whole other pipeline instead.
+ * mislabels. So this stage is constrained, with no opt-out.
  */
 const FLAG_VERIFICATION_SCHEMA: Record<string, unknown> = {
   type: 'object',
@@ -375,18 +274,6 @@ const FLAG_VERIFICATION_SCHEMA: Record<string, unknown> = {
   required: ['verdict'],
   additionalProperties: false,
 };
-
-/**
- * Force the OLD chapter-discovery flag pass instead of the ranker/verifier
- * pipeline. This is the documented degradation path, kept for two real cases:
- *
- *  - a machine with no NLI worker environment (no venv, no model) — that case
- *    selects itself automatically, this env var is not needed for it;
- *  - `misinformation`, which entailment cannot rank at all (see
- *    MISINFORMATION_EXCLUSION in nli-ranker.service.ts). A user whose flagging
- *    is mostly about factual claims wants the LLM reading the transcript.
- */
-const FLAGS_DISCOVERY = process.env.BRIEFCASE_FLAGS_DISCOVERY === '1';
 
 /**
  * Output budget for one verification call, used only to SIZE num_ctx.
@@ -434,12 +321,11 @@ const BODY_SCHEMA: Record<string, unknown> = {
 };
 
 /**
- * Kill switches for the metadata schemas — note the polarity is the OPPOSITE of
- * FLAGS_CONSTRAINED, and deliberately so.
+ * Kill switches for the metadata schemas.
  *
- * Flags are a JUDGMENT task: the measured A/B showed structured output buys 5.5x
- * speed at the cost of recall, so there quality is the default and speed is the
- * explicit opt-in. Tags and description are MECHANICAL — extraction and format
+ * Open-ended flag discovery (removed in P7) was a JUDGMENT task: the measured
+ * A/B showed structured output bought 5.5x speed at the cost of recall. Tags
+ * and description are MECHANICAL — extraction and format
  * transforms over summaries that were already the product of judgment upstream —
  * which is exactly the class where constraining is pure win (it collapses a
  * thinking model's output from thousands of reasoning tokens to the answer; a
@@ -504,64 +390,25 @@ function validateChapterAnalysisResult(data: unknown): ChapterAnalysisResult | n
 // These ensure a chapter fits comfortably with room for prompts and output
 interface ModelLimits {
   maxChapterChars: number;     // Max chars per chapter for analysis
-  maxChapterSeconds: number;   // Max chapter duration before splitting
 }
 
 /**
- * Compute per-chapter size limits that are guaranteed to FIT the context window
- * the model will actually run with, so the transcript is never silently
- * truncated:
- *  - time granularity (maxChapterSeconds) is tiered by model size (bigger models
- *    reason over longer spans well),
- *  - but the CHARACTER caps are derived from `contextTokens` — the real ceiling.
- *
- * `contextTokens` is the effective context window:
- *  - local llama.cpp: the pinned server context (8192, the `-c` value),
- *  - ollama: numCtxMaxForModel(model) (what we actually request as num_ctx),
- *  - claude/openai: a large value (their windows are big).
- *
- * This is the fix for the historical mismatch where the char caps assumed a huge
- * context but the runner (pinned 8K local, or a VRAM-capped Ollama num_ctx) had
- * far less, silently dropping the tail of every long chapter.
+ * Per-chapter size limits that are guaranteed to FIT the context window the
+ * model will actually run with, so the transcript is never silently truncated:
+ * the CHARACTER cap is derived from `contextTokens`, the real ceiling (a
+ * Crucible catalog model's served context, an `ollama/` upstream's window, or
+ * a cloud model's large one). Snap chapters are never split for time: the
+ * outline's Viterbi switch cost owns granularity.
  */
-function getModelLimits(modelName: string, contextTokens: number): ModelLimits {
-  // Extract parameter count from model name (e.g., "qwen2.5:7b" -> 7)
-  const match = modelName.toLowerCase().match(/(\d+(?:\.\d+)?)\s*b/);
-  const paramBillions = match ? parseFloat(match[1]) : 7; // Default to 7b if unknown
-
+function getModelLimits(contextTokens: number): ModelLimits {
   // Reserve context for generation + prompt scaffolding (template + categories),
-  // then convert the remaining input budget to chars. The reserve is >= the
-  // local llama.cpp max_tokens (4096) so that, on the FIXED-context local path,
-  // a maximum-size chapter prompt plus a full-length completion still fit inside
-  // the pinned 8192-token window (input + output <= ctx). On the Ollama path
-  // num_ctx is sized dynamically to fit prompt + output, so this is just the
-  // chapter-size cap there. Thinking models use the leftover generation headroom
-  // for their chain of thought (typically ~1-2K tokens; num_predict is a ceiling).
+  // then convert the remaining input budget to chars. Thinking models use the
+  // leftover generation headroom for their chain of thought.
   const OUTPUT_RESERVE_TOKENS = 4096;
   const SCAFFOLD_TOKENS = 1024;
   const CHARS_PER_TOKEN = 3;
   const usableInputTokens = Math.max(1024, contextTokens - OUTPUT_RESERVE_TOKENS - SCAFFOLD_TOKENS);
-  const maxChapterChars = usableInputTokens * CHARS_PER_TOKEN;
-
-  // Time granularity tiers (independent of the char caps above).
-  let maxChapterSeconds: number;
-  if (paramBillions <= 3) {
-    maxChapterSeconds = 180;
-  } else if (paramBillions <= 7) {
-    maxChapterSeconds = 360;
-  } else if (paramBillions <= 14) {
-    maxChapterSeconds = 540;
-  } else if (paramBillions <= 32) {
-    // 900s (15 min), raised from 600. Flag extraction is ~72% of a run and costs
-    // a large FIXED thinking overhead per call, so fewer/longer chapters beat
-    // more/shorter ones: a 40-min video goes from ~7 flag calls to ~4. Safe
-    // against truncation — 900s of speech is ~13.5k chars against a 21.5k cap.
-    maxChapterSeconds = 900;
-  } else {
-    maxChapterSeconds = 720;
-  }
-
-  return { maxChapterChars, maxChapterSeconds };
+  return { maxChapterChars: usableInputTokens * CHARS_PER_TOKEN };
 }
 
 // =============================================================================
@@ -584,10 +431,8 @@ export class AIAnalysisService {
 
   constructor(
     private readonly aiProviderService: AIProviderService,
-    private readonly ollamaService: OllamaService,
-    private readonly apiKeysService: ApiKeysService,
-    private readonly chapterDetectionService: ChapterDetectionService,
-    private readonly nliRanker: NliRankerService,
+    /** The snap engine's scorer stage (chapters + flag ranking on Crucible's decision door). */
+    private readonly snapAnalysis: SnapAnalysisService,
     /**
      * OPTIONAL on purpose. This service is constructed directly by smoke
      * harnesses and by callers that have no library open, and the only thing it
@@ -597,13 +442,6 @@ export class AIAnalysisService {
      * an analysis cannot run.
      */
     @Optional() private readonly databaseService?: DatabaseService,
-    /**
-     * The snap engine's scorer stage (chapters + flag ranking on the scorer).
-     * OPTIONAL like the database: the classic pipeline never needs it, and a
-     * missing service with analysisEngine 'snap' is a warned fallback, not an
-     * error (see the engine selection in analyzeTranscript).
-     */
-    @Optional() private readonly snapAnalysis?: SnapAnalysisService,
   ) {}
 
   // ===========================================================================
@@ -613,20 +451,10 @@ export class AIAnalysisService {
   /**
    * Analyses currently in flight, keyed by queue job id.
    *
-   * The AI pool is single-slot, so in practice this holds at most one entry —
-   * but it is a MAP rather than a single field on purpose. The standalone
-   * analysis controller can start a run outside the queue, and model release
-   * has to be able to answer "is any other run still using this model" before
-   * it unloads anything. A single field could not.
+   * A MAP rather than a single field: analyses on different Crucible lanes
+   * (a GPU lane and the cloud lane) can run at once.
    */
-  private readonly activeRuns = new Map<
-    string,
-    {
-      controller: AbortController;
-      /** `${endpoint}::${model}` for every Ollama model this run may load. */
-      ollamaKeys: Set<string>;
-    }
-  >();
+  private readonly activeRuns = new Map<string, { controller: AbortController }>();
 
   /**
    * Cancel the analysis belonging to one queue job.
@@ -646,15 +474,9 @@ export class AIAnalysisService {
    * The cancel itself, split out from the event handler so it can be driven
    * directly (tests, and any future in-process caller).
    *
-   * Order matters:
-   *   1. abort  — the open generation dies, and every stage loop's next
-   *               `ensureNotCancelled` throws instead of issuing another call;
-   *   2. NLI    — the worker holds a loaded model and ~1GB of python, and a
-   *               cancel landing mid-`rankWindows` would otherwise wait out the
-   *               scoring timeout before analyzeTranscript's finally could run;
-   *   3. models — released only after the abort, because Ollama serializes per
-   *               model and an unload queued behind a live generation would not
-   *               land until that generation finished.
+   * The abort kills the open call (a chat or a decide), and every stage loop's
+   * next `ensureNotCancelled` throws instead of issuing another one. The
+   * Crucible run the analysis is inside releases its lease as it unwinds.
    *
    * Returns false when no such run exists.
    */
@@ -664,36 +486,6 @@ export class AIAnalysisService {
 
     this.logger.log(`Cancelling AI analysis for job ${jobId}`);
     run.controller.abort();
-
-    // The ranker worker is a single shared process, so only tear it down when
-    // no OTHER run could be using it. With the single-slot AI pool this is
-    // always true; the guard is what keeps it true if that ever changes.
-    if (this.activeRuns.size === 1) {
-      this.nliRanker.stop();
-    } else {
-      this.logger.warn(
-        `[Cancel] ${this.activeRuns.size - 1} other analysis run(s) are active — leaving the NLI ` +
-        `ranker worker up rather than pulling it out from under them`,
-      );
-    }
-
-    // Release ONLY the models no other live run still needs. Ollama is shared
-    // with another app on this machine, and releaseOllamaModelKeys additionally
-    // intersects with what Briefcase itself actually loaded — so a model this
-    // run never touched, or that another app loaded, is never unloaded.
-    const stillNeeded = new Set<string>();
-    for (const [otherId, other] of this.activeRuns) {
-      if (otherId === jobId) continue;
-      for (const key of other.ollamaKeys) stillNeeded.add(key);
-    }
-    const releasable = [...run.ollamaKeys].filter((key) => !stillNeeded.has(key));
-
-    // Fire-and-forget: the cancel path must return promptly to the queue, and
-    // releaseOllamaModelKeys never throws.
-    void this.aiProviderService.releaseOllamaModelKeys(releasable).catch((error) => {
-      this.logger.warn(`[Cancel] Model release failed for job ${jobId}: ${(error as Error).message}`);
-    });
-
     return true;
   }
 
@@ -709,37 +501,6 @@ export class AIAnalysisService {
    * Returns {} on any read/parse failure — routing is an optimization, and a
    * malformed config must not take the whole analysis down.
    */
-  /**
-   * The stored default sensitivity (app-config `defaultGranularity`).
-   *
-   * THIS IS NOW A DISCOVERY-FALLBACK-ONLY SETTING, and it is the ONLY way it can
-   * be set: the 1-5 sensitivity slider was removed from all three run-config
-   * surfaces (operator, 2026-08-25: "not sure we need the 1-5 run slider anymore
-   * after we've turned it into a filter"), and nothing in the UI writes or reads
-   * it. It lives in app-config.json and is edited by hand, or not at all.
-   *
-   * The DEFAULT ranked flag path ignores sensitivity entirely — it captures at
-   * its widest, verifies everything, stores every verdict, and the dial became a
-   * display filter in the video editor. The DISCOVERY fallback path (no NLI
-   * worker environment, or BRIEFCASE_FLAGS_DISCOVERY=1) still uses it as a real
-   * run input, because it asks one open-ended question per chapter and has no
-   * scored candidate list to filter afterwards.
-   *
-   * It is resolved HERE rather than at the discovery branch because the value is
-   * also carried into the run's log line and because some entry points (the
-   * standalone analysis controller path) never plumbed the option at all. When
-   * neither the caller nor the config file supplies one, the discovery prompt's
-   * own default (2, balanced) applies — see getSensitivityLine.
-   */
-  private loadDefaultGranularity(): number | undefined {
-    try {
-      const raw = JSON.parse(fs.readFileSync(this.appConfigPath(), 'utf8'))?.defaultGranularity;
-      return typeof raw === 'number' && Number.isFinite(raw) ? raw : undefined;
-    } catch {
-      return undefined;
-    }
-  }
-
   private appConfigPath(): string {
     const userDataPath =
       process.env.APPDATA ||
@@ -763,9 +524,10 @@ export class AIAnalysisService {
       }
 
       // Anything outside ROUTABLE_TASKS is not a task this pipeline runs, so an
-      // entry for it silently does nothing. Warn loudly instead of ignoring it.
+      // entry for it silently does nothing. Warn loudly instead of ignoring it
+      // (a retired task's entry is not the user's mistake: ignored quietly).
       const rejected = Object.keys(raw).filter(
-        (k) => !ROUTABLE_TASKS.includes(k as (typeof ROUTABLE_TASKS)[number]),
+        (k) => !ROUTABLE_TASKS.includes(k as (typeof ROUTABLE_TASKS)[number]) && !RETIRED_TASKS.has(k),
       );
       if (rejected.length) {
         this.logger.warn(
@@ -782,11 +544,8 @@ export class AIAnalysisService {
 
   /**
    * Resolve the provider config for one task, applying any `taskModels` override.
-   *
-   * The API key is re-resolved for the override's provider — routing a task to
-   * Claude while the base job runs on Ollama must not send Ollama's (absent) key.
-   * An override naming a cloud provider with no configured key is ignored rather
-   * than allowed to fail the task.
+   * Keys are the serving Crucible's, so an override naming an upstream is taken
+   * as it is; the server refuses by name if it has no key for it.
    */
   private resolveTaskConfig(
     base: AIProviderConfig,
@@ -801,154 +560,19 @@ export class AIAnalysisService {
     const model = parsed.model;
     if (!model || (provider === base.provider && model === base.model)) return base;
 
-    let apiKey = base.apiKey;
-    // Through Crucible the keys are the SERVER's (Settings › AI), so an override
-    // naming a cloud provider is taken as it is; the server refuses by name if
-    // it has no key for it.
-    if (provider !== base.provider && this.aiProviderService.via() === 'crucible') {
-      this.logger.log(`[TaskModels] ${task} -> ${provider}:${model} (via Crucible)`);
-      return { ...base, provider, model, apiKey: undefined };
-    }
-    if (provider !== base.provider) {
-      if (provider === 'claude') apiKey = this.apiKeysService.getClaudeApiKey();
-      else if (provider === 'openai') apiKey = this.apiKeysService.getOpenAiApiKey();
-      else apiKey = undefined; // ollama / local need none
-
-      if ((provider === 'claude' || provider === 'openai') && !apiKey) {
-        this.logger.warn(
-          `[TaskModels] Ignoring '${task}' -> ${spec}: no ${provider} API key configured.`,
-        );
-        return base;
-      }
-    }
-
     this.logger.log(`[TaskModels] ${task} -> ${provider}:${model}`);
-    return { ...base, provider, model, apiKey };
+    return { ...base, provider, model };
   }
 
   /**
-   * List the model tags installed on an Ollama endpoint, or null if the endpoint
-   * is not reachable. 2-second budget: this runs on the analysis hot path purely
-   * to take an optimization, so an unreachable or wedged daemon must cost
-   * ~nothing and simply mean "no small model available".
-   */
-  private async listOllamaTags(endpoint: string): Promise<string[] | null> {
-    try {
-      const response = await fetch(`${endpoint}/api/tags`, {
-        signal: AbortSignal.timeout(2000),
-      });
-      if (!response.ok) return null;
-      const data = await response.json();
-      const models = Array.isArray(data?.models) ? data.models : [];
-      return models
-        .map((m: { name?: unknown }) => (typeof m?.name === 'string' ? m.name : ''))
-        .filter((name: string) => !!name);
-    } catch {
-      return null;
-    }
-  }
-
-  /**
-   * Automatically route boundary PLACEMENT to a small local model when one is
-   * installed — no configuration required.
-   *
-   * Placement is per-boundary quote copying (~10 calls per hour of video) and a
-   * 4B does it as accurately as a 27B at a quarter of the time, so the win is
-   * free and worth taking by default rather than only for users who happen to
-   * have written a `taskModels.boundary` line. Deliberately applies even when
-   * the MAIN provider is claude/openai: a cloud user with Ollama installed still
-   * gets fast local placement, and placement is the one task where nothing is
-   * lost by it (a failed placement degrades to the junction time).
-   *
-   * Precedence: explicit `taskModels.boundary` > BRIEFCASE_PLACE_MODEL >
-   * auto-detection > the job's main model.
-   *
-   * MUTATES `overrides` so every downstream `resolveTaskConfig(_, 'boundary')`
-   * — including the context-limit survey — sees the same answer, and so the
-   * /api/tags probe happens exactly ONCE per analysis run. It is deliberately
-   * not cached process-wide: models get pulled and removed between runs.
-   */
-  private async applyAutoPlacementModel(
-    overrides: Partial<Record<AITaskKind, string>>,
-    ollamaEndpoint?: string,
-  ): Promise<void> {
-    if (overrides.boundary) {
-      this.logger.log(
-        `[Placement] boundary -> ${overrides.boundary} (explicit taskModels.boundary override)`,
-      );
-      return;
-    }
-
-    // Env override names a bare Ollama tag and is taken on faith — it exists to
-    // test a model that may not be installed yet, so it skips the probe.
-    const forced = (process.env.BRIEFCASE_PLACE_MODEL || '').trim();
-    if (forced) {
-      overrides.boundary = `ollama:${forced}`;
-      this.logger.log(
-        `[Placement] boundary -> ollama:${forced} (BRIEFCASE_PLACE_MODEL; availability not checked)`,
-      );
-      return;
-    }
-
-    // Through Crucible: a small model from the server's OWN catalog, when it has
-    // one installed. Ollama is only an upstream there, and its /api/tags is not
-    // Briefcase's to probe.
-    if (this.aiProviderService.via() === 'crucible') {
-      const small = await this.aiProviderService.smallLocalCrucibleModel();
-      if (small) {
-        overrides.boundary = small;
-        this.logger.log(`[Placement] boundary -> ${small} (a small model in the Crucible catalog)`);
-      } else {
-        this.logger.log('[Placement] boundary -> main model (the Crucible catalog has no small local model installed)');
-      }
-      return;
-    }
-
-    const endpoint = ollamaEndpoint || 'http://localhost:11434';
-    const installed = await this.listOllamaTags(endpoint);
-    if (!installed) {
-      this.logger.log(
-        `[Placement] boundary -> main model (Ollama not reachable at ${endpoint}; ` +
-        `placement stays on the job's model)`,
-      );
-      return;
-    }
-
-    const match = PREFERRED_PLACEMENT_MODELS.find((preferred) =>
-      installed.some(
-        (name) =>
-          name === preferred ||
-          name === `${preferred}:latest` ||
-          name.startsWith(`${preferred}-`),
-      ),
-    );
-
-    if (!match) {
-      this.logger.log(
-        `[Placement] boundary -> main model (none of ${PREFERRED_PLACEMENT_MODELS.join(', ')} ` +
-        `installed on ${endpoint})`,
-      );
-      return;
-    }
-
-    overrides.boundary = `ollama:${match}`;
-    this.logger.log(
-      `[Placement] boundary -> ollama:${match} (auto-detected on ${endpoint}; ` +
-      `small models place boundaries as accurately as large ones, ~4x faster)`,
-    );
-  }
-
-  /**
-   * Main entry point: Analyze transcript using AI
-   * Uses two-pass chapter-centric analysis:
-   *   Pass 1: Detect chapter boundaries (embedding-scored, then placed)
-   *   Pass 2: Analyze each chapter with full context (title, summary)
-   *   Pass 2b: Extract category flags per chapter, as a dedicated call
+   * Main entry point: analyse a transcript. The snap scorer stage (chapters
+   * and flag ranking), then Pass 2 (chapter summaries), Pass 2b (flag
+   * verification) and the metadata, all on Crucible (see the file header).
    */
   async analyzeTranscript(options: AnalysisOptions): Promise<AnalysisResult> {
     // ONE Crucible run per analysis: each local model the run uses is loaded
     // once, leased and heartbeaten until the analysis settles (done, failed or
-    // cancelled), then released. On the direct road this is a plain call.
+    // cancelled), then released.
     return this.aiProviderService.withRun(() => this.analyzeTranscriptRun(options));
   }
 
@@ -973,8 +597,6 @@ export class AIAnalysisService {
       videoTitle = '',
       categories,
       customInstructions,
-      apiKey,
-      ollamaEndpoint,
       onProgress,
       jobId,
     } = options;
@@ -985,13 +607,10 @@ export class AIAnalysisService {
     // both kills the open generation and stops the pipeline issuing more.
     const controller = new AbortController();
     const signal = controller.signal;
-    const run = { controller, ollamaKeys: new Set<string>() };
+    const run = { controller };
 
-    // EVERY run registers, even one with no queue job. A run without a jobId is
-    // not cancellable (nothing can name it), but it still has to be VISIBLE:
-    // model release and the NLI-worker teardown both ask "is anything else
-    // running", and an unregistered standalone analysis would have its model
-    // unloaded and its ranker killed out from under it by an unrelated cancel.
+    // EVERY run registers, even one with no queue job (it is then not
+    // cancellable by id, since nothing can name it).
     const runKey = jobId ?? `standalone-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const stale = this.activeRuns.get(runKey);
     if (stale) {
@@ -1002,20 +621,8 @@ export class AIAnalysisService {
     }
     this.activeRuns.set(runKey, run);
 
-    // Sensitivity, USED ONLY BY THE DISCOVERY FALLBACK FLAG PATH: an explicit
-    // value wins; otherwise the config file's stored default; otherwise the
-    // discovery prompt's own default of 2. Nothing in the UI sets either any
-    // more — see loadDefaultGranularity. The ranked path never reads this.
-    const analysisGranularity = options.analysisGranularity ?? this.loadDefaultGranularity();
-    if (options.analysisGranularity === undefined && analysisGranularity !== undefined) {
-      this.logger.log(
-        `[Sensitivity] Caller passed none — using the config file's stored default ` +
-        `${analysisGranularity} (discovery fallback path only)`,
-      );
-    }
-
     // Strip provider prefix from model if present (shared parser, one source of
-    // truth across all entry points), e.g. "local:cogito-8b" -> "cogito-8b".
+    // truth across all entry points), e.g. "local:qwen3.5-9b" -> "qwen3.5-9b".
     {
       const parsed = parseProviderModel(model, provider);
       if (parsed.provider && parsed.provider !== provider) {
@@ -1093,21 +700,6 @@ export class AIAnalysisService {
     try {
       sendProgress('analysis', 0, `Starting AI analysis with ${model}...`);
 
-      // Check model availability (only for Ollama, and only on the direct road:
-      // through Crucible, Ollama is the server's upstream and the server answers
-      // for it).
-      if (provider === 'ollama' && this.aiProviderService.via() !== 'crucible') {
-        const available = await this.ollamaService.isModelAvailable(
-          model,
-          ollamaEndpoint,
-        );
-        if (!available) {
-          throw new Error(
-            `Model '${model}' not found in Ollama. Please install it first.`,
-          );
-        }
-      }
-
       // Write header to file
       fs.writeFileSync(
         outputFile,
@@ -1119,12 +711,7 @@ export class AIAnalysisService {
         'utf-8',
       );
 
-      const aiConfig: AIProviderConfig = {
-        provider,
-        model,
-        apiKey,
-        ollamaEndpoint,
-      };
+      const aiConfig: AIProviderConfig = { provider, model };
 
       // Per-task model routing. Metadata tasks are narrow and cheap, so they can
       // run on a small fast model while chapter work keeps the big one. The three
@@ -1132,31 +719,9 @@ export class AIAnalysisService {
       // them to the same model costs exactly ONE model swap, not three.
       const taskModels = this.loadTaskModelOverrides();
 
-      // Boundary placement takes a small local model automatically when one is
-      // installed (one /api/tags probe for the whole run). No-op when the user
-      // configured 'boundary' explicitly, or when Ollama is not reachable.
-      await this.applyAutoPlacementModel(taskModels, ollamaEndpoint);
-
-      // Record every Ollama model this run can load, now that routing is
-      // settled. Cancellation releases exactly this set (intersected with what
-      // was actually loaded), so a shared Ollama never loses a model that
-      // belongs to another app — or to another Briefcase run.
-      {
-        const endpoint = ollamaEndpoint || 'http://localhost:11434';
-        if (aiConfig.provider === 'ollama') {
-          run.ollamaKeys.add(`${endpoint}::${aiConfig.model}`);
-        }
-        for (const task of ROUTABLE_TASKS) {
-          const cfg = this.resolveTaskConfig(aiConfig, task, taskModels);
-          if (cfg.provider === 'ollama') {
-            run.ollamaKeys.add(`${cfg.ollamaEndpoint || endpoint}::${cfg.model}`);
-          }
-        }
-      }
-
       // Effective context window each raw-transcript task will actually use.
       //
-      // boundary / chapter / flags all read raw transcript, and each may now be
+      // chapter / flags both read raw transcript, and each may be
       // routed to a DIFFERENT model. One shared set of caps therefore has to be
       // safe for all of them, so every limit is the most CONSERVATIVE across the
       // resolved models: sizing to the main model alone would overflow a smaller
@@ -1164,14 +729,12 @@ export class AIAnalysisService {
       // Through Crucible a 'local' model is one in the server's catalog, served
       // at the context its manifest sizes for this host: read it once per model.
       const crucibleLocalContext = new Map<string, number>();
-      const viaCrucible = this.aiProviderService.via() === 'crucible';
       // An ollama choice the serving Crucible has a model of its own for runs
       // as that model (ollama-map.ts, decided again by chat() at call time):
       // sized at that model's context. `null`: it stays on the ollama/ upstream.
       const crucibleStandIn = new Map<string, string | null>();
       const crucibleStandInLoad = new Map<string, number>();
       const ollamaTagOf = (cfg: AIProviderConfig): string | null => {
-        if (!viaCrucible) return null;
         try {
           const target = crucibleTargetOf(cfg.provider, cfg.model);
           return target.route === 'upstream' && target.upstream === 'ollama' ? target.bareModel : null;
@@ -1188,7 +751,7 @@ export class AIAnalysisService {
         return tag !== null && !crucibleStandIn.get(tag);
       };
       const crucibleOllamaSized = new Map<string, boolean>();
-      if (viaCrucible) {
+      {
         const sized = [aiConfig, ...(['chapter', 'flags'] as AITaskKind[]).map((t) => this.resolveTaskConfig(aiConfig, t, taskModels))];
         for (const cfg of sized) {
           const tag = ollamaTagOf(cfg);
@@ -1220,44 +783,25 @@ export class AIAnalysisService {
           }
           return CRUCIBLE_OLLAMA_CONTEXT;
         }
-        return cfg.provider === 'local' && crucibleLocalContext.has(cfg.model)
-          ? crucibleLocalContext.get(cfg.model)!
-          : cfg.provider === 'local'
-          ? 8192 // pinned llama.cpp server context (-c 8192)
-          : cfg.provider === 'ollama'
-            ? numCtxMaxForModel(cfg.model) // what we request as num_ctx
-            : 128000; // claude/openai have large windows
+        if (cfg.provider === 'local') return crucibleLocalContext.get(cfg.model) ?? CRUCIBLE_LOCAL_CONTEXT_FALLBACK;
+        // An ollama/ choice the server runs as its own model was answered above.
+        if (cfg.provider === 'ollama') return numCtxMaxForModel(cfg.model);
+        return 128000; // claude/openai have large windows
       };
 
-      // 'boundary' is NOT in this list. Placement reads a fixed ~90-second
-      // window it sizes itself (chapter-detection.service pins one num_ctx from
-      // its own largest prompt), so no chapter cap constrains it — and now that
-      // placement auto-routes to a small local model, including it here would
-      // drag the shared char cap down to that model's context for a cloud job
-      // whose chapter/flags tasks have a 128K window.
       const rawTranscriptTasks: AITaskKind[] = ['chapter', 'flags'];
       const perTaskLimits = rawTranscriptTasks.map((t) => {
         const cfg = this.resolveTaskConfig(aiConfig, t, taskModels);
         const ctx = contextFor(cfg);
-        return { task: t, model: cfg.model, ctx, limits: getModelLimits(cfg.model, ctx) };
+        return { task: t, model: cfg.model, ctx, limits: getModelLimits(ctx) };
       });
 
-      // Two different rules, deliberately:
-      //
-      //  - CHARACTER caps are a CORRECTNESS guarantee and take the minimum. A
-      //    model reading text sized for a larger model's context would silently
-      //    truncate its prompt, losing transcript with no error.
-      //
-      //  - TIME granularity is a QUALITY heuristic (getModelLimits tiers span by
-      //    model size) and follows the MAIN model. Taking the minimum here would
-      //    shrink chapters whenever chaptering is routed to a small model, which
-      //    creates MORE chapters and therefore more calls for whatever expensive
-      //    model does flag extraction — the opposite of why routing exists.
-      const mainLimits = getModelLimits(model, contextFor(aiConfig));
+      // The CHARACTER cap is a CORRECTNESS guarantee and takes the minimum: a
+      // model reading text sized for a larger model's context would silently
+      // truncate its prompt, losing transcript with no error.
       const contextTokens = Math.min(...perTaskLimits.map((x) => x.ctx));
       const modelLimits: ModelLimits = {
         maxChapterChars: Math.min(...perTaskLimits.map((x) => x.limits.maxChapterChars)),
-        maxChapterSeconds: mainLimits.maxChapterSeconds,
       };
 
       const distinct = [...new Set(perTaskLimits.map((x) => x.model))];
@@ -1269,143 +813,59 @@ export class AIAnalysisService {
         );
       }
       this.logger.log(
-        `[Model Limits] effective ctx=${contextTokens}: ` +
-        `maxChapterChars=${modelLimits.maxChapterChars}, ` +
-        `maxChapterSeconds=${modelLimits.maxChapterSeconds}`,
+        `[Model Limits] effective ctx=${contextTokens}: maxChapterChars=${modelLimits.maxChapterChars}`,
       );
 
       // =========================================================================
-      // ENGINE SELECTION: classic (default) or snap (scorer/analysis-engine.ts)
+      // THE SCORER STAGE (snap, on Crucible's decision door)
       // =========================================================================
-      // 'snap' is a preference, never a requirement. The scorer stage runs
-      // BEFORE every LLM stage (both passes in one scorer lease), and any stage
-      // it could not produce falls back to its classic path with a job warning,
-      // the same channel the NLI-missing fallback uses. A cancel inside it
-      // propagates as a cancellation and never falls back into more work.
-      const engine = resolveAnalysisEngine();
-      if (engine.ignored) {
-        this.logger.warn(`[Engine] Ignoring unrecognised analysis engine setting: ${engine.ignored}`);
-      }
+      // Both passes in one scorer lease, BEFORE every LLM stage. There is no
+      // other engine: a stage it cannot make throws (SnapEngineError, naming
+      // why) and fails the analysis; a busy or silent server parks the task; a
+      // cancel propagates as a cancellation and never falls into more work.
+      sendProgress('analysis', 3, 'Starting the analysis engine...');
+      const snap = await this.snapAnalysis.run({
+        segments,
+        categories: categories || [],
+        chapters: true,
+        flags: true,
+        signal,
+        onProgress: (p) => sendProgress('analysis', 3 + Math.round(p.fraction * 22), p.message),
+      });
       const engineWarnings: string[] = [];
-      let snap: SnapStageResult | null = null;
-      if (wantsScorer(engine)) {
-        const stages = (['chapters', 'flags'] as const).filter((st) => engine[st] === 'snap');
-        // On Crucible (P6) the scorer is the decision door and there is no
-        // fallback: the run below fails by name, or parks, when it cannot serve.
-        const availability = this.snapAnalysis
-          ? await this.snapAnalysis.availability()
-          : { available: false as const, reason: 'the snap analysis service is not registered' };
-        if (!availability.available) {
-          this.logger.warn(`[Engine] snap selected (${engine.source}) but unavailable: ${availability.reason} — classic for ${stages.join(' + ')}`);
-          engineWarnings.push(snapFallbackMessage([...stages], availability.reason));
-        } else {
-          this.logger.log(`[Engine] snap engine (${engine.source}) for ${stages.join(' + ')}`);
-          sendProgress('analysis', 3, 'Starting the analysis engine...');
-          snap = await this.snapAnalysis!.run({
-            segments,
-            categories: categories || [],
-            chapters: engine.chapters === 'snap',
-            flags: engine.flags === 'snap',
-            signal,
-            // The scorer stage owns 3%-15%; chapter placement (when it still
-            // runs) keeps the rest of Pass 1's band.
-            onProgress: (p) => sendProgress('analysis', 3 + Math.round(p.fraction * 12), p.message),
-          });
-          // One warning per distinct reason, naming the stages it cost.
-          const failed: Array<{ stage: 'chapters' | 'flags'; reason: string }> = [];
-          if (engine.chapters === 'snap' && !snap.chapters) failed.push({ stage: 'chapters', reason: snap.chaptersError || 'no chapters' });
-          if (engine.flags === 'snap' && !snap.flags) failed.push({ stage: 'flags', reason: snap.flagsError || 'no ranking' });
-          if (snap.chapters && snap.chapterTreeError) engineWarnings.push(`Sub-chapters were skipped: ${snap.chapterTreeError}`);
-          for (const reason of [...new Set(failed.map((f) => f.reason))]) {
-            engineWarnings.push(snapFallbackMessage(failed.filter((f) => f.reason === reason).map((f) => f.stage), reason));
-          }
-          // Every scorer stage is done. A LOCAL flag verifier (Ollama or the
-          // app's llama-server) is about to load its own model; it must not sit
-          // beside an idle 18 GB scorer for the idle window. A cloud verifier
-          // needs no local memory, so the scorer stays warm for the next job.
-          // (A cancel never reaches here: run() throws it.)
-          const verifier = this.resolveTaskConfig(aiConfig, 'flags', taskModels);
-          if (verifier.provider === 'ollama' || verifier.provider === 'local') {
-            this.logger.log(`[Engine] flag verifier is local (${verifier.provider}:${verifier.model}) — unloading the scorer first`);
-            await this.snapAnalysis!.releaseScorer();
-          }
-        }
-      } else {
-        this.logger.log(`[Engine] classic engine (${engine.source})`);
+      if (snap.chapterTreeError) engineWarnings.push(`Sub-chapters were skipped: ${snap.chapterTreeError}`);
+      const gated = snap.labelMassGated.total;
+      if (gated > 0) {
+        engineWarnings.push(
+          `${gated} of the analysis engine's answers were read as no evidence (the model put under 1% of its ` +
+            `probability on the answer letters); they did not move any chapter or flag.`,
+        );
       }
       // A refined outline: Pass 2 works on its LEAVES (they tile the video, as
       // flat chapters do); the parents are put back around them at the end.
-      const snapTree = snap?.chapterTree && snap.chapterTree.depth > 1 ? snap.chapterTree : null;
-      const snapChapters = snapTree
-        ? leafChapters(snapTree.flat)
-        : snap?.chapters && snap.chapters.chapters.length > 0
-          ? snap.chapters.chapters
-          : null;
+      const snapTree = snap.chapterTree && snap.chapterTree.depth > 1 ? snap.chapterTree : null;
+      const snapChapters = snapTree ? leafChapters(snapTree.flat) : snap.chapters?.chapters ?? [];
+      const flagRanking = snap.flags;
+      if (!flagRanking) throw new Error('the analysis engine returned no flag ranking');
 
-      // =========================================================================
-      // PASS 1: Detect chapter boundaries
-      // =========================================================================
-      // Pass 1 is no longer an LLM reading the transcript for boundaries — that
-      // prompt returned a PREFIX of the boundaries (1-3) and stopped, missing
-      // e.g. a mid-video ad break entirely. Boundaries are now SCORED from
-      // embeddings and only PLACED by the model (see chapter-detection.service),
-      // or, on the snap engine, come from the scorer's outline + Viterbi path
-      // with the outline labels as titles.
-      const pass1StartTime = Date.now();
-      let boundaries: number[];
-      let pass1Calls = 0;
-      if (snapChapters) {
-        boundaries = snapChapters.map((c) => c.startSeconds);
-        sendProgress('analysis', 25, `Found ${boundaries.length} chapters (snap engine)`);
-      } else {
-        const band: [number, number] = snap ? [15, 25] : [5, 25];
-        sendProgress('analysis', band[0], 'Detecting chapter boundaries...');
-        const detection = await this.chapterDetectionService.detectBoundaries({
-          segments,
-          boundaryConfig: this.resolveTaskConfig(aiConfig, 'boundary', taskModels),
-          maxChapterSeconds: modelLimits.maxChapterSeconds,
-          videoTitle,
-          ollamaEndpoint,
-          onTokens: trackTokens,
-          // Pass 1 owns the 5%-25% band. Scoring is one early tick (it is seconds
-          // of embedding, not minutes of generation); the rest of the band walks
-          // with the per-boundary placement calls, so the queue sees steady
-          // progress instead of a frozen 5% for the whole pass.
-          onProgress: (current, total, label) => {
-            const pct = band[0] + Math.round((current / Math.max(1, total)) * (band[1] - band[0]));
-            sendProgress('analysis', pct, label);
-          },
-          signal,
-        });
-        boundaries = detection.boundaries;
-        pass1Calls = detection.placeCalls;
-        sendProgress('analysis', 25, `Found ${boundaries.length} chapters (${detection.scorer} scoring)`);
-      }
+      // The chapters: the scorer's outline + Viterbi path, the outline labels as titles.
+      const boundaries = snapChapters.map((c) => c.startSeconds);
+      sendProgress('analysis', 25, `Found ${boundaries.length} chapter${boundaries.length === 1 ? '' : 's'}`);
 
-      // Calculate total API calls for accurate progress reporting:
-      // chapters + one flag-extraction call each + the FOUR metadata calls
-      // (tags, description hook, description body, title), plus the
-      // boundary-placement calls Pass 1 already made.
+      // Calculate total API calls for accurate progress reporting: one summary
+      // call per chapter + one verification call per (window, category) + the
+      // FOUR metadata calls (tags, description hook, description body, title).
       //
       // The narrated-actor re-ask (at most one per viewer-facing field) is NOT
       // counted here, exactly as chapter and flag PARSE retries are not: this
       // number is the expected-work estimate the ETA divides by, and retries are
       // exceptions. Their real cost is still recorded — every attempt, retry
       // included, goes through trackTokens and lands in tokenStats.apiCalls.
-      // Omitting the flag pass
-      // here is what produced negative ETAs and a "4/4 API calls" counter on a
-      // run that actually made seven; omitting Pass 1's calls would understate
-      // the same way. The embedding call is NOT counted — it is one batch
-      // request measured in seconds, not a generation call, and counting it
-      // would poison the ETA's average-call-time.
+      // The scorer stage's decides are NOT counted: they are not generation
+      // calls, and counting them would poison the ETA's average-call-time.
       let chapterCallCount = boundaries.length;
-      // Flag calls are NO LONGER one per chapter. On the default ranked path
-      // there is one call per (window, category) pair, a number nothing
-      // knows until the ranker has run — so this starts at the old
-      // one-per-chapter estimate and the flag stage corrects it the moment it
-      // knows, exactly as the chapter loop corrects chapterCallCount after long
-      // chapters are split.
-      // Starts at ZERO — not at a one-per-chapter guess. Under capture-wide
+      // Flag calls: one per (window, category) pair, known once the verifier
+      // stage has the ranking. Starts at ZERO — not at a one-per-chapter guess. Under capture-wide
       // ranking the real number is routinely 10x a per-chapter estimate (83 vs
       // 7 on the hour-long reference video), and a guess that wrong does not
       // degrade gracefully: it made the bar sprint to 53% after a single
@@ -1413,13 +873,12 @@ export class AIAnalysisService {
       // ranker reports its actual count.
       let flagCallCount = 0;
       const recomputeTotalApiCalls = () => {
-        totalApiCalls = chapterCallCount + flagCallCount + 4 + pass1Calls;
+        totalApiCalls = chapterCallCount + flagCallCount + 4;
       };
       recomputeTotalApiCalls();
-      completedApiCalls = pass1Calls;
-      // ETA averages over every counted call, so the clock starts where the
-      // first counted call did — the placement stage, not Pass 2.
-      pass2StartTime = pass1Calls > 0 ? pass1StartTime : Date.now();
+      completedApiCalls = 0;
+      // ETA averages over every counted call, so the clock starts with Pass 2.
+      pass2StartTime = Date.now();
 
       // Progress is BANDED PER STAGE, not computed as a fraction of all calls.
       //
@@ -1453,16 +912,13 @@ export class AIAnalysisService {
         modelLimits,
         recordFailure,
         customInstructions,
-        analysisGranularity,
         trackTokens,
         (current, total) => {
-          // Post-split chapter count is only known here; correct the estimate so
-          // the ETA stops drifting when Pass 2 splits long chapters.
           if (total !== chapterCallCount) {
             chapterCallCount = total;
             recomputeTotalApiCalls();
           }
-          completedApiCalls = pass1Calls + current;
+          completedApiCalls = current;
           lastProgress = bandProgress(PASS2_BAND, current, total);
           sendProgress('analysis', lastProgress, `Analyzing chapter ${current}/${total}...`);
         },
@@ -1472,14 +928,11 @@ export class AIAnalysisService {
             flagCallCount = total;
             recomputeTotalApiCalls();
           }
-          completedApiCalls = pass1Calls + chapterCallCount + current;
+          completedApiCalls = chapterCallCount + current;
           lastProgress = bandProgress(FLAG_BAND, current, total);
           sendProgress('analysis', lastProgress, `Verifying flag candidates ${current}/${total}...`);
         },
-        // Ranking is one quick tick — seconds of local scoring, not a
-        // generation call — so it reports a message at the CURRENT percentage
-        // and is deliberately not counted in totalApiCalls (counting it would
-        // poison the ETA's average-call-time, same as the embedding call).
+        // A message at the CURRENT percentage, not counted in totalApiCalls.
         (message) => {
           // Ranking runs at the START of the flag band: chapters are done, no
           // verification has happened yet, and the candidate count is about to
@@ -1489,8 +942,8 @@ export class AIAnalysisService {
         },
         signal,
         {
-          chapterTitles: snapChapters ? snapChapters.map((c) => c.title) : undefined,
-          flagRanking: snap?.flags ?? null,
+          chapterTitles: snapChapters.map((c) => c.title),
+          flagRanking,
         },
       );
       lastProgress = METADATA_BAND[0];
@@ -1660,6 +1113,11 @@ export class AIAnalysisService {
       // wrapper would hide the type from every caller), must not be logged at
       // ERROR level, and must reach media-operations as a cancellation so that
       // nothing is persisted for the job.
+      // Crucible said "not now": the task parks, as it is (never wrapped).
+      if (isParked(error)) {
+        this.logger.log(`AI analysis parked${jobId ? ` for job ${jobId}` : ''}: ${(error as Error).message}`);
+        throw error;
+      }
       if (isCancellation(error)) {
         this.logger.log(
           `AI analysis cancelled${jobId ? ` for job ${jobId}` : ''} after ${tokenStats.apiCalls} API call(s) ` +
@@ -1671,12 +1129,6 @@ export class AIAnalysisService {
       this.logger.error(message);
       throw new Error(message);
     } finally {
-      // The ranker worker is per-analysis: it holds a loaded model and ~1GB of
-      // Python, and there is no reason to keep that resident between runs. It
-      // also joins the app's graceful-shutdown path (OnApplicationShutdown), so
-      // a crash mid-run cannot leave an orphan python behind either.
-      this.nliRanker.stop();
-
       // Deregister LAST, and identity-checked, so a cancel that arrives while
       // this run is unwinding still finds it (and a replacement run registered
       // under the same id is never deleted out from under itself).
@@ -1691,51 +1143,7 @@ export class AIAnalysisService {
   // =============================================================================
 
   /**
-   * Split boundaries to ensure no chapter exceeds the model's max chapter duration
-   * This prevents very long chapters that might cause truncation or model issues
-   */
-  private splitLongChapters(
-    boundaries: number[],
-    videoDuration: number,
-    limits: ModelLimits,
-  ): number[] {
-    const result: number[] = [];
-    const maxDuration = limits.maxChapterSeconds;
-
-    this.logger.log(
-      `[Pass 2] Max chapter duration for this model: ${maxDuration}s (${Math.round(maxDuration / 60)} min)`,
-    );
-
-    for (let i = 0; i < boundaries.length; i++) {
-      const startTime = boundaries[i];
-      const endTime = i < boundaries.length - 1 ? boundaries[i + 1] : videoDuration;
-      const duration = endTime - startTime;
-
-      result.push(startTime);
-
-      // If chapter is too long, split it into smaller chunks
-      if (duration > maxDuration) {
-        const numSplits = Math.ceil(duration / maxDuration);
-        const splitDuration = duration / numSplits;
-
-        this.logger.log(
-          `[Pass 2] Splitting long chapter (${Math.round(duration)}s) at ${this.formatDisplayTime(startTime)} into ${numSplits} parts (max ${maxDuration}s each)`,
-        );
-
-        for (let j = 1; j < numSplits; j++) {
-          const splitTime = startTime + j * splitDuration;
-          result.push(splitTime);
-        }
-      }
-    }
-
-    // Sort and deduplicate
-    return Array.from(new Set(result)).sort((a, b) => a - b);
-  }
-
-  /**
    * Analyze a single chapter with retry logic
-   * Returns the analysis result or a fallback on failure
    */
   private async analyzeChapterWithRetry(
     config: AIProviderConfig,
@@ -1791,7 +1199,7 @@ export class AIAnalysisService {
         }
       } catch (error) {
         // Never retry a cancellation, and never let it become a chapter failure.
-        if (isCancellation(error)) throw error;
+        if (stopsTheRun(error)) throw error;
         lastError = (error as Error).message;
         this.logger.warn(`[Pass 2] Error analyzing chapter ${chapterNumber} (attempt ${attempt + 1}): ${lastError}`);
         if (attempt < maxRetries) {
@@ -1811,120 +1219,6 @@ export class AIAnalysisService {
   }
 
   /**
-   * PASS 2b: Extract category flags for one chapter, as a DEDICATED call.
-   *
-   * Split out from chapter titling so the model spends its whole budget looking
-   * for matches instead of treating `flags` as a third field to fill in after
-   * the title and summary.
-   *
-   * Unlike chapter analysis this NEVER throws: flags are additive findings, so a
-   * chapter whose extraction fails still keeps its title and summary rather than
-   * failing the whole chapter. A failure returns [] and is logged — the caller
-   * counts it via `onFailure` so a systematically broken extraction is still
-   * visible rather than silently producing an unflagged video.
-   */
-  private async extractChapterFlags(
-    config: AIProviderConfig,
-    chapterText: string,
-    videoTitle: string,
-    categories: AnalysisCategory[],
-    chapterNumber: number,
-    sensitivity: number | undefined,
-    customInstructions: string | undefined,
-    onTokens?: (response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void,
-    onFailure?: (message: string) => void,
-    signal?: AbortSignal,
-  ): Promise<ChapterFlag[]> {
-    const enabled = categories?.filter((c) => c.enabled !== false) || [];
-    if (enabled.length === 0) return [];
-
-    const prompt = buildFlagExtractionPrompt(
-      videoTitle,
-      chapterText,
-      categories,
-      chapterNumber,
-      sensitivity,
-      customInstructions,
-    );
-
-    // Structured output is an Ollama-only lever (cloud providers ignore
-    // overrides entirely) and an explicit speed-over-quality opt-in — see
-    // FLAGS_CONSTRAINED for the measured trade. Nothing else about the call
-    // changes: same model, same temperature, same think level, same prompt.
-    const overrides =
-      config.provider === 'ollama' && FLAGS_CONSTRAINED
-        ? { format: FLAG_EXTRACTION_SCHEMA, signal }
-        : { signal };
-    if (config.provider === 'ollama') {
-      this.logger.debug(
-        `[Pass 2b] Chapter ${chapterNumber} flag call: ${
-          FLAGS_CONSTRAINED ? 'schema-constrained (BRIEFCASE_FLAGS_CONSTRAINED=1)' : 'free-running (default)'
-        }`,
-      );
-    }
-
-    let lastError = '';
-    for (let attempt = 0; attempt <= JSON_PARSE_RETRIES; attempt++) {
-      // This function is documented as never throwing — the ONE exception is a
-      // cancellation, which must propagate or the discovery pool would keep
-      // grinding through chapters after the user pressed stop.
-      ensureNotCancelled(signal, `chapter ${chapterNumber} flag extraction`);
-
-      try {
-        const response = await this.aiProviderService.generateText(prompt, config, 'flags', overrides);
-        onTokens?.(response);
-
-        if (response?.text) {
-          const parsed = this.parseFlagExtractionResponse(response.text);
-          if (parsed) return parsed;
-          this.logger.warn(
-            `[Pass 2b] Chapter ${chapterNumber} flag response unparseable (attempt ${attempt + 1})`,
-          );
-        } else {
-          this.logger.warn(`[Pass 2b] No flag response for chapter ${chapterNumber} (attempt ${attempt + 1})`);
-        }
-      } catch (error) {
-        if (isCancellation(error)) throw error;
-        lastError = (error as Error).message;
-        this.logger.warn(
-          `[Pass 2b] Error extracting flags for chapter ${chapterNumber} (attempt ${attempt + 1}): ${lastError}`,
-        );
-      }
-      if (attempt < JSON_PARSE_RETRIES) await this.delay(1000 * (attempt + 1));
-    }
-
-    onFailure?.(
-      `Pass 2b chapter ${chapterNumber} flag extraction failed` + (lastError ? `: ${lastError}` : ''),
-    );
-    return [];
-  }
-
-  /**
-   * Parse the dedicated flag-extraction response. Returns null when the payload
-   * is not usable at all (so the caller can retry) and [] when the model
-   * legitimately reported no matches.
-   */
-  private parseFlagExtractionResponse(text: string): ChapterFlag[] | null {
-    // Same multi-strategy parser the chapter path uses, so a thinking model's
-    // stray prose around the JSON is salvaged identically.
-    const parsed = safeJsonParse<Record<string, unknown>>(text, this.logger);
-    if (!parsed || typeof parsed !== 'object') return null;
-
-    const raw = parsed.flags;
-    if (!Array.isArray(raw)) return null;
-
-    return raw.filter((f): f is ChapterFlag => {
-      return (
-        !!f &&
-        typeof f === 'object' &&
-        typeof (f as ChapterFlag).category === 'string' &&
-        (typeof (f as ChapterFlag).description === 'string' ||
-          typeof (f as ChapterFlag).quote === 'string')
-      );
-    });
-  }
-
-  /**
    * Simple delay helper for retry backoff
    */
   private delay(ms: number): Promise<void> {
@@ -1939,9 +1233,9 @@ export class AIAnalysisService {
    * Read one verdict out of a verification response.
    *
    * The schema-constrained decode makes the JSON reliable, but this stays
-   * tolerant on purpose: cloud providers get the same prompt with NO schema (see
-   * ai-provider.service — `format` is an Ollama-only lever), so their answer is
-   * whatever prose the model chose to wrap the verdict in.
+   * tolerant on purpose: cloud upstreams get the same prompt with NO schema (see
+   * crucible/llm/target.ts), so their answer is whatever prose the model chose
+   * to wrap the verdict in.
    *
    * Returns null when the text carries no verdict at all; the caller treats that
    * as 'skip' plus a warning, never as a flag. An unreadable answer must not be
@@ -1995,7 +1289,7 @@ export class AIAnalysisService {
   private buildWindowSections(
     verified: Array<{ window: FlagWindow; categories: WindowCategory[] }>,
     sentences: RankedSentence[],
-    ranker: 'nli' | 'snap-v1' = 'nli',
+    ranker: 'nli' | 'snap-v1',
     /** 'candidate' for over-budget snap windows the verifier never saw (same shape, never a finding). */
     verdict: 'flag' | 'candidate' = 'flag',
   ): AnalyzedSection[] {
@@ -2062,7 +1356,7 @@ export class AIAnalysisService {
   private buildSkipSections(
     rejected: Array<{ window: FlagWindow; category: WindowCategory }>,
     sentences: RankedSentence[],
-    ranker: 'nli' | 'snap-v1' = 'nli',
+    ranker: 'nli' | 'snap-v1',
   ): AnalyzedSection[] {
     const sections: AnalyzedSection[] = [];
 
@@ -2137,11 +1431,10 @@ export class AIAnalysisService {
   }
 
   /**
-   * The DEFAULT flag path: rank every sentence at the widest capture setting,
-   * group the survivors into paragraph-sized windows, ask one question per
-   * (window, category), and STORE EVERY ANSWER.
+   * The flag verifier stage: ask one question per (window, category) of the
+   * snap ranking, and STORE EVERY ANSWER.
    *
-   * WHAT CHANGED, AND THE RULING BEHIND IT (operator, 2026-08-25):
+   * THE RULING BEHIND IT (operator, 2026-08-25):
    *
    *   "really, we should find all the loose flags and organize them, and the
    *    knob can be a filter afterward that filters out loosely paired ones,
@@ -2149,62 +1442,55 @@ export class AIAnalysisService {
    *    and itll be a UI component that filters out loose pairings rather than
    *    defining what the actual run does before it runs."
    *
-   * So this stage takes NO sensitivity. It captures at 0.2 with the clamped 0.15
-   * rescue floor, asks the calibrated question (the old sensitivity-2 prompt,
-   * with the emphasis ladder retired — see FLAG_VERIFICATION_PROMPT_VERSION),
-   * and returns BOTH the accepted and the rejected verdicts as sections carrying
-   * `verdict` and `nli_score`. Which of them a user sees is decided afterwards,
-   * client-side, instantly, and reversibly.
+   * So this stage takes NO sensitivity. It asks the calibrated question (see
+   * FLAG_VERIFICATION_PROMPT_VERSION) and returns BOTH the accepted and the
+   * rejected verdicts as sections carrying `verdict` and the ranker's score.
+   * Which of them a user sees is decided afterwards, client-side, instantly,
+   * and reversibly.
    *
    * VERIFICATION ORDER IS DESCENDING WINDOW SCORE, and that is a durability
    * property, not a cosmetic one: a run killed halfway has already answered and
    * cached its most trustworthy questions, so the resume is cheap AND the
    * findings that survive an interruption are the ones most worth having.
    *
-   * Returns null when the ranker is unavailable or its scoring call fails, which
-   * is the caller's signal to run the old chapter-discovery pass instead. It
-   * never throws for a per-call problem: a failed or unreadable verification is
-   * that (window, category) degrading to "not flagged" with a warning, NOT a
-   * recordFailure — one bad HTTP call must not push a run toward
-   * TOO_MANY_FAILURES when the pipeline is making hundreds of tiny calls. A
-   * TOTAL failure (Ollama down, so every call throws) is reported to the caller
-   * the same way chapter analysis reports total failure: the run's own
-   * recordFailure, once, for the stage.
+   * A per-call problem does not throw: a verification the model answered
+   * unreadably, or past its token limit, is that (window, category) left
+   * unflagged with a warning, NOT a recordFailure (one bad answer must not push
+   * a run toward TOO_MANY_FAILURES across hundreds of tiny calls). A TOTAL
+   * failure is recorded once, for the stage. A cancel, and Crucible parking
+   * the run, are never absorbed here (stopsTheRun): they stop the whole run.
    */
   private async runRankedFlagStage(
     flagConfig: AIProviderConfig,
     segments: Segment[],
-    categories: AnalysisCategory[],
     recordFailure: (what: string) => void,
-    onTokens?: (response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void,
-    onFlagProgress?: (current: number, total: number) => void,
-    onFlagStatus?: (message: string) => void,
-    signal?: AbortSignal,
+    onTokens: ((response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void) | undefined,
+    onFlagProgress: ((current: number, total: number) => void) | undefined,
+    onFlagStatus: ((message: string) => void) | undefined,
+    signal: AbortSignal | undefined,
     /**
-     * The snap engine's ranking, made by the scorer before any LLM stage ran.
-     * Present: its windows replace the NLI ranker's (same sentence indexing,
-     * same strength-first order), over-budget windows become unverified
+     * The snap engine's ranking, made by the scorer before any LLM stage ran:
+     * its windows (strength-first), over-budget windows become unverified
      * 'candidate' rows unless every question is already cached, and accepted
-     * sub-passages of one long span are stored as one section. Absent: NLI.
+     * sub-passages of one long span are stored as one section.
      */
-    snapRanking?: SnapFlagRankResult,
-  ): Promise<AnalyzedSection[] | null> {
+    snapRanking: SnapFlagRankResult,
+  ): Promise<AnalyzedSection[]> {
     const sentences = assembleSentences(segments);
     if (sentences.length === 0) {
       this.logger.warn('[Pass 2b] No sentences could be assembled from the transcript');
       return [];
     }
 
-    const ranker: 'nli' | 'snap-v1' = snapRanking ? 'snap-v1' : 'nli';
+    const ranker = 'snap-v1' as const;
     const verifierModel = `${flagConfig.provider}:${flagConfig.model}`;
     const passageOf = (window: FlagWindow) =>
       sentences.slice(window.contextFrom, window.contextTo + 1).map((s) => s.text);
 
-    let windows: FlagWindow[];
+    let windows: FlagWindow[] = snapRanking.windows;
     // Over-budget snap windows that stay unverified ('candidate' rows).
     let candidateWindows: FlagWindow[] = [];
-    if (snapRanking) {
-      windows = snapRanking.windows;
+    {
       if (snapRanking.overflow.length > 0) {
         // Cache hits do not count against the verify budget (plan §5.5): an
         // over-budget window whose every question is already answered costs
@@ -2226,29 +1512,14 @@ export class AIAnalysisService {
           `stored as unverified candidates`,
         );
       }
-    } else {
-      try {
-        onFlagStatus?.(`Ranking ${sentences.length} sentences for flag candidates...`);
-        windows = await this.nliRanker.rankWindows(sentences, categories);
-      } catch (error) {
-        if (isCancellation(error)) throw error;
-        // Cancelling STOPS the ranker worker, and the in-flight scoring request
-        // then rejects with "worker exited" — which is not a cancellation error
-        // by type but absolutely is one by cause. Returning null here would fall
-        // through to the DISCOVERY path and issue one fresh LLM call per chapter.
-        ensureNotCancelled(signal, 'the NLI ranking stage');
-        this.logger.warn(`[Pass 2b] NLI ranking failed: ${(error as Error).message}`);
-        return null;
-      }
     }
-    // Ranking can take tens of seconds; do not walk into the verification loop
-    // on a run that was cancelled during it.
+    onFlagStatus?.(`Verifying ${windows.length} flag candidate passage${windows.length === 1 ? '' : 's'}...`);
     ensureNotCancelled(signal, 'flag verification');
 
     // One call per (window, category) — a passage where three categories fired
     // costs three questions, not one per (sentence, category) pair.
     //
-    // `windows` arrives from rankWindows sorted by DESCENDING noisy-OR strength
+    // `windows` arrives from the snap ranker sorted by DESCENDING strength
     // and each window's categories are ordered strongest-first, so walking them
     // in nested order produces exactly the descending-score verification order
     // this stage promises. The order is ASSERTED in the loop below rather than
@@ -2273,11 +1544,8 @@ export class AIAnalysisService {
     }
 
     this.logger.log(
-      (snapRanking
-        ? `[Pass 2b] Snap-ranked ${sentences.length} sentences (${snapRanking.stats.units} units, ` +
-          `${snapRanking.stats.spans} spans) -> `
-        : `[Pass 2b] Ranked ${sentences.length} sentences at the fixed capture threshold ` +
-          `${this.nliRanker.captureThreshold} (rescue floor ${this.nliRanker.rescueFloor}) -> `) +
+      `[Pass 2b] Snap-ranked ${sentences.length} sentences (${snapRanking.stats.units} units, ` +
+      `${snapRanking.stats.spans} spans) -> ` +
       `${windows.length} windows / ${jobs.length} verification calls on ${verifierModel}. ` +
       `Sensitivity is NOT a run input on this path: every candidate is verified and every verdict ` +
       `is stored, and the dial filters that stored record at display time.`,
@@ -2323,9 +1591,10 @@ export class AIAnalysisService {
       numCtx,
       temperature: 0,
       signal,
-      // Schema on Ollama only — cloud providers ignore overrides entirely and
-      // get the same prompt as prose, parsed by parseVerificationVerdict.
-      ...(flagConfig.provider === 'ollama' ? { format: FLAG_VERIFICATION_SCHEMA } : {}),
+      // The schema crosses for a Crucible catalog model and ollama/; a cloud
+      // upstream gets none (target.ts) and answers the same prompt in prose,
+      // parsed by parseVerificationVerdict.
+      format: FLAG_VERIFICATION_SCHEMA,
     };
 
     // Verified categories per window, keyed by the window object itself: jobs
@@ -2432,7 +1701,7 @@ export class AIAnalysisService {
       } catch (error) {
         // A cancelled call is not a degraded verdict. Counting it as one would
         // also let the loop continue to the next candidate.
-        if (isCancellation(error)) throw error;
+        if (stopsTheRun(error)) throw error;
         degraded++;
         this.logger.warn(
           `[Pass 2b] Verification call failed at ${where}: ${(error as Error).message} — not flagged, ` +
@@ -2466,12 +1735,7 @@ export class AIAnalysisService {
     // video plays rather than in noisy-OR order. On the snap path, accepted
     // sub-passages of ONE long span (split only so the verifier reads <= 40 s)
     // are stored as one section covering both: no picket fence.
-    const verified = snapRanking
-      ? mergeSpanSubPassages(windows, verifiedByWindow)
-      : windows
-          .filter((window) => verifiedByWindow.has(window))
-          .sort((a, b) => a.contextFrom - b.contextFrom)
-          .map((window) => ({ window, categories: verifiedByWindow.get(window) as WindowCategory[] }));
+    const verified = mergeSpanSubPassages(windows, verifiedByWindow);
 
     const flagSections = this.buildWindowSections(verified, sentences, ranker);
     const skipSections = this.buildSkipSections(rejected, sentences, ranker);
@@ -2505,25 +1769,23 @@ export class AIAnalysisService {
     categories: AnalysisCategory[],
     limits: ModelLimits,
     recordFailure: (what: string) => void,
-    customInstructions?: string,
-    analysisGranularity?: number,
-    onTokens?: (response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void,
-    onChapterProgress?: (current: number, total: number) => void,
-    taskModels: Partial<Record<AITaskKind, string>> = {},
-    onFlagProgress?: (current: number, total: number) => void,
-    onFlagStatus?: (message: string) => void,
-    signal?: AbortSignal,
+    customInstructions: string | undefined,
+    onTokens: ((response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void) | undefined,
+    onChapterProgress: ((current: number, total: number) => void) | undefined,
+    taskModels: Partial<Record<AITaskKind, string>>,
+    onFlagProgress: ((current: number, total: number) => void) | undefined,
+    onFlagStatus: ((message: string) => void) | undefined,
+    signal: AbortSignal | undefined,
     /**
-     * Snap engine inputs (both absent on the classic engine):
+     * The snap engine's output:
      *   chapterTitles  one per boundary, the scorer's outline labels. The LLM
-     *                  chapter call then supplies only the summary (its title is
+     *                  chapter call supplies only the summary (its title is
      *                  discarded), and long chapters are NOT split: Viterbi's
      *                  switch cost owns granularity, and a forced split would
      *                  manufacture chapters at arbitrary times (plan §4.5).
-     *   flagRanking    the snap ranker's windows for the verifier stage, in
-     *                  place of the NLI ranker.
+     *   flagRanking    the snap ranker's windows for the verifier stage.
      */
-    snap: { chapterTitles?: string[]; flagRanking?: SnapFlagRankResult | null } = {},
+    snap: { chapterTitles: string[]; flagRanking: SnapFlagRankResult },
   ): Promise<{ chapters: Chapter[]; flags: AnalyzedSection[]; warnings?: string[] }> {
     const chapters: Chapter[] = [];
     const warnings: string[] = [];
@@ -2536,16 +1798,12 @@ export class AIAnalysisService {
 
     const videoDuration = segments[segments.length - 1].end;
 
-    // Split any chapters that are too long to prevent truncation issues —
-    // except snap chapters, whose boundaries and titles come as a set.
-    const presetTitles =
-      snap.chapterTitles && snap.chapterTitles.length === boundaries.length ? snap.chapterTitles : null;
-    const adjustedBoundaries = presetTitles ? boundaries : this.splitLongChapters(boundaries, videoDuration, limits);
-    if (adjustedBoundaries.length > boundaries.length) {
-      this.logger.log(
-        `[Pass 2] Split long chapters: ${boundaries.length} -> ${adjustedBoundaries.length} chapters`,
-      );
+    // Snap chapters: boundaries and titles come as a set, one title each.
+    if (snap.chapterTitles.length !== boundaries.length) {
+      throw new Error(`the analysis engine gave ${snap.chapterTitles.length} chapter titles for ${boundaries.length} chapters`);
     }
+    const presetTitles = snap.chapterTitles;
+    const adjustedBoundaries = boundaries;
 
     let previousChapterSummary = '';
 
@@ -2558,15 +1816,9 @@ export class AIAnalysisService {
       this.logger.log(`[Pass 2] Analyzing chapters on ${chapterConfig.provider}:${chapterConfig.model}`);
     }
 
-    // Chapters that succeeded and still need flag extraction (Pass 2b).
-    const pendingFlagWork: Array<{
-      index: number;
-      chapterNumber: number;
-      truncatedText: string;
-      chapterSegments: Segment[];
-      startTime: number;
-      endTime: number;
-    }> = [];
+    // Chapters that succeeded: flags are verified only when at least one did
+    // (a run with none fails below, with the real reason).
+    let succeededChapters = 0;
 
     for (let i = 0; i < adjustedBoundaries.length; i++) {
       // Do not start chapter i+1 on a cancelled run.
@@ -2618,7 +1870,7 @@ export class AIAnalysisService {
         // A cancelled chapter is not a FAILED chapter: recording it would
         // inflate the job's failure count (and could trip TOO_MANY_FAILURES,
         // turning a user cancel into a reported analysis failure).
-        if (isCancellation(error)) throw error;
+        if (stopsTheRun(error)) throw error;
         recordFailure(`Pass 2 chapter ${i + 1}/${adjustedBoundaries.length} analysis failed: ${(error as Error).message}`);
         chapters.push({
           sequence: i + 1,
@@ -2635,26 +1887,19 @@ export class AIAnalysisService {
         continue;
       }
 
-      // Flag extraction deliberately does NOT happen here — see the Pass 2b loop
+      // Flag verification deliberately does NOT happen here — see Pass 2b
       // below. Running it inline would alternate chapter/flags per iteration,
-      // which reloads an 18GB model between every call the moment the two tasks
-      // are routed to different models.
-      pendingFlagWork.push({
-        index: i,
-        chapterNumber: i + 1,
-        truncatedText,
-        chapterSegments,
-        startTime,
-        endTime,
-      });
+      // which reloads a model between every call the moment the two tasks are
+      // routed to different models.
+      succeededChapters++;
 
-      // Create chapter entry. On the snap engine the title is the outline
-      // label the boundary came from; the LLM call supplied the summary only.
+      // The title is the outline label the boundary came from; the LLM call
+      // supplied the summary only.
       chapters.push({
         sequence: i + 1,
         start_time: this.formatDisplayTime(startTime),
         end_time: this.formatDisplayTime(endTime),
-        title: presetTitles ? presetTitles[i] : result.title,
+        title: presetTitles[i],
         summary: result.summary,
       });
 
@@ -2671,248 +1916,38 @@ export class AIAnalysisService {
 
 
     // =========================================================================
-    // PASS 2b: flag extraction for every chapter, as its own phase.
-    //
-    // Kept separate from the chapter loop so all chapter work finishes before
-    // any flag work starts. Flag extraction reads the same truncated chapter
-    // text and never the chapter's title/summary, so the two are independent and
-    // safe to separate — and separating them means each model loads once even
-    // when 'flags' is routed to a different model than 'chapter'.
+    // PASS 2b: flag verification, as its own phase, after every chapter, so
+    // each model loads once even when 'flags' is routed to a different model
+    // than 'chapter'.
     // =========================================================================
     const flagConfig = this.resolveTaskConfig(config, 'flags', taskModels);
 
-    // -------------------------------------------------------------------------
-    // FLAG PATH SELECTION. The ranked pipeline is the default; chapter discovery
-    // is the degradation path, kept intact for machines with no NLI worker
-    // environment and for `misinformation`, which entailment cannot rank.
-    // Exactly one line of the log says which ran and why.
-    // -------------------------------------------------------------------------
-    if (pendingFlagWork.length > 0) {
-      // The flag stage is the expensive one. Never enter it on a cancelled run.
+    // The snap ranker already ranked the candidates (before any LLM stage ran);
+    // each window is verified here. The flag stage is the expensive one: never
+    // entered on a cancelled run.
+    if (succeededChapters > 0) {
       ensureNotCancelled(signal, 'the flag stage');
-
-      // SNAP ENGINE: the scorer already ranked the candidates (before any LLM
-      // stage ran); the verifier stage is the same one the NLI path uses. When
-      // the snap ranking is absent (classic engine, or snap failed and the job
-      // already carries that warning) the NLI -> discovery chain below runs.
-      if (snap.flagRanking) {
-        const ranked = await this.runRankedFlagStage(
-          flagConfig,
-          segments,
-          categories,
-          recordFailure,
-          onTokens,
-          onFlagProgress,
-          onFlagStatus,
-          signal,
-          snap.flagRanking,
-        );
-        if (ranked) {
-          this.logger.log(
-            `[Pass 2b] FLAG PATH: ranked + verified (snap scorer ranking, verify budget ` +
-            `${snap.flagRanking.stats.verifyBudget}) — ${ranked.length} sections ` +
-            `(${ranked.filter((r) => r.verdict === 'flag').length} flag, ` +
-            `${ranked.filter((r) => r.verdict === 'skip').length} ghosted rejections, ` +
-            `${ranked.filter((r) => r.verdict === 'candidate').length} unverified candidates)`,
-          );
-          return { chapters, flags: ranked, warnings };
-        }
-      }
-
-      let unavailableReason: string | null = FLAGS_DISCOVERY
-        ? 'BRIEFCASE_FLAGS_DISCOVERY=1'
-        : (await this.nliRanker.isAvailable())
-          ? null
-          : this.nliRanker.unavailable || 'NLI ranker unavailable';
-
-      if (!unavailableReason) {
-        // analysisGranularity is deliberately NOT passed. On this path the dial
-        // is a display filter over stored verdicts, not a run input — see
-        // runRankedFlagStage. The discovery branch below still reads it.
-        const ranked = await this.runRankedFlagStage(
-          flagConfig,
-          segments,
-          categories,
-          recordFailure,
-          onTokens,
-          onFlagProgress,
-          onFlagStatus,
-          signal,
-        );
-        if (ranked) {
-          this.logger.log(
-            `[Pass 2b] FLAG PATH: ranked + verified (NLI sentence ranking at the fixed widest capture, ` +
-            `merged into passages, one verification call per (window, category), every verdict stored) ` +
-            `— ${ranked.length} sections (${ranked.filter((r) => r.verdict !== 'skip').length} flag, ` +
-            `${ranked.filter((r) => r.verdict === 'skip').length} ghosted rejections)`,
-          );
-          // Returned WITHOUT the 5-second timestamp dedup below. That dedup
-          // exists to clean up after a discovery model emitting several flags
-          // for one moment; this path already emits exactly one section per
-          // window, so there is nothing left for it to find and a real risk it
-          // would delete a legitimately distinct neighbouring passage.
-          return { chapters, flags: ranked, warnings };
-        }
-        unavailableReason = 'NLI ranking failed mid-run';
-      }
-
-      // SAY SO WHERE THE USER LOOKS, NOT ONLY IN THE LOG.
-      //
-      // The line below is the honest record for whoever reads the server log;
-      // nobody else ever will. This degradation changes the RESULT the user is
-      // about to look at — fewer flags, found by a weaker method — so it also
-      // goes onto the job as a warning, which the queue row and the library card
-      // already render (TaskResult.warnings -> job.warnings). No new channel and
-      // no new UI: this is the one that already exists for exactly this kind of
-      // "it worked, but not the way you think" outcome.
-      //
-      // BRIEFCASE_FLAGS_DISCOVERY=1 is excluded on purpose: that is a deliberate
-      // operator override, and warning somebody about a thing they just asked for
-      // is noise.
-      if (!FLAGS_DISCOVERY) {
-        warnings.push(this.nliRanker.userFacingUnavailableMessage(unavailableReason));
-      }
-
-      // THE DISCOVERY PATH KEEPS THE DIAL. It cannot capture wide and re-filter:
-      // it asks one open-ended question per chapter and gets back whatever list
-      // the model chose to produce, with no per-candidate score and no rejected
-      // candidates to store. `analysisGranularity` is therefore still a real run
-      // input here, and its rows are written legacy-shaped (verdict and
-      // nli_score NULL), which every reader treats as an unfiltered flag.
+      const ranked = await this.runRankedFlagStage(
+        flagConfig,
+        segments,
+        recordFailure,
+        onTokens,
+        onFlagProgress,
+        onFlagStatus,
+        signal,
+        snap.flagRanking,
+      );
       this.logger.log(
-        `[Pass 2b] FLAG PATH: chapter discovery (${unavailableReason}), sensitivity ` +
-        `${normalizeSensitivity(analysisGranularity)} is a RUN INPUT on this path — ` +
-        `extracting flags for ${pendingFlagWork.length} chapters on ${flagConfig.provider}:${flagConfig.model} ` +
-        `(concurrency ${Math.min(FLAG_EXTRACTION_CONCURRENCY, pendingFlagWork.length)})`,
+        `[Pass 2b] ranked + verified (snap scorer ranking, verify budget ${snap.flagRanking.stats.verifyBudget}) — ` +
+          `${ranked.length} sections (${ranked.filter((r) => r.verdict === 'flag').length} flag, ` +
+          `${ranked.filter((r) => r.verdict === 'skip').length} ghosted rejections, ` +
+          `${ranked.filter((r) => r.verdict === 'candidate').length} unverified candidates)`,
       );
-
-      // Extract concurrently, but WRITE results in chapter order below: flags are
-      // rendered on a timeline, so interleaving them by completion order would
-      // scramble the output for no benefit.
-      const extracted: ChapterFlag[][] = new Array(pendingFlagWork.length);
-      let nextWorkIndex = 0;
-      let completedFlagChapters = 0;
-
-      const runWorker = async (): Promise<void> => {
-        for (;;) {
-          // Each worker checks independently, so a cancel drains the whole pool
-          // at the next slot boundary rather than only the worker that happened
-          // to hold the aborted call.
-          ensureNotCancelled(signal, 'the next chapter flag extraction');
-
-          const slot = nextWorkIndex++;
-          if (slot >= pendingFlagWork.length) return;
-          const work = pendingFlagWork[slot];
-          // extractChapterFlags never throws — a failed chapter yields [] and is
-          // counted via recordFailure — so one bad chapter cannot abort the pool.
-          extracted[slot] = await this.extractChapterFlags(
-            flagConfig,
-            work.truncatedText,
-            videoTitle,
-            categories,
-            work.chapterNumber,
-            analysisGranularity,
-            customInstructions,
-            onTokens,
-            recordFailure,
-            signal,
-          );
-          completedFlagChapters++;
-          onFlagProgress?.(completedFlagChapters, pendingFlagWork.length);
-        }
-      };
-
-      await Promise.all(
-        Array.from(
-          { length: Math.min(FLAG_EXTRACTION_CONCURRENCY, pendingFlagWork.length) },
-          () => runWorker(),
-        ),
-      );
-
-      for (let slot = 0; slot < pendingFlagWork.length; slot++) {
-        const work = pendingFlagWork[slot];
-        const { chapterNumber, chapterSegments, startTime, endTime } = work;
-        const flags = extracted[slot] ?? [];
-
-        // Convert flags to AnalyzedSection format - pass through without filtering
-        if (flags.length > 0) {
-          for (const flag of flags) {
-            // Try to find the actual timestamp of the quote in the transcript
-            let flagStartTime = startTime;
-            if (flag.quote) {
-              const foundTime = findPhraseTimestamp(flag.quote, chapterSegments, this.logger);
-              if (foundTime !== null) {
-                flagStartTime = foundTime;
-              } else {
-                // Quote not found - log for debugging
-                this.logger.debug(`[Pass 2b] Quote not found in transcript: "${flag.quote.substring(0, 80)}..."`);
-              }
-            } else {
-              this.logger.debug(`[Pass 2b] Flag has no quote field: ${JSON.stringify(flag)}`);
-            }
-
-            // Build description: prefer quote (verbatim text), fall back to description
-            // If both exist, show quote first with reason after
-            let displayDescription = flag.description || '';
-            if (flag.quote) {
-              if (flag.description) {
-                displayDescription = `"${flag.quote}" — ${flag.description}`;
-              } else {
-                displayDescription = `"${flag.quote}"`;
-              }
-            }
-
-            allFlags.push({
-              category: flag.category,
-              description: displayDescription,
-              start_time: this.formatDisplayTime(flagStartTime),
-              end_time: this.formatDisplayTime(Math.min(flagStartTime + 30, endTime)), // ~30 sec duration
-              quotes: flag.quote
-                ? [
-                    {
-                      timestamp: this.formatDisplayTime(flagStartTime),
-                      text: flag.quote,
-                      significance: flag.description,
-                    },
-                  ]
-                : [],
-            });
-          }
-        }
-        this.logger.debug(`[Pass 2b] Chapter ${chapterNumber}: ${flags.length} flags`);
-      }
+      allFlags.push(...ranked);
     }
 
-    // Deduplicate flags with the same or very close timestamps (within 5 seconds)
-    // This handles cases where less capable models create multiple flags for the same content
-    const deduplicatedFlags: AnalyzedSection[] = [];
-    for (const flag of allFlags) {
-      // Check if we already have a flag at a similar time
-      const existingIndex = deduplicatedFlags.findIndex((f) => {
-        const startA = this.parseDisplayTime(f.start_time);
-        const startB = this.parseDisplayTime(flag.start_time);
-        return Math.abs(startA - startB) < 5; // Within 5 seconds
-      });
-
-      if (existingIndex === -1) {
-        // No duplicate, add it
-        deduplicatedFlags.push(flag);
-      } else {
-        // Duplicate found - log it but don't add
-        this.logger.debug(
-          `[Pass 2] Skipping duplicate flag at ${flag.start_time} (category: ${flag.category}) - similar to existing flag at ${deduplicatedFlags[existingIndex].start_time}`,
-        );
-      }
-    }
-
-    if (deduplicatedFlags.length < allFlags.length) {
-      this.logger.log(
-        `[Pass 2] Deduplicated flags: ${allFlags.length} -> ${deduplicatedFlags.length}`,
-      );
-    }
-
-    this.logger.log(`[Pass 2] Analyzed ${chapters.length} chapters, found ${deduplicatedFlags.length} category flags`);
-    return { chapters, flags: deduplicatedFlags, warnings };
+    this.logger.log(`[Pass 2] Analyzed ${chapters.length} chapters, found ${allFlags.length} flag sections`);
+    return { chapters, flags: allFlags, warnings };
   }
 
   /**
@@ -2980,16 +2015,14 @@ export class AIAnalysisService {
     onTokens?: (response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void,
     signal?: AbortSignal,
   ): Promise<string | null> {
-    // Ollama-only lever; cloud providers ignore overrides entirely and simply
-    // follow the same prompt's "output JSON only" instruction.
-    const overrides =
-      config.provider === 'ollama'
-        ? {
-            ...(DESCRIPTION_UNCONSTRAINED ? {} : { format: schema }),
-            ...(temperature !== undefined ? { temperature } : {}),
-            signal,
-          }
-        : { signal };
+    // target.ts decides what crosses: a Crucible catalog model and ollama/ take
+    // the schema and the temperature; a cloud upstream gets neither and follows
+    // the same prompt's "output JSON only" instruction.
+    const overrides = {
+      ...(DESCRIPTION_UNCONSTRAINED ? {} : { format: schema }),
+      ...(temperature !== undefined ? { temperature } : {}),
+      signal,
+    };
 
     const runOnce = async (prompt: string): Promise<string | null> => {
       const response = await this.aiProviderService.generateText(prompt, config, 'description', overrides);
@@ -3067,7 +2100,7 @@ export class AIAnalysisService {
       return null;
     }
 
-    if (config.provider === 'ollama') {
+    {
       this.logger.debug(
         `[Description] hook + body calls: ${
           DESCRIPTION_UNCONSTRAINED
@@ -3141,7 +2174,7 @@ export class AIAnalysisService {
     } catch (error) {
       // A cancellation is not a description failure — it must not be recorded
       // against the job's failure budget.
-      if (isCancellation(error)) throw error;
+      if (stopsTheRun(error)) throw error;
       recordFailure(`Description generation failed: ${(error as Error).message}`);
       return null;
     }
@@ -3173,7 +2206,8 @@ export class AIAnalysisService {
         chaptersList: chaptersList.substring(0, 4000),
       });
 
-      // Schema-constrained by DEFAULT (Ollama only). This is mechanical
+      // Schema-constrained by DEFAULT (target.ts sends it to every non-cloud
+      // model). This is mechanical
       // extraction from summaries — the judgment already happened upstream in
       // chapter summarization — which is precisely the class where structured
       // output is pure win: it pins the exact `{people, topics}` shape the parser
@@ -3181,10 +2215,7 @@ export class AIAnalysisService {
       // reasoning tokens to the answer itself. The prompt, its intent and the
       // output shape are UNCHANGED; only the decoding grammar is.
       // BRIEFCASE_TAGS_UNCONSTRAINED=1 restores free-running decoding.
-      const overrides =
-        config.provider === 'ollama' && !TAGS_UNCONSTRAINED
-          ? { format: TAGS_EXTRACTION_SCHEMA, signal }
-          : { signal };
+      const overrides = TAGS_UNCONSTRAINED ? { signal } : { format: TAGS_EXTRACTION_SCHEMA, signal };
 
       const response = await this.aiProviderService.generateText(prompt, config, 'tags', overrides);
       onTokens?.(response);
@@ -3207,7 +2238,7 @@ export class AIAnalysisService {
       recordFailure('Tags extraction returned empty text');
       return null;
     } catch (error) {
-      if (isCancellation(error)) throw error;
+      if (stopsTheRun(error)) throw error;
       recordFailure(`Tags extraction failed: ${(error as Error).message}`);
       return null;
     }
@@ -3310,7 +2341,7 @@ export class AIAnalysisService {
 
       return null;
     } catch (error) {
-      if (isCancellation(error)) throw error;
+      if (stopsTheRun(error)) throw error;
       // A hard error (not just a rejected title) is a real failure.
       recordFailure(`Title generation failed: ${(error as Error).message}`);
       return null;
@@ -3331,10 +2362,7 @@ export class AIAnalysisService {
     // analysis, so it registers the same way — one call, but a cancel must
     // still abort it and release whatever model it loaded.
     const controller = new AbortController();
-    const run = { controller, ollamaKeys: new Set<string>() };
-    if (config.provider === 'ollama') {
-      run.ollamaKeys.add(`${config.ollamaEndpoint || 'http://localhost:11434'}::${config.model}`);
-    }
+    const run = { controller };
     const runKey = jobId ?? `standalone-webpage-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     this.activeRuns.set(runKey, run);
 
@@ -3410,7 +2438,7 @@ export class AIAnalysisService {
     } catch (error) {
       // A cancellation must NOT become "no title" — that would let the caller
       // treat the job as a completed analysis that simply found nothing.
-      if (isCancellation(error)) throw error;
+      if (stopsTheRun(error)) throw error;
       this.logger.warn(`Webpage title generation failed: ${(error as Error).message}`);
       return null;
     } finally {

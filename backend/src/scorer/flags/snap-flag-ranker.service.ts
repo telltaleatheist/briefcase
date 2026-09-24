@@ -1,6 +1,6 @@
 /**
- * SnapFlagRanker: stage 1 of the flag pipeline on the snap scorer. It replaces
- * the NLI (DeBERTa) ranker and feeds the SAME verifier stage (plan §5).
+ * SnapFlagRanker: stage 1 of the flag pipeline on the snap scorer, feeding the
+ * verifier stage (plan §5). It replaced the NLI (DeBERTa) ranker, deleted in P7.
  *
  *   pass 1  one `choice` per unit (with the previous unit as context) over the
  *           enabled categories + "none"; the whole probability vector is kept.
@@ -8,23 +8,22 @@
  *           per plausible category, restoring independent per-category
  *           evidence where the pass-1 softmax made categories compete.
  *   spans   pure, in flag-spans.ts: Viterbi on/off, category-blind merge,
- *           co-fire strength, <= 40 s passages, NLI's buildWindows, budget.
+ *           co-fire strength, <= 40 s passages, buildWindows, budget.
  *
- * DROP-IN SHAPE. `rankWindows(sentences, categories)` has the NLI ranker's
- * signature and returns FlagWindow[] (SnapFlagWindow adds fields only), indexed
- * by the SAME `assembleSentences` sentences, strongest first, so
- * runRankedFlagStage's walk, cache and prompt work unchanged. `rank()` returns
+ * SHAPE. `rankWindows(sentences, categories)` returns FlagWindow[]
+ * (SnapFlagWindow adds fields only), indexed by the `assembleSentences`
+ * sentences, strongest first, which is what runRankedFlagStage's walk, cache
+ * and prompt read. `rank()` returns
  * the full result: windows, over-budget overflow, spans, the rating map, stats.
  *
  * Timestamps: every time is a whisper segment time carried by the sentences.
  * The scorer only picks letters.
  */
 
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { AnalysisCancelledError } from '../../analysis/cancellation';
-import type { RankedSentence } from '../../analysis/nli-ranker.service';
+import type { RankedSentence } from '../../analysis/flag-windows';
 import type { AnalysisCategory } from '../../analysis/prompts/analysis-prompts';
-import { ScorerServerService } from '../scorer-server.service';
 import {
   ChoiceAnswer,
   ChoiceQuestion,
@@ -106,7 +105,7 @@ export interface SnapFlagRankOptions {
   stateBuilder?: (unitTexts: string[], flagLegend: string | null, chunk: FlagChunk) => string;
   signal?: AbortSignal;
   onProgress?: (progress: FlagRankProgress) => void;
-  /** Use this scorer instead of leasing the ScorerServerService (tests, or a caller already holding a lease). */
+  /** The scorer to rank with: the caller's lease (SnapAnalysisService's, a test's fake). */
   scorer?: FlagScorer;
 }
 
@@ -154,9 +153,7 @@ export const DEFAULT_N_PROBS = 100;
 export class SnapFlagRanker {
   private readonly logger = new Logger(SnapFlagRanker.name);
 
-  constructor(@Optional() private readonly scorerServer?: ScorerServerService) {}
-
-  /** Drop-in for NliRankerService.rankWindows. */
+  /** The windows alone (the shape the verifier stage reads). */
   async rankWindows(
     sentences: RankedSentence[],
     categories: AnalysisCategory[],
@@ -197,9 +194,8 @@ export class SnapFlagRanker {
 
     if (units.length) {
       const work = (scorer: FlagScorer) => this.score(scorer, map, plan, params, options, counters);
-      if (options.scorer) await work(options.scorer);
-      else if (this.scorerServer) await this.scorerServer.withScorer((handle) => work(handle), options.signal);
-      else throw new Error('SnapFlagRanker: no scorer (inject ScorerServerService or pass options.scorer)');
+      if (!options.scorer) throw new Error('SnapFlagRanker: no scorer (pass options.scorer, a lease the caller holds)');
+      await work(options.scorer);
     }
 
     const ranked = rankFromRatingMap(map, sentences, plan, params);

@@ -1,7 +1,6 @@
 // Imported explicitly: the backend tsconfig pins "types": ["node"].
 import { describe, expect, it } from '@jest/globals';
-import * as fs from 'fs';
-import * as path from 'path';
+import { createHash } from 'crypto';
 
 import { DEFAULT_CATEGORIES } from '../../analysis/prompts/analysis-prompts';
 import {
@@ -27,8 +26,6 @@ import {
   flagLegendBlock,
 } from './flag-questions';
 
-const NLI_SOURCE = fs.readFileSync(path.join(__dirname, '../../analysis/nli-ranker.service.ts'), 'utf8');
-
 describe('flag option texts', () => {
   it('has a tuned option text and proposition for every built-in category except misinformation', () => {
     for (const c of DEFAULT_CATEGORIES) {
@@ -39,10 +36,13 @@ describe('flag option texts', () => {
     expect(Object.keys(SNAP_OPTION_TEXTS).sort()).toEqual(Object.keys(FLAG_PROPOSITIONS).sort());
   });
 
-  it('keeps every proposition byte-identical to the NLI ranker (the verdict-cache hash depends on it)', () => {
-    for (const text of Object.values(FLAG_PROPOSITIONS)) {
-      expect(NLI_SOURCE.includes(`'${text}'`) || NLI_SOURCE.includes(`"${text}"`)).toBe(true);
-    }
+  it('keeps every proposition byte-identical to the ones stored verdicts were asked with (the verdict-cache hash depends on it)', () => {
+    // Pinned when P7 removed the NLI ranker these were copied from. A change
+    // here makes every cached verdict a miss: change the pin only on purpose.
+    const entries = Object.entries(FLAG_PROPOSITIONS).sort(([a], [b]) => a.localeCompare(b));
+    expect(createHash('sha256').update(JSON.stringify(entries)).digest('hex')).toBe(
+      'f4374cae73edc0e668230e1bd7b9a8e796fd009bdbf15a48d454f41dd6d50028',
+    );
   });
 
   it('never uses the LLM-instruction descriptions as option text', () => {

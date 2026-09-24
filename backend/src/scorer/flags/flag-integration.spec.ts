@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import type { WindowCategory } from '../../analysis/nli-ranker.service';
+import type { WindowCategory } from '../../analysis/flag-windows';
 import { mergeSpanSubPassages, promoteCachedOverflow } from './flag-integration';
 import type { SnapFlagWindow } from './flag-spans';
 

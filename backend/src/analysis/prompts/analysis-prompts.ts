@@ -162,148 +162,10 @@ export const QUOTE_EXTRACTION_PROMPT = DEFAULT_QUOTE_PROMPT;
 // =============================================================================
 
 // -----------------------------------------------------------------------------
-// PASS 1: Boundary Placement Prompt
-// -----------------------------------------------------------------------------
-// Pass 1 no longer asks a model WHERE the chapters are — that prompt is gone.
-// Asking for "all the boundaries in this 15-minute chunk" reliably returned a
-// PREFIX of them (1-3) and stopped, which is how a 27:00 ad break went missing
-// on a 63-minute video. Boundaries are now SCORED from embedding cohesion
-// (chapter-detection.service), and the model's only job is the one thing code
-// cannot do: read the ~90 seconds around an already-chosen junction and say
-// which sentence the new subject starts on.
-//
-// The model NEVER emits a timestamp. It quotes a verbatim sentence and
-// findPhraseTimestamp maps that quote to seconds — an invented timestamp is a
-// guess, a mapped quote is a measurement.
-
-/**
- * Ask for the first sentence of the NEW subject inside one ~90s window.
- *
- * The "turn, not arrival" ordering is load-bearing: an earlier version of this
- * prompt that rejected the sentence which merely hints at what is coming placed
- * boundaries ~12s LATE, because the hint IS where a human puts the mark.
- */
-export function buildBoundaryPlacementPrompt(
-  windowText: string,
-  videoTitle?: string,
-): string {
-  const titleContext = videoTitle ? `Video: ${videoTitle}\n` : '';
-
-  return `Below is one stretch of a video transcript. Somewhere inside it the speaker moves from one subject to the next.
-${titleContext}
-TRANSCRIPT:
-${windowText}
-
-Find where the handover BEGINS — the first sentence a viewer would want to land on if they clicked a chapter marker here.
-
-That is the sentence where the speaker TURNS AWAY from the old subject, which is usually a beat EARLIER than the sentence that first explains the new one. If the speaker says "anyway, let's talk about X" and then explains X three sentences later, the turn is "anyway, let's talk about X" — quote that, not the explanation. A viewer dropped at the explanation has already missed the start.
-
-Prefer, in this order:
-1. the sentence where the speaker announces, introduces or turns toward the new subject
-2. the sentence where the speaker closes off the old subject, if the turn is not announced
-3. the first sentence that is plainly about the new subject, if there is no turn at all
-
-If the transcript contains MORE THAN ONE subject change, pick the one nearest the MIDDLE of the excerpt — the excerpt is centered on the boundary being placed, so changes near its edges belong to neighboring chapters, not this one.
-
-Copy the sentence EXACTLY as it appears above, word for word, at least six words, no timestamps and no tidying up. That quote is what fixes the chapter's start time to the second, so a quote you reworded points at the wrong moment.
-
-Output exactly this shape and nothing else:
-{"quote": "<exact sentence from the transcript above>"}`;
-}
-
-// -----------------------------------------------------------------------------
 // PASS 2: Chapter Analysis Prompt
 // -----------------------------------------------------------------------------
 // Full analysis prompt for a single chapter. Generates title, summary, and
 // optionally detects category flags within the chapter's content.
-
-/**
- * Coerce a stored sensitivity value onto the 1-5 scale.
- *
- * SCALE HISTORY. The dial was 1-10 (<=3 strict, <=7 balanced, >7 broad), then
- * 1-3, and is now 1-5. Only a value of 6 or more is UNAMBIGUOUSLY from the 1-10
- * scale, so those are still folded onto the bucket that scale selected:
- * 6-7 -> 2 (balanced), 8-10 -> 3 (broad).
- *
- * VALUES 4 AND 5 ARE NOW VALID NEW-SCALE VALUES, deliberately. On the old 1-10
- * scale a 4 or a 5 meant "balanced"; read as the new scale it means "very
- * aggressive" or "flag everything plausible". That reinterpretation is accepted
- * for two reasons. First, the 1-3 scale shipped this week and every stored dial
- * value was normalized onto 1-3 the first time it was read, so a stored 4 or 5
- * is overwhelmingly likely to be a deliberate new-scale choice rather than a
- * legacy leftover. Second, the failure is in the safe direction: a legacy value
- * misread upward produces MORE candidates, all of which a human reviews and can
- * discard, whereas misreading downward would silently hide content. The whole
- * pipeline is built on the assumption that a miss is the expensive error.
- *
- * Values 1-3 keep exactly the reading they have always had.
- */
-export function normalizeSensitivity(value: number | undefined | null): 1 | 2 | 3 | 4 | 5 {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return 2;
-  if (value > 5) return value <= 7 ? 2 : 3; // unambiguously a legacy 1-10 value
-  const rounded = Math.round(value);
-  return (rounded < 1 ? 1 : rounded > 5 ? 5 : rounded) as 1 | 2 | 3 | 4 | 5;
-}
-
-/**
- * Map the 1-5 sensitivity dial onto a flagging-threshold block.
- *
- * The PROMOTING-vs-DEBUNKING guard is deliberately NOT part of this scale — it
- * lives in the flag rulebook and applies identically at every level, because a
- * speaker who debunks a claim must never be flagged for it no matter how far up
- * the dial goes. What this scale moves is the confidence bar and how exhaustive
- * the model is told to be.
- *
- *   1 - strong matches only: explicit and unmistakable. Precision over recall.
- *   2 - balanced (default): clear matches plus reasonably likely ones.
- *   3 - aggressive: everything that could match, including implication and
- *       euphemism, with an explicit instruction to be exhaustive rather than
- *       selective. Recall over precision, on the assumption that a human
- *       reviews every flag and would rather discard a few than miss one.
- *   4 - very aggressive: 3, plus partial matches and claims carried only by
- *       implication, on the same reviewer assumption stated more strongly.
- *   5 - flag everything plausible: the quote earns a flag unless it clearly is
- *       not an instance of the category, or the speaker is clearly opposing or
- *       reporting it. Uncertainty resolves toward flagging.
- *
- * THIS IS THE ONLY PLACE THE DIAL IS STILL A RUN INPUT, and the asymmetry is
- * deliberate (operator ruling, 2026-08-25). The DEFAULT ranked path captures at
- * its widest once and stores every verdict, so its dial moved to the display
- * side — see FLAG_VERIFICATION_PROMPT_VERSION below. This DISCOVERY path cannot
- * do that: it asks one open-ended question per chapter, gets back whatever list
- * the model chose to produce, and there is no per-candidate score and no
- * rejected-candidate list to filter afterwards. The only lever it has is the
- * instruction it sends, so it keeps the instruction and keeps reading the stored
- * setting. A user on a machine with no NLI worker environment therefore still
- * changes what a run DOES when they move the control.
- */
-function getSensitivityLine(sensitivity: number): string {
-  switch (normalizeSensitivity(sensitivity)) {
-    case 1:
-      return 'Sensitivity: strong matches only. Flag a quote only when it is an explicit, unmistakable instance of the category. When unsure, do not flag.';
-    case 3:
-      return `Sensitivity: AGGRESSIVE. Find everything that could match a category.
-- Be exhaustive, not selective. List every qualifying quote in the chapter even if there are many; do not stop at the most obvious two or three, and never merge several separate moments into one flag.
-- Include borderline cases, euphemism, coded language, and claims advanced by implication rather than stated outright. If a reviewer would plausibly want to see it, flag it.
-- Recall matters more than precision at this setting. A human reviews every flag and can discard the weak ones; a missed quote is the expensive error.
-- This does NOT relax the test above. The speaker must still be advancing the claim rather than debunking it, and the quote must still be verbatim.`;
-    case 4:
-      return `Sensitivity: VERY AGGRESSIVE. Find every quote that could belong to a category, including the partial ones.
-- Be exhaustive, not selective. List every qualifying quote in the chapter even if there are many; do not stop at the most obvious two or three, and never merge several separate moments into one flag.
-- Flag a quote when it matches a category even partially, or by implication, euphemism, coded language, or clear insinuation. A quote that carries only part of the category still belongs in the list.
-- A person reviews every flag before it is used, and a quote that is not flagged is never reviewed. A missed quote is the expensive error; an extra one costs a moment of a reviewer's time.
-- This does NOT relax the test above. The speaker must still be advancing the claim rather than debunking it, and the quote must still be verbatim.`;
-    case 5:
-      return `Sensitivity: FLAG EVERYTHING PLAUSIBLE. Find every quote a reviewer could plausibly want to see.
-- Be exhaustive, not selective. List every qualifying quote in the chapter even if there are many; do not stop at the most obvious two or three, and never merge several separate moments into one flag.
-- Flag a quote whenever it could be an instance of the category — stated outright, in part, by implication, in euphemism, or in coded language. When you are genuinely uncertain whether a quote belongs, flag it.
-- Leave a quote out only when it clearly is not an instance of any category, or when the speaker is clearly opposing the claim or reporting that other people make it.
-- A person reviews every flag before it is used, and a quote that is not flagged is never reviewed. A missed quote is the expensive error; an extra one costs a moment of a reviewer's time.
-- This does NOT relax the test above. The speaker must still be advancing the claim rather than debunking it, and the quote must still be verbatim.`;
-    default:
-      return 'Sensitivity: balanced. Flag clear matches and reasonably likely ones; skip vague or tangential cases.';
-  }
-}
 
 /**
  * Chapter titling and summarization ONLY.
@@ -347,69 +209,6 @@ ${chapterText}`;
 }
 
 /**
- * Dedicated category-flag extraction for a single chapter.
- *
- * This is a separate call from chapter titling so the model's whole attention
- * goes to finding matches. The debunking-vs-promoting guard leads the prompt
- * because it is the #1 correctness axis for this counter-apologetics use case:
- * the operator's own commentary must never flag itself for quoting the thing
- * it is criticizing.
- */
-export function buildFlagExtractionPrompt(
-  videoTitle: string,
-  chapterText: string,
-  categories: AnalysisCategory[],
-  chapterNumber: number,
-  sensitivity?: number,
-  customInstructions?: string,
-): string {
-  const enabledCategories = categories?.filter((c) => c.enabled !== false) || [];
-
-  const categoryList = enabledCategories
-    .map((c) => `- ${c.name}: ${c.description}`)
-    .join('\n');
-
-  const firstCategory = enabledCategories[0]?.name ?? 'hate';
-
-  const customContext = customInstructions
-    ? `Viewer context: ${customInstructions}\n`
-    : '';
-
-  const sensitivityLine = getSensitivityLine(sensitivity ?? 2);
-
-  return `Find every quote in chapter ${chapterNumber} of this transcript that matches one of the categories below. Output JSON only.
-Video: ${videoTitle}
-${customContext}
-Output exactly this shape and nothing else:
-{
-  "flags": [{"category": "${firstCategory}", "description": "why the quote matches", "quote": "exact words from the transcript"}]
-}
-Use {"flags": []} when nothing matches.
-
-THE TEST FOR EVERY FLAG — is the speaker SAYING THIS IS TRUE, or SAYING IT IS FALSE?
-Flag ONLY when the speaker asserts, promotes, defends, or urges the claim.
-Never flag a speaker who debunks, fact-checks, doubts, mocks, or reports a claim — even when they repeat the claim's words in order to knock it down. Skepticism ("that's a hoax", "there's no evidence", "the courts threw it out") is never a flag.
-Judge the whole chapter's stance, not one sentence: if the speaker's point is that the claim is FALSE, flag nothing from it, including the sentence where they state the claim they are about to refute.
-
-Worked examples:
-- "The election was stolen, they cheated and everyone knows it." -> FLAG {conspiracy} (asserts it as true)
-- "People keep claiming the election was stolen, but every court threw it out for lack of evidence." -> NO FLAG (refutes it)
-
-CATEGORIES:
-${categoryList}
-
-Flagging rules:
-- quote = exact words copied from the TRANSCRIPT. Never paraphrase, translate, or invent one.
-- One quote, one flag, one category. Choose the single best fit; never merge two names (not "hate-conspiracy"). If nothing fits but it clearly qualifies, coin a new lowercase-dashed name.
-- description = one sentence on why it matches, and it must describe the speaker ENDORSING the claim.
-
-${sensitivityLine}
-
-TRANSCRIPT:
-${chapterText}`;
-}
-
-/**
  * PROMPT IDENTITY for the flag verifier — the version stamp that invalidates the
  * stored-verdict cache.
  *
@@ -444,8 +243,7 @@ export const FLAG_VERIFICATION_PROMPT_VERSION = 'flag-verify/v3-calibrated-2026-
  * second half — the ranker's threshold decided WHAT WAS ASKED, and this decided
  * how the answer leaned.
  *
- * WHY IT IS GONE. The pipeline now captures at its widest ONCE (threshold 0.2,
- * rescue floor 0.15 — see nli-ranker.service.ts) and stores EVERY verdict,
+ * WHY IT IS GONE. The pipeline now captures at its widest ONCE and stores EVERY verdict,
  * flag and skip, with the window's score. The dial became a display filter over
  * stored verdicts, applied client-side with no re-run. In that world a leaning
  * clause is not a dial, it is a bias: it would bake ONE run's lean into the
@@ -471,13 +269,8 @@ export const FLAG_VERIFICATION_PROMPT_VERSION = 'flag-verify/v3-calibrated-2026-
  * is now STORED as that skip rather than discarded, and shows up ghosted at the
  * LOOSE filter position with the verifier's reason attached.
  *
- * THE DISCOVERY FALLBACK KEEPS ITS OWN DIAL. `getSensitivityLine` above is still
- * live and still reads the stored setting, because the discovery path (no NLI
- * worker environment, or BRIEFCASE_FLAGS_DISCOVERY=1) asks one open-ended
- * question per chapter and cannot capture wide and re-filter afterwards: there
- * is no per-candidate score to filter on and no verdict list to keep. On that
- * path the dial is still a run input and still means something. The asymmetry is
- * deliberate and is documented at both ends.
+ * (The open-ended discovery fallback that kept a run-input dial was removed
+ * with the NLI ranker in P7: every flag goes through this verifier now.)
  */
 
 /**
@@ -485,11 +278,10 @@ export const FLAG_VERIFICATION_PROMPT_VERSION = 'flag-verify/v3-calibrated-2026-
  * asserting the category's proposition, or only reporting/questioning/arguing
  * against it?
  *
- * This is the second half of the measured flag pipeline (see
- * nli-ranker.service.ts). The NLI ranker cannot tell stance apart — "these
- * candidates are communists" and "Republicans have been eager to paint them as
- * communists" both score ~0.98 on the same hypothesis — so every category a
- * window fired gets exactly one question asked about it here.
+ * This is the second half of the flag pipeline (after the snap ranker). A
+ * ranker cannot tell stance apart — "these candidates are communists" and
+ * "Republicans have been eager to paint them as communists" read alike to it —
+ * so every category a window fired gets exactly one question asked about it here.
  *
  * WHY A PASSAGE AND NOT A MARKED SENTENCE. The unit of scoring is the sentence;
  * the unit of JUDGMENT is the passage the ranker's hot sentences were expanded
@@ -505,7 +297,7 @@ export const FLAG_VERIFICATION_PROMPT_VERSION = 'flag-verify/v3-calibrated-2026-
  * Both verdicts are DEFINED positively — what earns "flag", what earns "skip" —
  * rather than illustrated with a wrong answer the model might copy.
  *
- * It keeps the spirit of buildFlagExtractionPrompt's promoting-vs-debunking
+ * It keeps the spirit of the old flag-extraction prompt's promoting-vs-debunking
  * guard, which is the #1 correctness axis for this counter-apologetics use case
  * (the operator's own commentary must never flag itself for quoting the thing
  * it criticizes) — scoped to one passage and one claim instead of a whole

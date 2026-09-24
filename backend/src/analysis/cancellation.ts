@@ -17,6 +17,7 @@
  * message — which matters because the same code path also aborts on the
  * ai-provider's 10-minute request timeout, and THAT is a genuine failure.
  */
+import { isParked } from '../crucible/llm/errors';
 
 export class AnalysisCancelledError extends Error {
   /** Structural marker: survives error re-wrapping and cross-realm instances. */
@@ -48,4 +49,15 @@ export function ensureNotCancelled(signal?: AbortSignal, what?: string): void {
   if (signal?.aborted) {
     throw new AnalysisCancelledError(what ? `Analysis cancelled before ${what}` : 'Analysis cancelled');
   }
+}
+
+/**
+ * An error no per-call catch may absorb: a cancellation, or Crucible saying
+ * "not now" inside a queue-admitted run (CrucibleParkedError, which also
+ * carries `cancelled` so every older `isCancellation` catch passes it on).
+ * Either one stops the whole run; a park sends the task back to wait with
+ * nothing saved, never a chapter, verdict or description quietly degraded.
+ */
+export function stopsTheRun(error: unknown): boolean {
+  return isCancellation(error) || isParked(error);
 }

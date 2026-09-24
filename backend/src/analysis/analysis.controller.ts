@@ -8,8 +8,7 @@ import {
   HttpException,
   HttpStatus,
 } from '@nestjs/common';
-import { AnalysisService, AnalysisRequest } from './analysis.service';
-import { OllamaService } from './ollama.service';
+import { AnalysisService } from './analysis.service';
 import { SharedConfigService } from '../config/shared-config.service';
 import { DatabaseService } from '../database/database.service';
 import { DEFAULT_CATEGORIES } from './prompts/analysis-prompts';
@@ -20,7 +19,6 @@ import * as os from 'os';
 export class AnalysisController {
   constructor(
     private analysisService: AnalysisService,
-    private ollamaService: OllamaService,
     private configService: SharedConfigService,
     private databaseService: DatabaseService,
   ) {}
@@ -35,194 +33,6 @@ export class AnalysisController {
     }
     // Fallback to default
     return path.join(os.homedir(), 'Downloads', 'Briefcase');
-  }
-
-  /**
-   * Start a new analysis job
-   */
-  @Post('start')
-  async startAnalysis(@Body() request: AnalysisRequest) {
-    try {
-      // Validate request
-      if (!request.input || !request.inputType) {
-        throw new HttpException(
-          'Missing required fields: input, inputType',
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-
-      if (!request.aiModel) {
-        throw new HttpException(
-          'Missing required field: aiModel',
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-
-      // Start analysis immediately - model availability will be checked during analysis
-      const jobId = await this.analysisService.startAnalysis(request);
-
-      return {
-        success: true,
-        jobId,
-        message: 'Analysis started',
-      };
-    } catch (error: any) {
-      if (error instanceof HttpException) {
-        throw error;
-      }
-      throw new HttpException(
-        `Failed to start analysis: ${(error as Error).message || 'Unknown error'}`,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
-
-  /**
-   * Get job status
-   */
-  @Get('job/:jobId')
-  async getJob(@Param('jobId') jobId: string) {
-    const job = this.analysisService.getJob(jobId);
-
-    if (!job) {
-      throw new HttpException('Job not found', HttpStatus.NOT_FOUND);
-    }
-
-    return {
-      success: true,
-      job,
-    };
-  }
-
-  /**
-   * Get all jobs
-   */
-  @Get('jobs')
-  async getAllJobs() {
-    const jobs = this.analysisService.getAllJobs();
-
-    return {
-      success: true,
-      jobs,
-    };
-  }
-
-  /**
-   * Delete a job
-   */
-  @Delete('job/:jobId')
-  async deleteJob(@Param('jobId') jobId: string) {
-    const deleted = await this.analysisService.deleteJob(jobId);
-
-    if (!deleted) {
-      throw new HttpException('Job not found', HttpStatus.NOT_FOUND);
-    }
-
-    return {
-      success: true,
-      message: 'Job deleted',
-    };
-  }
-
-  /**
-   * Check Ollama connection and list available models
-   */
-  @Get('models')
-  async getModels() {
-    try {
-      const connected = await this.ollamaService.checkConnection();
-
-      if (!connected) {
-        return {
-          success: false,
-          connected: false,
-          message: 'Cannot connect to Ollama',
-          recommended: this.ollamaService.getRecommendedModels(),
-        };
-      }
-
-      const models = await this.ollamaService.listModels();
-
-      return {
-        success: true,
-        connected: true,
-        models,
-        recommended: this.ollamaService.getRecommendedModels(),
-      };
-    } catch (error: any) {
-      throw new HttpException(
-        `Failed to get models: ${(error as Error).message || 'Unknown error'}`,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
-
-  /**
-   * Pull/download an Ollama model
-   * This is a long-running operation - the frontend should show a spinner
-   */
-  @Post('pull-model')
-  async pullModel(@Body() body: { modelName: string; endpoint?: string }) {
-    try {
-      const { modelName, endpoint } = body;
-
-      if (!modelName) {
-        throw new HttpException('modelName is required', HttpStatus.BAD_REQUEST);
-      }
-
-      // Check if Ollama is connected first
-      const connected = await this.ollamaService.checkConnection(endpoint);
-      if (!connected) {
-        throw new HttpException(
-          'Ollama is not running. Please start Ollama first.',
-          HttpStatus.SERVICE_UNAVAILABLE
-        );
-      }
-
-      // Start the pull (this will log progress to backend logs)
-      await this.ollamaService.pullModel(modelName, endpoint);
-
-      return {
-        success: true,
-        message: `Successfully downloaded ${modelName}`,
-        modelName
-      };
-    } catch (error: any) {
-      if (error instanceof HttpException) {
-        throw error;
-      }
-      throw new HttpException(
-        `Failed to download model: ${(error as Error).message || 'Unknown error'}`,
-        HttpStatus.INTERNAL_SERVER_ERROR
-      );
-    }
-  }
-
-  /**
-   * Check if a specific model is available
-   */
-  @Post('check-model')
-  async checkModel(@Body() body: { model: string; endpoint?: string }) {
-    try {
-      const available = await this.ollamaService.isModelAvailable(
-        body.model,
-        body.endpoint,
-      );
-
-      return {
-        success: true,
-        available,
-        model: body.model,
-        instructions: available
-          ? null
-          : this.ollamaService.getInstallInstructions(body.model),
-      };
-    } catch (error: any) {
-      throw new HttpException(
-        `Failed to check model: ${(error as Error).message || 'Unknown error'}`,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
   }
 
   /**
@@ -412,7 +222,7 @@ export class AnalysisController {
    * Transcribe a single video by ID
    */
   @Post('transcribe')
-  async transcribeVideo(@Body() body: { videoId: string; whisperModel?: string }) {
+  async transcribeVideo(@Body() body: { videoId: string }) {
     try {
       if (!body.videoId) {
         throw new HttpException(
@@ -430,15 +240,10 @@ export class AnalysisController {
         );
       }
 
-      // Get config defaults
-      const config = await this.configService.getConfig();
-      const whisperModel = body.whisperModel || 'base';
-
       // Start batch analysis with transcribe-only mode for this single video
       const result = await this.analysisService.startBatchAnalysis({
         videoIds: [body.videoId],
         transcribeOnly: true,
-        whisperModel,
       });
 
       return {
@@ -466,12 +271,9 @@ export class AnalysisController {
     videoId: string;
     videoTitle?: string;
     aiModel?: string;
-    aiProvider?: 'ollama' | 'claude' | 'openai';
-    whisperModel?: string;
+    aiProvider?: 'local' | 'ollama' | 'claude' | 'openai';
     forceReanalyze?: boolean;
     forceRetranscribe?: boolean;
-    claudeApiKey?: string;
-    openaiApiKey?: string;
     jobId?: string;  // Custom job ID from frontend (for tracking in processing queue)
   }) {
     try {
@@ -495,7 +297,6 @@ export class AnalysisController {
       const config = await this.configService.getConfig();
       let aiModel = body.aiModel || config.aiModel;
       let aiProvider = body.aiProvider; // No fallback - must be explicitly provided
-      const whisperModel = body.whisperModel || 'base';
       const forceReanalyze = body.forceReanalyze || false;
       const forceRetranscribe = body.forceRetranscribe || false;
 
@@ -521,7 +322,7 @@ export class AnalysisController {
       if (colonIndex > 0) {
         const possibleProvider = aiModel.substring(0, colonIndex);
         if (knownProviders.includes(possibleProvider as typeof knownProviders[number])) {
-          aiProvider = possibleProvider as 'ollama' | 'openai' | 'claude';
+          aiProvider = possibleProvider as 'local' | 'ollama' | 'openai' | 'claude';
           aiModel = aiModel.substring(colonIndex + 1);
         }
       }
@@ -531,11 +332,8 @@ export class AnalysisController {
         videoIds: [body.videoId],
         aiModel,
         aiProvider,
-        whisperModel,
         forceReanalyze,
         forceRetranscribe,
-        claudeApiKey: body.claudeApiKey,
-        openaiApiKey: body.openaiApiKey,
         customJobId: body.jobId,  // Pass the custom job ID from frontend
       });
 

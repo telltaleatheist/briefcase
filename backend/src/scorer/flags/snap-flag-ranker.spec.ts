@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from '@jest/globals';
 import { Logger } from '@nestjs/common';
 
 import { AnalysisCancelledError, isCancellation } from '../../analysis/cancellation';
-import type { FlagWindow, RankedSentence } from '../../analysis/nli-ranker.service';
+import type { FlagWindow, RankedSentence } from '../../analysis/flag-windows';
 import { ChoiceAnswer, ChoiceQuestion, DecideRequest, DecideResponse, ScorerError } from '../scorer.types';
 import { SNAP_OPTION_TEXTS } from './flag-options';
 import { FITS } from './flag-questions';
@@ -248,18 +248,8 @@ describe('SnapFlagRanker with a fake scorer', () => {
     expect(isCancellation(err)).toBe(false);
   });
 
-  it('leases the ScorerServerService when no scorer is passed', async () => {
-    const fake = new FakeScorer();
-    let leases = 0;
-    const server = {
-      withScorer: async (fn: (h: FlagScorer) => Promise<unknown>) => {
-        leases++;
-        return fn(fake);
-      },
-    };
-    const res = await new SnapFlagRanker(server as any).rank(transcript(), CATEGORIES);
-    expect(leases).toBe(1);
-    expect(res.windows.length).toBeGreaterThan(0);
+  it('refuses to rank without a scorer (the caller holds the lease)', async () => {
+    await expect(new SnapFlagRanker().rank(transcript(), CATEGORIES)).rejects.toThrow(/no scorer/);
   });
 
   it('chunked transcripts: every unit scored once, against its own chunk, with the real previous unit', async () => {

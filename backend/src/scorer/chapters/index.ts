@@ -8,4 +8,3 @@ export * from './segmenter';
 export * from './chunks';
 export * from './chapter-tree';
 export * from './snap-chapter.service';
-export { SnapChaptersModule } from './snap-chapters.module';

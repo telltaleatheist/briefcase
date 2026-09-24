@@ -1,13 +1,8 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { AnalysisController } from './analysis.controller';
 import { AnalysisService } from './analysis.service';
-import { SimpleTranscribeController } from './simple-transcribe.controller';
-import { OllamaService } from './ollama.service';
 import { AIProviderService } from './ai-provider.service';
 import { AIAnalysisService } from './ai-analysis.service';
-import { ChapterDetectionService } from './chapter-detection.service';
-import { NliRankerService } from './nli-ranker.service';
-import { LlamaManager } from '../bridges';
 import { FfmpegModule } from '../ffmpeg/ffmpeg.module';
 import { DownloaderModule } from '../downloader/downloader.module';
 import { PathModule } from '../path/path.module';
@@ -16,7 +11,6 @@ import { LibraryModule } from '../library/library.module';
 import { DatabaseModule } from '../database/database.module';
 import { MediaModule } from '../media/media.module';
 import { QueueModule } from '../queue/queue.module';
-import { ApiKeysModule } from '../config/config.module';
 import { SnapAnalysisModule } from '../scorer/snap-analysis.module';
 import { CrucibleLlmModule } from '../crucible/llm/crucible-llm.module';
 
@@ -30,18 +24,15 @@ import { CrucibleLlmModule } from '../crucible/llm/crucible-llm.module';
     forwardRef(() => DatabaseModule),
     forwardRef(() => MediaModule),
     forwardRef(() => QueueModule),
-    ApiKeysModule,
-    // The snap engine's scorer stage. Injected @Optional into AIAnalysisService
-    // and used only when analysisEngine selects 'snap'.
+    // The snap engine's scorer stage: the analysis engine.
     SnapAnalysisModule,
-    // P3: every LLM call goes through Crucible when aiVia resolves to 'crucible'.
+    // Every LLM call goes through Crucible (P3; the only road since P7).
     CrucibleLlmModule,
   ],
   controllers: [
     AnalysisController,
-    SimpleTranscribeController,
   ],
-  providers: [AnalysisService, OllamaService, AIProviderService, AIAnalysisService, ChapterDetectionService, NliRankerService, LlamaManager],
-  exports: [AnalysisService, OllamaService, AIProviderService, AIAnalysisService, ChapterDetectionService, NliRankerService, LlamaManager],
+  providers: [AnalysisService, AIProviderService, AIAnalysisService],
+  exports: [AnalysisService, AIProviderService, AIAnalysisService],
 })
 export class AnalysisModule {}

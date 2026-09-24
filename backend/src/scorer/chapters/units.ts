@@ -27,7 +27,7 @@
  * segment's start (early by up to one segment, the right direction for a marker).
  */
 
-import { RankedSentence, assembleSentences } from '../../analysis/nli-ranker.service';
+import { RankedSentence, assembleSentences } from '../../analysis/flag-windows';
 
 export interface TranscriptSegment {
   start: number;

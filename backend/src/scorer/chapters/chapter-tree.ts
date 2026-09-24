@@ -11,8 +11,8 @@
  *             once, at level 0), Viterbi, boundaries. Recurse while children
  *             stay long, up to `maxDepth` levels in all.
  *
- * A section whose sub-outline has fewer than 2 items (OutlineError), or whose
- * sub-path collapses to one run, stays a leaf. Children tile their parent
+ * A section whose sub-outline has one item (one chapter spanning it) or none
+ * (OutlineError), or whose sub-path collapses to one run, stays a leaf. Children tile their parent
  * exactly: the first child starts at the parent's start, the last ends at the
  * parent's end, and every inner boundary is a unit start clamped into the
  * parent's span (zero-length children are dropped, which cannot open a gap).
@@ -295,7 +295,7 @@ export async function refineChapters(
   return { tree, flat, depth, refined, timings: { refineMs: Date.now() - t0 } };
 }
 
-/** Level 0 and the refinement in one call (SnapChapterService, tests). Progress: level 0 first, then the tree. */
+/** Level 0 and the refinement in one call (tests). Progress: level 0 first, then the tree. */
 export async function runSnapChapterTree(
   scorer: ChapterScorer,
   units: SentenceUnit[],

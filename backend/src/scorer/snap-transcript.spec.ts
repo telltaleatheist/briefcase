@@ -3,7 +3,6 @@ import { Logger } from '@nestjs/common';
 
 import { runSnapChapters } from './chapters/snap-chapter.service';
 import { SnapFlagRanker } from './flags/snap-flag-ranker.service';
-import { ScorerPromptBuilder, TemplateRenderer } from './scorer-prompt';
 import {
   ChatMessage,
   ChoiceAnswer,
@@ -51,16 +50,6 @@ class RecordingScorer {
     return { model: 'fake', answers, timingMs: { total: 1, perQuestion: {} }, tokens: { perQuestion: {}, images: 0 } };
   }
 }
-
-/** Qwen3.5's template for system + user, thinking off (content |trim), as the engine renders it. */
-const qwenRenderer: TemplateRenderer = {
-  async applyTemplate(messages: ChatMessage[], addGen: boolean): Promise<string> {
-    let out = '';
-    for (const m of messages) out += `<|im_start|>${m.role}\n${m.content.trim()}<|im_end|>\n`;
-    if (addGen) out += '<|im_start|>assistant\n<think>\n\n</think>\n\n';
-    return out;
-  },
-};
 
 function segments(n: number) {
   const topics = ['cooking pasta in a big pot', 'travel to the mountains by train', 'a word from our sponsor today'];
@@ -110,15 +99,6 @@ describe('one transcript for both snap passes (plan §3.2)', () => {
     expect(chapter).toBe(chunkTranscript(t, 0));
     expect(flag.startsWith(chapter + '\n\n')).toBe(true);
     expect(flag.slice(chapter.length + 2).startsWith('Categories (the options in the questions below):')).toBe(true);
-
-    // What the engine is actually sent to prime: the chapter prime is a byte
-    // prefix of the flag prime, so the flag pass restores the checkpoint the
-    // chapter pass left at the end of the transcript and prefills the legend only.
-    const builder = await ScorerPromptBuilder.create(qwenRenderer, '<__media__>');
-    const chapterPrime = builder.sharedPrefix(chapter);
-    const flagPrime = builder.sharedPrefix(flag);
-    expect(flagPrime.startsWith(chapterPrime)).toBe(true);
-    expect(flagPrime.slice(chapterPrime.length).startsWith('\n\nCategories')).toBe(true);
   });
 
   it('inline layout: the chapter and flag states are identical', async () => {

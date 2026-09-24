@@ -15,7 +15,7 @@
  *                         do not count against the budget (plan §5.5).
  */
 
-import type { FlagWindow, WindowCategory } from '../../analysis/nli-ranker.service';
+import type { FlagWindow, WindowCategory } from '../../analysis/flag-windows';
 import type { SnapFlagWindow } from './flag-spans';
 
 export interface VerifiedWindow {

@@ -6,13 +6,16 @@ import * as path from 'path';
 
 import { AIAnalysisService, AnalysisOptions } from './ai-analysis.service';
 import { AnalysisCancelledError, isCancellation } from './cancellation';
-import type { FlagWindow, WindowCategory } from './nli-ranker.service';
-import type { SnapStageRequest, SnapStageResult } from '../scorer/snap-analysis.service';
+import type { FlagWindow, WindowCategory } from './flag-windows';
+import { SnapEngineError, type SnapStageRequest, type SnapStageResult } from '../scorer/snap-analysis.service';
+import { CrucibleParkedError } from '../crucible/llm/errors';
 
 /**
- * The analysisEngine wiring in AIAnalysisService.analyzeTranscript, end to end
- * with fakes: no model, no scorer, no NLI worker, no network. The config dir is
- * a temp dir (APPDATA), so the developer's real app-config is never read.
+ * The snap engine wiring in AIAnalysisService.analyzeTranscript, end to end
+ * with fakes: no model, no scorer, no network. Snap is the only engine (P7):
+ * a stage it cannot make fails the analysis by name, a busy Crucible parks it,
+ * and nothing falls back to another path. The config dir is a temp dir
+ * (APPDATA), so the developer's real app-config is never read.
  */
 
 const LINES = [
@@ -52,6 +55,7 @@ function snapResult(over: Partial<SnapStageResult> = {}): SnapStageResult {
     transcript: null,
     model: 'fake-qwen',
     timings: { startMs: 0, prepareMs: 0, chaptersMs: 0, flagsMs: 0, totalMs: 0 },
+    labelMassGated: { chapters: 0, flags: 0, refine: 0, total: 0 },
     chapters: {
       chapters: [
         { startSeconds: 0, endSeconds: 60, title: 'Pasta day', label: 'Pasta day', sentenceRange: [0, 6], isAd: false },
@@ -77,55 +81,32 @@ function snapResult(over: Partial<SnapStageResult> = {}): SnapStageResult {
 
 class Harness {
   generated: Array<{ prompt: string; task: string }> = [];
-  detections = 0;
-  nliRanks = 0;
   snapRuns: SnapStageRequest[] = [];
-  releases = 0;
-  snapAvailable: { available: true } | { available: false; reason: string } = { available: true };
   snapRun: (req: SnapStageRequest) => Promise<SnapStageResult> = async () => snapResult();
+  /** Replaceable: every LLM call's answer. */
+  answer: (prompt: string, task: string) => Promise<{ text: string; inputTokens: number; outputTokens: number }> = async () => ({
+    text: '{"title":"LLM title","summary":"A summary of it.","verdict":"flag","people":[],"topics":["cooking"],"hook":"A hook.","body":"A body."}',
+    inputTokens: 1, outputTokens: 1,
+  });
 
-  service(withSnap = true): AIAnalysisService {
+  service(): AIAnalysisService {
     const provider = {
       generateText: async (prompt: string, _cfg: unknown, task: string) => {
         this.generated.push({ prompt, task });
-        return {
-          text: '{"title":"LLM title","summary":"A summary of it.","verdict":"flag","people":[],"topics":["cooking"],"hook":"A hook.","body":"A body."}',
-          inputTokens: 1, outputTokens: 1,
-        };
+        return this.answer(prompt, task);
       },
-      releaseOllamaModelKeys: async () => undefined,
-      via: () => 'direct' as const,
       withRun: <T>(fn: () => Promise<T>) => fn(),
-    };
-    const detection = {
-      detectBoundaries: async () => {
-        this.detections++;
-        return { boundaries: [0, 40], placeCalls: 0, scorer: 'embedding' };
-      },
-    };
-    const nli = {
-      captureThreshold: 0.2, rescueFloor: 0.15, unavailable: null,
-      isAvailable: async () => true,
-      rankWindows: async () => {
-        this.nliRanks++;
-        return [swin(2, 2, [], [wcat('political-demonization', 0.97, [2])])];
-      },
-      stop: () => undefined,
-      userFacingUnavailableMessage: (r: string) => `NLI unavailable: ${r}`,
+      crucibleOllamaStandInChoice: async () => null,
+      crucibleOllamaTakesContext: async () => true,
+      crucibleContextWindow: async () => 32768,
     };
     const snap = {
-      availability: () => this.snapAvailable,
       run: (req: SnapStageRequest) => {
         this.snapRuns.push(req);
         return this.snapRun(req);
       },
-      releaseScorer: async () => {
-        this.releases++;
-      },
     };
-    return new AIAnalysisService(
-      provider as any, {} as any, {} as any, detection as any, nli as any, undefined, withSnap ? (snap as any) : undefined,
-    );
+    return new AIAnalysisService(provider as any, snap as any, undefined);
   }
 }
 
@@ -133,12 +114,12 @@ let tmp: string;
 const savedEnv = { ...process.env };
 function options(): AnalysisOptions {
   return {
-    provider: 'claude', model: 'claude-test', apiKey: 'k', transcript: LINES.join(' '), segments: SEGMENTS,
+    provider: 'claude', model: 'claude-test', transcript: LINES.join(' '), segments: SEGMENTS,
     outputFile: path.join(tmp, 'analysis.txt'), categories: [{ name: 'political-demonization' } as any],
   };
 }
 
-describe('AIAnalysisService: the analysis engine setting', () => {
+describe('AIAnalysisService: snap is the analysis engine', () => {
   beforeAll(() => {
     Logger.overrideLogger(false);
     jest_silence();
@@ -146,32 +127,17 @@ describe('AIAnalysisService: the analysis engine setting', () => {
   beforeEach(() => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'engine-spec-'));
     process.env.APPDATA = tmp; // app-config reads land in the temp dir
-    process.env.BRIEFCASE_PLACE_MODEL = 'none'; // no Ollama probe
-    delete process.env.BRIEFCASE_ANALYSIS_ENGINE;
   });
   afterAll(() => {
     process.env = savedEnv;
   });
 
-  it("default is classic: the scorer is never touched", async () => {
-    const h = new Harness();
-    const res = await h.service().analyzeTranscript(options());
-    expect(h.snapRuns).toHaveLength(0);
-    expect(h.detections).toBe(1);
-    expect(h.nliRanks).toBe(1);
-    expect(res.sections.every((s) => s.ranker === 'nli')).toBe(true);
-    expect(res.warnings).toBeUndefined();
-  });
-
-  it('snap: outline titles and scorer boundaries, snap windows verified, sub-passages merged, candidates stored', async () => {
-    process.env.BRIEFCASE_ANALYSIS_ENGINE = 'snap';
+  it('outline titles and scorer boundaries, snap windows verified, sub-passages merged, candidates stored', async () => {
     const h = new Harness();
     const res = await h.service().analyzeTranscript(options());
     expect(h.snapRuns).toHaveLength(1);
     expect(h.snapRuns[0]).toMatchObject({ chapters: true, flags: true });
     expect(h.snapRuns[0].signal).toBeDefined();
-    expect(h.detections).toBe(0);
-    expect(h.nliRanks).toBe(0);
 
     // Chapters: the scorer's boundaries and outline labels; the LLM wrote only summaries.
     expect(res.chapters.map((c) => [c.start_time, c.title, c.summary])).toEqual([
@@ -197,17 +163,13 @@ describe('AIAnalysisService: the analysis engine setting', () => {
   });
 
   it('the .txt report holds findings only: no candidate and no skip rows', async () => {
-    process.env.BRIEFCASE_ANALYSIS_ENGINE = 'snap';
     const h = new Harness();
     const svc = h.service();
     // The verifier rejects the second sub-passage (sentences 4-5; its prompt's
     // context does not reach sentence 2): a 'skip' row.
-    const provider = (svc as any).aiProviderService;
-    const base = provider.generateText;
-    provider.generateText = async (prompt: string, cfg: unknown, task: string) =>
-      task === 'flags' && !prompt.includes('communists')
-        ? { text: '{"verdict":"skip"}', inputTokens: 1, outputTokens: 1 }
-        : base(prompt, cfg, task);
+    const base = h.answer;
+    h.answer = async (prompt, task) =>
+      task === 'flags' && !prompt.includes('communists') ? { text: '{"verdict":"skip"}', inputTokens: 1, outputTokens: 1 } : base(prompt, task);
     const res = await svc.analyzeTranscript(options());
     expect(res.sections.some((s) => s.verdict === 'skip')).toBe(true);
     expect(res.sections.some((s) => s.verdict === 'candidate')).toBe(true);
@@ -218,93 +180,99 @@ describe('AIAnalysisService: the analysis engine setting', () => {
     expect(report).not.toContain('deep state'); // the unverified candidate
   });
 
-  it('snap + cloud flag verifier: the scorer stays warm', async () => {
-    process.env.BRIEFCASE_ANALYSIS_ENGINE = 'snap';
-    const h = new Harness();
-    await h.service().analyzeTranscript(options());
-    expect(h.snapRuns).toHaveLength(1);
-    expect(h.releases).toBe(0);
-  });
-
-  it('snap + local flag verifier (ollama or llama local): the scorer is unloaded before any LLM stage', async () => {
-    for (const spec of ['ollama:qwen3.5:9b', 'local:cogito-8b']) {
-      process.env.BRIEFCASE_ANALYSIS_ENGINE = 'snap';
-      fs.mkdirSync(path.join(tmp, 'briefcase'), { recursive: true });
-      fs.writeFileSync(path.join(tmp, 'briefcase', 'app-config.json'), JSON.stringify({ taskModels: { flags: spec } }));
-      const h = new Harness();
-      let llmCallsAtRelease = -1;
-      const svc = h.service();
-      const snap = (svc as any).snapAnalysis;
-      snap.releaseScorer = async () => {
-        h.releases++;
-        llmCallsAtRelease = h.generated.length;
-      };
-      await svc.analyzeTranscript(options());
-      expect(h.releases).toBe(1);
-      expect(llmCallsAtRelease).toBe(0);
-      expect(h.generated.filter((g) => g.task === 'flags').length).toBeGreaterThan(0);
-    }
-  });
-
-  it('a cancel in the scorer stage with a local verifier: cancellation as before, no unload call', async () => {
-    process.env.BRIEFCASE_ANALYSIS_ENGINE = 'snap';
-    fs.mkdirSync(path.join(tmp, 'briefcase'), { recursive: true });
-    fs.writeFileSync(path.join(tmp, 'briefcase', 'app-config.json'), JSON.stringify({ taskModels: { flags: 'ollama:qwen3.5:9b' } }));
+  it('a stage the engine cannot make fails the analysis BY NAME: no other engine, no LLM call', async () => {
     const h = new Harness();
     h.snapRun = async () => {
-      throw new AnalysisCancelledError('Analysis cancelled during snap flag ranking');
+      throw new SnapEngineError('chapters', 'the outline was unusable: outline came back with no items');
     };
-    const err = await h.service().analyzeTranscript({ ...options(), jobId: 'job-3' }).catch((e) => e);
-    expect(isCancellation(err)).toBe(true);
-    expect(h.releases).toBe(0);
+    const err = await h.service().analyzeTranscript(options()).catch((e) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toMatch(/AI analysis failed: The analysis engine on Crucible could not make the chapters: the outline was unusable/);
     expect(h.generated).toHaveLength(0);
   });
 
-  it('snap selected but unavailable: classic for both stages, one warning on the job', async () => {
-    process.env.BRIEFCASE_ANALYSIS_ENGINE = 'snap';
+  it('a busy or silent Crucible in the scorer stage PARKS the task: the park goes up as it is', async () => {
     const h = new Harness();
-    h.snapAvailable = { available: false, reason: 'scorer model not found: /m/Qwen3.5-9B-BF16.gguf' };
+    h.snapRun = async () => {
+      throw new CrucibleParkedError('mac', 'Crucible is busy: the card is held by the settlement clearing the card');
+    };
+    const err = await h.service().analyzeTranscript({ ...options(), jobId: 'job-p' }).catch((e) => e);
+    expect(err).toBeInstanceOf(CrucibleParkedError);
+    expect(h.generated).toHaveLength(0);
+  });
+
+  it('a park mid-verification stops the whole run (never a quietly degraded flag)', async () => {
+    const h = new Harness();
+    const base = h.answer;
+    h.answer = async (prompt, task) => {
+      if (task === 'flags') throw new CrucibleParkedError('mac', "Crucible on mac isn't answering.");
+      return base(prompt, task);
+    };
+    const err = await h.service().analyzeTranscript({ ...options(), jobId: 'job-q' }).catch((e) => e);
+    expect(err).toBeInstanceOf(CrucibleParkedError);
+    expect(h.generated.filter((g) => g.task === 'flags')).toHaveLength(1);
+    expect(h.generated.some((g) => g.task === 'tags' || g.task === 'description' || g.task === 'title')).toBe(false);
+  });
+
+  it('a single-topic video: one chapter spanning it, analysed like any other', async () => {
+    const h = new Harness();
+    h.snapRun = async () => snapResult({
+      chapters: {
+        chapters: [{ startSeconds: 0, endSeconds: 80, title: 'Pasta day', label: 'Pasta day', sentenceRange: [0, 8], isAd: false }],
+        outline: ['Pasta day'], chunks: [], seams: [], timings: { outlineMs: 0, assignMs: 0, adsMs: 0, totalMs: 0 },
+      },
+    });
     const res = await h.service().analyzeTranscript(options());
-    expect(h.snapRuns).toHaveLength(0);
-    expect(h.detections).toBe(1);
-    expect(h.nliRanks).toBe(1);
-    expect(res.warnings).toHaveLength(1);
-    expect(res.warnings![0]).toMatch(/^Chapters and flags were made with the classic analysis engine.*Qwen3\.5-9B-BF16/);
+    expect(res.chapters.map((c) => [c.start_time, c.end_time, c.title])).toEqual([['00:00:00', '00:01:20', 'Pasta day']]);
   });
 
-  it('snap chapters failed, flags fine: classic chapters only, warning names chapters', async () => {
-    process.env.BRIEFCASE_ANALYSIS_ENGINE = 'snap';
+  it('answers under the label-mass gate are counted and said on the job, never silent', async () => {
     const h = new Harness();
-    h.snapRun = async () => snapResult({ chapters: null, chaptersError: 'the outline was unusable: 1 item' });
+    h.snapRun = async () => snapResult({ labelMassGated: { chapters: 2, flags: 3, refine: 0, total: 5 } });
     const res = await h.service().analyzeTranscript(options());
-    expect(h.detections).toBe(1);
-    expect(h.nliRanks).toBe(0);
-    expect(res.warnings).toEqual([expect.stringMatching(/^Chapters were made with the classic.*outline was unusable/)]);
-    expect(res.sections.some((s) => s.ranker === 'snap-v1')).toBe(true);
+    expect(res.warnings).toEqual([expect.stringMatching(/^5 of the analysis engine's answers were read as no evidence/)]);
   });
 
-  it('no service registered (module absent): a warned classic run', async () => {
-    process.env.BRIEFCASE_ANALYSIS_ENGINE = 'snap';
+  it('sub-chapters that could not be refined keep the top-level chapters and say so', async () => {
     const h = new Harness();
-    const res = await h.service(false).analyzeTranscript(options());
-    expect(h.detections).toBe(1);
-    expect(res.warnings![0]).toMatch(/not registered/);
+    h.snapRun = async () => snapResult({ chapterTreeError: 'chapter refinement failed: boom' });
+    const res = await h.service().analyzeTranscript(options());
+    expect(res.warnings).toEqual(['Sub-chapters were skipped: chapter refinement failed: boom']);
   });
 
-  it('a cancel inside the scorer stage is a cancellation: no fallback, no LLM call', async () => {
-    process.env.BRIEFCASE_ANALYSIS_ENGINE = 'snap';
+  it('zero successful chapters fails the analysis with the real reason (never an empty success)', async () => {
+    const h = new Harness();
+    h.answer = async (_prompt, task) => {
+      if (task === 'chapter') throw new Error('Crucible http_500: the engine fell over');
+      return { text: '{}', inputTokens: 1, outputTokens: 1 };
+    };
+    const svc = h.service();
+    (svc as unknown as { delay: () => Promise<void> }).delay = async () => undefined; // no retry backoff in a spec
+    const err = await svc.analyzeTranscript(options()).catch((e) => e);
+    expect((err as Error).message).toMatch(/no chapters could be analyzed.*the engine fell over/);
+  });
+
+  it("a stored taskModels.boundary (the retired classic placement task) is read and ignored", async () => {
+    fs.mkdirSync(path.join(tmp, 'briefcase'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'briefcase', 'app-config.json'), JSON.stringify({ taskModels: { boundary: 'ollama:qwen3.5:4b' } }));
+    const h = new Harness();
+    const res = await h.service().analyzeTranscript(options());
+    expect(res.chapters).toHaveLength(2);
+    expect(h.generated.some((g) => g.task === 'boundary')).toBe(false);
+  });
+
+  it('a cancel inside the scorer stage is a cancellation: no LLM call', async () => {
     const h = new Harness();
     h.snapRun = async () => {
       throw new AnalysisCancelledError('Analysis cancelled during snap chaptering');
     };
     const err = await h.service().analyzeTranscript({ ...options(), jobId: 'job-1' }).catch((e) => e);
     expect(isCancellation(err)).toBe(true);
-    expect(h.detections).toBe(0);
+    expect(err).not.toBeInstanceOf(CrucibleParkedError);
     expect(h.generated).toHaveLength(0);
   });
 
   it('cancelAnalysis(jobId) aborts the signal the scorer stage was given', async () => {
-    process.env.BRIEFCASE_ANALYSIS_ENGINE = 'snap';
     const h = new Harness();
     const svc = h.service();
     h.snapRun = async (req) => {

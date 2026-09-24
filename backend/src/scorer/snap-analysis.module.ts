@@ -8,12 +8,10 @@ import { SnapAnalysisService } from './snap-analysis.service';
 
 /**
  * The snap engine's analysis stage (chapters + flag ranking in one scorer
- * lease). ScorerModule is @Global, so ScorerServerService injects without an
- * import here. Imported by AnalysisModule; AIAnalysisService takes the service
- * @Optional, so the classic pipeline never depends on it.
+ * lease), on Crucible's decision door (CrucibleScorerService). Imported by
+ * AnalysisModule: snap is the analysis engine.
  */
 @Module({
-  // P6: under aiVia crucible the scorer is Crucible's decision door (CrucibleScorerService).
   imports: [CrucibleModule, CrucibleLlmModule],
   providers: [SnapFlagRanker, CrucibleScorerService, SnapAnalysisService],
   exports: [SnapAnalysisService],

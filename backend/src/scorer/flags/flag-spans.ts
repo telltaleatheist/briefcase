@@ -14,7 +14,7 @@ import {
   FlagWindow,
   RankedSentence,
   buildWindows,
-} from '../../analysis/nli-ranker.service';
+} from '../../analysis/flag-windows';
 import { viterbi, runsOf } from '../scorer-viterbi';
 import type { FlagOptionPlan } from './flag-options';
 import type { FlagChunk, FlagUnit } from './flag-units';

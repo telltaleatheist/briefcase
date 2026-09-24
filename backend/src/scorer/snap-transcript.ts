@@ -21,7 +21,7 @@
  * that was primed last is still cached when the next pass begins.
  */
 
-import { RankedSentence, assembleSentences } from '../analysis/nli-ranker.service';
+import { RankedSentence, assembleSentences } from '../analysis/flag-windows';
 import { Chunk, ChunkPlanOptions, planChunks } from './chapters/chunks';
 import { unitTokens } from './chapters/snap-chapter.service';
 import { AssembleUnitsOptions, SnapUnit, TranscriptSegment, assembleUnits } from './chapters/units';
@@ -43,7 +43,7 @@ export interface SnapTranscript {
 export interface SnapTranscriptOptions {
   units?: AssembleUnitsOptions;
   chunking?: ChunkPlanOptions;
-  /** Real token counts (llama-server /tokenize). Absent: ~4 characters per token. */
+  /** Real token counts (Crucible's tokenize). Absent: ~4 characters per token. */
   countTokens?: (text: string, signal?: AbortSignal) => Promise<number>;
   signal?: AbortSignal;
 }

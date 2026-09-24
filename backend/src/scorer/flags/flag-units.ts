@@ -16,7 +16,7 @@
  * hold sentences (the eval), where a run-on is cut by word count instead.
  */
 
-import type { RankedSentence } from '../../analysis/nli-ranker.service';
+import type { RankedSentence } from '../../analysis/flag-windows';
 import type { Chunk } from '../chapters/chunks';
 import { AssembleUnitsOptions, DEFAULT_UNIT_OPTIONS as UNIT_DEFAULTS, SnapUnit, unitsFromSentences } from '../chapters/units';
 

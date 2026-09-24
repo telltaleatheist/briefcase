@@ -6,24 +6,17 @@
  *
  *   option text   What the SCORER reads in pass 1 / pass 2: a short,
  *                 discriminating description of the ACT, one line. Derived
- *                 from the tuned NLI hypotheses (nli-ranker.service.ts
- *                 HYPOTHESES), never from DEFAULT_CATEGORIES' descriptions:
+ *                 from the tuned hypotheses of the NLI ranker (removed in P7),
+ *                 never from DEFAULT_CATEGORIES' descriptions:
  *                 those are LLM instructions ("flag even if quoted", "NOTE: do
  *                 NOT flag…"), and a scorer reads an instruction as content.
  *                 Multi-hypothesis categories collapse their alternatives into
  *                 one disjunction, since a choice option can hold one.
  *
- *   proposition   What the VERIFIER tests. MUST be byte-identical to the NLI
- *                 ranker's PROPOSITIONS: it is part of the verdict-cache
- *                 question hash, so a snap window whose passage matches an NLI
- *                 window's is a free cache hit only if the proposition matches
- *                 too. flag-options.spec.ts asserts every string below appears
- *                 verbatim in nli-ranker.service.ts.
- *
- * DEVIATION (plan §5.1): the plan moves HYPOTHESES/PROPOSITIONS into
- * analysis/flag-categories.ts shared by both rankers. That touches
- * nli-ranker.service.ts, which this phase must not edit, so the propositions
- * are COPIED here and pinned by a spec; the move is an integration-phase task.
+ *   proposition   What the VERIFIER tests. It is part of the verdict-cache
+ *                 question hash, so it must stay byte-identical to what stored
+ *                 verdicts (NLI-era ones included) were asked with.
+ *                 flag-text.spec.ts pins the set by hash.
  */
 
 import { AnalysisCategory } from '../../analysis/prompts/analysis-prompts';
@@ -57,7 +50,7 @@ export const SNAP_OPTION_TEXTS: Readonly<Record<string, string>> = {
 export const MISINFORMATION_OPTION_TEXT =
   'States as fact something that is widely known to be false (debunked medical, scientific, or historical claims)';
 
-/** Verifier propositions. VERBATIM copies of nli-ranker.service.ts PROPOSITIONS (see header). */
+/** Verifier propositions (see header: pinned, the verdict cache hashes them). */
 export const FLAG_PROPOSITIONS: Readonly<Record<string, string>> = {
   hate: 'a group of people deserves hostility, contempt, or mockery because of their race, ethnicity, religion, national origin, immigration status, gender, or sexuality',
   conspiracy:
@@ -183,8 +176,8 @@ export function buildFlagPlan(categories: AnalysisCategory[], options: FlagPlanO
       `Category '${name}' has no tuned option text; running on the first sentence of its description ` +
         `(${JSON.stringify(optionText)}). Its hotness is uncalibrated.`,
     );
-    // Same proposition the NLI ranker's buildPlan would use, so the verdict
-    // cache is shared across rankers for custom categories too.
+    // The description is the proposition (as the NLI ranker used it before
+    // P7), so verdicts cached for custom categories stay hits.
     plan.push({ category: name, optionText, proposition: description, tuned: false });
     seen.add(name);
   }
@@ -192,7 +185,7 @@ export function buildFlagPlan(categories: AnalysisCategory[], options: FlagPlanO
   if (plan.length > MAX_FLAG_CATEGORIES) {
     throw new FlagPlanError(
       `${plan.length} flag categories are enabled; the snap ranker supports at most ${MAX_FLAG_CATEGORIES} ` +
-        `(26 answer letters, one reserved for "none"). Disable some categories or use the NLI ranker.`,
+        `(26 answer letters, one reserved for "none"). Disable some categories in Settings › AI.`,
     );
   }
   return { plan, notes };

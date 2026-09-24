@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import type { RankedSentence } from '../../analysis/nli-ranker.service';
+import type { RankedSentence } from '../../analysis/flag-windows';
 import { buildFlagPlan } from './flag-options';
 import {
   DEFAULT_SPAN_PARAMS,
