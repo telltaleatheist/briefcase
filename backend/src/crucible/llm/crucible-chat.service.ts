@@ -32,6 +32,13 @@
  * with no load and no lease. The body rules (no sampling to cloud, ever) live
  * in target.ts.
  *
+ * A LOAD'S EVENT STREAM that drops is followed again after the last event seen
+ * (`Last-Event-ID`): first after 5 s, the waits doubling to 30 s, for up to
+ * 5 minutes from the drop (BookForge's stream-reconnect). Past that, and for
+ * any other "not now" from the server on the local path (unreachable, a 5xx,
+ * a socket that died), the call fails as `unreachable`, which a queue-admitted
+ * run PARKS on rather than failing the analysis (P4).
+ *
  * CANCEL. The caller's `signal` aborts the open fetch, cancels an in-flight
  * load job, and ends any busy or queue-full wait at once. A run's lease is
  * released in its `finally`.
@@ -43,9 +50,12 @@ import {
   CrucibleCardHeld,
   CrucibleLeased,
   CrucibleRefused,
+  CrucibleUnreachable,
   type CrucibleClient,
+  type JobEvent,
   type ModelInfo,
 } from '@crucible/client';
+import { crucibleUnavailableCause } from '../transport-failure';
 import { CrucibleClientFactory } from '../client-factory';
 import { CrucibleServersService } from '../crucible-servers.service';
 import { CrucibleProbeService } from '../probe';
@@ -66,6 +76,7 @@ export const LEASE_TTL_SECONDS = 120;
 export const HEARTBEAT_MS = 40_000;
 /** A heartbeat that failed for weather is tried again this soon, while the TTL still covers it. */
 export const HEARTBEAT_RETRY_MS = 5_000;
+export const LOAD_STREAM_RETRY: Readonly<{ firstMs: number; maxMs: number; budgetMs: number }> = { firstMs: 5_000, maxMs: 30_000, budgetMs: 5 * 60_000 };
 /** Queue-full retries before the call gives up. */
 export const MAX_QUEUE_FULL_RETRIES = 30;
 const DEFAULT_RETRY_AFTER_MS = 2_000;
@@ -229,6 +240,12 @@ export class CrucibleChatService {
   heartbeatRetryMs = HEARTBEAT_RETRY_MS;
   /** How long the server keeps a lease nobody renews: the retry budget. */
   leaseTtlMs = LEASE_TTL_SECONDS * 1000;
+  /**
+   * Re-following a load's dropped event stream (BookForge's stream-reconnect):
+   * the first wait, the cap the waits double up to, and the budget from the
+   * drop (reset by any event) after which the server counts as unreachable.
+   */
+  loadStreamRetry = { ...LOAD_STREAM_RETRY };
   /**
    * Leases this side gave up on but could not hand back, per server. Crucible
    * allows one lease per client per server, so re-leasing is refused `leased`
@@ -566,14 +583,14 @@ export class CrucibleChatService {
   private async ensureLocalOnce(server: string, model: string, signal?: AbortSignal): Promise<void> {
     const scope = this.runs.getStore();
     if (scope === undefined) {
-      await this.makeResident(server, model, signal, false);
+      await this.makeResident(server, model, signal, false).catch((err: unknown) => { throw this.asUnreachable(err, server); });
       return;
     }
     const run = scope.lock.then(async () => {
       const held = scope.held.get(server);
       if (held !== undefined && held.model === model && !held.lost) return;
       if (held !== undefined) await this.releaseHold(scope, held);
-      const leaseId = await this.makeResident(server, model, signal, true);
+      const leaseId = await this.makeResident(server, model, signal, true).catch((err: unknown) => { throw this.asUnreachable(err, server); });
       const hold: Held = { server, model, leaseId, beat: null, lost: false, mayStillHold: false, stopped: false };
       if (leaseId !== null) this.startHeartbeat(hold);
       scope.held.set(server, hold);
@@ -648,22 +665,20 @@ export class CrucibleChatService {
       void client.cancel(loadId).then(() => this.ledger?.settle(server, 'job', loadId), () => undefined);
     };
     signal?.addEventListener('abort', onAbort, { once: true });
+    let terminal: JobEvent | null = null;
     try {
-      for await (const event of client.events(loadId)) {
-        this.touch();
-        if (event.event === 'failed' || event.event === 'cancelled' || event.event === 'done') settled = true;
-        if (event.event === 'failed') {
-          throw new CrucibleChatError(500, event.data.error.code, `Loading ${model} on "${server}" failed: ${event.data.error.message}`, server);
-        }
-        if (event.event === 'cancelled') {
-          if (signal?.aborted) throw new CrucibleChatCancelled();
-          throw new CrucibleChatError(409, 'load_cancelled', `Loading ${model} on "${server}" was cancelled on the server.`, server);
-        }
-        if (event.event === 'done') break;
-      }
+      terminal = await this.followLoad(client, server, model, loadId, signal);
+      settled = true;
     } finally {
       signal?.removeEventListener('abort', onAbort);
       if (settled) this.ledger?.settle(server, 'job', loadId);
+    }
+    if (terminal.event === 'failed') {
+      throw new CrucibleChatError(500, terminal.data.error.code, `Loading ${model} on "${server}" failed: ${terminal.data.error.message}`, server);
+    }
+    if (terminal.event === 'cancelled') {
+      if (signal?.aborted) throw new CrucibleChatCancelled();
+      throw new CrucibleChatError(409, 'load_cancelled', `Loading ${model} on "${server}" was cancelled on the server.`, server);
     }
     this.modelsCache.delete(server);
     if (!lease) {
@@ -688,6 +703,53 @@ export class CrucibleChatService {
       throw new CrucibleChatCancelled();
     }
     return status.leaseId;
+  }
+
+  /**
+   * A load job's events to its terminal one. A stream that drops for weather
+   * is opened again after the last event seen; lost past the budget, the load
+   * is cancelled best-effort (the ledger keeps its row for the sweep when the
+   * server can't be told) and the call is `unreachable`.
+   */
+  private async followLoad(client: CrucibleClient, server: string, model: string, loadId: string, signal: AbortSignal | undefined): Promise<JobEvent> {
+    const { firstMs, maxMs, budgetMs } = this.loadStreamRetry;
+    let lastEventId = 0;
+    let droppedAt: number | null = null;
+    let wait = firstMs;
+    for (;;) {
+      try {
+        for await (const event of client.events(loadId, lastEventId > 0 ? { lastEventId } : {})) {
+          this.touch();
+          lastEventId = event.id;
+          droppedAt = null;
+          wait = firstMs;
+          if (event.event === 'failed' || event.event === 'cancelled' || event.event === 'done') return event;
+        }
+        throw new CrucibleUnreachable('', `the event stream for load ${loadId} ended with no terminal event`);
+      } catch (err) {
+        if (signal?.aborted) throw new CrucibleChatCancelled();
+        const wire = crucibleUnavailableCause(err);
+        if (wire === null) throw this.mapRefusal(err, server);
+        const now = this.now();
+        droppedAt ??= now;
+        if (now - droppedAt + wait > budgetMs) {
+          void client.cancel(loadId).then(() => this.ledger?.settle(server, 'job', loadId), () => undefined);
+          throw new CrucibleChatError(0, 'unreachable',
+            `Crucible "${server}" isn't answering (lost the load of ${model} for ${Math.round((now - droppedAt) / 1000)} s: ${wire}).`, server);
+        }
+        this.logger.warn(`[${server}] the event stream of load ${loadId} dropped (${wire}); following it again after event ${lastEventId} in ${Math.round(wait / 100) / 10} s`);
+        await sleep(wait, signal);
+        wait = Math.min(wait * 2, maxMs);
+      }
+    }
+  }
+
+  /** A "not now" from the server (unreachable, 5xx, a dead socket) as the chat error a queue run parks on. */
+  private asUnreachable(err: unknown, server: string): unknown {
+    if (err instanceof CrucibleChatError || err instanceof CrucibleChatCancelled || err instanceof CrucibleBusyError) return err;
+    const wire = crucibleUnavailableCause(err);
+    if (wire === null) return err;
+    return new CrucibleChatError(0, 'unreachable', `Crucible "${server}" isn't answering (${wire}).`, server);
   }
 
   private async releaseOrphanLease(client: CrucibleClient, server: string, model: string, loadId: string): Promise<void> {

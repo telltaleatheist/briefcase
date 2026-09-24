@@ -281,6 +281,31 @@ describe('CrucibleChatService: one server', () => {
     expect(fake.chatBodies()).toHaveLength(0);
   });
 
+  it('REGRESSION: a load whose event stream drops is followed again after the last event seen (Last-Event-ID)', async () => {
+    await start({ loadMs: 200 });
+    chat.loadStreamRetry = { firstMs: 10, maxMs: 20, budgetMs: 2_000 };
+    fake.faults.resetAfterBytes = [{ match: { method: 'GET', path: /\/v1\/jobs\/[^/]+\/events$/ }, afterBytes: 45, times: 1 }];
+    const result = await chat.withRun(() => chat.chat({ model: 'qwen3.5-9b', prompt: 'x' }));
+    expect(result.text).toBe('{"ok":true}');
+    const streams = fake.requestsTo(`/v1/jobs/${fake.jobs[0].jobId}/events`, 'GET');
+    expect(streams.length).toBeGreaterThanOrEqual(2);
+    expect(streams[0].fault).toMatch(/reset/);
+    expect(Number(streams[1].headers['last-event-id'])).toBeGreaterThan(0);
+    expect(fake.jobs).toHaveLength(1);
+  });
+
+  it('REGRESSION: a load stream lost past its budget is "unreachable" (the queue parks on it), and the load is cancelled', async () => {
+    await start({ loadMs: 200 });
+    chat.loadStreamRetry = { firstMs: 10, maxMs: 20, budgetMs: 60 };
+    fake.faults.resetAfterBytes = [{ match: { method: 'GET', path: /\/v1\/jobs\/[^/]+\/events$/ }, afterBytes: 0 }];
+    const failure = await chat.withRun(() => chat.chat({ model: 'qwen3.5-9b', prompt: 'x' })).catch((e) => e);
+    expect(failure).toBeInstanceOf(CrucibleChatError);
+    expect(failure).toMatchObject({ code: 'unreachable', server: 'mac' });
+    expect(fake.requestsTo(`/v1/jobs/${fake.jobs[0].jobId}/events`, 'GET').length).toBeGreaterThanOrEqual(2);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(fake.requestsTo(`/v1/jobs/${fake.jobs[0].jobId}`, 'DELETE')).toHaveLength(1);
+  });
+
   it('an already-aborted signal sends nothing', async () => {
     await start();
     const controller = new AbortController();

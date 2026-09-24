@@ -163,6 +163,19 @@ describe('parking against the fake', () => {
   });
 });
 
+describe('REGRESSION: a load whose event stream is lost', () => {
+  it('parks the lane task ("isn\'t answering") instead of failing the analysis', async () => {
+    await wire();
+    chat.loadStreamRetry = { firstMs: 10, maxMs: 20, budgetMs: 60 };
+    fake.faults.resetAfterBytes = [{ match: { method: 'GET', path: /\/v1\/jobs\/[^/]+\/events$/ }, afterBytes: 0 }];
+    const rig = makeRig(lanes);
+    const id = rig.qm.addJob(analyzeJob('v1', 'local:qwen3.5-9b'));
+    await until(() => rig.qm.getJob(id)?.parkedReason !== undefined || rig.qm.getJob(id)?.status === 'failed');
+    expect(rig.qm.getJob(id)).toMatchObject({ status: 'pending', parkedReason: "Crucible on mac isn't answering." });
+    rig.qm.onModuleDestroy();
+  });
+});
+
 describe('cancel against the fake', () => {
   it('cancelling a running lane task aborts its chat, releases its lease and empties the ledger', async () => {
     await wire();
