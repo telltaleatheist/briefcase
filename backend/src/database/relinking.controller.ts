@@ -70,7 +70,7 @@ export class RelinkingController {
     // would race a running queue task into the wrong library — refuse to start.
     const queueManager = this.getQueueManager();
     if (queueManager.hasActiveTasks()) {
-      const running = queueManager.getMainPool().size + (queueManager.getAIPool() ? 1 : 0);
+      const running = queueManager.runningTaskCount();
       throw new HttpException(
         `Cannot relink while ${running} task(s) are running — wait for the queue to finish or cancel it`,
         HttpStatus.CONFLICT,
@@ -148,7 +148,7 @@ export class RelinkingController {
     // would race a running queue task into the wrong library — refuse to start.
     const queueManager = this.getQueueManager();
     if (queueManager.hasActiveTasks()) {
-      const running = queueManager.getMainPool().size + (queueManager.getAIPool() ? 1 : 0);
+      const running = queueManager.runningTaskCount();
       throw new HttpException(
         `Cannot relink while ${running} task(s) are running — wait for the queue to finish or cancel it`,
         HttpStatus.CONFLICT,

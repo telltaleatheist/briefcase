@@ -325,7 +325,7 @@ export class QueueController {
       includeTranscript?: boolean;
       includeAnalysis?: boolean;
       aiModel?: string;
-      aiProvider?: 'ollama' | 'claude' | 'openai';
+      aiProvider?: 'local' | 'ollama' | 'claude' | 'openai';
     },
   ) {
     if (!body.url) {
@@ -361,9 +361,16 @@ export class QueueController {
       });
     }
 
-    // Add transcription (after any video processing)
-    if (body.includeTranscript !== false) {
+    // Add transcription (after any video processing). Asked for explicitly, it
+    // needs Crucible like any AI task (the queue's door refuses it by name when
+    // Crucible can't be had). Left unsaid, a quick download includes it only
+    // when Crucible can take it: a download is never refused for want of AI.
+    const skipped: string[] = [];
+    if (body.includeTranscript === true) {
       tasks.push({ type: 'transcribe', options: {} });
+    } else if (body.includeTranscript === undefined) {
+      if (this.queueManager.canQueueCrucibleWork()) tasks.push({ type: 'transcribe', options: {} });
+      else skipped.push('transcribe');
     }
 
     // Add AI analysis (requires transcript)
@@ -393,7 +400,8 @@ export class QueueController {
     return {
       success: true,
       jobId,
-      message: 'Quick job added to queue',
+      message: skipped.length ? 'Quick job added to queue (no transcript: Crucible is not available)' : 'Quick job added to queue',
+      ...(skipped.length ? { skipped } : {}),
     };
   }
 }

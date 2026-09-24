@@ -1,7 +1,8 @@
 /**
  * THE QUEUE'S CRUCIBLE LANES (migration plan §7, P4).
  *
- * Under `aiVia: 'crucible'` the AI pool of one is replaced by lanes:
+ * Every AI task runs on a lane (the AI pool of one, and the direct road it
+ * served, are gone since P7):
  *
  *   gpu:<server>   one per ENABLED registered server, width 1: an analysis
  *                  whose model is a local model on that server. The card holds
@@ -12,10 +13,9 @@
  *                  rate limits come back as 429 + Retry-After.
  *
  * The main pool (5) is not touched: downloads, imports and every other non-AI
- * task never read anything in this file. A `transcribe` (P5) is placed here:
- * a GPU lane when the venue rule puts it on Crucible (its reservation is the
- * asr submit), else back to the main pool as a whisper-cli task. Under `aiVia: 'direct'`
- * the queue keeps today's AI pool exactly (QueueManagerService.processQueue).
+ * task never read anything in this file. A `transcribe` (P5) is placed here
+ * too: a GPU lane on the server the transcription setting chose (its reservation is the
+ * asr submit), or, when no server can take it, it PARKS with the reason.
  *
  * This service DECIDES; the queue (queue-manager.service.ts) holds the slots.
  *
@@ -50,7 +50,6 @@ import {
   type SweepReport,
   type SweepTiming,
 } from '../crucible/in-flight-sweep';
-import { resolveAiVia, type AiVia } from '../crucible/llm/ai-via';
 import { CrucibleChatService } from '../crucible/llm/crucible-chat.service';
 import { CrucibleBusyError, CrucibleChatError, CrucibleParkedError } from '../crucible/llm/errors';
 import { crucibleTargetOf, type CrucibleTarget } from '../crucible/llm/target';
@@ -74,11 +73,7 @@ export const STARVATION_MS = 10 * 60_000;
 export const PARK_FIRST_MS = 5_000;
 export const PARK_MAX_MS = 60_000;
 
-/**
- * The task types that go to lanes. `transcribe` (P5) goes to a GPU lane when
- * the venue rule puts it on Crucible; otherwise it is handed to the main pool
- * as a whisper-cli task (capped there, see QueueManagerService).
- */
+/** The task types that go to lanes: every task that needs Crucible. */
 export const LANE_TASK_TYPES: ReadonlySet<string> = new Set(['analyze', 'analyze-webpage', 'transcribe']);
 
 /** The asr model a transcribe placement names, in the shape the lanes carry every target in. */
@@ -88,7 +83,7 @@ export function asrTarget(model: string): CrucibleTarget {
 
 export type TranscribePlaceAnswer =
   | { kind: 'lane'; placement: LanePlacement }
-  | { kind: 'cli'; reason: string; warning: string | null };
+  | { kind: 'wait'; reason: string };
 
 export function gpuLaneOf(server: string): string {
   return `gpu:${server}`;
@@ -134,7 +129,6 @@ export interface LaneView {
 }
 
 export interface LanesStatus {
-  mode: AiVia;
   lanes: LaneView[];
   timestamp: string;
 }
@@ -142,6 +136,19 @@ export interface LanesStatus {
 function shortClient(client: string | null | undefined): string {
   if (!client) return 'another app';
   return client.split(/\s+/)[0] || client;
+}
+
+/**
+ * The engine claim as a busy sentence, or null when there is none or it is
+ * ours. ANY other claim is busy: a streaming session, and Crucible's own
+ * settlement clearing the card after a lapsed lease ("the settlement clearing
+ * the card") — so admission waits for it instead of starting into a refusal.
+ * The holder is said whole: it is a sentence, not a client id.
+ */
+export function claimBusyLine(activity: Activity): string | null {
+  const heldBy = activity.claim?.heldBy?.trim();
+  if (!heldBy || /^briefcase\b/i.test(heldBy)) return null;
+  return `Crucible is busy: the card is held by ${heldBy}`;
 }
 
 /**
@@ -157,7 +164,8 @@ export function busyLineForJob(activity: Activity, ours: ReadonlySet<string>): s
   if (job !== undefined) {
     return `Crucible is busy: ${shortClient(job.client)}, ${job.type} ${Math.round(job.progress * 100)}% done`;
   }
-  if (activity.claim !== null) return `Crucible is busy: ${shortClient(activity.claim.heldBy)} holds the card`;
+  const claimed = claimBusyLine(activity);
+  if (claimed !== null) return claimed;
   if (activity.streaming !== null) return 'Crucible is busy: a streaming session holds the card';
   return null;
 }
@@ -174,7 +182,8 @@ export function busyLineFor(activity: Activity, ours: ReadonlySet<string>, targe
   if (job !== undefined) {
     return `Crucible is busy: ${shortClient(job.client)}, ${job.type} ${Math.round(job.progress * 100)}% done`;
   }
-  if (activity.claim !== null) return `Crucible is busy: ${shortClient(activity.claim.heldBy)} holds the card`;
+  const claimed = claimBusyLine(activity);
+  if (claimed !== null) return claimed;
   if (activity.streaming !== null) return 'Crucible is busy: a streaming session holds the card';
   const lease = activity.lease;
   if (lease !== null && !ours.has(lease.leaseId)) {
@@ -194,9 +203,8 @@ export class CrucibleLanesService implements OnModuleInit, BeforeApplicationShut
   /** Settles when the startup sweep has run. The lanes await it; the main pool never does. */
   ready: Promise<void> = Promise.resolve();
 
-  /** Replaceable by a spec: the clock, the road, the sweep's per-server timing. */
+  /** Replaceable by a spec: the clock, the sweep's per-server timing. */
   now: () => number = Date.now;
-  via: () => AiVia = () => resolveAiVia().via;
   sweepTiming: SweepTiming | undefined;
   startupDeadlineMs = STARTUP_SWEEP_DEADLINE_MS;
   quitDeadlineMs = QUIT_SWEEP_DEADLINE_MS;
@@ -207,9 +215,8 @@ export class CrucibleLanesService implements OnModuleInit, BeforeApplicationShut
     private readonly chat: CrucibleChatService,
     private readonly factory: CrucibleClientFactory,
     private readonly registry: CrucibleRegistryService,
+    private readonly transcription: CrucibleTranscriptionService,
     @Optional() @Inject(CRUCIBLE_IN_FLIGHT_LEDGER) private readonly ledger?: InFlightLedger,
-    /** P5: the transcription venue rule. Absent: every transcribe is whisper-cli in the main pool. */
-    @Optional() private readonly transcription?: CrucibleTranscriptionService,
   ) {
     registry.onChange((change) => {
       if (change.server !== null) this.activityCache.delete(change.server);
@@ -232,15 +239,6 @@ export class CrucibleLanesService implements OnModuleInit, BeforeApplicationShut
     return this.quitSweep;
   }
   private quitSweep: Promise<void> | null = null;
-
-  /** 'crucible' when AI tasks go to lanes, 'direct' for today's AI pool. */
-  mode(): AiVia {
-    try {
-      return this.via();
-    } catch {
-      return 'direct';
-    }
-  }
 
   /** Subscribe to registry changes (add, remove, rank, pause): parked work is asked again at once. */
   onServersChanged(listener: () => void): () => void {
@@ -275,16 +273,12 @@ export class CrucibleLanesService implements OnModuleInit, BeforeApplicationShut
   }
 
   /**
-   * Where a transcribe task runs (P5): a GPU lane when the venue rule puts it
-   * on Crucible, else whisper-cli in the main pool, with the warning to put on
-   * the task when that is a fallback. Never 'wait': a transcription always has
-   * whisper-cli to fall back to (the user's rule, 2026-09-23).
+   * Where a transcribe task runs (P5): the GPU lane of the server the venue
+   * rule chose, or 'wait' (the task parks) with why no server can take it.
    */
-  async placeTranscribe(task: Task): Promise<TranscribePlaceAnswer> {
-    if (this.transcription === undefined) return { kind: 'cli', reason: 'Crucible transcription is not available in this build.', warning: null };
-    const translate = (task.options as { translate?: unknown } | undefined)?.translate === true;
-    const route = await this.transcription.route({ translate });
-    if (route.kind === 'cli') return route;
+  async placeTranscribe(): Promise<TranscribePlaceAnswer> {
+    const route = await this.transcription.route();
+    if (route.kind === 'none') return { kind: 'wait', reason: route.reason };
     return { kind: 'lane', placement: { lane: gpuLaneOf(route.server), server: route.server, target: asrTarget(route.model) } };
   }
 
@@ -384,9 +378,8 @@ export class CrucibleLanesService implements OnModuleInit, BeforeApplicationShut
    * come from the queue.
    */
   async lanesStatus(running: LaneTaskView[], waitingByLane: Map<string, number>): Promise<LanesStatus> {
-    const mode = this.mode();
     const lanes: LaneView[] = [];
-    if (mode === 'crucible') {
+    {
       let rows: Array<{ name: string; enabled: boolean }> = [];
       try {
         rows = this.servers.routing().ranked;
@@ -423,7 +416,7 @@ export class CrucibleLanesService implements OnModuleInit, BeforeApplicationShut
         width: CLOUD_LANE_WIDTH, running: running.filter((t) => t.lane === CLOUD_LANE), waiting: waitingByLane.get(CLOUD_LANE) ?? 0,
       });
     }
-    return { mode, lanes, timestamp: new Date(this.now()).toISOString() };
+    return { lanes, timestamp: new Date(this.now()).toISOString() };
   }
 
   /** Running/Paused, the routing record's per-server switch (P1). */

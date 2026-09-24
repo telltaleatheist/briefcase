@@ -2,8 +2,9 @@
  * A QueueManagerService wired by hand over stubs: media operations that are
  * gated promises (so a spec decides when a download or an analysis finishes
  * and can count how many ran at once), a two-library manager, a recording
- * event bus, and either no lanes (the direct road), a scripted StubLanes, or
- * the real CrucibleLanesService against the fake Crucible.
+ * event bus, the lanes (a scripted StubLanes, or the real CrucibleLanesService
+ * against the fake Crucible) and the readiness gate (a scripted StubReadiness,
+ * or the real one).
  */
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Logger } from '@nestjs/common';
@@ -23,6 +24,8 @@ import { crucibleTargetOf, type CrucibleTarget } from '../../src/crucible/llm/ta
 import { CrucibleParkedError } from '../../src/crucible/llm/errors';
 import type { Task, TaskResult } from '../../src/common/interfaces/task.interface';
 import type { WhisperRoute } from '../../src/media/whisper.service';
+import { CrucibleRequiredError, type CrucibleReadinessService } from '../../src/crucible/readiness.service';
+import type { CrucibleReadinessView } from '../../src/crucible/wire/readiness-wire';
 
 Logger.overrideLogger(false);
 
@@ -62,8 +65,8 @@ export class StubMedia {
   delayMs = 5;
   /** Replaces analyzeVideo's body (runs inside the task's Crucible run when admitted to a lane). */
   analyze?: (videoId: string, options: Record<string, unknown>, taskId: string) => Promise<TaskResult>;
-  /** Replaces transcribeVideo's body (P5): sees the engine route the queue chose. */
-  transcribe?: (videoId: string, options: Record<string, unknown>, taskId: string, route: WhisperRoute | undefined) => Promise<TaskResult>;
+  /** Replaces transcribeVideo's body (P5): sees the route the queue placed it on. */
+  transcribe?: (videoId: string, taskId: string, route: WhisperRoute | undefined) => Promise<TaskResult>;
   /** The route every transcribeVideo call was given, in call order (P5). */
   readonly transcribeRoutes: Array<{ taskId: string; route: WhisperRoute | undefined }> = [];
   private nextVideo = 1;
@@ -100,11 +103,11 @@ export class StubMedia {
   getVideoInfo = (url: string, taskId: string) => this.op('get-info', url, taskId, () => ({ success: true, data: { title: url } }));
   downloadVideo = (url: string, _o: unknown, taskId: string) => this.op('download', url, taskId, () => ({ success: true, data: { videoPath: `/tmp/${encodeURIComponent(url)}.mp4`, title: url } }));
   importToLibrary = (p: string, _o: unknown, taskId: string) => this.op('import', p, taskId, () => ({ success: true, data: { videoId: `v${this.nextVideo++}` } }));
-  transcribeVideo = (id: string, options: unknown, taskId: string, route?: WhisperRoute): Promise<TaskResult> => {
+  transcribeVideo = (id: string, taskId: string, route?: WhisperRoute): Promise<TaskResult> => {
     this.transcribeRoutes.push({ taskId, route });
     if (this.transcribe) {
       this.calls.push({ op: 'transcribe', arg: id, taskId });
-      return this.transcribe(id, (options ?? {}) as Record<string, unknown>, taskId, route);
+      return this.transcribe(id, taskId, route);
     }
     return this.op('transcribe', id, taskId, () => ({ success: true, data: { transcriptPath: '/tmp/t.srt' } }));
   };
@@ -144,7 +147,6 @@ export class StubLanes {
   ready: Promise<void> = Promise.resolve();
   offset = 0;
   now = (): number => Date.now() + this.offset;
-  modeValue: 'crucible' | 'direct' = 'crucible';
   /** model → server; upstream models go to the cloud lane on `cloudServer`. */
   serverOf = new Map<string, string>();
   cloudServer = 'mac';
@@ -155,10 +157,11 @@ export class StubLanes {
   /** server → holder sentence at the reservation (the door's 409). */
   doorBusy = new Map<string, string>();
   /**
-   * P5: where a transcribe goes. `{server, model}` for a GPU lane, or
-   * `{cli: warning|null}` for whisper-cli in the main pool. Default: whisper-cli, no warning.
+   * P5: where a transcribe goes. `{server, model}` for a GPU lane (the
+   * default: mac's large-v3), or `{wait: reason}` when no server can take it
+   * (the task parks: there is no other transcriber).
    */
-  transcribeTo: { server: string; model: string } | { cli: string | null } = { cli: null };
+  transcribeTo: { server: string; model: string } | { wait: string } = { server: 'mac', model: 'mlx-whisper-large-v3' };
   placeTranscribeCalls = 0;
   /** server → holder sentence at the asr (job-lane) preflight. */
   jobBusy = new Map<string, string>();
@@ -169,7 +172,6 @@ export class StubLanes {
   private readonly listeners = new Set<() => void>();
   placeCalls = 0;
 
-  mode() { return this.modeValue; }
   onServersChanged(listener: () => void) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   serversChanged() { for (const l of this.listeners) l(); }
   targetOf(task: Task): CrucibleTarget {
@@ -185,10 +187,10 @@ export class StubLanes {
     const server = this.serverOf.get(target.model) ?? 'mac';
     return { kind: 'lane', placement: { lane: gpuLaneOf(server), server, target } };
   }
-  async placeTranscribe(_task: Task): Promise<TranscribePlaceAnswer> {
+  async placeTranscribe(): Promise<TranscribePlaceAnswer> {
     this.placeTranscribeCalls++;
     const to = this.transcribeTo;
-    if ('cli' in to) return { kind: 'cli', reason: 'scripted', warning: to.cli };
+    if ('wait' in to) return { kind: 'wait', reason: to.wait };
     return { kind: 'lane', placement: { lane: gpuLaneOf(to.server), server: to.server, target: asrTarget(to.model) } };
   }
   async preflightJob(server: string) { return this.jobBusy.get(server) ?? null; }
@@ -204,9 +206,37 @@ export class StubLanes {
     return fn();
   }
   async lanesStatus(running: LaneTaskView[]): Promise<LanesStatus> {
-    return { mode: this.modeValue, lanes: running.length ? [] : [], timestamp: new Date().toISOString() };
+    return { lanes: running.length ? [] : [], timestamp: new Date().toISOString() };
   }
   setPaused() { /* recorded by specs that need it */ }
+}
+
+/**
+ * The readiness gate, scripted: `ready` (the default), or a view whose state
+ * refuses or parks. Records what the queue told it about waiting AI work.
+ */
+export class StubReadiness {
+  view: CrucibleReadinessView = {
+    state: 'ready', reason: 'Crucible on mac is ready.', action: null, server: 'mac', busy: null,
+    progress: null, declined: false, aiWaiting: 0, at: new Date(0).toISOString(),
+  };
+  readonly waiting: number[] = [];
+  assertCalls = 0;
+  private readonly listeners = new Set<(view: CrucibleReadinessView) => void>();
+  current() { return this.view; }
+  set(view: Partial<CrucibleReadinessView>) {
+    this.view = { ...this.view, ...view };
+    for (const l of this.listeners) l(this.view);
+  }
+  onChange(listener: (view: CrucibleReadinessView) => void) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
+  assertCanQueue(what: string) {
+    this.assertCalls++;
+    const v = this.view;
+    if (v.state === 'ready' || v.state === 'starting' || (v.state === 'unreachable' && !v.declined)) return;
+    throw new CrucibleRequiredError(what, v);
+  }
+  assertReadyNow(what: string) { if (this.view.state !== 'ready') throw new CrucibleRequiredError(what, this.view); }
+  noteAiWaiting(count: number) { this.waiting.push(count); }
 }
 
 export interface Rig {
@@ -216,9 +246,10 @@ export interface Rig {
   emitter: EventEmitter2;
   events: Array<{ name: string; data: Record<string, any> }>;
   db: Record<string, jest.Mock>;
+  readiness: StubReadiness | CrucibleReadinessService;
 }
 
-export function makeRig(lanes?: StubLanes | CrucibleLanesService): Rig {
+export function makeRig(lanes: StubLanes | CrucibleLanesService = new StubLanes(), readiness: StubReadiness | CrucibleReadinessService = new StubReadiness()): Rig {
   const media = new StubMedia();
   const libraries = new StubLibraries();
   const emitter = new EventEmitter2();
@@ -248,8 +279,9 @@ export function makeRig(lanes?: StubLanes | CrucibleLanesService): Rig {
     {} as never,
     {} as never,
     lanes as never,
+    readiness as never,
   );
-  return { qm, media, libraries, emitter, events, db };
+  return { qm, media, libraries, emitter, events, db, readiness };
 }
 
 export function analyzeJob(videoId: string, aiModel: string, extra: Record<string, unknown> = {}) {

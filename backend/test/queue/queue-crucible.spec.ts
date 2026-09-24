@@ -10,16 +10,15 @@ import { AIProviderService } from '../../src/analysis/ai-provider.service';
 import { isCancellation } from '../../src/analysis/cancellation';
 import { CrucibleServersService } from '../../src/crucible/crucible-servers.service';
 import { InFlightLedger } from '../../src/crucible/in-flight-ledger';
-import { AI_VIA_ENV } from '../../src/crucible/llm/ai-via';
+import { CrucibleTranscriptionService } from '../../src/crucible/asr/crucible-transcription.service';
 import { CrucibleChatService } from '../../src/crucible/llm/crucible-chat.service';
 import { CrucibleLanesService } from '../../src/queue/crucible-lanes';
 import type { TaskResult } from '../../src/common/interfaces/task.interface';
 import { startFakeCrucible, unusedLoopbackUrl, type FakeCrucible } from '../fake-crucible/fake-crucible';
 import { harness, type Harness } from '../crucible/harness';
 import { tempDir } from '../crucible/helpers';
-import { analyzeJob, downloadJob, gate, makeRig, tick, until, type Rig } from './queue-rig';
+import { analyzeJob, downloadJob, gate, makeRig, StubReadiness, tick, until, type Rig } from './queue-rig';
 
-const noLlama = { isAvailable: () => false } as never;
 const savedEnv = { ...process.env };
 const BUSY = { client: 'bookforge crucible-client/1.0.6', type: 'tts', progress: 0.4 };
 
@@ -37,11 +36,12 @@ async function wire(url?: string): Promise<void> {
   ledger = InFlightLedger.inDir(h.dir, () => undefined);
   const servers = new CrucibleServersService(h.registry, h.factory);
   chat = new CrucibleChatService(servers, h.factory, h.probes, ledger);
-  lanes = new CrucibleLanesService(servers, h.probes, chat, h.factory, h.registry, ledger);
-  lanes.via = () => 'crucible';
+  const transcription = new CrucibleTranscriptionService(servers, h.probes, h.factory, ledger);
+  transcription.configDir = () => h.dir;
+  lanes = new CrucibleLanesService(servers, h.probes, chat, h.factory, h.registry, transcription, ledger);
   lanes.now = () => Date.now() + offset;
   lanes.sweepTiming = { confirmForMs: 200, pollEveryMs: 20 };
-  provider = new AIProviderService(noLlama, chat);
+  provider = new AIProviderService(chat);
 }
 
 /** An analysis body that makes real calls through the provider, as ai-analysis does. */
@@ -64,7 +64,7 @@ function analysisThatCalls(models: string[], hooks: { between?: () => Promise<vo
 
 beforeEach(async () => {
   offset = 0;
-  process.env = { ...savedEnv, APPDATA: tempDir('queue-appdata-'), [AI_VIA_ENV]: 'crucible', BRIEFCASE_PLACE_MODEL: '' };
+  process.env = { ...savedEnv, APPDATA: tempDir('queue-appdata-') };
   fake = await startFakeCrucible({ models: [{ id: 'qwen3.5-9b', paramsB: 9 }, { id: 'qwen3.5-4b', paramsB: 4 }], upstreams: { anthropic: { key: 'sk-ant-9999' } } });
 });
 afterEach(async () => {
@@ -229,7 +229,6 @@ describe('the lane strip', () => {
     const rig = makeRig(lanes);
     rig.qm.onModuleInit();
     let status = await rig.qm.getLanesStatus();
-    expect(status.mode).toBe('crucible');
     expect(status.lanes.map((l) => [l.id, l.label, l.state, l.width])).toEqual([
       ['gpu:mac', 'GPU · mac', 'busy', 1],
       ['cloud', 'Cloud', 'ready', 2],
@@ -247,11 +246,11 @@ describe('the lane strip', () => {
     rig.qm.onModuleDestroy();
   });
 
-  it("under aiVia 'direct' there are no lanes", async () => {
+  it('with no server registered there are no lanes to draw (and nothing else runs AI)', async () => {
     await wire();
-    lanes.via = () => 'direct';
+    h.registry.remove('mac');
     const rig = makeRig(lanes);
-    expect(await rig.qm.getLanesStatus()).toMatchObject({ mode: 'direct', lanes: [] });
+    expect(await rig.qm.getLanesStatus()).toMatchObject({ lanes: [expect.objectContaining({ id: 'cloud' })] });
   });
 });
 
@@ -301,19 +300,23 @@ describe('REGRESSION: downloads, imports and processing are untouched', () => {
     // A startup sweep still running must not hold the main pool.
     let sweepDone!: () => void;
     lanes.ready = new Promise<void>((resolve) => { sweepDone = resolve; });
-    const crucibleRig = makeRig(lanes);
+    const unreachable = new StubReadiness();
+    unreachable.set({ state: 'unreachable', reason: "Crucible on mac isn't answering.", action: 'connect', server: null });
+    const crucibleRig = makeRig(lanes, unreachable);
     const withCrucible = await run(crucibleRig);
     expect(crucibleRig.media.maxDownloads).toBe(5);
     expect(crucibleRig.media.started('download')).toHaveLength(20);
     expect(crucibleRig.media.started('import')).toHaveLength(20);
 
-    // Same queue on the direct road, no lanes at all: the same concurrency.
-    const directRig = makeRig();
-    directRig.media.gated.add('analyze');
-    const direct = await run(directRig);
-    expect(directRig.media.maxDownloads).toBe(5);
-    // No new waits: within noise of the direct road.
-    expect(withCrucible.ms).toBeLessThan(direct.ms * 2 + 200);
+    // The same downloads with no AI task at all: the same concurrency, and no new waits.
+    const plainRig = makeRig(lanes, unreachable);
+    plainRig.media.delayMs = 15;
+    const t0 = Date.now();
+    const plain = Array.from({ length: 20 }, (_, i) => plainRig.qm.addJob(downloadJob(`https://example.com/p${i}`)));
+    await until(() => plain.every((id) => plainRig.qm.getJob(id)?.status === 'completed'), 10_000, 'every plain download');
+    const plainMs = Date.now() - t0;
+    expect(plainRig.media.maxDownloads).toBe(5);
+    expect(withCrucible.ms).toBeLessThan(plainMs * 2 + 200);
 
     // Now let the lanes run: every analysis parks, none fails, none runs.
     sweepDone();
@@ -324,20 +327,23 @@ describe('REGRESSION: downloads, imports and processing are untouched', () => {
     expect(crucibleRig.media.started('analyze')).toHaveLength(0);
     expect(crucibleRig.events.some((e) => e.name === 'task.failed')).toBe(false);
     crucibleRig.qm.onModuleDestroy();
-    directRig.qm.onModuleDestroy();
+    plainRig.qm.onModuleDestroy();
   }, 30_000);
 
-  // P5: a transcribe IS placed by the lanes now (placeTranscribe); with no
-  // transcription service it is whisper-cli in the main pool, and never an LLM venue.
-  it('non-AI tasks (normalize, transcribe, process-video) never ask for an LLM venue, and run in the main pool', async () => {
+  it('non-AI tasks (normalize, process-video) never ask for a venue and run in the main pool; a transcribe parks on Crucible, never elsewhere', async () => {
     await wire(await unusedLoopbackUrl());
-    const spy = jest.spyOn(lanes, 'place');
+    const place = jest.spyOn(lanes, 'place');
     const rig = makeRig(lanes);
-    const ids = ['normalize-audio', 'transcribe', 'process-video'].map((type) =>
+    const ids = ['normalize-audio', 'process-video'].map((type) =>
       rig.qm.addJob({ videoId: `v-${type}`, tasks: [{ type, options: {} } as never] }));
+    const transcribe = rig.qm.addJob({ videoId: 'v-t', tasks: [{ type: 'transcribe', options: {} } as never] });
     await until(() => ids.every((id) => rig.qm.getJob(id)?.status === 'completed'));
+    await until(() => rig.qm.getJob(transcribe)?.parkedReason !== undefined);
     await tick(20);
-    expect(spy).not.toHaveBeenCalled();
+    expect(place).not.toHaveBeenCalled();
+    expect(rig.media.started('transcribe')).toHaveLength(0);
+    expect(rig.qm.getJob(transcribe)).toMatchObject({ status: 'pending', parkedReason: expect.stringMatching(/isn't answering/) });
     expect([...rig.qm.getMainPool().values()]).toHaveLength(0);
+    rig.qm.onModuleDestroy();
   });
 });

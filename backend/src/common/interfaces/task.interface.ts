@@ -72,24 +72,23 @@ export interface ProcessVideoTask extends BaseTask {
   };
 }
 
+/**
+ * Transcription on Crucible's asr job. The server and model come from
+ * Settings › Transcription; there are no per-task options (P7 removed the
+ * whisper-cli model choice and `translate`, which Briefcase does not need).
+ */
 export interface TranscribeTask extends BaseTask {
   type: 'transcribe';
-  options?: {
-    model?: string; // Whisper model (tiny, base)
-    language?: string; // Language code (en, es, fr, etc.)
-    translate?: boolean; // Translate speech to English (whisper --translate)
-  };
+  options?: Record<string, never>;
 }
 
 export interface AnalyzeTask extends BaseTask {
   type: 'analyze';
   options?: {
     aiModel: string;
+    /** `local` = a model in the Crucible server's own catalog; the rest are its upstreams. */
     aiProvider?: 'local' | 'ollama' | 'claude' | 'openai';
-    apiKey?: string;
-    ollamaEndpoint?: string;
     customInstructions?: string;
-    analysisGranularity?: number; // 1-5: 1 = strong matches only, 5 = flag everything plausible
   };
 }
 
@@ -98,8 +97,6 @@ export interface AnalyzeWebpageTask extends BaseTask {
   options?: {
     aiModel: string;
     aiProvider?: 'local' | 'ollama' | 'claude' | 'openai';
-    apiKey?: string;
-    ollamaEndpoint?: string;
   };
 }
 
@@ -242,7 +239,7 @@ export interface QueueJob {
   startedAt?: Date;
   completedAt?: Date;
 
-  // ── Crucible lanes (P4). Absent under aiVia 'direct'. ──
+  // ── Crucible lanes (P4): where every AI task runs. ──
   /** The lane the current AI task was placed on: `gpu:<server>` or `cloud`. */
   lane?: string;
   /** The Crucible server it runs (or ran) on. */
@@ -262,12 +259,6 @@ export interface QueueJob {
   /** When the current AI task became runnable (the same-model preference's starvation guard). */
   aiWaitingSince?: number;
   aiWaitingIndex?: number;
-  /**
-   * P5: the transcribe task at `index` runs on whisper-cli in the main pool
-   * (the venue rule said so, or Crucible couldn't take it). `warning` is put on
-   * the job when it finishes, when that was a fallback.
-   */
-  transcribeRoute?: { index: number; kind: 'cli'; warning: string | null };
 }
 
 // Queue status

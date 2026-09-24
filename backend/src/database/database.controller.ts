@@ -2346,15 +2346,11 @@ export class DatabaseController {
   async startBatchAnalysis(
     @Body() options?: {
       aiModel?: string;
-      aiProvider?: 'ollama' | 'claude' | 'openai';
-      whisperModel?: string;
-      ollamaEndpoint?: string;
+      aiProvider?: 'local' | 'ollama' | 'claude' | 'openai';
       limit?: number;
       videoIds?: string[];
       transcribeOnly?: boolean;
       forceReanalyze?: boolean;
-      claudeApiKey?: string;
-      openaiApiKey?: string;
     },
   ) {
     this.logger.log(`Starting batch ${options?.transcribeOnly ? 'transcription' : 'analysis'}`);
@@ -2963,7 +2959,7 @@ export class DatabaseController {
     // relink would race the shared connection into the wrong library — refuse.
     const queueManager = this.getQueueManager();
     if (queueManager.hasActiveTasks()) {
-      const running = queueManager.getMainPool().size + (queueManager.getAIPool() ? 1 : 0);
+      const running = queueManager.runningTaskCount();
       throw new HttpException(
         `Cannot relink while ${running} task(s) are running — wait for the queue to finish or cancel it`,
         HttpStatus.CONFLICT,
@@ -3429,7 +3425,7 @@ export class DatabaseController {
     // read/write the wrong library — refuse while either is in progress.
     const queueManager = this.getQueueManager();
     if (queueManager.hasActiveTasks() || this.getRelinkingService().isRelinkInProgress()) {
-      const running = queueManager.getMainPool().size + (queueManager.getAIPool() ? 1 : 0);
+      const running = queueManager.runningTaskCount();
       throw new HttpException(
         `Cannot switch libraries while ${running} task(s) are running or a relink is in progress — wait for them to finish or cancel`,
         HttpStatus.CONFLICT,
@@ -3562,7 +3558,7 @@ export class DatabaseController {
     // and returned as a 200 { success:false }.
     const queueManager = this.getQueueManager();
     if (queueManager.hasActiveTasks() || this.getRelinkingService().isRelinkInProgress()) {
-      const running = queueManager.getMainPool().size + (queueManager.getAIPool() ? 1 : 0);
+      const running = queueManager.runningTaskCount();
       throw new HttpException(
         `Cannot transfer libraries while ${running} task(s) are running or a relink is in progress — wait for them to finish or cancel`,
         HttpStatus.CONFLICT,

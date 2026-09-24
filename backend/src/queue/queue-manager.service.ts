@@ -22,7 +22,8 @@ import * as path from 'path';
 import { atomicReplaceFile } from '../common/utils/temp-file.util';
 import { isParked } from '../crucible/llm/errors';
 import { isAsrUnavailable } from '../crucible/asr/crucible-asr-job';
-import type { WhisperRoute } from '../media/whisper.service';
+import { isTranscriptionRetryable, type WhisperRoute } from '../media/whisper.service';
+import { CrucibleReadinessService, crucibleTasksIn } from '../crucible/readiness.service';
 import {
   CLOUD_LANE,
   CrucibleLanesService,
@@ -42,7 +43,7 @@ export interface ActiveTask {
   taskIndex: number;
   type: string;
   /** 'lane' is a Crucible lane (P4): `lane` names which, `server` where it runs. */
-  pool: 'main' | 'ai' | 'lane';
+  pool: 'main' | 'lane';
   lane?: string;
   server?: string;
   model?: string;
@@ -73,8 +74,8 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
 
   // Task pools - tracks actively running tasks
   private mainPool = new Map<string, ActiveTask>();  // Max 5 concurrent
-  private aiPool: ActiveTask | null = null;           // Max 1 concurrent (aiVia 'direct')
-  // Crucible lanes (aiVia 'crucible', P4): gpu:<server> ×1 each, cloud ×2.
+  // Crucible lanes (P4): gpu:<server> ×1 each, cloud ×2. Every AI task runs
+  // on one; there is no other AI pool (P7 removed the direct road's pool of 1).
   private lanePool = new Map<string, ActiveTask>();
 
   // Admission into the lanes is async (venue, preflight) and serialised.
@@ -84,6 +85,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
   private lanesTimer: NodeJS.Timeout | null = null;
   private lanesEmitTimer: NodeJS.Timeout | null = null;
   private unsubscribeServers: (() => void) | null = null;
+  private unsubscribeReadiness: (() => void) | null = null;
   private readonly LANES_REFRESH_MS = 15_000;
 
   // Queue processing state (kept for API compatibility, no longer used as a lock)
@@ -92,12 +94,6 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
   // Watchdog timer for detecting stuck tasks
   private watchdogInterval: NodeJS.Timeout | null = null;
   private readonly WATCHDOG_INTERVAL_MS = 60000;  // Check every minute
-  // 90 minutes. Sized from measured qwen3.8:27b rates (~220s per flag-extraction
-  // call, ~40s per chapter): a 60-minute video projects to ~57min, leaving almost
-  // no margin at 60. The asymmetry justifies the headroom — a run that finishes
-  // early costs nothing, while a premature kill destroys the whole analysis,
-  // since results are only persisted at finalize.
-  private readonly AI_TASK_TIMEOUT_MS = 90 * 60 * 1000;  // 90 minutes for AI tasks
   // Main-pool tasks are killed on a STALL, not on total runtime. A wall-clock
   // cap can't distinguish a wedged task from a healthy slow one, and legitimate
   // work routinely runs past any cap worth setting: a 2.5-hour broadcast is a
@@ -106,14 +102,8 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
   // alone; 10 minutes of total silence is the stuck signal.
   private readonly MAIN_TASK_STALL_MS = 10 * 60 * 1000;  // 10 minutes with no progress
 
-  // Concurrency limits (5+1 model)
-  private readonly MAX_MAIN_CONCURRENT = 5;  // 5 general tasks
-  private readonly MAX_AI_CONCURRENT = 1;     // 1 AI task
-  // P5 (migration plan §7.1): at most 2 of the main pool's 5 slots run a
-  // whisper-cli transcription at once (each is a whole CPU/GPU-heavy process;
-  // before P5 up to 5 ran together). Transcriptions on Crucible hold a GPU
-  // lane instead and never count here.
-  private readonly MAX_MAIN_TRANSCRIBES = 2;
+  // Concurrency: 5 general (non-AI) tasks; AI tasks take Crucible lanes.
+  private readonly MAX_MAIN_CONCURRENT = 5;
 
   constructor(
     private readonly mediaOps: MediaOperationsService,
@@ -124,14 +114,15 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
     private readonly clipExtractor: ClipExtractorService,
     private readonly fileScannerService: FileScannerService,
     private readonly libraryService: LibraryService,
-    /** P4. Absent (a spec, or a build without Crucible): the AI pool, as before. */
-    @Optional() private readonly lanes?: CrucibleLanesService,
+    /** P4: where every AI task runs. Nothing on the main pool's path reads it. */
+    private readonly lanes: CrucibleLanesService,
+    /**
+     * P7: is Crucible there. Asked only for jobs that carry an AI task (at the
+     * door), and told how much AI work is parked waiting on it. A job with no
+     * AI task never reads it.
+     */
+    private readonly readiness: CrucibleReadinessService,
   ) {}
-
-  /** 'crucible' routes analyze tasks to Crucible lanes; 'direct' keeps the AI pool of one. */
-  private aiMode(): 'crucible' | 'direct' {
-    return this.lanes === undefined ? 'direct' : this.lanes.mode();
-  }
 
   /**
    * Lifecycle hook - called when the module is initialized
@@ -141,7 +132,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
 
     this.startWatchdog();
 
-    if (this.lanes !== undefined) {
+    {
       // A server added, removed, re-ranked, paused or resumed: parked work is
       // asked again at once (§7.2 step 4), and the lane strip redrawn.
       this.unsubscribeServers = this.lanes.onServersChanged(() => {
@@ -154,11 +145,20 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       // The lane strip's reach and holder sentences go stale on their own
       // (another app starts or stops); redraw them, and re-ask parked work
       // whose server now reads free, every 15 s.
-      this.lanesTimer = setInterval(() => {
-        if (this.aiMode() !== 'crucible') return;
-        this.scheduleLanesEmit();
-      }, this.LANES_REFRESH_MS);
+      this.lanesTimer = setInterval(() => this.scheduleLanesEmit(), this.LANES_REFRESH_MS);
       this.lanesTimer.unref?.();
+      // Crucible back (started, reconnected, resumed): parked work is asked again at once.
+      this.unsubscribeReadiness = this.readiness.onChange((view) => {
+        if (view.state !== 'ready') return;
+        let parked = false;
+        for (const job of this.jobQueue.values()) {
+          if (job.parkedReason !== undefined) {
+            job.parkedUntil = 0;
+            parked = true;
+          }
+        }
+        if (parked) this.processQueue();
+      });
     }
   }
 
@@ -182,29 +182,6 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
    */
   private checkForStuckTasks() {
     const now = new Date();
-
-    // Check AI pool. The AI pool has exactly ONE slot, so a hung AI task wedges
-    // ALL analysis forever unless we actively reclaim the slot. On hard timeout,
-    // fail the task and free the slot instead of only logging.
-    if (this.aiPool) {
-      const active = this.aiPool;
-      const runningMs = now.getTime() - active.startedAt.getTime();
-      const lastProgressMs = now.getTime() - active.lastProgressAt.getTime();
-
-      if (runningMs > this.AI_TASK_TIMEOUT_MS) {
-        this.logger.error(
-          `⏱️ AI task ${active.taskId} exceeded the ${Math.round(this.AI_TASK_TIMEOUT_MS / 60000)}-minute timeout ` +
-          `(running ${Math.round(runningMs / 60000)}m, last progress ${Math.round(lastProgressMs / 1000)}s ago at ${active.progress}%). ` +
-          `Failing it and freeing the AI slot.`
-        );
-        this.failStuckTask(active, 'ai', `AI task timed out after ${Math.round(runningMs / 60000)} minutes without completing`);
-      } else if (lastProgressMs > 5 * 60 * 1000) {  // 5 minutes without progress
-        this.logger.warn(
-          `⚠️ AI task ${active.taskId} hasn't reported progress in ${Math.round(lastProgressMs / 60000)} minutes ` +
-          `(stuck at ${active.progress}%)`
-        );
-      }
-    }
 
     // Crucible lanes: a STALL, not a wall clock (§7.5). A long analysis on a
     // 27B is healthy as long as chats keep answering; 15 minutes with no
@@ -266,7 +243,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
    * waiting work proceeds. `abandoned` guards executeTask from double-emitting if
    * its promise ever settles later.
    */
-  private failStuckTask(active: ActiveTask, pool: 'main' | 'ai' | 'lane', reason: string): void {
+  private failStuckTask(active: ActiveTask, pool: 'main' | 'lane', reason: string): void {
     active.abandoned = true;
 
     // Kill the stuck child so it stops consuming CPU/network instead of only
@@ -285,12 +262,8 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       if (this.mainPool.get(active.taskId) === active) {
         this.mainPool.delete(active.taskId);
       }
-    } else if (pool === 'lane') {
-      if (this.lanePool.get(active.taskId) === active) {
-        this.lanePool.delete(active.taskId);
-      }
-    } else if (this.aiPool === active) {
-      this.aiPool = null;
+    } else if (this.lanePool.get(active.taskId) === active) {
+      this.lanePool.delete(active.taskId);
     }
 
     this.emitTaskFailed({
@@ -359,13 +332,6 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
    * Update progress for an active task (called by event handlers)
    */
   updateTaskProgress(jobId: string, progress: number, message?: string): void {
-    // Update AI pool if matching
-    if (this.aiPool?.jobId === jobId) {
-      this.aiPool.progress = progress;
-      this.aiPool.lastProgressAt = new Date();
-      if (message) this.aiPool.message = message;
-    }
-
     // Update main pool if matching
     const mainTask = this.mainPool.get(jobId);
     if (mainTask) {
@@ -450,6 +416,8 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
     this.parkTimer = this.lanesEmitTimer = this.lanesTimer = null;
     this.unsubscribeServers?.();
     this.unsubscribeServers = null;
+    this.unsubscribeReadiness?.();
+    this.unsubscribeReadiness = null;
 
     // Crucible lane tasks: abort each run so its lease is released in the
     // run's own finally. Whatever that cannot finish (the process is going),
@@ -474,7 +442,6 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
     // Clear the queue and pools
     this.jobQueue.clear();
     this.mainPool.clear();
-    this.aiPool = null;
     this.lanePool.clear();
 
     // Reset processing flag
@@ -485,8 +452,12 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
    * Add a job to the queue
    */
   addJob(job: Omit<QueueJob, 'id' | 'createdAt' | 'status' | 'progress' | 'currentPhase' | 'currentTaskIndex'>, options?: { paused?: boolean }): string {
-    const jobId = uuidv4();
     const paused = options?.paused ?? false;
+    // P7: a job that needs Crucible is refused at the door (CrucibleRequiredError,
+    // HTTP 409) when it could never run as things stand. A staged (paused) job
+    // is checked when it is started instead.
+    if (!paused) this.assertCrucibleFor([job]);
+    const jobId = uuidv4();
 
     const fullJob: QueueJob = {
       ...job,
@@ -515,6 +486,8 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
    * Start one or more paused jobs — sets status to 'pending' and kicks the queue
    */
   startJobs(jobIds: string[]): number {
+    // All or none: a staged job that needs Crucible it cannot have refuses the start.
+    this.assertCrucibleFor(jobIds.map((id) => this.jobQueue.get(id)).filter((j): j is QueueJob => j !== undefined && j.status === 'paused'));
     let startedCount = 0;
     for (const jobId of jobIds) {
       const job = this.jobQueue.get(jobId);
@@ -529,6 +502,24 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       setImmediate(() => this.processQueue());
     }
     return startedCount;
+  }
+
+  /** True when an AI task queued now would be accepted (readiness's gate says yes). */
+  canQueueCrucibleWork(): boolean {
+    try {
+      this.readiness.assertCanQueue('AI work');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Refuse jobs whose AI tasks could never run as things stand (the readiness gate). Non-AI jobs pass untouched. */
+  private assertCrucibleFor(jobs: Array<Pick<QueueJob, 'tasks'>>): void {
+    const needs = [...new Set(jobs.flatMap((j) => crucibleTasksIn(j.tasks)))];
+    if (needs.length === 0) return;
+    const what = needs.map((t) => (t === 'transcribe' ? 'Transcription' : t === 'analyze' ? 'AI analysis' : 'Webpage analysis')).join(' and ');
+    this.readiness.assertCanQueue(what);
   }
 
   /**
@@ -553,13 +544,6 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
   }
 
   /**
-   * Get AI pool status (for API/monitoring)
-   */
-  getAIPool(): ActiveTask | null {
-    return this.aiPool;
-  }
-
-  /**
    * True when any task is currently running in either pool. Used to block
    * external library switch/transfer while a task could be mid-await (which
    * would swap the shared DB connection out from under it).
@@ -567,7 +551,12 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
   hasActiveTasks(): boolean {
     // Parked tasks are not here: they hold no slot, so a park never blocks a
     // library switch (§7.2 step 4).
-    return this.mainPool.size > 0 || !!this.aiPool || this.lanePool.size > 0;
+    return this.mainPool.size > 0 || this.lanePool.size > 0;
+  }
+
+  /** Tasks holding a slot now: the main pool's and the lanes'. */
+  runningTaskCount(): number {
+    return this.mainPool.size + this.lanePool.size;
   }
 
   /** Crucible lane slots (P4), for the API and specs. */
@@ -601,9 +590,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
     // Abort the running child process (download/transcode/transcription) so it
     // stops immediately instead of running to completion. Look the active task
     // up BEFORE freeing the slot below so we still know it's ours to abort.
-    const active = this.mainPool.get(jobId)
-      ?? (this.aiPool?.jobId === jobId ? this.aiPool : undefined)
-      ?? this.lanePool.get(jobId);
+    const active = this.mainPool.get(jobId) ?? this.lanePool.get(jobId);
     if (active) {
       this.abortActiveTask(active);
     }
@@ -613,12 +600,10 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
     job.completedAt = new Date();
     // A parked task holds nothing on any server: cancelling it is only this.
     this.clearPark(job);
+    this.scheduleParkWake();
 
     // Remove from pools if active
     this.mainPool.delete(jobId);
-    if (this.aiPool?.jobId === jobId) {
-      this.aiPool = null;
-    }
     const lane = this.lanePool.get(jobId);
     this.lanePool.delete(jobId);
     if (lane !== undefined) this.scheduleLanesEmit();
@@ -678,14 +663,8 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         maxConcurrent: this.MAX_MAIN_CONCURRENT,
         tasks: Array.from(this.mainPool.values()),
       },
-      aiPool: {
-        active: this.aiPool ? 1 : 0,
-        maxConcurrent: this.MAX_AI_CONCURRENT,
-        task: this.aiPool,
-      },
-      // P4: Crucible lanes. Empty under aiVia 'direct'.
+      // P4: Crucible lanes, where every AI task runs.
       lanePool: {
-        mode: this.aiMode(),
         active: this.lanePool.size,
         tasks: Array.from(this.lanePool.values()).map(({ abort: _abort, ...rest }) => rest),
         parked: jobs.filter(j => j.parkedReason !== undefined && (j.status === 'pending' || j.status === 'processing')).length,
@@ -703,34 +682,16 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
 
 
   /**
-   * Unified queue processing with 5+1 pool model.
+   * Unified queue processing: the main pool (5) for everything that is not AI,
+   * and the Crucible lanes for everything that is.
    * Event-driven: called when jobs are added or tasks complete.
-   * Each call fills available pool slots with the next eligible tasks.
    * No polling loop — executeTask's finally block re-triggers this.
    */
   private processQueue(): void {
-    // Fill main pool (up to 5 concurrent tasks)
-    let dispatched = this.fillMainPool();
-
-    // AI tasks. Under aiVia 'crucible' they go to Crucible lanes, admitted
-    // asynchronously (venue, activity, reservation) so nothing here waits on
-    // the network. Under 'direct' this is today's AI pool, unchanged.
-    if (this.aiMode() === 'crucible') {
-      this.kickAdmission();
-      return;
-    }
-
-    // Fill AI pool (up to 1 concurrent task)
-    if (!this.aiPool) {
-      const nextTask = this.getNextAITask();
-      if (nextTask) {
-        this.executeTask(nextTask, 'ai').catch(err => {
-          this.logger.error(`AI pool task failed: ${err?.message || err}`);
-        });
-        dispatched++;
-      }
-    }
-
+    this.fillMainPool();
+    // AI tasks go to Crucible lanes, admitted asynchronously (venue, activity,
+    // reservation) so nothing here waits on the network.
+    this.kickAdmission();
   }
 
   /** Fill the main pool (up to 5 concurrent tasks). Returns how many were dispatched. */
@@ -756,7 +717,6 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
   private getInFlightLibraryId(): string | undefined {
     const first = this.mainPool.values().next().value as ActiveTask | undefined;
     if (first) return first.libraryId;
-    if (this.aiPool) return this.aiPool.libraryId;
     const lane = this.lanePool.values().next().value as ActiveTask | undefined;
     return lane?.libraryId;
   }
@@ -769,7 +729,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
    * for another library waits until both pools drain.
    */
   private canStartJobLibrary(job: QueueJob): boolean {
-    if (this.mainPool.size === 0 && !this.aiPool && this.lanePool.size === 0) {
+    if (this.mainPool.size === 0 && this.lanePool.size === 0) {
       return true;
     }
     const target = job.libraryId ?? this.libraryManager.getActiveLibrary()?.id;
@@ -809,77 +769,9 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         continue; // Wait for previous tasks to complete
       }
 
-      // Only return non-AI tasks
-      if (currentTask.type === 'analyze' || currentTask.type === 'analyze-webpage') continue;
-
-      if (currentTask.type === 'transcribe') {
-        // Under Crucible lanes a transcription is PLACED first (P5): a GPU
-        // lane, or back here as whisper-cli. Unplaced, it isn't main-pool work.
-        if (this.aiMode() === 'crucible' && !this.transcribeRoutedToCli(job)) continue;
-        if (this.runningMainTranscribes() >= this.MAX_MAIN_TRANSCRIBES) continue;
-      }
+      // Only non-AI tasks: every task that needs Crucible takes a lane.
+      if (LANE_TASK_TYPES.has(currentTask.type)) continue;
       return { task: currentTask, job };
-    }
-    return null;
-  }
-
-  /** The job's current transcribe task was routed to whisper-cli (the venue rule, or a fallback). */
-  private transcribeRoutedToCli(job: QueueJob): boolean {
-    return job.transcribeRoute !== undefined && job.transcribeRoute.index === job.currentTaskIndex;
-  }
-
-  /** whisper-cli transcriptions running in the main pool now. */
-  private runningMainTranscribes(): number {
-    let n = 0;
-    for (const task of this.mainPool.values()) if (task.type === 'transcribe') n++;
-    return n;
-  }
-
-  /** Hand a job's transcribe task to the main pool as whisper-cli. It is no longer the lanes' to place. */
-  private routeTranscribeToCli(job: QueueJob, index: number, warning: string | null): void {
-    job.transcribeRoute = { index, kind: 'cli', warning };
-    this.clearPark(job);
-    delete job.lane;
-    delete job.venue;
-  }
-
-  /**
-   * Get next AI task from any job
-   */
-  private getNextAITask(): { task: Task; job: QueueJob } | null {
-    this.logger.debug(`getNextAITask: Checking ${this.jobQueue.size} jobs`);
-    for (const job of this.jobQueue.values()) {
-      if (job.status !== 'pending' && job.status !== 'processing') continue;
-
-      // Don't start a task that would switch the shared DB connection out from
-      // under a task already running against a different library.
-      if (!this.canStartJobLibrary(job)) continue;
-
-      const currentTask = job.tasks[job.currentTaskIndex];
-      this.logger.debug(`getNextAITask: Job ${job.id} currentTaskIndex=${job.currentTaskIndex}, task=${currentTask?.type}`);
-      if (!currentTask) continue;
-
-      if (this.isTaskRunning(job.id, job.currentTaskIndex)) continue;
-
-      // Only return AI tasks
-      if (currentTask.type === 'analyze' || currentTask.type === 'analyze-webpage') {
-        this.logger.log(`getNextAITask: Found ${currentTask.type} task for job ${job.id}`);
-        // Check if any previous task in this job is still running
-        // Tasks must be sequential within a job
-        let previousTaskRunning = false;
-        for (let i = 0; i < job.currentTaskIndex; i++) {
-          if (this.isTaskRunning(job.id, i)) {
-            previousTaskRunning = true;
-            break;
-          }
-        }
-
-        if (previousTaskRunning) {
-          continue; // Wait for previous tasks to complete
-        }
-
-        return { task: currentTask, job };
-      }
     }
     return null;
   }
@@ -895,11 +787,6 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       }
     }
 
-    // Check AI pool
-    if (this.aiPool?.jobId === jobId && this.aiPool.taskIndex === taskIndex) {
-      return true;
-    }
-
     const lane = this.lanePool.get(jobId);
     if (lane !== undefined && lane.taskIndex === taskIndex) {
       return true;
@@ -913,7 +800,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
    */
   private async executeTask(
     { task, job }: { task: Task; job: QueueJob },
-    pool: 'main' | 'ai' | 'lane',
+    pool: 'main' | 'lane',
     placement?: LanePlacement,
   ): Promise<void> {
     // Check if job was cancelled before starting
@@ -955,16 +842,11 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
     // same task again while we await the library switch below.
     if (pool === 'main') {
       this.mainPool.set(taskId, activeTask);
-    } else if (pool === 'lane') {
+    } else {
       this.lanePool.set(taskId, activeTask);
       job.lane = placement!.lane;
       job.venue = placement!.server;
       this.scheduleLanesEmit();
-    } else {
-      this.aiPool = activeTask;
-      // A task parked under Crucible, now run by the AI pool (the road was
-      // switched to direct): its reason line no longer applies.
-      this.clearPark(job);
     }
 
     // Update job status
@@ -979,13 +861,9 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
     // P5: a transcription placed on a GPU lane reserves with its asr submit
     // (a 409 there parks it), not with a model load and lease.
     const asrOnLane = placement !== undefined && task.type === 'transcribe';
-    const transcribeRoute: WhisperRoute | undefined = task.type !== 'transcribe'
-      ? undefined
-      : asrOnLane
-        ? { kind: 'crucible', server: placement!.server, model: placement!.target.model, fallback: 'defer', signal: activeTask.abort!.signal }
-        : this.transcribeRoutedToCli(job)
-          ? { kind: 'cli', warning: job.transcribeRoute!.warning }
-          : undefined;
+    const transcribeRoute: WhisperRoute | undefined = asrOnLane
+      ? { kind: 'crucible', server: placement!.server, model: placement!.target.model, signal: activeTask.abort!.signal }
+      : undefined;
     try {
       const run = async (): Promise<TaskResult> => {
         // Ensure correct library is active for this job (all tasks need the right DB context)
@@ -1025,7 +903,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       // held (heartbeaten) across the whole task and released when it settles.
       const result = placement === undefined || asrOnLane
         ? await run()
-        : await this.lanes!.runAdmitted({
+        : await this.lanes.runAdmitted({
             ...placement,
             signal: activeTask.abort!.signal,
             localId: job.id,
@@ -1143,16 +1021,13 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         return;
       }
 
-      // P5: Crucible couldn't take the transcription for an infrastructure
-      // reason (unreachable, no asr engine, the stream lost). It goes to
-      // whisper-cli in the main pool, and the task says so when it finishes.
+      // P5/P7: Crucible stopped answering or lost the stream mid-transcription.
+      // PARK, like any other "not now" from Crucible: the task is asked again
+      // (a re-run reuses its upload) and is never done some other way.
       // A cancel never gets here (isJobCancelled above).
-      if (asrOnLane && isAsrUnavailable(error) && !activeTask.abandoned) {
-        const why = error.message.replace(/[.\s]+$/, '');
-        const warning = `Transcribed with the offline transcriber (whisper) because ${why.charAt(0).toLowerCase()}${why.slice(1)}.`;
-        this.logger.warn(`[${job.id}] ${warning}`);
-        this.routeTranscribeToCli(job, job.currentTaskIndex, warning);
-        this.eventService.emitTaskProgress(job.id, 'transcribe', 0, 'Crucible unavailable, using the offline transcriber...');
+      if (asrOnLane && isTranscriptionRetryable(error) && !activeTask.abandoned) {
+        const reason = isAsrUnavailable(error) ? error.message : (error as Error).message;
+        this.parkJob(job, reason, placement!.server, activeTask.libraryId);
         parkedHere = true; // the server is not free because this lane is: re-ask nothing
         return;
       }
@@ -1193,22 +1068,20 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         if (this.mainPool.get(taskId) === activeTask) {
           this.mainPool.delete(taskId);
         }
-      } else if (pool === 'lane') {
+      } else {
         if (this.lanePool.get(taskId) === activeTask) {
           this.lanePool.delete(taskId);
         }
         // The lane is free: anything parked on this server is asked again at
         // once (§7.2 step 4), against a fresh read of its activity.
         const server = placement!.server;
-        this.lanes?.forgetActivity(server);
+        this.lanes.forgetActivity(server);
         if (!parkedHere) {
           for (const other of this.jobQueue.values()) {
             if (other !== job && other.parkedReason !== undefined && other.parkedServer === server) other.parkedUntil = 0;
           }
         }
         this.scheduleLanesEmit();
-      } else if (this.aiPool === activeTask) {
-        this.aiPool = null;
       }
 
       // Dispatch next tasks
@@ -1224,7 +1097,6 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
    * admit the same task, and a slow probe never holds up processQueue.
    */
   private kickAdmission(): void {
-    if (this.lanes === undefined) return;
     if (this.admitting) {
       this.admitAgain = true;
       return;
@@ -1234,7 +1106,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       try {
         // The startup sweep gives back what a killed run left on a card
         // before any lane admits anything (§7.4). The main pool never waits.
-        await this.lanes!.ready;
+        await this.lanes.ready;
         do {
           this.admitAgain = false;
           await this.admitPass();
@@ -1250,7 +1122,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
 
   /** Test seam: resolves when no admission pass is running or pending. */
   async settleAdmission(): Promise<void> {
-    await this.lanes?.ready;
+    await this.lanes.ready;
     for (let i = 0; i < 1000 && (this.admitting || this.admitAgain); i++) {
       await new Promise((resolve) => setImmediate(resolve));
     }
@@ -1263,7 +1135,6 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       if (job.status !== 'pending' && job.status !== 'processing') continue;
       const task = job.tasks[job.currentTaskIndex];
       if (!task || !LANE_TASK_TYPES.has(task.type)) continue;
-      if (task.type === 'transcribe' && this.transcribeRoutedToCli(job)) continue;
       if (this.isTaskRunning(job.id, job.currentTaskIndex)) continue;
       let previousRunning = false;
       for (let i = 0; i < job.currentTaskIndex; i++) {
@@ -1290,33 +1161,26 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
   }
 
   private async admitPass(): Promise<void> {
-    if (this.aiMode() !== 'crucible') {
-      // The road changed under us: the AI pool takes it from here.
-      this.processQueue();
-      return;
-    }
-    const lanes = this.lanes!;
+    const lanes = this.lanes;
     const now = lanes.now();
     const candidates = this.laneCandidates(now);
     if (candidates.length === 0) return;
 
     // 1. Venue, once per model per pass.
     const decisions = new Map<string, ReturnType<CrucibleLanesService['place']>>();
-    const transcribeDecisions = new Map<string, ReturnType<CrucibleLanesService['placeTranscribe']>>();
+    let transcribeDecision: ReturnType<CrucibleLanesService['placeTranscribe']> | null = null;
     const byLane = new Map<string, Array<{ task: Task; job: QueueJob; index: number; placement: LanePlacement }>>();
-    let toMain = false;
     for (const { task, job } of candidates) {
       const index = job.currentTaskIndex;
       if (!this.canStartJobLibrary(job)) continue;
       if (task.type === 'transcribe') {
-        // P5: the transcription venue rule, once per pass per translate flag.
-        const key = (task.options as { translate?: unknown } | undefined)?.translate === true ? 'translate' : 'transcribe';
-        if (!transcribeDecisions.has(key)) transcribeDecisions.set(key, lanes.placeTranscribe(task));
-        const answer = await transcribeDecisions.get(key)!;
+        // P5: the transcription venue rule, once per pass. No server that can
+        // take it: the task PARKS with why (P7: there is no other transcriber).
+        transcribeDecision ??= lanes.placeTranscribe();
+        const answer = await transcribeDecision;
         if (!this.stillWaiting(job, index)) continue;
-        if (answer.kind === 'cli') {
-          this.routeTranscribeToCli(job, index, answer.warning);
-          toMain = true;
+        if (answer.kind === 'wait') {
+          this.parkJob(job, answer.reason, null);
           continue;
         }
         job.lane = answer.placement.lane;
@@ -1380,9 +1244,6 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         free--;
       }
     }
-
-    // Transcriptions the venue rule sent to whisper-cli: the main pool takes them.
-    if (toMain) this.fillMainPool();
   }
 
   /**
@@ -1404,7 +1265,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
    * it was admitted under is pinned, so it never resumes into another one.
    */
   private parkJob(job: QueueJob, reason: string, server: string | null, libraryId?: string): void {
-    const now = this.lanes?.now() ?? Date.now();
+    const now = this.lanes.now();
     const changed = job.parkedReason !== reason;
     job.parkCount = (job.parkCount ?? 0) + 1;
     job.parkedUntil = now + parkDelayMs(job.parkCount);
@@ -1447,20 +1308,25 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
     });
   }
 
-  /** One timer, set for the earliest parked task's next ask. */
+  /** One timer, set for the earliest parked task's next ask. Also tells readiness how much AI work waits. */
   private scheduleParkWake(): void {
     if (this.parkTimer) {
       clearTimeout(this.parkTimer);
       this.parkTimer = null;
     }
     let next = Infinity;
+    let parked = 0;
     for (const job of this.jobQueue.values()) {
       if (job.parkedReason !== undefined && job.parkedUntil !== undefined && (job.status === 'pending' || job.status === 'processing')) {
         next = Math.min(next, job.parkedUntil);
+        parked++;
       }
     }
+    // AI work waiting on Crucible: the moment readiness asks (or starts the
+    // Crucible here, once per outage, unless the user declined).
+    this.readiness.noteAiWaiting(parked);
     if (next === Infinity) return;
-    const delay = Math.max(0, next - (this.lanes?.now() ?? Date.now()));
+    const delay = Math.max(0, next - this.lanes.now());
     this.parkTimer = setTimeout(() => {
       this.parkTimer = null;
       this.processQueue();
@@ -1481,13 +1347,11 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
 
   /** Running (false) or Paused (true) for one server: the routing record's switch (P1). */
   setServerPaused(server: string, paused: boolean): void {
-    if (this.lanes === undefined) throw new Error('Crucible lanes are not available in this build.');
     this.lanes.setPaused(server, paused);
   }
 
   /** The lane strip, as the queue tab draws it. */
   async getLanesStatus(): Promise<LanesStatus> {
-    if (this.lanes === undefined) return { mode: 'direct', lanes: [], timestamp: new Date().toISOString() };
     const running: LaneTaskView[] = [...this.lanePool.values()].map((t) => {
       const job = this.jobQueue.get(t.jobId);
       return { jobId: t.jobId, title: job?.displayName ?? job?.videoId ?? t.jobId, model: t.model ?? '', lane: t.lane ?? '' };
@@ -1504,7 +1368,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
 
   /** Redraw the lane strip soon (debounced: a burst of admissions draws once). */
   private scheduleLanesEmit(): void {
-    if (this.lanes === undefined || this.lanesEmitTimer) return;
+    if (this.lanesEmitTimer) return;
     this.lanesEmitTimer = setTimeout(() => {
       this.lanesEmitTimer = null;
       void this.getLanesStatus().then(
@@ -1783,7 +1647,6 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
 
         result = await this.mediaOps.transcribeVideo(
           job.videoId || job.videoPath!,
-          task.options,
           taskId,
           transcribeRoute,
         );

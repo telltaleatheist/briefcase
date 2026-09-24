@@ -2,10 +2,12 @@
  * The queue's Crucible lanes (migration plan §7, P4), over scripted lanes:
  * lane assignment, parking and re-admission, the same-model preference and
  * its starvation guard, the stall watchdog, cancel in every state, the
- * library guard, restart semantics, and the direct road left exactly as it was.
+ * library guard, restart semantics, and (P7) the readiness gate at the door:
+ * lanes are the only place AI work runs.
  */
 import { LANE_STALL_MS, STARVATION_MS } from '../../src/queue/crucible-lanes';
-import { analyzeJob, downloadJob, makeRig, StubLanes, tick, until, type Rig } from './queue-rig';
+import { CrucibleRequiredError } from '../../src/crucible/readiness.service';
+import { analyzeJob, downloadJob, makeRig, StubLanes, StubReadiness, tick, transcribeJob, until, type Rig } from './queue-rig';
 
 const LOCAL_9B = 'local:qwen3.5-9b';
 const LOCAL_4B = 'local:qwen3.5-4b';
@@ -19,49 +21,75 @@ function gatedRig(lanes?: StubLanes): Rig {
 
 afterEach(() => jest.useRealTimers());
 
-describe('direct road: the AI pool of one, exactly as before', () => {
-  it('with no lanes service, analyze runs in the AI pool, one at a time, and never asks for a venue', async () => {
-    const rig = gatedRig();
-    const a = rig.qm.addJob(analyzeJob('v1', LOCAL_9B));
-    const b = rig.qm.addJob(analyzeJob('v2', LOCAL_9B));
-    await until(() => rig.media.started('analyze').length === 1);
-    expect(rig.qm.getAIPool()?.jobId).toBe(a);
-    expect(rig.qm.getLanePool().size).toBe(0);
-    await tick(20);
-    expect(rig.media.started('analyze')).toEqual([a]);
-    rig.media.release('analyze', a);
-    await until(() => rig.media.started('analyze').length === 2);
-    expect(rig.qm.getAIPool()?.jobId).toBe(b);
-    rig.media.release('analyze', b);
-    await until(() => rig.qm.getJob(b)?.status === 'completed');
+describe('the readiness gate at the door (P7)', () => {
+  it('a job that needs Crucible is refused BY NAME when it could never run (nothing to connect to); nothing is queued', () => {
+    const readiness = new StubReadiness();
+    readiness.set({ state: 'not-installed', reason: 'Crucible is not installed.', action: 'install', server: null });
+    const rig = makeRig(new StubLanes(), readiness);
+    expect(() => rig.qm.addJob(analyzeJob('v1', LOCAL_9B))).toThrow(CrucibleRequiredError);
+    expect(() => rig.qm.addJob(transcribeJob('v2'))).toThrow(/Transcription needs Crucible\. Crucible is not installed\./);
+    expect(rig.qm.getAllJobs()).toHaveLength(0);
+    rig.qm.onModuleDestroy();
   });
 
-  it("with lanes present but aiVia 'direct', the lanes are never consulted", async () => {
+  it('a job with no AI task never asks the gate, whatever Crucible is doing', async () => {
+    const readiness = new StubReadiness();
+    readiness.set({ state: 'not-configured', reason: 'Every Crucible server is paused.', action: 'connect', server: null });
+    const rig = makeRig(new StubLanes(), readiness);
+    const id = rig.qm.addJob(downloadJob('https://example.com/a'));
+    await until(() => rig.qm.getJob(id)?.status === 'completed');
+    expect(readiness.assertCalls).toBe(0);
+    rig.qm.onModuleDestroy();
+  });
+
+  it('a registered server that is merely down (or starting) is not a refusal: the work is accepted and parks', async () => {
+    const readiness = new StubReadiness();
+    readiness.set({ state: 'unreachable', reason: "Crucible on mac isn't answering.", action: 'connect', server: null });
     const lanes = new StubLanes();
-    lanes.modeValue = 'direct';
-    const rig = gatedRig(lanes);
+    lanes.waitFor.set('qwen3.5-9b', "Crucible on mac isn't answering.");
+    const rig = makeRig(lanes, readiness);
+    rig.qm.onModuleInit();
+    const id = rig.qm.addJob(analyzeJob('v1', LOCAL_9B));
+    await until(() => rig.qm.getJob(id)?.parkedReason !== undefined);
+    // The queue told readiness AI work is waiting (the moment it asks, or starts the Crucible here).
+    expect(readiness.waiting.at(-1)).toBe(1);
+    // Crucible back: parked work is asked again at once.
+    lanes.waitFor.clear();
+    readiness.set({ state: 'ready', reason: 'Crucible on mac is ready.', action: null, server: 'mac' });
+    await until(() => rig.media.started('analyze').includes(id));
+    await until(() => rig.qm.getJob(id)?.status === 'completed');
+    rig.qm.onModuleDestroy();
+  });
+
+  it('declined (the user said "Not now"): a job that needs Crucible is refused, so nothing parks for ever', () => {
+    const readiness = new StubReadiness();
+    readiness.set({ state: 'unreachable', reason: 'Crucible is stopped on this computer.', action: 'start', declined: true, server: null });
+    const rig = makeRig(new StubLanes(), readiness);
+    expect(() => rig.qm.addJob(analyzeJob('v1', LOCAL_9B))).toThrow(CrucibleRequiredError);
+    rig.qm.onModuleDestroy();
+  });
+
+  it('a staged (paused) job is checked when it is started: all or none', () => {
+    const readiness = new StubReadiness();
+    const rig = makeRig(new StubLanes(), readiness);
+    const staged = rig.qm.addJob(analyzeJob('v1', LOCAL_9B), { paused: true });
+    const plain = rig.qm.addJob(downloadJob('https://example.com/b'), { paused: true });
+    readiness.set({ state: 'not-installed', reason: 'Crucible is not installed.', action: 'install', server: null });
+    expect(() => rig.qm.startJobs([staged, plain])).toThrow(CrucibleRequiredError);
+    expect(rig.qm.getJob(staged)?.status).toBe('paused');
+    expect(rig.qm.getJob(plain)?.status).toBe('paused');
+    expect(rig.qm.startJobs([plain])).toBe(1);
+    rig.qm.onModuleDestroy();
+  });
+
+  it('AI tasks run only on lanes: there is no AI pool, and none is ever in the main pool', async () => {
+    const rig = gatedRig(new StubLanes());
     const a = rig.qm.addJob(analyzeJob('v1', LOCAL_9B));
     await until(() => rig.media.started('analyze').length === 1);
-    expect(rig.qm.getAIPool()?.jobId).toBe(a);
-    expect(lanes.placeCalls).toBe(0);
-    expect(lanes.admitted).toHaveLength(0);
+    expect(rig.qm.getLanePool().get(a)?.pool).toBe('lane');
+    expect([...rig.qm.getMainPool().values()].some((t) => t.type === 'analyze')).toBe(false);
     rig.media.release('analyze', a);
     await until(() => rig.qm.getJob(a)?.status === 'completed');
-  });
-
-  it('the 90-minute wall clock still applies to the AI pool, and a merely quiet AI task is left alone', async () => {
-    const rig = gatedRig();
-    const a = rig.qm.addJob(analyzeJob('v1', LOCAL_9B));
-    await until(() => rig.qm.getAIPool() !== null);
-    const active = rig.qm.getAIPool()!;
-    active.lastProgressAt = new Date(Date.now() - 30 * 60_000);
-    (rig.qm as any).checkForStuckTasks();
-    expect(rig.qm.getJob(a)?.status).toBe('processing');
-    active.startedAt = new Date(Date.now() - 91 * 60_000);
-    (rig.qm as any).checkForStuckTasks();
-    expect(rig.qm.getJob(a)?.status).toBe('failed');
-    expect(rig.qm.getAIPool()).toBeNull();
-    rig.qm.onModuleDestroy();
   });
 });
 
@@ -76,7 +104,6 @@ describe('lanes: assignment', () => {
     await until(() => rig.media.started('analyze').length === 2);
     await tick(20);
     expect(rig.media.started('analyze').sort()).toEqual([mac1, pc1].sort());
-    expect(rig.qm.getAIPool()).toBeNull();
     expect([...rig.qm.getLanePool().values()].map((t) => t.lane).sort()).toEqual(['gpu:mac', 'gpu:pc']);
     // The second mac task WAITS for the lane; it is not parked (nobody else holds the card).
     expect(rig.qm.getJob(mac2)).toMatchObject({ status: 'pending' });

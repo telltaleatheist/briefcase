@@ -1,9 +1,10 @@
 /**
- * The queue's transcribe routing (P5, migration plan §7.1): a transcription on
- * Crucible takes its server's GPU lane and reserves with the asr submit (a 409
- * there parks it); an infrastructure failure re-routes it to whisper-cli in the
- * main pool with a warning; a cancel never does; whisper-cli transcribes are
- * capped at 2 of the main pool's 5; and under the direct road nothing changed.
+ * The queue's transcribe routing (P5; since P7 Crucible is the only
+ * transcriber): a transcription takes its server's GPU lane and reserves with
+ * the asr submit (a 409 there parks it); a server that stops answering or
+ * loses the stream parks it too; no server that can take it parks it with the
+ * reason; a cancel is a cancel; and nothing ever runs a transcription in the
+ * main pool.
  */
 import { CrucibleAsrCancelled, CrucibleAsrUnavailable } from '../../src/crucible/asr/crucible-asr-job';
 import { CrucibleParkedError } from '../../src/crucible/llm/errors';
@@ -28,7 +29,7 @@ function gatedTranscribes(rig: Rig) {
   const calls: Array<{ taskId: string; route: WhisperRoute | undefined; gate: Gate<TaskResult | Error> }> = [];
   let running = 0;
   let maxRunning = 0;
-  rig.media.transcribe = async (_id, _o, taskId, route) => {
+  rig.media.transcribe = async (_id, taskId, route) => {
     const g = gate<TaskResult | Error>();
     calls.push({ taskId, route, gate: g });
     running++;
@@ -55,48 +56,15 @@ function gatedTranscribes(rig: Rig) {
 }
 
 function crucibleRig(): { rig: Rig; lanes: StubLanes; t: ReturnType<typeof gatedTranscribes> } {
+  // StubLanes places a transcribe on mac's GPU lane by default.
   const lanes = new StubLanes();
   lanes.transcribeTo = { server: 'mac', model: ASR };
   const rig = makeRig(lanes);
   return { rig, lanes, t: gatedTranscribes(rig) };
 }
 
-describe('direct road: transcription exactly as before, capped at 2', () => {
-  it('with no lanes, transcribes run in the main pool with NO route (WhisperService decides), two at a time', async () => {
-    const rig = makeRig();
-    const t = gatedTranscribes(rig);
-    const ids = ['v1', 'v2', 'v3', 'v4'].map((v) => rig.qm.addJob(transcribeJob(v)));
-    await until(() => t.calls.length === 2);
-    await tick(20);
-    expect(t.calls).toHaveLength(2);
-    expect(t.calls.every((c) => c.route === undefined)).toBe(true);
-    expect([...rig.qm.getMainPool().values()].every((a) => a.type === 'transcribe')).toBe(true);
-    // Other main-pool work is not held up by the cap.
-    const norm = rig.qm.addJob({ videoId: 'v9', tasks: [{ type: 'normalize-audio', options: {} } as never] });
-    await until(() => rig.qm.getJob(norm)?.status === 'completed');
-    t.finish(ids[0]);
-    await until(() => t.calls.length === 3);
-    for (const id of ids.slice(1)) {
-      await until(() => t.of(id).length === 1);
-      t.finish(id);
-    }
-    await until(() => ids.every((id) => rig.qm.getJob(id)?.status === 'completed'));
-    expect(t.maxRunning).toBe(2);
-  });
-
-  it("with lanes present but aiVia 'direct', transcribes never ask the lanes", async () => {
-    const lanes = new StubLanes();
-    lanes.modeValue = 'direct';
-    const rig = makeRig(lanes);
-    const id = rig.qm.addJob(transcribeJob('v1'));
-    await until(() => rig.qm.getJob(id)?.status === 'completed');
-    expect(lanes.placeTranscribeCalls).toBe(0);
-    expect(rig.media.transcribeRoutes).toEqual([{ taskId: id, route: undefined }]);
-  });
-});
-
 describe('Crucible venue: a GPU lane, reserved by the asr submit', () => {
-  it('takes its server’s lane with a crucible route (fallback deferred to the queue), and never loads or leases a model', async () => {
+  it('takes its server’s lane with a crucible route, and never loads or leases a model', async () => {
     const { rig, lanes, t } = crucibleRig();
     const a = rig.qm.addJob(transcribeJob('v1'));
     const b = rig.qm.addJob(transcribeJob('v2'));
@@ -104,7 +72,7 @@ describe('Crucible venue: a GPU lane, reserved by the asr submit', () => {
     await tick(20);
     expect(t.calls).toHaveLength(1); // the lane is one wide
     const route = t.calls[0].route as Extract<WhisperRoute, { kind: 'crucible' }>;
-    expect(route).toMatchObject({ kind: 'crucible', server: 'mac', model: ASR, fallback: 'defer' });
+    expect(route).toMatchObject({ kind: 'crucible', server: 'mac', model: ASR });
     expect(route.signal).toBeInstanceOf(AbortSignal);
     expect(lanes.admitted).toEqual([]); // no load-model, no lease: the submit is the reservation
     expect([...rig.qm.getLanePool().values()]).toEqual([expect.objectContaining({ jobId: a, lane: 'gpu:mac', model: ASR, type: 'transcribe' })]);
@@ -166,21 +134,36 @@ describe('Crucible venue: a GPU lane, reserved by the asr submit', () => {
     expect(rig.events.some((e) => e.name === 'task.failed')).toBe(false);
   });
 
-  it('Crucible unreachable at the submit: re-routed to whisper-cli in the main pool, and the job carries the warning', async () => {
+  it('Crucible unreachable at the submit, or the stream lost: PARKED with the reason and asked again, never run elsewhere', async () => {
+    for (const code of ['crucible_unreachable', 'crucible_stream_lost']) {
+      const { rig, lanes, t } = crucibleRig();
+      const id = rig.qm.addJob(transcribeJob('v1'));
+      await until(() => t.calls.length === 1);
+      const reason = `Crucible on mac could not be reached for the upload (${code}).`;
+      t.finish(id, new CrucibleAsrUnavailable(code, 'mac', reason));
+      await until(() => rig.qm.getJob(id)?.parkedReason === reason);
+      expect(rig.qm.getJob(id)).toMatchObject({ status: 'pending', parkedServer: 'mac' });
+      expect(rig.qm.getLanePool().size).toBe(0);
+      expect(rig.qm.getMainPool().size).toBe(0);
+      lanes.offset += 6_000;
+      (rig.qm as any).processQueue();
+      await until(() => t.calls.length === 2);
+      expect(t.calls[1].route).toMatchObject({ kind: 'crucible', server: 'mac' });
+      t.finish(id);
+      await until(() => rig.qm.getJob(id)?.status === 'completed');
+      expect(rig.qm.getJob(id)?.warnings).toBeUndefined();
+      expect(rig.events.some((e) => e.name === 'task.failed')).toBe(false);
+      rig.qm.onModuleDestroy();
+    }
+  });
+
+  it('a misconfigured server (a refused token) fails the task by name: waiting would hide it', async () => {
     const { rig, t } = crucibleRig();
+    rig.media.transcribe = async () => ({ success: false, error: "Crucible on mac refused this computer's token (unauthorized). Pair it again in Settings › Crucible Servers." });
     const id = rig.qm.addJob(transcribeJob('v1'));
-    await until(() => t.calls.length === 1);
-    t.finish(id, new CrucibleAsrUnavailable('crucible_unreachable', 'mac', "Crucible on mac could not be reached for the upload (connect ECONNREFUSED)."));
-    await until(() => t.calls.length === 2);
-    const warning = 'Transcribed with the offline transcriber (whisper) because crucible on mac could not be reached for the upload (connect ECONNREFUSED).';
-    expect(t.calls[1].route).toEqual({ kind: 'cli', warning });
-    expect(rig.qm.getLanePool().size).toBe(0);
-    expect([...rig.qm.getMainPool().values()]).toEqual([expect.objectContaining({ jobId: id, type: 'transcribe', pool: 'main' })]);
-    expect(rig.qm.getJob(id)?.lane).toBeUndefined();
-    // WhisperService puts the route's warning on the result; the queue collects it onto the job.
-    t.finish(id, { ...OK, warnings: [warning] });
-    await until(() => rig.qm.getJob(id)?.status === 'completed');
-    expect(rig.qm.getJob(id)?.warnings).toEqual([warning]);
+    await until(() => rig.qm.getJob(id)?.status === 'failed');
+    expect(rig.qm.getJob(id)?.error).toMatch(/Pair it again/);
+    expect(t.calls).toHaveLength(0);
   });
 
   it('a cancel mid-file aborts the task’s signal and NEVER falls back', async () => {
@@ -209,36 +192,28 @@ describe('Crucible venue: a GPU lane, reserved by the asr submit', () => {
   });
 });
 
-describe('whisper-cli venue under the lanes', () => {
-  it('the venue rule’s whisper-cli answer goes to the main pool with its warning, capped at 2 of 5', async () => {
+describe('no server that can transcribe', () => {
+  it('the venue rule says none: the transcription PARKS with the reason, holding no slot, and runs when a server can take it', async () => {
     const lanes = new StubLanes();
-    lanes.transcribeTo = { cli: 'Transcribed with the offline transcriber (whisper) because Crucible on mac has no transcription engine.' };
+    lanes.transcribeTo = { wait: 'Crucible on mac has no transcription engine.' };
     const rig = makeRig(lanes);
     const t = gatedTranscribes(rig);
-    const ids = ['v1', 'v2', 'v3'].map((v) => rig.qm.addJob(transcribeJob(v)));
-    await until(() => t.calls.length === 2);
-    await tick(20);
-    expect(t.calls).toHaveLength(2);
-    expect(t.calls.every((c) => c.route?.kind === 'cli' && (c.route as { warning: string }).warning.includes('no transcription engine'))).toBe(true);
-    expect(rig.qm.getLanePool().size).toBe(0);
-    for (const id of ids) {
-      await until(() => t.of(id).length === 1);
-      t.finish(id);
-    }
-    await until(() => ids.every((id) => rig.qm.getJob(id)?.status === 'completed'));
-    expect(t.maxRunning).toBe(2);
-  });
-
-  it('a translate transcription is placed once per pass with its own flag', async () => {
-    const lanes = new StubLanes();
-    const rig = makeRig(lanes);
-    const id = rig.qm.addJob(transcribeJob('v1', { translate: true }));
+    const id = rig.qm.addJob(transcribeJob('v1'));
+    await until(() => rig.qm.getJob(id)?.parkedReason !== undefined);
+    expect(rig.qm.getJob(id)).toMatchObject({ status: 'pending', parkedReason: 'Crucible on mac has no transcription engine.' });
+    expect(t.calls).toHaveLength(0);
+    expect(rig.qm.hasActiveTasks()).toBe(false);
+    lanes.transcribeTo = { server: 'mac', model: ASR };
+    lanes.offset += 6_000;
+    (rig.qm as any).processQueue();
+    await until(() => t.calls.length === 1);
+    t.finish(id);
     await until(() => rig.qm.getJob(id)?.status === 'completed');
-    expect(rig.media.transcribeRoutes).toEqual([{ taskId: id, route: { kind: 'cli', warning: null } }]);
   });
 
-  it('REGRESSION: downloads stay 5 wide, and a download → import → transcribe chain completes on whisper-cli', async () => {
+  it('REGRESSION: downloads stay 5 wide, and a download → import → transcribe chain waits for Crucible, never blocking the downloads', async () => {
     const lanes = new StubLanes();
+    lanes.transcribeTo = { wait: 'No Crucible server is connected.' };
     const rig = makeRig(lanes);
     rig.media.gated.add('download');
     const ids = Array.from({ length: 7 }, (_, i) => rig.qm.addJob({ ...downloadJob(`https://x/${i}`), tasks: [...downloadJob(`https://x/${i}`).tasks, { type: 'transcribe', options: {} } as never] }));
@@ -249,9 +224,10 @@ describe('whisper-cli venue under the lanes', () => {
       await until(() => rig.media.gates.has(`download:${id}`));
       rig.media.release('download', id, { success: true, data: { videoPath: `/tmp/${id}.mp4` } });
     }
-    await until(() => ids.every((id) => rig.qm.getJob(id)?.status === 'completed'), 5000);
-    expect(rig.media.started('transcribe').sort()).toEqual([...ids].sort());
-    expect(rig.media.transcribeRoutes.every((r) => r.route?.kind === 'cli')).toBe(true);
+    await until(() => ids.every((id) => rig.qm.getJob(id)?.parkedReason === 'No Crucible server is connected.'), 5000);
+    expect(rig.media.started('import').sort()).toEqual([...ids].sort());
+    expect(rig.media.started('transcribe')).toEqual([]);
+    rig.qm.onModuleDestroy();
   });
 });
 
@@ -264,30 +240,27 @@ describe('the real lanes against the fake Crucible', () => {
     const servers = new CrucibleServersService(h.registry, h.factory);
     const transcription = new CrucibleTranscriptionService(servers, h.probes, h.factory, ledger);
     transcription.configDir = () => h.dir;
-    transcription.aiVia = () => 'crucible';
     const chat = new CrucibleChatService(servers, h.factory, h.probes, ledger);
-    const lanes = new CrucibleLanesService(servers, h.probes, chat, h.factory, h.registry, ledger, transcription);
-    lanes.via = () => 'crucible';
+    const lanes = new CrucibleLanesService(servers, h.probes, chat, h.factory, h.registry, transcription, ledger);
     return { fake, lanes };
   }
 
-  it('placeTranscribe: a server with asr is a GPU lane with its best model; translate is whisper-cli', async () => {
+  it('placeTranscribe: a server with asr is a GPU lane with its best model', async () => {
     const { fake, lanes } = await realLanes();
     try {
-      expect(await lanes.placeTranscribe({ type: 'transcribe', options: {} } as never)).toEqual({
+      expect(await lanes.placeTranscribe()).toEqual({
         kind: 'lane', placement: { lane: 'gpu:mac', server: 'mac', target: { model: ASR, route: 'local', upstream: null, bareModel: ASR } },
       });
-      expect(await lanes.placeTranscribe({ type: 'transcribe', options: { translate: true } } as never)).toMatchObject({ kind: 'cli', warning: null });
     } finally {
       await fake.close();
     }
   });
 
-  it('placeTranscribe: an unreachable server is whisper-cli WITH a warning (never a wait)', async () => {
+  it('placeTranscribe: an unreachable server is a wait (the task parks) with the reason', async () => {
     const { fake, lanes } = await realLanes(await unusedLoopbackUrl());
     try {
-      expect(await lanes.placeTranscribe({ type: 'transcribe', options: {} } as never)).toMatchObject({
-        kind: 'cli', warning: expect.stringMatching(/Crucible on mac isn't answering/),
+      expect(await lanes.placeTranscribe()).toMatchObject({
+        kind: 'wait', reason: expect.stringMatching(/Crucible on mac isn't answering/),
       });
     } finally {
       await fake.close();
