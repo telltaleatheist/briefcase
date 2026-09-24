@@ -164,10 +164,11 @@ export interface CrucibleChatRequest {
   loadContext?: number;
 }
 
+/** A chat's `usage`, each count null where the server did not state it (never an invented 0). */
 export interface CrucibleChatUsage {
-  promptTokens: number;
-  completionTokens: number;
-  totalTokens: number;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  totalTokens: number | null;
 }
 
 export interface CrucibleChatResult {
@@ -584,15 +585,22 @@ export class CrucibleChatService {
         fromReasoning = true;
       }
     }
-    const usageDoc = doc['usage'] as Record<string, unknown> | undefined;
-    const usage = usageDoc && typeof usageDoc === 'object'
-      ? {
-          promptTokens: Number(usageDoc['prompt_tokens'] ?? 0) || 0,
-          completionTokens: Number(usageDoc['completion_tokens'] ?? 0) || 0,
-          totalTokens: Number(usageDoc['total_tokens'] ?? 0) || 0,
-        }
-      : null;
-    if (usage && usage.totalTokens === 0) usage.totalTokens = usage.promptTokens + usage.completionTokens;
+    const usageDoc = doc['usage'];
+    const count = (key: string): number | null => {
+      const value = (usageDoc as Record<string, unknown>)[key];
+      return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
+    };
+    let usage: CrucibleChatUsage | null = null;
+    if (usageDoc !== null && typeof usageDoc === 'object') {
+      const promptTokens = count('prompt_tokens');
+      const completionTokens = count('completion_tokens');
+      const stated = count('total_tokens');
+      usage = {
+        promptTokens,
+        completionTokens,
+        totalTokens: stated ?? (promptTokens !== null && completionTokens !== null ? promptTokens + completionTokens : null),
+      };
+    }
     let sampling: Record<string, string> | null = null;
     const header = response.headers.get('x-crucible-sampling');
     if (header) {

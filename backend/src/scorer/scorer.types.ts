@@ -223,8 +223,9 @@ export interface GenerateOptions {
 
 export interface GenerateResult {
   text: string;
-  promptTokens: number;
-  completionTokens: number;
+  /** The server's usage counts; null where it did not state them. */
+  promptTokens: number | null;
+  completionTokens: number | null;
   finishReason: string;
   model: string;
 }

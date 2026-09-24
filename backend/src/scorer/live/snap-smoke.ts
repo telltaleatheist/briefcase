@@ -342,8 +342,8 @@ export interface OutlineCheck {
   id: string;
   items: string[];
   ms: number;
-  promptTokens: number;
-  completionTokens: number;
+  promptTokens: number | null;
+  completionTokens: number | null;
   finishReason: string;
 }
 
@@ -352,7 +352,7 @@ async function generateOutlineOnce(v: YtsegVideo, handle: ScorerHandle): Promise
   const res = await handle.generate(outlinePrompt(v.sents.join('\n')), { maxTokens: OUTLINE_MAX_TOKENS });
   const check = { id: v.id, items: parseOutline(res.text), ms: Date.now() - t, promptTokens: res.promptTokens, completionTokens: res.completionTokens, finishReason: res.finishReason };
   console.log(`\n## outline written by ${handle.model} for ${v.id}: ${check.items.length} items in ${(check.ms / 1000).toFixed(1)} s ` +
-    `(${check.promptTokens} prompt + ${check.completionTokens} completion tokens, ${check.finishReason})`);
+    `(${check.promptTokens ?? '?'} prompt + ${check.completionTokens ?? '?'} completion tokens, ${check.finishReason})`);
   for (const item of check.items) console.log(`  - ${item}`);
   return check;
 }

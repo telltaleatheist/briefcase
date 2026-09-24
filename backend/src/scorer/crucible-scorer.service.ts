@@ -54,6 +54,7 @@ import {
   isParked,
 } from '../crucible/llm/errors';
 import { crucibleTargetOf } from '../crucible/llm/target';
+import { compareVersions } from '../crucible/probe';
 import { isVisionAlias } from '../crucible/llm/ollama-map';
 import { crucibleUnavailableCause } from '../crucible/transport-failure';
 import { fromWireResponse, toWireRequest } from './crucible-decide';
@@ -193,10 +194,13 @@ export class CrucibleScorerService {
     } catch (err) {
       throw this.mapFailure(err, null);
     }
+    // Refused up front only when the server STATES an older version. One that
+    // states none (server.version is informational since 1.0.25) is asked: the
+    // door itself answers, and a server without it refuses by name.
     const version = await this.chat.serverVersion(server);
-    if (!(await this.chat.serverAtLeast(server, DECIDE_MIN_VERSION))) {
+    if (version !== null && compareVersions(version, DECIDE_MIN_VERSION) < 0) {
       throw new ScorerError('scorer_unavailable',
-        `Crucible "${server}" is ${version ?? 'an unknown version'}; the analysis engine needs its decision door (${DECIDE_MIN_VERSION} or newer). Update Crucible.`);
+        `Crucible "${server}" is ${version}; the analysis engine needs its decision door (${DECIDE_MIN_VERSION} or newer). Update Crucible.`);
     }
     let models: ModelInfo[];
     let decide: Pick<CapabilityRow, 'enabled' | 'selected' | 'reason'> | null = null;
@@ -328,8 +332,8 @@ export class CrucibleScorerService {
       });
       return {
         text: result.text,
-        promptTokens: result.usage?.promptTokens ?? 0,
-        completionTokens: result.usage?.completionTokens ?? 0,
+        promptTokens: result.usage?.promptTokens ?? null,
+        completionTokens: result.usage?.completionTokens ?? null,
         finishReason: result.finishReason ?? 'stop',
         model: result.model,
       };
@@ -365,7 +369,11 @@ export class CrucibleScorerService {
         loadContext: SCORER_LOAD_CONTEXT,
         signal,
       });
+      // Load-bearing here: the count sizes the scorer's chunks. Never a guessed 0.
       if (result.usage === null) throw new ScorerError('engine_error', `Crucible "${server}" answered a chat with no usage to count tokens from`);
+      if (result.usage.promptTokens === null) {
+        throw new ScorerError('engine_error', `Crucible "${server}" answered a chat whose usage states no prompt_tokens to count tokens from`);
+      }
       return result.usage.promptTokens;
     } catch (err) {
       throw this.mapFailure(err, server, signal);

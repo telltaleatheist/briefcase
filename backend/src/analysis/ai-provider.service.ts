@@ -382,13 +382,17 @@ export class AIProviderService {
     }
 
     const text = stripThinkTags(result.text);
-    const inputTokens = result.usage?.promptTokens ?? 0;
-    const outputTokens = result.usage?.completionTokens ?? 0;
+    // Informational (cost and log): a count the server did not state adds
+    // nothing to the tally and reads "?" in the log, as it did with no usage.
+    const statedIn = result.usage?.promptTokens ?? null;
+    const statedOut = result.usage?.completionTokens ?? null;
+    const inputTokens = statedIn ?? 0;
+    const outputTokens = statedOut ?? 0;
     const pricedAs = target.upstream === 'anthropic' ? 'claude' : target.upstream === 'openai' ? 'openai' : null;
     const estimatedCost = pricedAs === null ? 0 : this.calculateCost(pricedAs, target.bareModel, inputTokens, outputTokens);
     target = result.target ?? target;
     this.logger.log(
-      `Crucible (${result.server}) ${target.model}: ${inputTokens} input + ${outputTokens} output tokens`
+      `Crucible (${result.server}) ${target.model}: ${statedIn ?? '?'} input + ${statedOut ?? '?'} output tokens`
         + `${pricedAs ? ` (≈$${estimatedCost.toFixed(4)})` : ''}${result.attempts > 1 ? `, ${result.attempts} attempts` : ''}`,
     );
     return {
