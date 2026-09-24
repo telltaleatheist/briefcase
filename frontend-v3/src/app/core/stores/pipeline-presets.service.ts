@@ -56,7 +56,7 @@ export const PIPELINE_STEPS: {
   {
     type: 'ai-analyze',
     label: 'AI Analyze',
-    description: 'Sections & flags via your default AI model',
+    description: 'Chapters and flags on Crucible',
     defaultConfig: { customInstructions: '', aiModel: '' },
   },
 ];
@@ -237,16 +237,27 @@ export class PipelinePresetsService {
 }
 
 /**
- * Transcribe options Briefcase no longer has (P7): the asr model comes only
- * from Settings › Transcription, speech is transcribed in its own language,
- * and there is no translate. Dropped from stored presets so they are not sent.
+ * Options Briefcase no longer has (P7), dropped from stored presets so they
+ * are not sent:
+ *   transcribe   the asr model comes only from Settings › Transcription,
+ *                speech is transcribed in its own language, and there is no
+ *                translate;
+ *   ai-analyze   the 1-5 sensitivity (a display filter in the editor now), the
+ *                fast/thorough quality and the summary/key-points switches:
+ *                the Crucible pipeline has none of them.
+ * A stored `aiModel` is kept as it is: the picker shows what it resolves to on
+ * the connected Crucible, and it is queued in that spelling.
  */
-const RETIRED_TRANSCRIBE_KEYS = ['model', 'language', 'translate'];
+const RETIRED_KEYS: Partial<Record<PipelineStepType, readonly string[]>> = {
+  transcribe: ['model', 'language', 'translate'],
+  'ai-analyze': ['analysisGranularity', 'analysisQuality', 'generateSummary', 'extractKeyPoints'],
+};
 
 export function withoutRetiredKeys(step: PipelineStep): PipelineStep {
-  if (step.type !== 'transcribe') return step;
+  const retired = RETIRED_KEYS[step.type];
+  if (!retired) return step;
   const config = { ...step.config };
-  for (const key of RETIRED_TRANSCRIBE_KEYS) delete config[key];
+  for (const key of retired) delete config[key];
   return { ...step, config };
 }
 

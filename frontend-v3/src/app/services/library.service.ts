@@ -1,4 +1,5 @@
 import { Injectable, signal } from '@angular/core';
+import { splitAiModelValue } from '../models/ai-model-value';
 import { HttpClient } from '@angular/common/http';
 import { Observable, of, firstValueFrom } from 'rxjs';
 import { map, catchError } from 'rxjs/operators';
@@ -584,54 +585,36 @@ export class LibraryService {
         // No options: the asr model is Settings › Transcription's (P7).
         return [{ type: 'transcribe', options: {} }];
 
-      case 'ai-analyze':
-        // Parse model value in format "provider:model" (e.g., "ollama:qwen2.5:7b", "openai:gpt-4o")
+      case 'ai-analyze': {
+        // "provider:model" (e.g. "local:qwen3.5-9b", "claude:claude-sonnet-5").
         // NO DEFAULT - user must explicitly select an AI model
         if (!config?.aiModel) {
           throw new Error('AI analysis requires an AI model to be selected. Please select a model in the configuration.');
         }
-        const modelValue = config.aiModel;
-        let aiProvider = 'ollama';
-        let aiModel = modelValue;
-
-        if (modelValue.includes(':')) {
-          const colonIndex = modelValue.indexOf(':');
-          aiProvider = modelValue.substring(0, colonIndex);
-          aiModel = modelValue.substring(colonIndex + 1);
-        }
-
+        const { aiProvider, aiModel } = splitAiModelValue(config.aiModel);
         return [{
           type: 'analyze',
           options: {
             aiModel,
             aiProvider,
             customInstructions: config?.customInstructions || '',
-            // Forwarded ONLY when a caller explicitly set it — see queue.service's
-            // copy of this comment. Nothing in the UI sets it any more.
-            analysisGranularity: config?.analysisGranularity,
-            analysisQuality: config?.analysisQuality || 'fast'
           }
         }];
+      }
 
-      case 'analyze-webpage':
+      case 'analyze-webpage': {
         if (!config?.aiModel) {
           throw new Error('Webpage analysis requires an AI model to be selected. Please select a model in the configuration.');
         }
-        const webModelValue = config.aiModel;
-        let webProvider = 'ollama';
-        let webModel = webModelValue;
-        if (webModelValue.includes(':')) {
-          const colonIndex = webModelValue.indexOf(':');
-          webProvider = webModelValue.substring(0, colonIndex);
-          webModel = webModelValue.substring(colonIndex + 1);
-        }
+        const { aiProvider, aiModel } = splitAiModelValue(config.aiModel);
         return [{
           type: 'analyze-webpage',
           options: {
-            aiModel: webModel,
-            aiProvider: webProvider,
+            aiModel,
+            aiProvider,
           }
         }];
+      }
 
       default:
         console.warn(`Unknown task type: ${frontendTaskType}`);

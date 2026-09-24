@@ -28,16 +28,6 @@ export interface VideoJobSettings {
   aiAnalysis: boolean;
   aiModel?: string; // Full model ID from available models
   customInstructions?: string;
-  /**
-   * 1-5 sensitivity. OPTIONAL AND NO LONGER SET BY ANY UI — the slider was
-   * removed from every run-config surface when the dial became a display filter
-   * (see models/flag-filter.ts). It survives on the request model for API
-   * compatibility: the backend still accepts it, and the DISCOVERY fallback flag
-   * path still honors it. When absent, that path falls back to the config file's
-   * `defaultGranularity` and then to its own default of 2.
-   */
-  analysisGranularity?: number;
-  analysisQuality?: 'fast' | 'thorough'; // fast = single-pass (cheaper), thorough = multi-pass (better)
   outputFormat?: 'mp4' | 'webm' | 'mov' | 'avi';
   outputQuality?: 'low' | 'medium' | 'high' | 'ultra';
   /**

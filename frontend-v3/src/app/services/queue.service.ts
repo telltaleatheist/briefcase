@@ -1,4 +1,5 @@
 import { Injectable, Injector, inject, signal, computed, effect, OnDestroy } from '@angular/core';
+import { splitAiModelValue } from '../models/ai-model-value';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom, Observable, of } from 'rxjs';
 import { map, tap, catchError } from 'rxjs/operators';
@@ -1539,19 +1540,7 @@ export class QueueService implements OnDestroy {
       if (!analyzeTask.options?.['aiModel']) {
         warnings?.push('AI analysis was skipped because no AI model is selected. Configure a model in the queue item settings.');
       } else {
-        // Parse provider:model string
-        const modelValue = analyzeTask.options['aiModel'];
-        let aiProvider = 'ollama';
-        let aiModel = modelValue;
-
-        if (modelValue.includes(':')) {
-          const firstColon = modelValue.indexOf(':');
-          const possibleProvider = modelValue.substring(0, firstColon);
-          if (['ollama', 'claude', 'openai', 'local'].includes(possibleProvider)) {
-            aiProvider = possibleProvider;
-            aiModel = modelValue.substring(firstColon + 1);
-          }
-        }
+        const { aiProvider, aiModel } = splitAiModelValue(analyzeTask.options['aiModel']);
 
         backendTasks.push({
           type: 'analyze',
@@ -1559,12 +1548,6 @@ export class QueueService implements OnDestroy {
             aiModel,
             aiProvider,
             customInstructions: analyzeTask.options?.['customInstructions'],
-            // Forwarded ONLY when a caller explicitly set it. No UI does any more
-            // (the 1-5 sensitivity slider was removed when the dial became a display
-            // filter), and defaulting to 2 here would override the config-file
-            // `defaultGranularity` that the discovery fallback path still reads.
-            analysisGranularity: analyzeTask.options?.['analysisGranularity'],
-            analysisQuality: analyzeTask.options?.['analysisQuality'] || 'fast'
           }
         });
       }
@@ -1575,19 +1558,7 @@ export class QueueService implements OnDestroy {
       if (!analyzeWebpageTask.options?.['aiModel']) {
         warnings?.push('Webpage analysis was skipped because no AI model is selected. Configure a model in the queue item settings.');
       } else {
-        // Parse provider:model string
-        const modelValue = analyzeWebpageTask.options['aiModel'];
-        let aiProvider = 'ollama';
-        let aiModel = modelValue;
-
-        if (modelValue.includes(':')) {
-          const firstColon = modelValue.indexOf(':');
-          const possibleProvider = modelValue.substring(0, firstColon);
-          if (['ollama', 'claude', 'openai', 'local'].includes(possibleProvider)) {
-            aiProvider = possibleProvider;
-            aiModel = modelValue.substring(firstColon + 1);
-          }
-        }
+        const { aiProvider, aiModel } = splitAiModelValue(analyzeWebpageTask.options['aiModel']);
 
         backendTasks.push({
           type: 'analyze-webpage' as any,

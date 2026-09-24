@@ -32,23 +32,17 @@ export interface DownloadImportConfig {
  */
 export type TranscribeConfig = Record<string, never>;
 
-export type AnalysisQuality = 'fast' | 'thorough';
-
+/**
+ * AI Analyze's options. The analysis is Crucible's pipeline: chapters from the
+ * scorer's outline and decisions, flags ranked by the scorer and checked by
+ * `aiModel`, which also writes chapter titles, the description, tags and a
+ * title. There is no sensitivity, quality or engine option: the analysis always
+ * captures everything (sensitivity is a display filter in the editor).
+ */
 export interface AIAnalyzeConfig {
-  aiModel?: string; // Dynamic model string like "ollama:qwen2.5:7b" or "claude:claude-3-sonnet"
+  /** A stored `provider:model` choice (`local:<id>`, `claude:<id>`, …): one of the connected Crucible's options. */
+  aiModel?: string;
   customInstructions?: string;
-  /**
-   * 1-5 sensitivity. OPTIONAL AND NO LONGER SET BY ANY UI — the slider was
-   * removed from every run-config surface when the dial became a display filter
-   * (see models/flag-filter.ts). It survives on the request model for API
-   * compatibility: the backend still accepts it, and the DISCOVERY fallback flag
-   * path still honors it. When absent, that path falls back to the config file's
-   * `defaultGranularity` and then to its own default of 2.
-   */
-  analysisGranularity?: number;
-  generateSummary?: boolean;
-  extractKeyPoints?: boolean;
-  analysisQuality?: AnalysisQuality; // 'fast' = single-pass (cheaper), 'thorough' = multi-pass (better quotes)
 }
 
 export interface FixAspectRatioConfig {

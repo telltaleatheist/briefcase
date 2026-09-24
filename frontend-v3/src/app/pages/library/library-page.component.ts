@@ -2836,8 +2836,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
 
   /**
    * Reconstruct the pipeline steps a VideoJobSettings bag implies, matching the
-   * exact task options the removed convertSettingsToQueueTasks produced (the
-   * legacy ai-analyze carries analysisQuality, not analysisGranularity).
+   * task options the removed convertSettingsToQueueTasks produced.
    */
   private settingsToSteps(settings: VideoJobSettings): PipelineStep[] {
     const steps: PipelineStep[] = [];
@@ -2856,7 +2855,6 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
         config: {
           aiModel: settings.aiModel,
           customInstructions: settings.customInstructions,
-          analysisQuality: settings.analysisQuality,
         },
       });
     }
