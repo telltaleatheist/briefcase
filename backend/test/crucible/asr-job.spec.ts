@@ -402,3 +402,29 @@ describe('REGRESSION: a cancel during a door retry is a cancel, never an unreach
     expect(submits).toBe(1);
   });
 });
+
+describe('REGRESSION: a non-network event-stream error DELETEs the admitted job before the caller falls back', () => {
+  it('a protocol error on the stream cancels the job and settles the ledger', async () => {
+    const { runAsrJob } = await import('../../src/crucible/asr/crucible-asr-job');
+    const { CrucibleProtocolError } = await import('@crucible/client');
+    const dir = tempDir('asr-proto-');
+    const file = path.join(dir, 'v.mp4');
+    fs.writeFileSync(file, Buffer.alloc(1024, 1));
+    const cancel = jest.fn(async () => ({ status: 'cancelled' }));
+    const settled: string[] = [];
+    const client = {
+      upload: async () => ({ blobId: 'b1' }),
+      submit: async () => 'job-7',
+      cancel,
+      // eslint-disable-next-line require-yield
+      events: async function* () { throw new (CrucibleProtocolError as unknown as new (m: string) => Error)('event ids went backwards'); },
+    } as unknown as import('@crucible/client').CrucibleClient;
+    const err = await runAsrJob({
+      client, server: 'mac', model: 'm', params: { language: 'auto', vad_filter: false, word_timestamps: false } as never,
+      file, filename: 'v.mp4', ledger: { record: () => undefined, settle: (id: string) => { settled.push(id); } } as never,
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(cancel).toHaveBeenCalledWith('job-7');
+    expect(settled).toEqual(['job-7']);
+  });
+});

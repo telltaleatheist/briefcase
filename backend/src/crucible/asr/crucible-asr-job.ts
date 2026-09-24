@@ -306,7 +306,13 @@ export async function runAsrJob(options: RunAsrJobOptions): Promise<AsrJobOutcom
         if (cancelAsked) {
           throw new CrucibleAsrCancelled(server, admitted, `The transcription was cancelled (Crucible job ${admitted} on ${server}).`);
         }
-        if (wire === null) throw classifyAsrRefusal(err, server, `the events of asr job ${admitted}`);
+        if (wire === null) {
+          // Not weather (a protocol or auth error on the stream): the job is
+          // still admitted and holding the card. DELETE it before the caller
+          // falls back, or whisper-cli and Crucible transcribe the same video.
+          await cancel(`the event stream failed: ${(err as Error)?.message ?? err}`);
+          throw classifyAsrRefusal(err, server, `the events of asr job ${admitted}`);
+        }
         if (failures >= streamDelays.length) {
           await cancel('event stream lost past its budget');
           throw new CrucibleAsrUnavailable('crucible_stream_lost', server,
