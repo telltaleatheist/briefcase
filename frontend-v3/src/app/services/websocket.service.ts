@@ -5,6 +5,7 @@ import type { CrucibleServersChangedPayload } from '@crucible-wire/settings-wire
 import type { CrucibleInstallProgress } from '@crucible-wire/install-wire';
 import type { CrucibleCoordinationState } from '@crucible-wire/coordinate-wire';
 import type { CrucibleInstallDoorEvent } from '@crucible-wire/install-door-wire';
+import { CRUCIBLE_READINESS_EVENT, type CrucibleReadinessView } from '@crucible-wire/readiness-wire';
 import type { LanesStatus } from '../models/queue-lanes.model';
 
 export type CrucibleServersChanged = CrucibleServersChangedPayload;
@@ -65,7 +66,6 @@ export interface TaskFailed {
 
 export interface SystemStatus {
   mainPool: { active: number; maxConcurrent: number; pending: number };
-  aiPool: { active: number; maxConcurrent: number; pending: number };
   queue: { total: number; waiting: number; completed: number; failed: number };
 }
 
@@ -105,29 +105,6 @@ export interface VideoAdded {
   timestamp: string;
 }
 
-export interface ModelDownloadProgress {
-  modelId: string;
-  progress: number;
-  downloadedGB: number;
-  totalGB: number;
-  speed?: string;
-  eta?: string;
-}
-
-export interface ModelDownloadComplete {
-  modelId: string;
-}
-
-export interface ModelDownloadError {
-  modelId: string;
-  error: string;
-}
-
-export interface ModelDownloadCancelled {
-  modelId: string;
-}
-
-// Component (binary/model) download events — download-on-demand
 export interface ComponentDownloadProgress {
   componentId: string;
   phase: 'download' | 'verify' | 'extract' | 'install';
@@ -177,10 +154,6 @@ export class WebsocketService implements OnDestroy {
   private analysisCompletedCallbacks: ((event: AnalysisCompleted) => void)[] = [];
   private suggestionRejectedCallbacks: ((event: SuggestionRejected) => void)[] = [];
   private videoAddedCallbacks: ((event: VideoAdded) => void)[] = [];
-  private modelDownloadProgressCallbacks: ((event: ModelDownloadProgress) => void)[] = [];
-  private modelDownloadCompleteCallbacks: ((event: ModelDownloadComplete) => void)[] = [];
-  private modelDownloadErrorCallbacks: ((event: ModelDownloadError) => void)[] = [];
-  private modelDownloadCancelledCallbacks: ((event: ModelDownloadCancelled) => void)[] = [];
   private componentDownloadProgressCallbacks: ((event: ComponentDownloadProgress) => void)[] = [];
   private componentDownloadCompleteCallbacks: ((event: ComponentDownloadComplete) => void)[] = [];
   private componentDownloadErrorCallbacks: ((event: ComponentDownloadError) => void)[] = [];
@@ -189,6 +162,7 @@ export class WebsocketService implements OnDestroy {
   private crucibleInstallProgressCallbacks: ((event: CrucibleInstallProgress) => void)[] = [];
   private crucibleCoordinationCallbacks: ((event: CrucibleCoordinationState) => void)[] = [];
   private crucibleInstallDoorCallbacks: ((event: CrucibleInstallDoorEvent) => void)[] = [];
+  private crucibleReadinessCallbacks: ((event: CrucibleReadinessView) => void)[] = [];
 
   constructor(private ngZone: NgZone) {}
 
@@ -352,25 +326,6 @@ export class WebsocketService implements OnDestroy {
       this.dispatch(this.videoAddedCallbacks, event);
     });
 
-    // Model download events
-    this.socket.on('model.download.progress', (event: ModelDownloadProgress) => {
-      this.dispatch(this.modelDownloadProgressCallbacks, event);
-    });
-
-    this.socket.on('model.download.complete', (event: ModelDownloadComplete) => {
-      console.log('WS model.download.complete received:', event);
-      this.dispatch(this.modelDownloadCompleteCallbacks, event);
-    });
-
-    this.socket.on('model.download.error', (event: ModelDownloadError) => {
-      console.log('WS model.download.error received:', event);
-      this.dispatch(this.modelDownloadErrorCallbacks, event);
-    });
-
-    this.socket.on('model.download.cancelled', (event: ModelDownloadCancelled) => {
-      console.log('WS model.download.cancelled received:', event);
-      this.dispatch(this.modelDownloadCancelledCallbacks, event);
-    });
 
     // Component (binary/model) download events
     this.socket.on('component.download.progress', (event: ComponentDownloadProgress) => {
@@ -407,6 +362,10 @@ export class WebsocketService implements OnDestroy {
 
     this.socket.on('crucible.install-door', (event: CrucibleInstallDoorEvent) => {
       this.dispatch(this.crucibleInstallDoorCallbacks, event);
+    });
+
+    this.socket.on(CRUCIBLE_READINESS_EVENT, (event: CrucibleReadinessView) => {
+      this.dispatch(this.crucibleReadinessCallbacks, event);
     });
 
     this.socket.on('analysisProgress', (event: any) => {
@@ -517,7 +476,6 @@ export class WebsocketService implements OnDestroy {
     };
   }
 
-  // Model download event subscriptions
   /** The Crucible server registry or its rank/pause record changed. */
   onCrucibleServersChanged(callback: (event: CrucibleServersChanged) => void): () => void {
     this.crucibleServersChangedCallbacks.push(callback);
@@ -550,31 +508,11 @@ export class WebsocketService implements OnDestroy {
     };
   }
 
-  onModelDownloadProgress(callback: (event: ModelDownloadProgress) => void): () => void {
-    this.modelDownloadProgressCallbacks.push(callback);
+  /** Whether Crucible is there for AI work, on every change (P7). */
+  onCrucibleReadiness(callback: (event: CrucibleReadinessView) => void): () => void {
+    this.crucibleReadinessCallbacks.push(callback);
     return () => {
-      this.modelDownloadProgressCallbacks = this.modelDownloadProgressCallbacks.filter(cb => cb !== callback);
-    };
-  }
-
-  onModelDownloadComplete(callback: (event: ModelDownloadComplete) => void): () => void {
-    this.modelDownloadCompleteCallbacks.push(callback);
-    return () => {
-      this.modelDownloadCompleteCallbacks = this.modelDownloadCompleteCallbacks.filter(cb => cb !== callback);
-    };
-  }
-
-  onModelDownloadError(callback: (event: ModelDownloadError) => void): () => void {
-    this.modelDownloadErrorCallbacks.push(callback);
-    return () => {
-      this.modelDownloadErrorCallbacks = this.modelDownloadErrorCallbacks.filter(cb => cb !== callback);
-    };
-  }
-
-  onModelDownloadCancelled(callback: (event: ModelDownloadCancelled) => void): () => void {
-    this.modelDownloadCancelledCallbacks.push(callback);
-    return () => {
-      this.modelDownloadCancelledCallbacks = this.modelDownloadCancelledCallbacks.filter(cb => cb !== callback);
+      this.crucibleReadinessCallbacks = this.crucibleReadinessCallbacks.filter(cb => cb !== callback);
     };
   }
 

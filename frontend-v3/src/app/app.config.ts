@@ -1,9 +1,10 @@
 import { ApplicationConfig, provideZoneChangeDetection } from '@angular/core';
 import { provideRouter, withViewTransitions, withInMemoryScrolling, withNavigationErrorHandler, NavigationError, RouteReuseStrategy } from '@angular/router';
 import { provideAnimations } from '@angular/platform-browser/animations';
-import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { routes } from './app.routes';
 import { WorkspaceReuseStrategy } from './core/workspace-reuse.strategy';
+import { crucibleRequiredInterceptor } from './core/crucible-required.interceptor';
 
 /**
  * A lazy route chunk failed to fetch — the running bundle is stale (the app
@@ -41,6 +42,6 @@ export const appConfig: ApplicationConfig = {
       withNavigationErrorHandler(handleStaleChunkNavigation)
     ),
     provideAnimations(),
-    provideHttpClient()
+    provideHttpClient(withInterceptors([crucibleRequiredInterceptor]))
   ]
 };

@@ -3,6 +3,7 @@ import { VideoTab } from '../../services/tabs.service';
 import { ShellSection } from '../../core/stores/navigation.store';
 import { UiBadgeComponent } from '../../ui';
 import { LibrarySwitcherComponent } from './library-switcher.component';
+import { CrucibleStatusComponent } from '../../components/crucible-readiness/crucible-status.component';
 
 /**
  * Shell sidebar — places only, no actions.
@@ -13,7 +14,7 @@ import { LibrarySwitcherComponent } from './library-switcher.component';
 @Component({
   selector: 'app-sidebar',
   standalone: true,
-  imports: [UiBadgeComponent, LibrarySwitcherComponent],
+  imports: [UiBadgeComponent, LibrarySwitcherComponent, CrucibleStatusComponent],
   templateUrl: './sidebar.component.html',
   styleUrls: ['./sidebar.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush
