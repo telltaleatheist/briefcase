@@ -1,20 +1,18 @@
 /**
- * THE SCORER ON CRUCIBLE (migration plan P6): the same seam the scorer's own
- * llama-server serves (`withScorer(fn)` handing `fn` a {@link ScorerHandle}),
- * with the transport swapped underneath. Crucible reserves the card and
- * returns data; chapters, flags and every decision about them stay above the
- * seam, in Briefcase.
+ * THE SCORER ON CRUCIBLE (migration plan P6): `withScorer(fn)` handing `fn` a
+ * {@link ScorerHandle}. Since P7 it is the only scorer (the scorer's own
+ * llama-server is gone). Crucible reserves the card and returns data;
+ * chapters, flags and every decision about them stay above the seam, in
+ * Briefcase.
  *
  *   decide     `POST /v1/decide` (PHASE22), act `decide`, `missing: "report"`,
  *              read back by crucible-decide.ts (Briefcase's floor policy
  *              client-side, the label-mass gate, the renormalised logprobs
  *              Viterbi needs).
- *   generate   the chat door, act `generate`: thinking off, temperature 0, as
- *              the llama-server path generated the outline.
+ *   generate   the chat door, act `generate`: thinking off, temperature 0.
  *   tokens     the chat door again, one token of answer: prompt_tokens of the
- *              text less the template's own, measured once per model. Chunk
- *              plans then match the llama-server path's /tokenize to within
- *              the template seam.
+ *              text less the template's own, measured once per model (exact
+ *              to within the template seam).
  *   the lease  ONE hold across the whole chapters + flags pass: the run's
  *              `withModel` (P3), loaded at {@link SCORER_LOAD_CONTEXT} (the
  *              largest chunk state plus its questions), heartbeaten, released
@@ -33,7 +31,7 @@
  * NO FALLBACK (the user's rule, 2026-09-23): when Crucible cannot serve the
  * scorer — no decide model, a server older than the door, decide_not_served —
  * the work fails by name, or parks when the server is merely busy or silent.
- * It never switches to the app's own llama-server or to the classic engine.
+ * There is nothing else to switch to.
  */
 
 import { Injectable, Logger } from '@nestjs/common';
@@ -45,7 +43,6 @@ import {
   type ModelInfo,
 } from '@crucible/client';
 import { CrucibleServersService } from '../crucible/crucible-servers.service';
-import { resolveAiVia } from '../crucible/llm/ai-via';
 import { CrucibleChatService, localTimeoutMs, MAX_QUEUE_FULL_RETRIES } from '../crucible/llm/crucible-chat.service';
 import {
   CrucibleBusyError,
@@ -59,7 +56,7 @@ import { crucibleTargetOf } from '../crucible/llm/target';
 import { isVisionAlias } from '../crucible/llm/ollama-map';
 import { crucibleUnavailableCause } from '../crucible/transport-failure';
 import { fromWireResponse, toWireRequest } from './crucible-decide';
-import type { ScorerHandle } from './scorer-server.service';
+import type { ScorerHandle } from './scorer-handle';
 import {
   ChatMessage,
   DecideOptions,
@@ -159,11 +156,6 @@ export class CrucibleScorerService {
     private readonly chat: CrucibleChatService,
     private readonly servers: CrucibleServersService,
   ) {}
-
-  /** True when AI goes through Crucible (Settings › AI): the scorer then runs here and only here. */
-  enabled(): boolean {
-    return resolveAiVia().via === 'crucible';
-  }
 
   /**
    * The server and model the scorer runs on, or a named failure. Parks (inside
@@ -281,7 +273,10 @@ export class CrucibleScorerService {
           continue;
         }
         if (err instanceof CrucibleRefused && err.code === 'model_not_resident' && !reacquired) {
-          // Someone else's load evicted it: take it back once, at the scorer's window.
+          // Someone else's load, or Crucible's settlement after a lapsed lease,
+          // evicted it: take it back once, at the scorer's window. A card the
+          // settlement still holds (engine_in_use) is waited out, bounded
+          // (RELOAD_BUSY_WAIT), then parks the task: never a failed analysis.
           reacquired = true;
           this.logger.warn(`[${server}] ${model} is no longer resident (${err.serverMessage}); loading it again`);
           try {

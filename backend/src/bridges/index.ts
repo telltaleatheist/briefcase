@@ -1,21 +1,17 @@
 /**
  * Bridges - Process wrappers for external binaries
  *
- * Provides clean interfaces to ffmpeg, ffprobe, whisper.cpp, and yt-dlp
- * with support for multiple concurrent processes and individualized feedback.
+ * Provides clean interfaces to ffmpeg, ffprobe and yt-dlp with support for
+ * multiple concurrent processes and individualized feedback. (AI runs on
+ * Crucible: Briefcase ships no whisper or llama binary of its own.)
  *
  * Usage:
- *   import { getRuntimePaths, FfmpegBridge, FfprobeBridge, WhisperBridge, YtDlpBridge } from '../bridges';
+ *   import { getRuntimePaths, FfmpegBridge, FfprobeBridge, YtDlpBridge } from '../bridges';
  *
  *   const paths = getRuntimePaths();
  *   const ffmpeg = new FfmpegBridge(paths.ffmpeg);
  *   const ffprobe = new FfprobeBridge(paths.ffprobe);
  *   const ytdlp = new YtDlpBridge(paths.ytdlp, { ffmpegPath: paths.ffmpeg });
- *   const whisper = new WhisperBridge({
- *     binaryPath: paths.whisper,
- *     modelsDir: paths.whisperModelsDir,
- *     libraryPath: getWhisperLibraryPath(),
- *   });
  */
 
 // Runtime path resolution
@@ -26,9 +22,6 @@ export {
   getPlatformFolder,
   getBinaryExtension,
   verifyBinary,
-  getWhisperLibraryPath,
-  getLlamaLibraryPath,
-  getWhisperModelDirs,
   type RuntimePaths,
 } from './runtime-paths';
 
@@ -58,28 +51,3 @@ export {
   type YtDlpVideoInfo,
   type YtDlpConfig,
 } from './ytdlp-bridge';
-
-// Whisper bridge
-export {
-  WhisperBridge,
-  type WhisperProgress,
-  type WhisperProcessInfo,
-  type WhisperResult,
-  type WhisperConfig,
-  type WhisperGpuMode,
-} from './whisper-bridge';
-
-// Llama bridge (local AI)
-export {
-  LlamaBridge,
-  type LlamaConfig,
-  type LlamaProgress,
-  type LlamaServerStatus,
-  type LlamaGenerateResult,
-} from './llama-bridge';
-
-// Llama manager
-export { LlamaManager, type LocalAIProgress } from './llama-manager';
-
-// Bridges module
-export { BridgesModule } from './bridges.module';

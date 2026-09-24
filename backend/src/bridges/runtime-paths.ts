@@ -57,39 +57,6 @@ function downloadedEntry(
   return fs.existsSync(full) ? full : null;
 }
 
-/** The downloaded whisper-models dir if it exists and holds at least one ggml-*.bin. */
-function getDownloadedWhisperModelsDir(): string | null {
-  const dir = path.join(getBriefcaseConfigDir(), 'models', 'whisper');
-  try {
-    if (fs.existsSync(dir) && fs.readdirSync(dir).some((f) => /^ggml-.*\.bin$/.test(f))) {
-      return dir;
-    }
-  } catch {
-    // ignore
-  }
-  return null;
-}
-
-/**
- * All directories that may contain whisper models, in priority order:
- * downloaded (<configDir>/models/whisper) first, then the bundled dir.
- *
- * Resolved live (not cached) so models downloaded after startup are picked up,
- * and so bundled + downloaded models are MERGED rather than one shadowing the
- * other. This is what makes every downloaded size show up for transcription.
- */
-export function getWhisperModelDirs(): string[] {
-  const dirs: string[] = [];
-  const downloaded = path.join(getBriefcaseConfigDir(), 'models', 'whisper');
-  const bundled = path.join(getResourcesPath(), 'utilities', 'models');
-  for (const dir of [downloaded, bundled]) {
-    if (!dirs.includes(dir) && fs.existsSync(dir)) {
-      dirs.push(dir);
-    }
-  }
-  return dirs;
-}
-
 /**
  * Check if running in a packaged Electron app
  */
@@ -161,36 +128,6 @@ export function getBinaryExtension(): string {
 }
 
 /**
- * Get whisper binary name for current platform/architecture
- */
-function getWhisperBinaryName(): string {
-  const platform = process.platform;
-  const arch = process.arch;
-
-  if (platform === 'win32') {
-    return 'whisper-cli.exe';
-  } else if (platform === 'darwin') {
-    return arch === 'arm64' ? 'whisper-cli-arm64' : 'whisper-cli-x64';
-  }
-  return 'whisper-cli';
-}
-
-/**
- * Get llama-server binary name for current platform/architecture
- */
-function getLlamaBinaryName(): string {
-  const platform = process.platform;
-  const arch = process.arch;
-
-  if (platform === 'win32') {
-    return 'llama-server.exe';
-  } else if (platform === 'darwin') {
-    return arch === 'arm64' ? 'llama-server-arm64' : 'llama-server-x64';
-  }
-  return 'llama-server';
-}
-
-/**
  * Get yt-dlp binary path relative to utilities/bin
  * ALL platforms use "onedir" builds (pre-extracted, fast startup)
  */
@@ -213,10 +150,6 @@ export interface RuntimePaths {
   ffmpeg: string;
   ffprobe: string;
   ytdlp: string;
-  whisper: string;
-  whisperModelsDir: string;
-  llama: string;
-  llamaModelsDir: string;
 }
 
 /**
@@ -230,19 +163,15 @@ export function getRuntimePaths(): RuntimePaths {
   let ffmpegPath: string;
   let ffprobePath: string;
   let ytdlpPath: string;
-  let whisperPath: string;
-  let llamaPath: string;
 
   if (isPackaged()) {
     // Packaged: binaries in resources/node_modules (for ffmpeg/ffprobe)
-    // and resources/utilities/bin (for whisper, yt-dlp, and llama)
+    // and resources/utilities/bin (for yt-dlp)
     ffmpegPath = path.join(resourcesPath, 'node_modules', '@ffmpeg-installer', platformFolder, `ffmpeg${ext}`);
     ffprobePath = path.join(resourcesPath, 'node_modules', '@ffprobe-installer', platformFolder, `ffprobe${ext}`);
     ytdlpPath = path.join(resourcesPath, 'utilities', 'bin', getYtDlpRelativePath());
-    whisperPath = path.join(resourcesPath, 'utilities', 'bin', getWhisperBinaryName());
-    llamaPath = path.join(resourcesPath, 'utilities', 'bin', getLlamaBinaryName());
   } else {
-    // Development: ffmpeg from npm package, yt-dlp, whisper, and llama from utilities/bin
+    // Development: ffmpeg from npm package, yt-dlp from utilities/bin
     ffmpegPath = path.join(
       resourcesPath,
       'node_modules',
@@ -258,8 +187,6 @@ export function getRuntimePaths(): RuntimePaths {
       `ffprobe${ext}`
     );
     ytdlpPath = path.join(resourcesPath, 'utilities', 'bin', getYtDlpRelativePath());
-    whisperPath = path.join(resourcesPath, 'utilities', 'bin', getWhisperBinaryName());
-    llamaPath = path.join(resourcesPath, 'utilities', 'bin', getLlamaBinaryName());
   }
 
   // Prefer downloaded components (download-on-demand) over bundled paths.
@@ -267,20 +194,11 @@ export function getRuntimePaths(): RuntimePaths {
   ffmpegPath = downloadedEntry(comps, 'ffmpeg-tools', `ffmpeg${ext}`) || ffmpegPath;
   ffprobePath = downloadedEntry(comps, 'ffmpeg-tools', `ffprobe${ext}`) || ffprobePath;
   ytdlpPath = downloadedEntry(comps, 'yt-dlp') || ytdlpPath;
-  whisperPath = downloadedEntry(comps, 'whisper') || whisperPath;
-  llamaPath = downloadedEntry(comps, 'llama') || llamaPath;
-  const whisperModelsDir = getDownloadedWhisperModelsDir() || path.join(resourcesPath, 'utilities', 'models');
 
   return {
     ffmpeg: ffmpegPath,
     ffprobe: ffprobePath,
     ytdlp: ytdlpPath,
-    whisper: whisperPath,
-    whisperModelsDir,
-    llama: llamaPath,
-    // GGUF models are downloaded to <configDir>/models (flat), matching
-    // ModelManagerService / LlamaManager / ComponentManagerService.
-    llamaModelsDir: path.join(getBriefcaseConfigDir(), 'models'),
   };
 }
 
@@ -312,45 +230,4 @@ export function verifyBinary(binaryPath: string, name: string): void {
       // Ignore verification errors (e.g., if 'file' command not available)
     }
   }
-}
-
-/**
- * Get DYLD_LIBRARY_PATH for whisper dylibs (macOS)
- */
-export function getWhisperLibraryPath(): string | undefined {
-  if (process.platform !== 'darwin') {
-    return undefined;
-  }
-
-  // Downloaded whisper ships its dylibs co-located in the component dir.
-  const downloaded = getDownloadedComponents()['whisper'];
-  if (downloaded && fs.existsSync(downloaded.dir)) {
-    return downloaded.dir;
-  }
-
-  const resourcesPath = getResourcesPath();
-  const binDir = path.join(resourcesPath, 'utilities', 'bin');
-
-  return binDir;
-}
-
-/**
- * Get DYLD_LIBRARY_PATH for llama dylibs (macOS)
- * Same location as whisper dylibs
- */
-export function getLlamaLibraryPath(): string | undefined {
-  if (process.platform !== 'darwin') {
-    return undefined;
-  }
-
-  // Downloaded llama ships its dylibs co-located in the component dir.
-  const downloaded = getDownloadedComponents()['llama'];
-  if (downloaded && fs.existsSync(downloaded.dir)) {
-    return downloaded.dir;
-  }
-
-  const resourcesPath = getResourcesPath();
-  const binDir = path.join(resourcesPath, 'utilities', 'bin');
-
-  return binDir;
 }

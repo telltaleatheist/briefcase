@@ -8,7 +8,6 @@ import { log } from './common/logger';
 import { ServerOptions } from 'socket.io';
 import * as express from 'express';  // Explicitly import express
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
-import { AIProviderService } from './analysis/ai-provider.service';
 import { installGracefulShutdown } from './common/graceful-shutdown';
 
 class ExtendedIoAdapter extends IoAdapter {
@@ -95,15 +94,14 @@ async function bootstrap() {
 
     // Graceful shutdown. The Electron parent sends SIGTERM and SIGKILLs 12 s
     // later; without a handler here the backend was ALWAYS force-killed, so
-    // nothing ever got a chance to clean up (most visibly, Ollama models
-    // stayed resident, 17-25GB, until keep_alive expired).
+    // nothing ever got a chance to clean up (the Crucible quit sweep gives
+    // back what Briefcase holds on a server's card).
     //
     // ONE path (graceful-shutdown.ts): NOT `app.enableShutdownHooks()` as
     // well, whose own listener ran every hook, the 8 s Crucible quit sweep
     // included, a second time beside ours.
     installGracefulShutdown({
       close: () => app.close(),
-      releaseOllama: () => app.get(AIProviderService, { strict: false }).releaseOllamaModels(),
       exit: (code) => process.exit(code),
       log: { info: (m) => log.info(m), warn: (m) => log.warn(m) },
     });

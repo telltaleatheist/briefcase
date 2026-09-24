@@ -1,6 +1,7 @@
 /**
- * Options -> bare letter labels A..Z, and the startup proof that each letter is
- * ONE token. Port of snap/labels.py.
+ * Options -> bare letter labels A..Z. Port of snap/labels.py. (The startup
+ * proof that each letter is one token belonged to the scorer's own
+ * llama-server, removed in P7; Crucible's decision door makes its own.)
  */
 
 import { ScorerError } from './scorer.types';
@@ -30,34 +31,4 @@ export function assignLabels(names: string[], question: string): Label[] {
 
 export function yesnoLabels(): Label[] {
   return YESNO_OPTIONS.map((name, i) => [LETTERS[i], name]);
-}
-
-export interface Tokenizer {
-  tokenize(text: string): Promise<number[]>;
-}
-
-/**
- * letter -> token id, via the engine's own /tokenize. Every letter must be
- * exactly one token (bare, no leading space: it is the first token of the
- * assistant content), and no two letters may share an id.
- */
-export async function resolveLabelTokens(engine: Tokenizer): Promise<Map<string, number>> {
-  const ids = new Map<string, number>();
-  for (const letter of LETTERS) {
-    const toks = await engine.tokenize(letter);
-    if (toks.length !== 1) {
-      throw new ScorerError(
-        'label_not_single_token',
-        `label '${letter}' tokenizes to ${toks.length} tokens [${toks.join(', ')}]; each label must be exactly one token`,
-      );
-    }
-    ids.set(letter, toks[0]);
-  }
-  if (new Set(ids.values()).size !== ids.size) {
-    throw new ScorerError(
-      'label_not_single_token',
-      `two labels share a token id: ${JSON.stringify(Object.fromEntries(ids))}`,
-    );
-  }
-  return ids;
 }

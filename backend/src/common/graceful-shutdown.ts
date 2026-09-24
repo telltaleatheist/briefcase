@@ -4,29 +4,24 @@
  * Electron sends SIGTERM and SIGKILLs 12 s later. Nest's `enableShutdownHooks()`
  * used to run beside a SIGTERM handler of our own that also called
  * `app.close()`, so every shutdown hook ran twice, the Crucible quit sweep
- * (8 s ceiling) included: once from Nest's listener at once, again from ours
- * after the Ollama release (3 s), about 11 s in all against the 12 s kill.
+ * (8 s ceiling) included.
  *
  * Now there is one listener per signal, one run however many signals arrive,
- * the Ollama release and `app.close()` (every hook, the sweep among them) side
- * by side rather than one after the other, and a hard exit at
- * {@link SHUTDOWN_DEADLINE_MS} so the parent never has to kill us.
+ * `app.close()` (every hook, the Crucible quit sweep among them) once, and a
+ * hard exit at {@link SHUTDOWN_DEADLINE_MS} so the parent never has to kill us.
+ * (Before P7 an Ollama unload ran beside the hooks; Briefcase no longer loads
+ * anything in Ollama itself, and what it holds on a Crucible the sweep gives back.)
  */
 
 /** Our own ceiling, under Electron's 12 s SIGKILL. */
 export const SHUTDOWN_DEADLINE_MS = 10_500;
-/** How long the Ollama unload may take (it runs beside the hooks). */
-export const OLLAMA_RELEASE_MS = 3_000;
 
 export interface GracefulShutdownDeps {
   /** `app.close()`: destroy, before-shutdown (the quit sweep) and shutdown hooks. */
   close(): Promise<void>;
-  /** Unload the Ollama models this run loaded. */
-  releaseOllama(): Promise<void>;
   exit(code: number): void;
   log: { info(message: string): void; warn(message: string): void };
   deadlineMs?: number;
-  ollamaMs?: number;
 }
 
 /** A handler that runs the shutdown once, whichever signal (and however many) asks for it. */
@@ -41,12 +36,7 @@ export function gracefulShutdown(deps: GracefulShutdownDeps): (signal: string) =
         deps.exit(0);
       }, deadlineMs);
       hard.unref?.();
-      const ollama = Promise.race([
-        Promise.resolve().then(() => deps.releaseOllama()).catch((error: unknown) => deps.log.warn(`Error releasing Ollama models: ${(error as Error).message}`)),
-        new Promise<void>((resolve) => setTimeout(resolve, deps.ollamaMs ?? OLLAMA_RELEASE_MS).unref?.()),
-      ]);
-      const hooks = Promise.resolve().then(() => deps.close()).catch((error: unknown) => deps.log.warn(`Error closing Nest application: ${(error as Error).message}`));
-      await Promise.all([ollama, hooks]);
+      await Promise.resolve().then(() => deps.close()).catch((error: unknown) => deps.log.warn(`Error closing Nest application: ${(error as Error).message}`));
       clearTimeout(hard);
       deps.log.info('Graceful shutdown complete');
       deps.exit(0);

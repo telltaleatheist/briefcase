@@ -20,8 +20,9 @@
  *
  * Usage: see USAGE below (also printed by --help).
  *
- * The live run starts the scorer's own llama-server (ScorerServerService: app-config
- * scorerModel etc.) and stops it at the end. It needs the GPU.
+ * The live run is on Crucible's decision door (the scorer's only transport since
+ * P7): the Crucible on this machine, or --crucible NAME from Briefcase's
+ * registry. It needs the card: one scorer lease per video, released after it.
  */
 
 import { execFileSync } from 'child_process';
@@ -30,9 +31,9 @@ import * as os from 'os';
 import * as path from 'path';
 import { Logger } from '@nestjs/common';
 
-import { RankedSentence, assembleSentences } from '../../../analysis/nli-ranker.service';
+import { RankedSentence, assembleSentences } from '../../../analysis/flag-windows';
 import { AnalysisCategory, DEFAULT_CATEGORIES } from '../../../analysis/prompts/analysis-prompts';
-import { ScorerServerService } from '../../scorer-server.service';
+import { crucibleServices } from '../../live/crucible-standalone';
 import { FlagOptionPlan } from '../flag-options';
 import { FlagLayout, NonePosition } from '../flag-questions';
 import {
@@ -60,6 +61,7 @@ const USAGE = `Usage (after \`npm run build\` in backend/, or tsc to any outDir)
                          (tune λ/τ/floors offline with --params)
     --dry-run            list the eval set and exit (no scorer)
     --no-copy            read the live DB immutably instead of copying it
+    --crucible <name>    the Crucible server in Briefcase's registry (default: the one on this machine)
 
 `;
 
@@ -264,6 +266,8 @@ interface Args {
   fromMaps?: string;
   dryRun: boolean;
   copy: boolean;
+  /** true: the Crucible on this machine; a string: that server in Briefcase's registry. */
+  crucible: string | true;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -278,6 +282,7 @@ function parseArgs(argv: string[]): Args {
     misinfo: false,
     dryRun: false,
     copy: true,
+    crucible: true,
   };
   for (let i = 0; i < argv.length; i++) {
     const v = () => {
@@ -299,6 +304,7 @@ function parseArgs(argv: string[]): Args {
       case '--from-maps': a.fromMaps = v(); break;
       case '--dry-run': a.dryRun = true; break;
       case '--no-copy': a.copy = false; break;
+      case '--crucible': a.crucible = v(); break;
       case '--help':
       case '-h':
         console.log(USAGE);
@@ -380,8 +386,8 @@ async function main(): Promise<void> {
   const dbs = args.dbs.length ? args.dbs : defaultLibraryDbs();
   if (!dbs.length) throw new Error('no library databases found; pass --db <path>');
   Logger.overrideLogger(['error', 'warn']);
-  const server = new ScorerServerService();
-  const ranker = new SnapFlagRanker(server);
+  const { scorer, chat } = crucibleServices(args.crucible);
+  const ranker = new SnapFlagRanker();
 
   try {
     for (const dbFile of dbs) {
@@ -417,13 +423,14 @@ async function main(): Promise<void> {
             );
             continue;
           }
-          const res = await ranker.rank(sentences, args.categories, {
+          const res = await chat.withRun(() => scorer.withScorer((handle) => ranker.rank(sentences, args.categories, {
+            scorer: handle,
             layout: args.layout,
             nonePosition: args.none,
             includeMisinformation: args.misinfo,
             params,
             batchSize: args.batch,
-          });
+          })));
           const m = scoreVideo(videoId, sentences, vrows, res.windows, res.overflow, res.stats);
           printVideo(m);
           results.push(m);
@@ -446,7 +453,7 @@ async function main(): Promise<void> {
       }
     }
   } finally {
-    await server.stop();
+    // Every lease was released as its video's run settled.
   }
   if (!args.dryRun) finish(results, args, params);
 }

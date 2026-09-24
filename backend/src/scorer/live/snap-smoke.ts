@@ -1,14 +1,13 @@
 /**
- * Live smoke test for the snap engine: run it once the GPU is free, BEFORE
- * flipping analysisEngine to 'snap' anywhere (docs/snap-analysis-plan.md,
- * "Live validation").
+ * Live smoke test for the snap engine (Briefcase's only analysis engine since
+ * P7): run it once the GPU is free (docs/snap-analysis-plan.md, "Live
+ * validation").
  *
- *   (a) engine    start the scorer's own llama-server through ScorerServerService
- *                 (app-config scorerModel / BRIEFCASE_SCORER_LLAMA_SERVER, exactly
- *                 as the app does), or attach to one already running (--engine),
- *                 or run on Crucible's decision door through the app's own
- *                 CrucibleScorerService (--crucible: its model pick, its load at
- *                 32K, its lease across the whole run, released at the end);
+ *   (a) engine    Crucible's decision door through the app's own
+ *                 CrucibleScorerService (its model pick, its load at 32K, its
+ *                 lease across the whole run, released at the end): the
+ *                 Crucible on this machine, or --crucible NAME. (The scorer's
+ *                 own llama-server, and --engine, went in P7.)
  *   (b) sanity    snap's own live cases: yes/no sentiment, choice routing, score
  *                 ordering (sanity-cases.ts, from snap/tests/fixtures);
  *   (c) chapters  the TS chaptering pipeline on N YTSeg test videos, with the
@@ -36,18 +35,14 @@
  *
  * RUN
  *   node dist/scorer/live/snap-smoke.js --offline               # no GPU: scoring-port check
- *   node dist/scorer/live/snap-smoke.js                         # starts the scorer itself
- *   node dist/scorer/live/snap-smoke.js --engine http://127.0.0.1:8481   # attach instead
+ *   node dist/scorer/live/snap-smoke.js                         # Crucible on this machine (~/.crucible/pairing)
  *   node dist/scorer/live/snap-smoke.js --n 4 --skip-sanity     # quick look
- *   node dist/scorer/live/snap-smoke.js --crucible              # Crucible on this machine (~/.crucible/pairing)
  *   node dist/scorer/live/snap-smoke.js --crucible mac --n 24   # a server in Briefcase's own registry, by name
  * The offline check was run on 2026-09-23: pen 20 -> F1@±1 0.720, Pk 0.229, the same
  * as bench_snap.py score on the same cached maps (all four swept costs match).
  *
  * FLAGS
- *   --engine URL        attach to a running llama-server (snap's serve flags:
- *                       -c 65536 --ctx-checkpoints 32 --parallel 1 --jinja); never stopped
- *   --crucible [NAME]   the transport is Crucible's POST /v1/decide (P6). With no NAME,
+ *   --crucible [NAME]   Crucible's POST /v1/decide (the only transport). With no NAME,
  *                       the Crucible on this machine, read from its pairing file into a
  *                       throwaway registry; with NAME, that server in Briefcase's own
  *                       registry. /v1/activity is read first: a card another app holds
@@ -81,20 +76,10 @@ import { runSnapChapters } from '../chapters/snap-chapter.service';
 import { boundaries, parseOutline } from '../chapters/segmenter';
 import { OUTLINE_MAX_TOKENS, PLUG, outlinePrompt } from '../chapters/snap-prompts';
 import { SnapUnit } from '../chapters/units';
-import * as os from 'os';
-import { CrucibleClientFactory } from '../../crucible/client-factory';
-import { CrucibleServersService } from '../../crucible/crucible-servers.service';
-import { CrucibleChatService } from '../../crucible/llm/crucible-chat.service';
-import { readCruciblePairingFile } from '../../crucible/pairing-file';
-import { CrucibleProbeService } from '../../crucible/probe';
-import { CrucibleRegistryService } from '../../crucible/registry.service';
-import { getBriefcaseConfigDir } from '../../bridges/runtime-paths';
-import { CrucibleScorerService } from '../crucible-scorer.service';
-import { ScorerDecider } from '../scorer-decide';
-import { ScorerEngine } from '../scorer-engine';
-import { ScorerHandle, ScorerServerService } from '../scorer-server.service';
+import type { ScorerHandle } from '../scorer-handle';
 import { viterbi } from '../scorer-viterbi';
-import { ChatMessage, ChoiceAnswer, ScoreAnswer, YesNoAnswer } from '../scorer.types';
+import { ChoiceAnswer, ScoreAnswer, YesNoAnswer } from '../scorer.types';
+import { cardHeldByOther, crucibleServices } from './crucible-standalone';
 import { SANITY_SUITES } from './sanity-cases';
 
 // ------------------------------------------------------------------ reference numbers
@@ -202,8 +187,7 @@ export function summarise(scores: VideoScore[], pens: number[] = SWEEP) {
 // ------------------------------------------------------------------ args
 
 interface Args {
-  engine?: string;
-  /** true: this machine's Crucible (pairing file); a string: that server in Briefcase's registry. */
+  /** true (the default): this machine's Crucible (pairing file); a string: that server in Briefcase's registry. */
   crucible?: string | true;
   forceCard: boolean;
   generateOutline: boolean;
@@ -228,8 +212,7 @@ function parseArgs(argv: string[]): Args {
       if (v === undefined) throw new Error(`${k} needs a value`);
       return v;
     };
-    if (k === '--engine') a.engine = val();
-    else if (k === '--crucible') a.crucible = argv[i + 1] !== undefined && !argv[i + 1].startsWith('--') ? val() : true;
+    if (k === '--crucible') a.crucible = argv[i + 1] !== undefined && !argv[i + 1].startsWith('--') ? val() : true;
     else if (k === '--force-card') a.forceCard = true;
     else if (k === '--generate-outline') a.generateOutline = true;
     else if (k === '--ref') a.ref = val();
@@ -469,66 +452,6 @@ async function runChapters(a: Args, vids: YtsegVideo[], handle: ScorerHandle | n
   return scores;
 }
 
-// ------------------------------------------------------------------ engine
-
-/** A handle on an already-running llama-server (never stopped by this script). */
-async function attach(url: string): Promise<ScorerHandle> {
-  const engine = new ScorerEngine(url);
-  await engine.health();
-  const decider = await ScorerDecider.create(engine);
-  return {
-    decide: (req, o) => decider.decide(req, o),
-    generate: (messages: ChatMessage[] | string, o) =>
-      engine.generate(typeof messages === 'string' ? [{ role: 'user', content: messages }] : messages, o),
-    model: decider.model,
-    countTokens: async (text, signal) => (await engine.tokenize(text, signal)).length,
-    decider: async () => decider,
-  };
-}
-
-/**
- * The app's own Crucible services, wired by hand as CrucibleModule wires them:
- * NAME from Briefcase's registry, or this machine's Crucible read from its
- * pairing file into a throwaway registry (nothing of the user's is written).
- */
-function crucibleServices(which: string | true): { scorer: CrucibleScorerService; chat: CrucibleChatService; server: string | null; factory: CrucibleClientFactory } {
-  let dir: string;
-  let server: string | null = null;
-  if (which === true) {
-    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'snap-smoke-crucible-'));
-  } else {
-    dir = getBriefcaseConfigDir();
-    server = which;
-  }
-  const registry = new CrucibleRegistryService(dir);
-  if (which === true) {
-    const reading = readCruciblePairingFile();
-    if (reading === null) throw new Error('no Crucible on this machine (~/.crucible/pairing is missing); pass --crucible NAME');
-    registry.add({ name: 'local', url: reading.pairing.url, token: reading.pairing.token });
-    server = 'local';
-  } else if (!registry.names().includes(which)) {
-    throw new Error(`no Crucible server named "${which}" in ${dir} (have: ${registry.names().join(', ') || 'none'})`);
-  }
-  const factory = new CrucibleClientFactory(registry);
-  const probes = new CrucibleProbeService(factory, registry);
-  const servers = new CrucibleServersService(registry, factory);
-  const chat = new CrucibleChatService(servers, factory, probes);
-  return { scorer: new CrucibleScorerService(chat, servers), chat, server, factory };
-}
-
-/** /v1/activity's answer to "is the card someone else's?": null when free, else the sentence. */
-async function cardHeldByOther(factory: CrucibleClientFactory, server: string): Promise<string | null> {
-  const activity = await (await factory.clientFor(server)).activity();
-  const mine = (client: string | null | undefined) => client === 'briefcase';
-  if (activity.lease && !mine(activity.lease.client)) return `a lease by ${activity.lease.client ?? 'another client'} (${activity.lease.act})`;
-  const running = activity.running.filter((j) => !mine(j.client));
-  if (running.length) return `running ${running.map((j) => `${j.client ?? '?'}'s ${j.type}`).join(', ')}`;
-  const queued = activity.queued.filter((j) => !mine(j.client));
-  if (queued.length) return `queued ${queued.map((j) => `${j.client ?? '?'}'s ${j.type}`).join(', ')}`;
-  if (activity.chat.rows.length) return `${activity.chat.rows.length} chat(s) in flight`;
-  return null;
-}
-
 // ------------------------------------------------------------------ main
 
 async function main(): Promise<number> {
@@ -552,10 +475,8 @@ async function main(): Promise<number> {
   if (a.offline) {
     a.sanity = false;
     await work(null);
-  } else if (a.engine) {
-    await work(await attach(a.engine));
-  } else if (a.crucible !== undefined) {
-    const { scorer, chat, server, factory } = crucibleServices(a.crucible);
+  } else {
+    const { scorer, chat, server, factory } = crucibleServices(a.crucible ?? true);
     const held = await cardHeldByOther(factory, server!);
     if (held !== null && !a.forceCard) throw new Error(`the card on "${server}" is in use (${held}); not starting (--force-card to go anyway)`);
     report.transport = { crucible: server, version: await chat.serverVersion(server!) };
@@ -564,16 +485,6 @@ async function main(): Promise<number> {
     await chat.withRun(() => scorer.withScorer((h) => work(h)));
     const after = await (await factory.clientFor(server!)).activity();
     console.log(`# after the run: lease ${after.lease ? `${after.lease.client}/${after.lease.act}` : 'none'}, resident ${after.resident?.id ?? 'none'}`);
-  } else {
-    const server = new ScorerServerService();
-    const avail = server.availability();
-    if (!avail.available) throw new Error(`scorer unavailable: ${avail.reason}`);
-    console.log(`# starting the scorer (${avail.binarySource} llama-server); an 18 GB model can take minutes`);
-    try {
-      await server.withScorer((h) => work(h));
-    } finally {
-      await server.stop();
-    }
   }
 
   // ---- summary

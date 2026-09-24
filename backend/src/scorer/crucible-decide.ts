@@ -5,7 +5,7 @@
  * — one distribution per question — and nothing else. Chapters and flags stay
  * in Briefcase; this file only swaps the TRANSPORT under the scorer seam
  * (`ScorerHandle.decide`), so every pipeline above it sees the same
- * {@link DecideResponse} it saw from the scorer's own llama-server:
+ * {@link DecideResponse} the scorer produced before P7 on its own llama-server:
  *
  *   request   Briefcase's arrays → the wire's ordered objects. State,
  *             instructions, option names and descriptions cross verbatim; the
@@ -16,7 +16,7 @@
  *             label outside its top-K, and Briefcase's own 'floor' policy is
  *             applied HERE, client-side (see {@link floorAnswer}).
  *   answers   the renormalised `logprobs` feed Viterbi; `labelMass` is the
- *             returned letters' raw mass, as the llama-server path counts it.
+ *             returned letters' raw mass.
  *
  * PURE: no I/O, so the mapping is pinned by unit tests.
  */
@@ -27,7 +27,7 @@ import type {
   DecideRequest as WireRequest,
   DecideResponse as WireResponse,
 } from '@crucible/client';
-import { MAX_IMAGES, validateDecideRequest } from './scorer-decide';
+import { MAX_IMAGES, validateDecideRequest } from './decide-request';
 import { MAX_OPTIONS, YESNO_OPTIONS } from './scorer-labels';
 import {
   DecideRequest,
@@ -81,7 +81,7 @@ export function labelsOf(q: ScorerQuestion): string[] {
  * Briefcase's request as the wire's. Order is meaning (the option order is the
  * letter order), and the wire carries options and questions as JSON objects,
  * so a name a JS object would reorder is refused here by name rather than
- * silently re-lettered. Every validation the llama-server path makes runs
+ * silently re-lettered. Every validation of decide-request.ts runs
  * first, so a bad request is refused before the card is touched.
  */
 export function toWireRequest(model: string, req: DecideRequest): WireRequest {
@@ -156,7 +156,7 @@ export interface FlooredDistribution {
 }
 
 /**
- * Briefcase's 'floor' policy (scorer-decide.ts labelDistribution) on a
+ * Briefcase's 'floor' policy (the llama-server path's labelDistribution, before P7) on a
  * report-mode answer. On its own llama-server a missing label took the logprob
  * of the least likely token the engine returned — an upper bound on its true
  * probability. The door returns only the letters, so the floor here is the
@@ -170,7 +170,7 @@ export interface FlooredDistribution {
  *     each at or above the missing label's probability.
  *
  * clamped to ln(1e-12), the chapter matrix's own floor. Then the whole row is
- * renormalised in log space, exactly as labelDistribution does it.
+ * renormalised in log space, exactly as that path did it.
  */
 export function floorAnswer(answer: WireAnswer, labels: string[], question: string): FlooredDistribution {
   const mass = answer.labelMass;
@@ -218,7 +218,7 @@ export function floorAnswer(answer: WireAnswer, labels: string[], question: stri
 }
 
 /** The Briefcase answer for one question (the same shapes scorer-decide.ts answerOf builds). */
-export function toScorerAnswer(q: ScorerQuestion, answer: WireAnswer): ScorerAnswer & { gated?: true } {
+export function toScorerAnswer(q: ScorerQuestion, answer: WireAnswer): ScorerAnswer {
   if (answer.type !== q.type) {
     throw new ScorerError('engine_error', `question '${q.name}' was a ${q.type} and came back a ${answer.type}`);
   }

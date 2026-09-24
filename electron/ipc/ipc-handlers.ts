@@ -16,24 +16,13 @@ let downloadService: DownloadService;
 let updateService: UpdateService;
 let webCaptureService: WebCaptureService;
 
-// Define settings schema
-interface Settings {
-  lastUsedProvider: string;
-  lastUsedModel: string;
-  claudeApiKey: string;
-  openaiApiKey: string;
-}
-
 // Initialize electron-store for user settings
-// Stored in user's app data directory - won't transfer with app
-const store = new Store<Settings>({
+// Stored in user's app data directory - won't transfer with app.
+// No AI defaults live here: models are chosen in Settings › AI and keys are
+// kept by the Crucible that serves the call (P7), never by Briefcase.
+const store = new Store<Record<string, unknown>>({
   name: 'briefcase-settings',
-  defaults: {
-    lastUsedProvider: 'ollama',
-    lastUsedModel: 'qwen3.8:27b',
-    claudeApiKey: '',
-    openaiApiKey: '',
-  }
+  defaults: {},
 });
 
 // Store backend service reference for IPC handlers

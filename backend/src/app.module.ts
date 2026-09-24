@@ -14,14 +14,11 @@ import { WebArchiveModule } from './web-archive/web-archive.module';
 import { ConfigModule } from '@nestjs/config';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { SharedConfigModule } from './config/shared-config.module';
-import { ApiKeysModule } from './config/config.module';
 import { ComponentManagerModule } from './components/component-manager.module';
 import { environment } from './config/environment';
 import { JobStateManagerModule } from './common/job-state-manager.module';
 import { CommonModule } from './common/common.module';
 import { EventEmitterModule } from '@nestjs/event-emitter';
-import { BridgesModule } from './bridges';
-import { ScorerModule } from './scorer/scorer.module';
 import { CrucibleModule } from './crucible/crucible.module';
 import { join } from 'path';
 
@@ -43,10 +40,7 @@ import { join } from 'path';
         })]
       : []),
     CommonModule,
-    BridgesModule,
-    ScorerModule,
     SharedConfigModule,
-    ApiKeysModule,
     ComponentManagerModule,
     DatabaseModule,
     DownloaderModule,
