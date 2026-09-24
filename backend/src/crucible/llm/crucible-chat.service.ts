@@ -632,16 +632,54 @@ export class CrucibleChatService {
       signal?.removeEventListener('abort', onAbort);
       if (settled) this.ledger?.settle(server, 'job', loadId);
     }
-    throwIfAborted(signal);
     this.modelsCache.delete(server);
-    if (!lease) return null;
+    if (!lease) {
+      throwIfAborted(signal);
+      return null;
+    }
+    // A cancel that lands as the load finishes must still give back the lease
+    // the load took: it is in no hold yet, so nothing else would release it
+    // and the card stays pinned for another app until its TTL runs out.
+    if (signal?.aborted) {
+      await this.releaseOrphanLease(client, server, model, loadId);
+      throw new CrucibleChatCancelled();
+    }
     const status = await client.job(loadId);
     if (status.leaseId === null) {
       this.logger.warn(`[${server}] load of ${model} finished without the lease it was asked for; chatting unprotected`);
     } else {
       this.recordLease(server, model, status.leaseId);
     }
+    if (signal?.aborted) {
+      if (status.leaseId !== null) await this.releaseLeaseQuietly(client, server, status.leaseId);
+      throw new CrucibleChatCancelled();
+    }
     return status.leaseId;
+  }
+
+  private async releaseOrphanLease(client: CrucibleClient, server: string, model: string, loadId: string): Promise<void> {
+    try {
+      const status = await client.job(loadId);
+      if (status.leaseId === null) return;
+      this.recordLease(server, model, status.leaseId);
+      await this.releaseLeaseQuietly(client, server, status.leaseId);
+    } catch (err) {
+      this.logger.warn(`[${server}] could not look up the lease of cancelled load ${loadId}: ${(err as Error).message} (it expires on its own)`);
+    }
+  }
+
+  /** Release a lease no hold owns; kept in the ledger for a sweep when the server can't be told. */
+  private async releaseLeaseQuietly(client: CrucibleClient, server: string, leaseId: string): Promise<void> {
+    try {
+      await client.release(leaseId);
+      this.ledger?.settle(server, 'lease', leaseId);
+    } catch (err) {
+      if (err instanceof CrucibleRefused && (err.code === 'unknown_lease' || err.status === 404)) {
+        this.ledger?.settle(server, 'lease', leaseId);
+        return;
+      }
+      this.logger.warn(`[${server}] releasing ${leaseId} after a cancel failed: ${(err as Error).message} (it expires on its own)`);
+    }
   }
 
   private recordLease(server: string, model: string, leaseId: string): void {

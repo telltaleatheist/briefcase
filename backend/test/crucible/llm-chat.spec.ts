@@ -210,6 +210,21 @@ describe('CrucibleChatService: one server', () => {
     expect(fake.chatBodies()).toHaveLength(0);
   });
 
+  it('REGRESSION: a cancel landing as a leased load finishes releases the lease the load took', async () => {
+    await start({ loadMs: 100 });
+    const controller = new AbortController();
+    const touch = (chat as unknown as { touch: () => void }).touch.bind(chat);
+    (chat as unknown as { touch: () => void }).touch = () => {
+      if (fake.jobs[0]?.status === 'done') controller.abort();
+      touch();
+    };
+    const run = chat.withRun(() => chat.chat({ model: 'qwen3.5-9b', prompt: 'x', signal: controller.signal }));
+    await expect(run).rejects.toBeInstanceOf(CrucibleChatCancelled);
+    expect(fake.leases.taken.map((l) => l.leaseId)).toEqual(['lease-1']);
+    expect(fake.leases.released).toEqual(['lease-1']);
+    expect(fake.chatBodies()).toHaveLength(0);
+  });
+
   it('an already-aborted signal sends nothing', async () => {
     await start();
     const controller = new AbortController();
