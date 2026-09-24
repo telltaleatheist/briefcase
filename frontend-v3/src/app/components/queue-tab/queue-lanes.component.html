@@ -1,0 +1,57 @@
+<div class="lanes" role="list" aria-label="Where queued work runs">
+  @for (lane of lanes(); track lane.id) {
+    @if (lane.kind === 'gpu') {
+      <div
+        class="lane-card toggle"
+        role="switch"
+        tabindex="0"
+        [class.on]="!isPaused(lane)"
+        [class.switching]="switching() === lane.server"
+        [attr.aria-checked]="!isPaused(lane)"
+        [attr.aria-label]="lane.label + ', ' + switchWord(isPaused(lane))"
+        [title]="isPaused(lane) ? 'Paused: no new work goes to this server. Click to run.' : 'Running. Click to pause: work already on it finishes.'"
+        (click)="toggle(lane)"
+        (keydown.enter)="toggle(lane)"
+        (keydown.space)="$event.preventDefault(); toggle(lane)">
+        <span class="lane-label">{{ lane.label }}</span>
+        <span class="lane-switch" [class.off]="isPaused(lane)">{{ switchWord(isPaused(lane)) }}</span>
+        @if (!isPaused(lane)) {
+          <span
+            class="lane-state"
+            [class.problem]="isProblem(lane)"
+            [class.quiet]="lane.state === 'busy'"
+            [title]="lane.detail ?? ''">{{ stateLine(lane) }}</span>
+        }
+        @if (lane.residentModel) {
+          <span class="lane-model" title="Model loaded on this server">{{ lane.residentModel }}</span>
+        }
+        @for (task of lane.running; track task.jobId) {
+          <span class="lane-task" [title]="task.title + ' · ' + task.model">
+            <span class="task-title">{{ task.title }}</span>
+            <span class="task-model">{{ task.model }}</span>
+          </span>
+        }
+        @if (waitingLine(lane.waiting); as waiting) {
+          <span class="lane-waiting">{{ waiting }}</span>
+        }
+      </div>
+    } @else {
+      <div class="lane-card" role="listitem" [attr.aria-label]="lane.label + ', ' + occupancy(lane)">
+        <span class="lane-label">{{ lane.label }}</span>
+        <span class="lane-state quiet">{{ occupancy(lane) }}</span>
+        @if (lane.state === 'unreachable' || lane.state === 'unavailable' || lane.state === 'paused') {
+          <span class="lane-state" [class.problem]="isProblem(lane)" [title]="lane.detail ?? ''">{{ stateLine(lane) }}</span>
+        }
+        @for (task of lane.running; track task.jobId) {
+          <span class="lane-task" [title]="task.title + ' · ' + task.model">
+            <span class="task-title">{{ task.title }}</span>
+            <span class="task-model">{{ task.model }}</span>
+          </span>
+        }
+        @if (waitingLine(lane.waiting); as waiting) {
+          <span class="lane-waiting">{{ waiting }}</span>
+        }
+      </div>
+    }
+  }
+</div>

@@ -16,7 +16,8 @@ import {
   calculateJobProgress
 } from '../models/queue-job.model';
 import { TaskType } from '../models/task.model';
-import { WebsocketService, TaskStarted, TaskProgress, TaskCompleted, TaskFailed } from './websocket.service';
+import { WebsocketService, TaskStarted, TaskProgress, TaskCompleted, TaskFailed, TaskParked, TaskUnparked } from './websocket.service';
+import { LanesStatus } from '../models/queue-lanes.model';
 import { LibraryService, BackendJobRequest, BackendTask } from './library.service';
 import { ErrorSurface } from '../core/error-surface.service';
 import { getApiBase } from '../core/runtime-url';
@@ -55,6 +56,11 @@ export class QueueService implements OnDestroy {
 
   // WebSocket unsubscribe functions
   private wsUnsubscribes: (() => void)[] = [];
+
+  // Queue admission lanes (Crucible). null until the first GET /queue/lanes
+  // answers, or when the backend predates lanes. mode 'direct' => lanes [].
+  private lanesState = signal<LanesStatus | null>(null);
+  readonly lanes = this.lanesState.asReadonly();
 
   // Public readonly computed views
   readonly allJobs = this.jobs.asReadonly();
@@ -108,6 +114,7 @@ export class QueueService implements OnDestroy {
 
     // Restore processing jobs from backend on init
     this.restoreFromBackend();
+    this.loadLanes();
 
     // Reconcile queue state whenever the WebSocket RE-connects. socket.io does
     // not replay events emitted while disconnected, so a task.completed fired
@@ -123,6 +130,7 @@ export class QueueService implements OnDestroy {
       if (hasConnectedOnce) {
         console.log('[QueueService] WebSocket reconnected — reconciling queue state from backend');
         this.refreshFromBackend();
+        this.loadLanes();
       }
       hasConnectedOnce = true;
     });
@@ -913,6 +921,7 @@ export class QueueService implements OnDestroy {
             if (primary.state !== newState) {
               this.updateJobState(primary.id, newState);
             }
+            this.applyAdmission(primary.id, backendJob);
             return;
           }
 
@@ -934,6 +943,7 @@ export class QueueService implements OnDestroy {
             if (byIdentity.state !== newState) {
               this.updateJobState(byIdentity.id, newState);
             }
+            this.applyAdmission(byIdentity.id, backendJob);
             return;
           }
 
@@ -1026,6 +1036,84 @@ export class QueueService implements OnDestroy {
     this.wsUnsubscribes.push(
       this.websocketService.onTaskFailed(event => this.handleTaskFailed(event))
     );
+    this.wsUnsubscribes.push(
+      this.websocketService.onTaskParked(event => this.handleTaskParked(event))
+    );
+    this.wsUnsubscribes.push(
+      this.websocketService.onTaskUnparked(event => this.handleTaskUnparked(event))
+    );
+    this.wsUnsubscribes.push(
+      this.websocketService.onQueueLanes(event => this.lanesState.set(event))
+    );
+  }
+
+  // ==================== QUEUE ADMISSION (CRUCIBLE LANES) ====================
+
+  /** Load the lane snapshot. Quiet on failure: lanes are informational only. */
+  private loadLanes(): void {
+    this.http.get<LanesStatus & { success?: boolean }>(`${this.API_BASE}/queue/lanes`).pipe(
+      catchError(error => {
+        console.warn('[QueueService] Could not load queue lanes:', error);
+        return of(null);
+      })
+    ).subscribe(response => {
+      if (response && Array.isArray(response.lanes)) {
+        this.lanesState.set({ mode: response.mode, lanes: response.lanes, timestamp: response.timestamp });
+      }
+    });
+  }
+
+  /**
+   * Pause or resume a Crucible server's GPU lane. A paused server is given no
+   * new work; work already on it finishes. Updates `lanes` from the response.
+   */
+  setServerPaused(server: string, paused: boolean): Observable<LanesStatus> {
+    return this.http.post<LanesStatus & { success?: boolean }>(
+      `${this.API_BASE}/queue/lanes/${encodeURIComponent(server)}/paused`,
+      { paused }
+    ).pipe(
+      map(response => ({ mode: response.mode, lanes: response.lanes ?? [], timestamp: response.timestamp })),
+      tap(status => this.lanesState.set(status))
+    );
+  }
+
+  /**
+   * Patch a job's admission fields, only when something actually changed (the
+   * reconcile runs often; don't churn the jobs signal / localStorage).
+   */
+  private patchAdmission(jobId: string, patch: Pick<QueueJob, 'parkedReason' | 'lane' | 'venue'>): void {
+    const job = this.jobs().find(j => j.id === jobId);
+    if (!job) return;
+    const changed = (Object.keys(patch) as (keyof typeof patch)[])
+      .some(key => job[key] !== patch[key]);
+    if (!changed) return;
+    this.jobs.update(jobs => jobs.map(j => (j.id === jobId ? { ...j, ...patch } : j)));
+  }
+
+  /** Carry parkedReason / lane / venue across from a GET /queue/jobs row. */
+  private applyAdmission(jobId: string, backendJob: any): void {
+    this.patchAdmission(jobId, {
+      parkedReason: backendJob.parkedReason || undefined,
+      lane: backendJob.lane || undefined,
+      venue: backendJob.venue || undefined,
+    });
+  }
+
+  /** Parked = waiting for admission. Never a failure: state is left alone. */
+  private handleTaskParked(event: TaskParked): void {
+    const jobId = this.backendToFrontendIdMap.get(event.jobId);
+    if (!jobId) return;
+    const job = this.jobs().find(j => j.id === jobId);
+    if (!job || isJobDone(job)) return;
+    this.patchAdmission(jobId, { parkedReason: event.reason, lane: job.lane, venue: job.venue });
+  }
+
+  private handleTaskUnparked(event: TaskUnparked): void {
+    const jobId = this.backendToFrontendIdMap.get(event.jobId);
+    if (!jobId) return;
+    const job = this.jobs().find(j => j.id === jobId);
+    if (!job) return;
+    this.patchAdmission(jobId, { parkedReason: undefined, lane: job.lane, venue: job.venue });
   }
 
   private handleTaskStarted(event: TaskStarted): void {
@@ -1037,6 +1125,16 @@ export class QueueService implements OnDestroy {
 
     const taskType = this.mapBackendToFrontendTaskType(event.type);
     console.log(`[QueueService] Task started: ${taskType} for job ${jobId}`);
+
+    // Admitted: the waiting reason no longer applies; record where it runs.
+    const startedJob = this.jobs().find(j => j.id === jobId);
+    if (startedJob) {
+      this.patchAdmission(jobId, {
+        parkedReason: undefined,
+        lane: event.lane ?? startedJob.lane,
+        venue: event.venue ?? startedJob.venue,
+      });
+    }
 
     // Update job to processing state
     this.updateJobState(jobId, 'processing');
@@ -1230,7 +1328,10 @@ export class QueueService implements OnDestroy {
       warnings: backendJob.warnings?.length ? [...backendJob.warnings] : undefined,
       createdAt: new Date(backendJob.createdAt).getTime(),
       startedAt: backendJob.startedAt ? new Date(backendJob.startedAt).getTime() : undefined,
-      completedAt: backendJob.completedAt ? new Date(backendJob.completedAt).getTime() : undefined
+      completedAt: backendJob.completedAt ? new Date(backendJob.completedAt).getTime() : undefined,
+      parkedReason: backendJob.parkedReason || undefined,
+      lane: backendJob.lane || undefined,
+      venue: backendJob.venue || undefined
     });
   }
 

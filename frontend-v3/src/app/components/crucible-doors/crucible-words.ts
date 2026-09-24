@@ -8,6 +8,7 @@
  */
 import type { CrucibleCoordinationState, CrucibleUnmetClass } from '@crucible-wire/coordinate-wire';
 import type { CrucibleInstallProgress } from '@crucible-wire/install-wire';
+import type { LaneView } from '../../models/queue-lanes.model';
 
 const CLASS_WORDS: Record<string, string> = {
   analysis: 'video analysis',
@@ -92,4 +93,36 @@ export function installHeadline(events: readonly CrucibleInstallProgress[]): str
     if (e.kind === 'step') return `${installStepWord(e.step)}${e.detail ? `: ${e.detail}` : ''}`;
   }
   return 'Starting the install.';
+}
+
+// ── Queue lanes (§7.6) ──────────────────────────────────────────────────────
+
+/** One short phrase for a lane's state; the holder sentence is kept verbatim. */
+export function laneStateLine(lane: Pick<LaneView, 'state' | 'detail'>): string {
+  switch (lane.state) {
+    case 'ready': return 'Ready';
+    case 'busy': return lane.detail ? `Busy: ${lane.detail}` : 'Busy';
+    case 'unreachable': return 'Not answering';
+    case 'paused': return 'Paused';
+    case 'unavailable': return lane.detail ? `Unavailable: ${lane.detail}` : 'Unavailable';
+  }
+}
+
+/** A lane state that means something is wrong, not merely occupied. */
+export function laneIsProblem(lane: Pick<LaneView, 'state'>): boolean {
+  return lane.state === 'unreachable' || lane.state === 'unavailable';
+}
+
+/** The Cloud lane's occupancy, e.g. "1 of 2 running". */
+export function laneOccupancy(lane: Pick<LaneView, 'running' | 'width'>): string {
+  return `${lane.running.length} of ${lane.width} running`;
+}
+
+export function laneWaiting(waiting: number): string | null {
+  return waiting > 0 ? `${waiting} waiting` : null;
+}
+
+/** The GPU server switch's word: Running, or Paused. */
+export function laneSwitchWord(paused: boolean): string {
+  return paused ? 'Paused' : 'Running';
 }

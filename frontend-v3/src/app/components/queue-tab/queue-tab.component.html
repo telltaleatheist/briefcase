@@ -39,6 +39,11 @@
     </div>
   </div>
 
+  <!-- Crucible admission lanes (crucible mode only; absent in direct mode). -->
+  @if (showLanes()) {
+    <app-queue-lanes />
+  }
+
   <!-- Clear ▾ menu: the DESTRUCTIVE options are two-click confirmed inline.
        Clearing completed rows destroys nothing, so it fires on one click. -->
   <ng-template

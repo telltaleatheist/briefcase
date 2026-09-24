@@ -5,6 +5,7 @@ import type { CrucibleServersChangedPayload } from '@crucible-wire/settings-wire
 import type { CrucibleInstallProgress } from '@crucible-wire/install-wire';
 import type { CrucibleCoordinationState } from '@crucible-wire/coordinate-wire';
 import type { CrucibleInstallDoorEvent } from '@crucible-wire/install-door-wire';
+import type { LanesStatus } from '../models/queue-lanes.model';
 
 export type CrucibleServersChanged = CrucibleServersChangedPayload;
 
@@ -25,6 +26,25 @@ export interface TaskStarted {
   type: string;
   pool: string;
   displayName?: string;
+  lane?: string;          // 'gpu:<server>' | 'cloud' (Crucible admission)
+  venue?: string;         // server name the task was admitted to
+}
+
+/** A backend job is parked: waiting for admission (NOT failed). */
+export interface TaskParked {
+  jobId: string;
+  videoId?: string;
+  type?: string;
+  reason: string;
+  server: string | null;
+  timestamp: string;
+}
+
+/** A parked backend job was admitted; its waiting reason no longer applies. */
+export interface TaskUnparked {
+  jobId: string;
+  videoId?: string;
+  timestamp: string;
 }
 
 export interface TaskCompleted {
@@ -149,6 +169,9 @@ export class WebsocketService implements OnDestroy {
   private taskProgressCallbacks: ((event: TaskProgress) => void)[] = [];
   private taskCompletedCallbacks: ((event: TaskCompleted) => void)[] = [];
   private taskFailedCallbacks: ((event: TaskFailed) => void)[] = [];
+  private taskParkedCallbacks: ((event: TaskParked) => void)[] = [];
+  private taskUnparkedCallbacks: ((event: TaskUnparked) => void)[] = [];
+  private queueLanesCallbacks: ((event: LanesStatus) => void)[] = [];
   private videoRenamedCallbacks: ((event: VideoRenamed) => void)[] = [];
   private videoPathUpdatedCallbacks: ((event: VideoPathUpdated) => void)[] = [];
   private analysisCompletedCallbacks: ((event: AnalysisCompleted) => void)[] = [];
@@ -277,6 +300,19 @@ export class WebsocketService implements OnDestroy {
       this.dispatch(this.taskFailedCallbacks, event);
     });
 
+    // Queue admission (Crucible lanes)
+    this.socket.on('task.parked', (event: TaskParked) => {
+      this.dispatch(this.taskParkedCallbacks, event);
+    });
+
+    this.socket.on('task.unparked', (event: TaskUnparked) => {
+      this.dispatch(this.taskUnparkedCallbacks, event);
+    });
+
+    this.socket.on('queue.lanes', (event: LanesStatus) => {
+      this.dispatch(this.queueLanesCallbacks, event);
+    });
+
     // System status
     this.socket.on('system.status', (status: SystemStatus) => {
       this.ngZone.run(() => {
@@ -398,6 +434,27 @@ export class WebsocketService implements OnDestroy {
     this.taskStartedCallbacks.push(callback);
     return () => {
       this.taskStartedCallbacks = this.taskStartedCallbacks.filter(cb => cb !== callback);
+    };
+  }
+
+  onTaskParked(callback: (event: TaskParked) => void): () => void {
+    this.taskParkedCallbacks.push(callback);
+    return () => {
+      this.taskParkedCallbacks = this.taskParkedCallbacks.filter(cb => cb !== callback);
+    };
+  }
+
+  onTaskUnparked(callback: (event: TaskUnparked) => void): () => void {
+    this.taskUnparkedCallbacks.push(callback);
+    return () => {
+      this.taskUnparkedCallbacks = this.taskUnparkedCallbacks.filter(cb => cb !== callback);
+    };
+  }
+
+  onQueueLanes(callback: (event: LanesStatus) => void): () => void {
+    this.queueLanesCallbacks.push(callback);
+    return () => {
+      this.queueLanesCallbacks = this.queueLanesCallbacks.filter(cb => cb !== callback);
     };
   }
 

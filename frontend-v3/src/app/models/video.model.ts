@@ -21,6 +21,7 @@ export interface VideoItem {
   sourceUrl?: string;
   errorMessage?: string; // Error message for failed downloads/operations
   warnings?: string[]; // Non-fatal issues from processing (queue items)
+  statusNote?: string; // Neutral one-line status (queue items), e.g. why a job is waiting; drawn grey, never as an error
   tags?: string[];
   // Media type info
   mediaType?: string;

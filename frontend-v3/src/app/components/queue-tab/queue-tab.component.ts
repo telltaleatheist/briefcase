@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, Input, Output, EventEmitter, inject, signal, computed, effect, untracked } from '@angular/core';
 import { OverlayModule } from '@angular/cdk/overlay';
 import { CascadeComponent } from '../cascade/cascade.component';
+import { QueueLanesComponent } from './queue-lanes.component';
 import { VideoWeek, VideoItem, ItemProgress, ChildrenConfig } from '../../models/video.model';
 import { QueueService } from '../../services/queue.service';
 import { QueueJob } from '../../models/queue-job.model';
@@ -13,7 +14,7 @@ type ClearOption = 'completed' | 'selected' | 'all';
 @Component({
   selector: 'app-queue-tab',
   standalone: true,
-  imports: [OverlayModule, CascadeComponent],
+  imports: [OverlayModule, CascadeComponent, QueueLanesComponent],
   templateUrl: './queue-tab.component.html',
   styleUrls: ['./queue-tab.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush
@@ -89,6 +90,12 @@ export class QueueTabComponent {
   pendingCount = computed(() => this.queueService.pendingJobs().length);
   processingCount = computed(() => this.queueService.processingJobs().length);
   completedCount = computed(() => this.queueService.completedJobs().length);
+
+  /** Crucible admission lanes: drawn only in crucible mode, and only when there are any. */
+  showLanes = computed(() => {
+    const status = this.queueService.lanes();
+    return status?.mode === 'crucible' && status.lanes.length > 0;
+  });
 
   // ── Clear ▾ menu (two-click confirmed per option) ──────────────────────────
   clearMenuOpen = signal(false);
@@ -173,7 +180,8 @@ export class QueueTabComponent {
           ...(job.trimStartTime ? [`trim:${job.trimStartTime}`] : []),
           ...(job.trimEndTime ? [`trimend:${job.trimEndTime}`] : []),
         ],
-        titleLoading: job.titleResolved === false
+        titleLoading: job.titleResolved === false,
+        statusNote: this.parkedNote(job)
       }));
 
       weeks.push({
@@ -198,7 +206,8 @@ export class QueueTabComponent {
           tags: [`processing:${job.id}`, `status:${job.state}`],
           titleLoading: job.titleResolved === false,
           errorMessage: errorMessage,
-          warnings: job.warnings
+          warnings: job.warnings,
+          statusNote: this.parkedNote(job)
         };
       });
 
@@ -246,6 +255,15 @@ export class QueueTabComponent {
 
     return weeks;
   });
+
+  /**
+   * A parked job's waiting reason, for the row's grey secondary line. Only
+   * while the backend still holds the job: Stop clears backendJobId, and a
+   * reason about a job the backend no longer has would be stale.
+   */
+  private parkedNote(job: QueueJob): string | undefined {
+    return job.backendJobId && job.parkedReason ? job.parkedReason : undefined;
+  }
 
   // Computed property for AI processing queue item ID
   aiProcessingQueueItemId = computed(() => {

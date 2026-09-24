@@ -1,4 +1,4 @@
-import { coordinationBusy, coordinationLine, installHeadline, unmetLine } from './crucible-words';
+import { coordinationBusy, coordinationLine, installHeadline, laneIsProblem, laneOccupancy, laneStateLine, laneWaiting, unmetLine } from './crucible-words';
 import type { CrucibleCoordinationState, CrucibleModuleProgress } from '@crucible-wire/coordinate-wire';
 
 // Plain describe/it/expect only, so this runs under Karma/Jasmine (ng test) and Jest alike.
@@ -58,5 +58,28 @@ describe('installHeadline', () => {
       .toBe('Starting Crucible: Waiting for Crucible to start');
     expect(installHeadline([{ kind: 'done', server: { name: 'c', url: 'u', configPath: 'p' }, release: '1.0.23', backend: 'mlx-darwin', connectedAs: 'c' }]))
       .toBe('Crucible 1.0.23 is installed and running.');
+  });
+});
+
+describe('lane words', () => {
+  it('names the state, keeping the holder sentence verbatim', () => {
+    expect(laneStateLine({ state: 'ready', detail: null })).toBe('Ready');
+    expect(laneStateLine({ state: 'busy', detail: 'bookforge, tts 62% done' })).toBe('Busy: bookforge, tts 62% done');
+    expect(laneStateLine({ state: 'unreachable', detail: 'connection refused' })).toBe('Not answering');
+    expect(laneStateLine({ state: 'paused', detail: null })).toBe('Paused');
+    expect(laneStateLine({ state: 'unavailable', detail: 'no GPU' })).toBe('Unavailable: no GPU');
+  });
+
+  it('only unreachable and unavailable read as problems', () => {
+    expect(laneIsProblem({ state: 'unreachable' })).toBe(true);
+    expect(laneIsProblem({ state: 'unavailable' })).toBe(true);
+    expect(laneIsProblem({ state: 'busy' })).toBe(false);
+    expect(laneIsProblem({ state: 'paused' })).toBe(false);
+  });
+
+  it('counts occupancy and waiting', () => {
+    expect(laneOccupancy({ running: [{ jobId: 'j', title: 't', model: 'm', lane: 'cloud' }], width: 2 })).toBe('1 of 2 running');
+    expect(laneWaiting(0)).toBeNull();
+    expect(laneWaiting(3)).toBe('3 waiting');
   });
 });

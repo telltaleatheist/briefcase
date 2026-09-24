@@ -63,6 +63,12 @@ export interface QueueJob {
   // degradation is visible, not silent (fallback-audit).
   warnings?: string[];
 
+  // Queue admission (Crucible lanes). A parked job is WAITING, not failed:
+  // parkedReason is the backend's one-sentence why, shown grey on the row.
+  parkedReason?: string;
+  lane?: string;          // 'gpu:<server>' | 'cloud'
+  venue?: string;         // server name the job was admitted to
+
   // Trim opener: seconds to trim from the start of the video after download
   trimStartTime?: number;
 
@@ -103,6 +109,9 @@ export function createQueueJob(partial: Partial<QueueJob> & { title: string }): 
     errorMessage: partial.errorMessage,
     trimStartTime: partial.trimStartTime,
     trimEndTime: partial.trimEndTime,
+    parkedReason: partial.parkedReason,
+    lane: partial.lane,
+    venue: partial.venue,
   };
 }
 

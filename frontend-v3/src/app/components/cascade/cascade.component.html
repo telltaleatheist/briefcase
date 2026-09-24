@@ -148,6 +148,12 @@
                     {{ item.video.warnings![0] }}{{ item.video.warnings!.length > 1 ? ' (+' + (item.video.warnings!.length - 1) + ' more — hover)' : '' }}
                   </span>
                 </div>
+              } @else if (item.video.statusNote) {
+                <!-- Neutral status (e.g. a queued job parked for admission):
+                     grey, not an error. -->
+                <div class="video-meta note-meta" [title]="item.video.statusNote">
+                  <span class="meta-filename note-text">{{ item.video.statusNote }}</span>
+                </div>
               }
 
               <!-- Suggested Title Row -->
