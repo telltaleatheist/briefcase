@@ -29,6 +29,7 @@ import {
 } from '../common/interfaces/task.interface';
 import * as fs from 'fs';
 import * as path from 'path';
+import { chapterPlace } from '../database/chapter-outline';
 
 @Injectable()
 export class MediaOperationsService {
@@ -785,6 +786,7 @@ export class MediaOperationsService {
         this.logger.log(`[${jobId || 'standalone'}] Saving ${analysisResult.chapters.length} chapters...`);
         this.databaseService.deleteChapters(videoId);
 
+        const chapterIds = new Map<number, string>();
         for (const chapter of analysisResult.chapters) {
           const chapterId = `chapter-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
           const startSeconds = this.parseTimeToSeconds(chapter.start_time);
@@ -799,6 +801,7 @@ export class MediaOperationsService {
             title: chapter.title,
             description: chapter.summary || '',
             source: 'ai',
+            ...chapterPlace(chapter, chapterId, chapterIds),
           });
         }
         this.logger.log(`[${jobId || 'standalone'}] Saved ${analysisResult.chapters.length} chapters`);

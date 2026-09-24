@@ -48,6 +48,7 @@ import { MarkerDialogComponent, MarkerDialogData } from './marker-dialog/marker-
 import { KeyboardShortcutsDialogComponent } from './keyboard-shortcuts-dialog/keyboard-shortcuts-dialog.component';
 import { TabBarComponent } from './tab-bar/tab-bar.component';
 import { getApiBase } from '../../core/runtime-url';
+import { chapterSubtreeIds, topLevelChapters } from './analysis-panel/chapter-outline';
 
 // Tool types for editor
 export enum EditorTool {
@@ -563,6 +564,8 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
 
   // Timeline chapters from analysis
   chapters = signal<TimelineChapter[]>([]);
+  /** The timeline shows the top level of a nested outline (it tiles the video). */
+  topLevelChapters = computed(() => topLevelChapters(this.chapters()));
   selectedChapterId = signal<string | undefined>(undefined);
 
   // Transcript for video
@@ -1262,7 +1265,9 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
           endTime: chapter.end_seconds || chapter.start_seconds + 60,
           title: chapter.title || `Chapter ${chapter.sequence}`,
           description: chapter.description,
-          source: chapter.source || 'ai'
+          source: chapter.source || 'ai',
+          level: chapter.level ?? 0,
+          parentId: chapter.parent_id ?? null,
         }));
         this.chapters.set(timelineChapters);
       } else {
@@ -2333,7 +2338,9 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
         this.http.delete(`${this.API_BASE}/database/videos/${videoId}/chapters/${chapterId}`)
       );
       // Remove from local state
-      this.chapters.update(chapters => chapters.filter(c => c.id !== chapterId));
+      // The backend deletes the chapter's sub-chapters with it.
+      const gone = chapterSubtreeIds(this.chapters(), chapterId);
+      this.chapters.update(chapters => chapters.filter(c => !gone.has(c.id)));
       // Clear selection if deleted chapter was selected
       if (this.selectedChapterId() === chapterId) {
         this.selectedChapterId.set(undefined);

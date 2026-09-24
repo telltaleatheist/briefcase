@@ -2888,6 +2888,8 @@ export class DatabaseController {
                 title: c.title,
                 description: c.description ?? undefined,
                 source: c.source,
+                level: c.level,
+                parentId: c.parent_id,
               });
             } catch (e) {
               // Ignore chapter errors

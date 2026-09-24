@@ -6,5 +6,6 @@ export * from './snap-prompts';
 export * from './units';
 export * from './segmenter';
 export * from './chunks';
+export * from './chapter-tree';
 export * from './snap-chapter.service';
 export { SnapChaptersModule } from './snap-chapters.module';

@@ -31,7 +31,7 @@
       (click)="setActiveTab('chapters')">
       Chapters
       @if (chapters.length > 0) {
-        <span class="tab-count">{{ chapters.length }}</span>
+        <span class="tab-count">{{ topChapterCount }}</span>
       }
     </button>
     <button
@@ -204,23 +204,35 @@
             <p class="empty-hint">Chapters are generated during AI analysis</p>
           </div>
         } @else {
-          @for (chapter of chapters; track chapter.id) {
+          @for (row of chapterRows; track row.chapter.id) {
             <div
               class="chapter-item"
-              [class.current]="isCurrentChapter(chapter)"
-              [class.follow-current]="followCursor() && chapter.id === currentChapterId"
-              [class.selected]="selectedChapterId === chapter.id"
-              [title]="chapter.title">
-              <button class="chapter-content" (click)="onChapterClick(chapter)">
-                <span class="chapter-number">{{ chapter.sequence }}</span>
+              [class.nested]="row.depth > 0"
+              [style.margin-left.px]="row.depth * 16"
+              [class.current]="isCurrentChapter(row.chapter)"
+              [class.follow-current]="followCursor() && row.chapter.id === currentChapterId"
+              [class.selected]="selectedChapterId === row.chapter.id"
+              [title]="row.chapter.title">
+              @if (row.hasChildren) {
+                <button class="chapter-chevron" [class.open]="row.expanded"
+                  (click)="toggleChapterExpanded(row.chapter, $event)"
+                  [attr.aria-expanded]="row.expanded"
+                  [title]="row.expanded ? 'Hide sub-chapters' : 'Show sub-chapters'">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M9 6l6 6-6 6"/>
+                  </svg>
+                </button>
+              }
+              <button class="chapter-content" (click)="onChapterClick(row.chapter)">
+                <span class="chapter-number">{{ row.number }}</span>
                 <div class="chapter-info">
-                  <span class="chapter-title">{{ chapter.title }}</span>
+                  <span class="chapter-title">{{ row.chapter.title }}</span>
                   <span class="chapter-meta">
-                    {{ formatTime(chapter.startTime) }} - {{ formatChapterDuration(chapter) }}
+                    {{ formatTime(row.chapter.startTime) }} - {{ formatChapterDuration(row.chapter) }}
                   </span>
                 </div>
               </button>
-              <button class="chapter-delete" (click)="onChapterDelete(chapter)" title="Delete chapter">
+              <button class="chapter-delete" (click)="onChapterDelete(row.chapter)" title="Delete chapter">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M18 6L6 18M6 6l12 12"/>
                 </svg>

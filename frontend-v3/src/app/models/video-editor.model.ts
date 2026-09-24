@@ -57,6 +57,10 @@ export interface TimelineChapter {
   title: string;
   description?: string;
   source: 'ai' | 'user';
+  /** Outline level, 0 = top (nested snap chapters). Absent/0 on flat chapters. */
+  level?: number;
+  /** The parent chapter's id; null/absent at top level. */
+  parentId?: string | null;
 }
 
 export interface AnalysisSection {

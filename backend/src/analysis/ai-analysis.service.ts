@@ -46,6 +46,7 @@ import {
   AnalysisCategory,
 } from './prompts/analysis-prompts';
 import { SnapAnalysisService, SnapStageResult } from '../scorer/snap-analysis.service';
+import { leafChapters, nestAnalysisChapters } from '../scorer/chapters/chapter-tree';
 import { resolveAnalysisEngine, snapFallbackMessage, wantsScorer } from '../scorer/analysis-engine';
 import type { SnapFlagRankResult } from '../scorer/flags/snap-flag-ranker.service';
 import { mergeSpanSubPassages, promoteCachedOverflow } from '../scorer/flags/flag-integration';
@@ -123,6 +124,13 @@ export interface Chapter {
    * dropped or written to the DB as a fake successful chapter.
    */
   failed?: boolean;
+  /**
+   * Outline level on a nested (snap refined) analysis: 0 = top level. Absent
+   * on flat analyses. Rows are in preorder, parents before their children.
+   */
+  level?: number;
+  /** `sequence` of the parent row, on a nested analysis below level 0. */
+  parent_sequence?: number;
 }
 
 // Interface for category flags detected within chapters
@@ -1246,6 +1254,7 @@ export class AIAnalysisService {
           const failed: Array<{ stage: 'chapters' | 'flags'; reason: string }> = [];
           if (engine.chapters === 'snap' && !snap.chapters) failed.push({ stage: 'chapters', reason: snap.chaptersError || 'no chapters' });
           if (engine.flags === 'snap' && !snap.flags) failed.push({ stage: 'flags', reason: snap.flagsError || 'no ranking' });
+          if (snap.chapters && snap.chapterTreeError) engineWarnings.push(`Sub-chapters were skipped: ${snap.chapterTreeError}`);
           for (const reason of [...new Set(failed.map((f) => f.reason))]) {
             engineWarnings.push(snapFallbackMessage(failed.filter((f) => f.reason === reason).map((f) => f.stage), reason));
           }
@@ -1263,7 +1272,14 @@ export class AIAnalysisService {
       } else {
         this.logger.log(`[Engine] classic engine (${engine.source})`);
       }
-      const snapChapters = snap?.chapters && snap.chapters.chapters.length > 0 ? snap.chapters.chapters : null;
+      // A refined outline: Pass 2 works on its LEAVES (they tile the video, as
+      // flat chapters do); the parents are put back around them at the end.
+      const snapTree = snap?.chapterTree && snap.chapterTree.depth > 1 ? snap.chapterTree : null;
+      const snapChapters = snapTree
+        ? leafChapters(snapTree.flat)
+        : snap?.chapters && snap.chapters.chapters.length > 0
+          ? snap.chapters.chapters
+          : null;
 
       // =========================================================================
       // PASS 1: Detect chapter boundaries
@@ -1567,7 +1583,8 @@ export class AIAnalysisService {
       return {
         sections_count: flags.length,
         sections: flags,           // Category flags from chapter analysis
-        chapters: chapters,        // Chapter list with titles/summaries
+        // Chapter list with titles/summaries; a refined outline adds its parents.
+        chapters: snapTree ? nestAnalysisChapters(chapters, snapTree.flat) : chapters,
         tags,
         description,
         suggested_title: suggestedTitle || undefined,

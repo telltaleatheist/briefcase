@@ -20,15 +20,17 @@ class FakeHandle {
   readonly decides: DecideRequest[] = [];
   generates = 0;
   outline = 'Cooking pasta\nTravel plans';
+  /** Per-prompt outline (refinement tests); falls back to `outline`. */
+  outlineFor?: (prompt: string) => string;
   failOn?: (req: DecideRequest, n: number) => Error | null;
   onDecide?: (n: number) => void;
 
   handle(): ScorerHandle {
     return {
       decide: (req, o) => this.decide(req, o),
-      generate: async () => {
+      generate: async (prompt: string) => {
         this.generates++;
-        return { text: this.outline, promptTokens: 0, completionTokens: 0, finishReason: 'stop', model: 'fake' } as GenerateResult;
+        return { text: this.outlineFor ? this.outlineFor(prompt) : this.outline, promptTokens: 0, completionTokens: 0, finishReason: 'stop', model: 'fake' } as GenerateResult;
       },
       decider: async () =>
         ({ model: 'fake-qwen', engine: { tokenize: async (t: string) => new Array(Math.ceil(t.length / 4)).fill(1) } }) as any,
@@ -204,6 +206,96 @@ describe('SnapAnalysisService', () => {
       .run({ segments: segments(), categories: CATEGORIES, chapters: false, flags: true, signal: controller.signal })
       .catch((e) => e);
     expect(isCancellation(err)).toBe(true);
+  });
+
+  describe('outline refinement', () => {
+    /** 31 units: a communists line, 10 boil, 10 sauce (Cooking), 10 travel. */
+    function longSegments() {
+      const lines = [
+        'Those people are communists and enemies of this country.',
+        ...Array.from({ length: 10 }, (_, i) => `Cooking pasta means you boil the water well, step ${i}.`),
+        ...Array.from({ length: 10 }, (_, i) => `Cooking the sauce means stirring it slowly, step ${i}.`),
+        ...Array.from({ length: 10 }, (_, i) => `Travel plans need train tickets booked early, step ${i}.`),
+      ];
+      return lines.map((text, i) => ({ start: i * 10, end: i * 10 + 10, text }));
+    }
+    const outlineFor = (p: string) =>
+      p.includes('Travel') && p.includes('Cooking') ? 'Cooking pasta\nTravel plans' : p.includes('boil') ? 'Boil water\nSauce stirring' : 'Just one';
+    const REFINE = { longUnits: 8, longSeconds: 1e9, minUnits: 4, maxDepth: 2 };
+
+    it('refines long chapters AFTER the flag pass, on the section state, with monotone progress', async () => {
+      const fake = new FakeHandle();
+      fake.outlineFor = outlineFor;
+      const { server, leases } = fakeServer(fake);
+      const events: SnapStageProgress[] = [];
+      const res = await new SnapAnalysisService(server, new SnapFlagRanker()).run({
+        segments: longSegments(), categories: CATEGORIES, chapters: true, flags: true,
+        refineOptions: REFINE, onProgress: (p) => events.push(p),
+      });
+      expect(leases()).toBe(1);
+      expect(res.chapterTreeError).toBeUndefined();
+      const tree = res.chapterTree!;
+      expect(tree.depth).toBe(2);
+      expect(tree.flat.map((c) => [c.title, c.level, c.isLeaf])).toEqual([
+        ['Cooking pasta', 0, false],
+        ['Boil water', 1, true],
+        ['Sauce stirring', 1, true],
+        ['Travel plans', 0, true],
+      ]);
+      const units = res.transcript!.units;
+      const cooking = units.slice(0, 21).map((u) => u.text).join('\n');
+      const firstRefine = fake.decides.findIndex((d) => d.state === cooking);
+      const lastFlag = fake.decides.map((d) => d.questions[0].name.startsWith('p')).lastIndexOf(true);
+      expect(firstRefine).toBeGreaterThan(lastFlag);
+      for (let i = 1; i < events.length; i++) expect(events[i].fraction).toBeGreaterThanOrEqual(events[i - 1].fraction);
+      expect(events.some((e) => e.stage === 'refine')).toBe(true);
+      expect(events[events.length - 1]).toMatchObject({ stage: 'done', fraction: 1 });
+    });
+
+    it('a short video runs no refinement and gets a flat one-level tree', async () => {
+      const fake = new FakeHandle();
+      const { server } = fakeServer(fake);
+      const res = await new SnapAnalysisService(server, new SnapFlagRanker()).run({
+        segments: segments(), categories: CATEGORIES, chapters: true, flags: true, chapterOptions: { switchCost: 2 },
+      });
+      expect(fake.generates).toBe(1);
+      expect(res.chapterTree!.flat.map((c) => [c.title, c.level, c.isLeaf])).toEqual([
+        ['Cooking pasta', 0, true],
+        ['Travel plans', 0, true],
+      ]);
+    });
+
+    it('a refinement engine error keeps the top-level chapters and says why', async () => {
+      const fake = new FakeHandle();
+      fake.outlineFor = outlineFor;
+      const { server } = fakeServer(fake);
+      let cookingState = '';
+      fake.failOn = (req) => (cookingState && req.state === cookingState ? new ScorerError('engine_error', 'boom') : null);
+      const units = (await import('./chapters/units')).assembleUnits(longSegments());
+      cookingState = units.slice(0, 21).map((u) => u.text).join('\n');
+      const res = await new SnapAnalysisService(server, new SnapFlagRanker()).run({
+        segments: longSegments(), categories: CATEGORIES, chapters: true, flags: true, refineOptions: REFINE,
+      });
+      expect(res.chapterTreeError).toMatch(/refinement failed: .*boom/);
+      expect(res.chapters!.chapters).toHaveLength(2);
+      expect(res.chapterTree!.depth).toBe(1);
+      expect(res.flags).not.toBeNull();
+    });
+
+    it('cancel during refinement throws a cancellation', async () => {
+      const fake = new FakeHandle();
+      fake.outlineFor = outlineFor;
+      const controller = new AbortController();
+      const { server } = fakeServer(fake);
+      const err = await new SnapAnalysisService(server, new SnapFlagRanker())
+        .run({
+          segments: longSegments(), categories: CATEGORIES, chapters: true, flags: true, refineOptions: REFINE,
+          signal: controller.signal,
+          onProgress: (p) => p.stage === 'refine' && controller.abort(),
+        })
+        .catch((e) => e);
+      expect(err).toBeInstanceOf(AnalysisCancelledError);
+    });
   });
 
   it('flags only: no outline is written', async () => {

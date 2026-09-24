@@ -6,6 +6,7 @@ import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { ThumbnailService } from './thumbnail.service';
 import { migrateAnalysisSectionsRanker } from './ranker-migration';
+import { deleteChapterSubtree, migrateChaptersOutline } from './chapter-outline';
 
 // Type definitions for database records
 export interface VideoRecord {
@@ -158,6 +159,10 @@ export interface ChapterRecord {
   description: string | null;
   source: string;
   created_at: string;
+  /** Outline level, 0 = top (migration 27). NULL on flat/legacy rows: top level. */
+  level: number | null;
+  /** The parent chapter's id, NULL at top level. */
+  parent_id: string | null;
 }
 
 export interface TagRecord {
@@ -657,6 +662,8 @@ export class DatabaseService {
         description TEXT,
         source TEXT DEFAULT 'ai',
         created_at TEXT NOT NULL,
+        level INTEGER,
+        parent_id TEXT,
         FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
       );
 
@@ -1882,6 +1889,21 @@ export class DatabaseService {
     } catch (migrationError: any) {
       // Fallback audit #6: a half-migrated schema corrupts every later write
       // to the missing column. Abort the library load loudly.
+      throw new Error(
+        `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
+        `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
+        `Check that the library volume is mounted and writable, then reopen the library.`,
+      );
+    }
+
+    // Migration 27: chapters.level + chapters.parent_id (the chapter outline;
+    // see chapter-outline.ts). Additive and nullable: old rows are top level.
+    try {
+      if (migrateChaptersOutline(db)) {
+        this.saveDatabase();
+        this.logger.log('Migration complete: level and parent_id columns added to chapters');
+      }
+    } catch (migrationError: any) {
       throw new Error(
         `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
         `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
@@ -4305,13 +4327,16 @@ export class DatabaseService {
     title: string;
     description?: string;
     source?: string;
+    /** Outline level (nested analyses); absent writes NULL, read as top level. */
+    level?: number | null;
+    parentId?: string | null;
   }) {
     const db = this.ensureInitialized();
 
     db.prepare(
       `INSERT INTO chapters (
-        id, video_id, sequence, start_seconds, end_seconds, title, description, source, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        id, video_id, sequence, start_seconds, end_seconds, title, description, source, created_at, level, parent_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       chapter.id,
       chapter.videoId,
@@ -4322,6 +4347,8 @@ export class DatabaseService {
       chapter.description || null,
       chapter.source || 'ai',
       new Date().toISOString(),
+      chapter.level ?? null,
+      chapter.parentId ?? null,
     );
 
     this.saveDatabase();
@@ -4339,11 +4366,11 @@ export class DatabaseService {
   }
 
   /**
-   * Delete a specific chapter by ID
+   * Delete a specific chapter by ID, with the chapters nested under it
    */
   deleteChapter(chapterId: string) {
     const db = this.ensureInitialized();
-    db.prepare('DELETE FROM chapters WHERE id = ?').run(chapterId);
+    deleteChapterSubtree(db, chapterId);
     this.saveDatabase();
     this.logger.log(`Deleted chapter ${chapterId}`);
   }

@@ -416,6 +416,34 @@ sponsor or their own products, or asks viewers to subscribe or support" against
 `snap:qwen3.5-9b-bf16 + ollama:qwen3.8:27b`, so a library can tell which rows came from
 which pipeline.
 
+### 4.6 Outline (nested chapters) for long videos
+
+Built in `scorer/chapters/chapter-tree.ts`; unmeasured, pending a live run.
+
+- **Method.** Level 0 is §4.1-4.5 unchanged. Every level-0 section that is *long* and not
+  an ad is chaptered again on its own units: a sub-outline from the verbatim outline
+  prompt over the section text, one assign choice per unit over the sub-items (no plug
+  item: ads are found once, at level 0), Viterbi, boundaries. This recurses breadth-first
+  while children stay long, up to `maxDepth` levels. A sub-outline with < 2 items, or a
+  sub-path of one run, leaves the section a leaf. Children tile their parent exactly.
+- **Defaults.** Long = at least 24 units AND (> 120 units OR > 15 min). `maxDepth` 3
+  (levels 0-2). Switch cost 20 at every level (configurable per level). 120 units / 15 min
+  is the size of a mid-range YTSeg video (60-320 sentences), the regime the method was
+  measured on.
+- **State.** A refinement's decide state is the section's units joined with `\n`, one
+  prime per section. A section over 16k tokens is chunked like a video. Flags keep the
+  full-transcript chunk states. Refinement runs after the flag pass, so the
+  chapter-to-flag prefix reuse in §3.2 is unchanged. A video with no long span never
+  runs it: the same requests and progress as before.
+- **Pipeline.** Pass 2 (summaries, flags, metadata) runs on the leaves, which tile the
+  video. The parent rows are interleaved at the end (preorder, with `level` and
+  `parent_sequence`) and have no summary.
+- **Storage (migration 27).** Adds nullable `chapters.level` and `chapters.parent_id`.
+  NULL means top level, so flat rows are unchanged. Deleting a chapter deletes its
+  subtree.
+- **UI.** The timeline shows the top level. The Chapters list nests rows (indented,
+  numbered 1.2.3). Rows are collapsed by default and open only via their chevron.
+
 ---
 
 ## 5. Flags on the snap scorer

@@ -78,6 +78,12 @@ export interface BuildChaptersOptions {
    * Plan §4.1 may route it to the user's chapter model when the scorer is small.
    */
   writeOutline?: (prompt: string, signal?: AbortSignal) => Promise<string>;
+  /**
+   * The previous-sentence stand-in for the first unit. Default "(start of the
+   * video)" (segment.py:65). Refinement (chapter-tree.ts) passes the real unit
+   * before the section, as chunks after the first already do.
+   */
+  prevBefore?: string;
 }
 
 export interface ChunkResult {
@@ -167,7 +173,7 @@ export async function runSnapChapters(
     // 2. assign
     t = Date.now();
     const options = assignOptions(items);
-    const prevBefore = chunk.start > 0 ? texts[chunk.start - 1] : START_OF_VIDEO;
+    const prevBefore = chunk.start > 0 ? texts[chunk.start - 1] : (opts.prevBefore ?? START_OF_VIDEO);
     const L: number[][] = [];
     let floored = 0;
     report('assign', k, W_OUTLINE);

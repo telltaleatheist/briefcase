@@ -13,6 +13,7 @@ import {
 } from '../../../models/flag-filter';
 import { TranscriptionSegment } from '../../../models/video-info.model';
 import { TranscriptSearchService, TranscriptSearchOptions } from '../../../services/transcript-search.service';
+import { ChapterRow, chapterRows, topLevelChapters } from './chapter-outline';
 
 @Component({
   selector: 'app-analysis-panel',
@@ -67,6 +68,12 @@ export class AnalysisPanelComponent implements OnChanges {
   currentSectionId: string | null = null;
   currentSegmentId: string | null = null;
   private lastFollowId: string | null = null;
+
+  // Nested chapters: rows the user opened with the chevron. Nothing opens by
+  // itself (not on load, not by following the cursor).
+  expandedChapterIds = signal<ReadonlySet<string>>(new Set());
+  chapterRows: ChapterRow[] = [];
+  topChapterCount = 0;
 
   // Primary tabs
   activeTab = signal<'analysis' | 'chapters' | 'transcript'>('analysis');
@@ -137,6 +144,7 @@ export class AnalysisPanelComponent implements OnChanges {
   }
 
   ngOnChanges(changes: SimpleChanges): void {
+    if (changes['chapters']) this.refreshChapterRows();
     if (changes['currentTime'] || changes['chapters'] || changes['sections'] ||
         changes['transcript'] || changes['categoryFilters']) {
       this.updateCurrentIds();
@@ -201,6 +209,20 @@ export class AnalysisPanelComponent implements OnChanges {
   setTranscriptView(view: 'segments' | 'plain'): void {
     this.transcriptView.set(view);
     this.scrollToCurrent(true);
+  }
+
+  private refreshChapterRows(): void {
+    this.chapterRows = chapterRows(this.chapters, this.expandedChapterIds());
+    this.topChapterCount = topLevelChapters(this.chapters).length;
+  }
+
+  toggleChapterExpanded(chapter: TimelineChapter, event: Event): void {
+    event.stopPropagation();
+    const next = new Set(this.expandedChapterIds());
+    if (next.has(chapter.id)) next.delete(chapter.id);
+    else next.add(chapter.id);
+    this.expandedChapterIds.set(next);
+    this.refreshChapterRows();
   }
 
   // Check if a chapter is currently playing

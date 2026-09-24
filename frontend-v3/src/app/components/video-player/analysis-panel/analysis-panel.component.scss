@@ -944,7 +944,9 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
+  min-width: 24px;
+  padding: 0 4px;
+  box-sizing: border-box;
   height: 24px;
   font-size: 11px;
   font-weight: 700;
@@ -973,6 +975,35 @@
 .chapter-meta {
   font-size: 10px;
   color: var(--text-secondary, #6c757d);
+}
+
+// Nested chapters: the chevron is the only way a row opens (never automatically).
+.chapter-chevron {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  padding: 0;
+  color: var(--text-secondary, #6c757d);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+
+  svg {
+    transition: transform 0.15s ease;
+  }
+
+  &.open svg {
+    transform: rotate(90deg);
+  }
+
+  &:hover {
+    color: var(--text-primary, #212529);
+  }
+}
+
+.chapter-item.nested {
+  border-left-width: 2px;
 }
 
 .chapter-delete {

@@ -25,6 +25,7 @@ import { Task } from '../common/interfaces/task.interface';
 import { DEFAULT_CATEGORIES } from './prompts/analysis-prompts';
 import { parseProviderModel, numCtxMaxForModel } from './model-utils';
 import { v4 as uuidv4 } from 'uuid';
+import { chapterPlace } from '../database/chapter-outline';
 
 export interface AnalysisJob {
   id: string;
@@ -1226,6 +1227,7 @@ export class AnalysisService implements OnModuleInit {
             this.databaseService.deleteChapters(videoId);
             console.log(`[processFinalizePhase] Deleted existing chapters for video ${videoId}`);
 
+            const chapterIds = new Map<number, string>();
             for (const chapter of persistableChapters) {
               console.log(`[processFinalizePhase] Processing chapter: ${JSON.stringify(chapter)}`);
 
@@ -1253,8 +1255,9 @@ export class AnalysisService implements OnModuleInit {
 
               console.log(`[processFinalizePhase] Inserting chapter: seq=${chapter.sequence}, start=${startSeconds}, end=${endSeconds}, title=${chapter.title}`);
 
+              const chapterId = require('uuid').v4();
               this.databaseService.insertChapter({
-                id: require('uuid').v4(),
+                id: chapterId,
                 videoId,
                 sequence: chapter.sequence,
                 startSeconds,
@@ -1262,6 +1265,7 @@ export class AnalysisService implements OnModuleInit {
                 title: chapter.title,
                 description: chapter.summary,
                 source: 'ai',
+                ...chapterPlace(chapter, chapterId, chapterIds),
               });
 
               console.log(`[processFinalizePhase] Chapter inserted successfully`);
