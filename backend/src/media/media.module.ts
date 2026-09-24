@@ -7,12 +7,10 @@ import { MediaOperationsService } from './media-operations.service';
 import { MediaController } from './media.controller';
 import { FfmpegModule } from '../ffmpeg/ffmpeg.module';
 import { WhisperService } from './whisper.service';
-import { WhisperManager } from './whisper-manager';
 import { JobStateManagerModule } from '../common/job-state-manager.module';
 import { DatabaseModule } from '../database/database.module';
 import { DownloaderModule } from '../downloader/downloader.module';
 import { AnalysisModule } from '../analysis/analysis.module';
-import { ApiKeysModule } from '../config/config.module';
 import { WebArchiveModule } from '../web-archive/web-archive.module';
 import { CrucibleAsrModule } from '../crucible/asr/crucible-asr.module';
 
@@ -23,9 +21,8 @@ import { CrucibleAsrModule } from '../crucible/asr/crucible-asr.module';
     forwardRef(() => DatabaseModule),
     forwardRef(() => DownloaderModule),
     forwardRef(() => AnalysisModule),
-    ApiKeysModule,
     WebArchiveModule,
-    // P5: transcription through Crucible's asr job (WhisperService picks the engine).
+    // Transcription is Crucible's asr job (P5; the only transcriber since P7).
     CrucibleAsrModule,
   ],
   controllers: [MediaController],
@@ -35,7 +32,6 @@ import { CrucibleAsrModule } from '../crucible/asr/crucible-asr.module';
     MediaRelationshipService,
     MediaOperationsService,
     WhisperService,
-    WhisperManager,
   ],
   exports: [
     MediaEventService,

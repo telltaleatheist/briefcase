@@ -1,13 +1,12 @@
 /**
  * TRANSCRIBE ON A CRUCIBLE: the `asr` door, and the venue rule's host (P5).
  *
- * `WhisperService.transcribeVideo` is still the one seam every caller goes
- * through (the queue, the analysis pipeline, the simple-transcribe door). On
- * the Crucible route it hands the VIDEO itself here, not an extracted WAV: the
- * server reads any container ffmpeg reads and windows it (900 s windows, 15 s
- * overlap), so nothing is chunked or extracted on this side. `transcript.json`
- * comes back, and an SRT is written in the job's output directory for the
- * caller to relocate exactly as it relocates whisper.cpp's.
+ * `WhisperService.transcribe` is the one seam every caller goes through (the
+ * queue, the simple-transcribe door). It hands the VIDEO itself here, not an
+ * extracted WAV: the server reads any container ffmpeg reads and windows it
+ * (900 s windows, 15 s overlap), so nothing is chunked or extracted on this
+ * side. `transcript.json` comes back, and an SRT and its plain text are
+ * written in the job's output directory for the caller to relocate.
  *
  * What the job sends (all three params are required and Crucible defaults
  * none): `language` ("auto": Briefcase has no language setting and never
@@ -28,7 +27,6 @@ import { CrucibleClientFactory } from '../client-factory';
 import { CRUCIBLE_IN_FLIGHT_LEDGER } from '../crucible.constants';
 import { CrucibleServersService } from '../crucible-servers.service';
 import type { InFlightLedger } from '../in-flight-ledger';
-import { resolveAiVia, type AiVia } from '../llm/ai-via';
 import { CrucibleProbeService } from '../probe';
 import type { TranscriptionServerView, TranscriptionView } from '../wire/transcription-wire';
 import { asrOfferOf, crucibleAsrLanguage, vadFilterFor, type AsrOffer } from './asr-models';
@@ -40,7 +38,7 @@ import {
   writeTranscriptionSetting,
   type TranscriptionSettingRead,
 } from './transcription-setting';
-import { decideTranscriptionRoute, type TranscriptionAsk, type TranscriptionRoute, type TranscriptionVenueHost } from './transcription-venue';
+import { decideTranscriptionRoute, type TranscriptionRoute, type TranscriptionVenueHost } from './transcription-venue';
 
 /** `/v1/info` is read at most this often per server for the venue rule. */
 export const ASR_OFFER_CACHE_MS = 30_000;
@@ -52,9 +50,9 @@ export interface CrucibleTranscriptionRequest {
   readonly model: string;
   /** The media file, sent as it is. */
   readonly videoFile: string;
-  /** Where the SRT is written: the job's temp directory, as whisper.cpp's output directory. */
+  /** Where the SRT and TXT are written: the job's temp directory. */
   readonly outputDir: string;
-  /** The SRT's base name (no extension), as whisper.cpp would name it. */
+  /** The SRT's and TXT's base name (no extension). */
   readonly baseName: string;
   /** Briefcase's queue job id: the ledger's `localId`, the log prefix and the clientRef's stem. */
   readonly localId: string;
@@ -65,6 +63,8 @@ export interface CrucibleTranscriptionRequest {
 
 export interface CrucibleTranscriptionOutcome {
   readonly srtFile: string;
+  /** The cues' text, one per line: the transcript's plain text. */
+  readonly txtFile: string;
   readonly jobId: string;
   readonly cues: number;
   readonly model: string;
@@ -142,7 +142,6 @@ export class CrucibleTranscriptionService {
   /** Replaceable by a spec. */
   now: () => number = Date.now;
   configDir: () => string = () => getBriefcaseConfigDir();
-  aiVia: () => AiVia = () => resolveAiVia({ configDir: this.configDir() }).via;
   /** Only a spec shortens these. */
   jobTiming: Pick<RunAsrJobOptions, 'doorDelaysMs' | 'streamDelaysMs' | 'uploadTickMs'> = {};
 
@@ -162,7 +161,7 @@ export class CrucibleTranscriptionService {
   saveSetting(input: unknown): TranscriptionSettingRead {
     const setting = parseTranscriptionSettingInput(input);
     const saved = writeTranscriptionSetting(this.configDir(), setting);
-    this.logger.log(`Transcription set to ${setting.venue}${setting.server ? ` on ${setting.server}` : ''}${setting.model ? ` with ${setting.model}` : ''}`);
+    this.logger.log(`Transcription set to ${setting.server ?? 'the best-ranked server'}${setting.model ? ` with ${setting.model}` : ''}`);
     return saved;
   }
 
@@ -171,7 +170,6 @@ export class CrucibleTranscriptionService {
   private host(): TranscriptionVenueHost {
     return {
       setting: () => this.setting().setting,
-      aiVia: () => this.aiVia(),
       registered: () => this.servers.routing().ranked,
       reach: async (server) => {
         const answer = await this.probes.reach(server);
@@ -181,14 +179,14 @@ export class CrucibleTranscriptionService {
     };
   }
 
-  /** Where a transcription runs right now. Never throws: anything unknown is the whisper-cli route with a warning. */
-  async route(ask: TranscriptionAsk = {}): Promise<TranscriptionRoute> {
+  /** Where a transcription runs right now. Never throws: a venue that cannot be decided is `none`, with why. */
+  async route(): Promise<TranscriptionRoute> {
     try {
-      return await decideTranscriptionRoute(ask, this.host());
+      return await decideTranscriptionRoute(this.host());
     } catch (err) {
       const why = (err as Error)?.message ?? String(err);
-      this.logger.warn(`The transcription venue could not be decided (${why}); using the offline transcriber.`);
-      return { kind: 'cli', reason: why, warning: `Transcribed with the offline transcriber (whisper) because the Crucible venue could not be decided (${why}).` };
+      this.logger.warn(`The transcription venue could not be decided (${why}).`);
+      return { kind: 'none', reason: `Where to transcribe could not be decided (${why}).` };
     }
   }
 
@@ -243,15 +241,13 @@ export class CrucibleTranscriptionService {
       }
       servers.push(view);
     }
-    const route = await this.route({});
+    const route = await this.route();
     return {
       setting: read.setting,
       explicit: read.explicit,
       ignored: read.ignored ?? null,
-      aiVia: this.aiVia(),
       servers,
       route,
-      whisperCliInUse: route.kind === 'cli',
     };
   }
 
@@ -305,14 +301,16 @@ export class CrucibleTranscriptionService {
       ...this.jobTiming,
     });
 
-    const { srt, cues, transcript } = transcriptToSrt(outcome.transcript);
+    const { srt, cues, transcript, plainText } = transcriptToSrt(outcome.transcript);
     fs.mkdirSync(request.outputDir, { recursive: true });
     const srtFile = path.join(request.outputDir, `${request.baseName}.srt`);
+    const txtFile = path.join(request.outputDir, `${request.baseName}.txt`);
     const temp = `${srtFile}.${process.pid}.part`;
     fs.writeFileSync(temp, srt, 'utf-8');
     fs.renameSync(temp, srtFile);
+    fs.writeFileSync(txtFile, plainText, 'utf-8');
     log(`${server} transcribed it: ${cues} cue(s)${transcript.durationS !== null ? `, ${hms(transcript.durationS)}` : ''}, language ${transcript.language}, ${transcript.model}${transcript.revision ? `@${transcript.revision.slice(0, 12)}` : ''}`);
-    return { srtFile, jobId: outcome.jobId, cues, model: transcript.model, revision: transcript.revision, language: transcript.language };
+    return { srtFile, txtFile, jobId: outcome.jobId, cues, model: transcript.model, revision: transcript.revision, language: transcript.language };
   }
 
   private blobCacheFor(server: string, file: string): AsrBlobCache | undefined {

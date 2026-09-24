@@ -21,9 +21,10 @@
  *   CrucibleAsrUnavailable    Crucible could not take or finish the work for an
  *                             infrastructure reason (unreachable, no asr, the
  *                             model not offered, the token refused, the stream
- *                             lost past its budget): the caller FALLS BACK to
- *                             whisper-cli with a warning.
- *   CrucibleAsrCancelled      ours or the server's cancel. Never a fallback.
+ *                             lost past its budget): the queue PARKS the
+ *                             task until Crucible answers (P7: no other
+ *                             transcriber).
+ *   CrucibleAsrCancelled      ours or the server's cancel. Never retried.
  *   CrucibleAsrJobFailed      the server admitted the job, ran it, and it
  *                             failed (a bad window, a decode error): the task
  *                             fails with the server's own message.
@@ -49,7 +50,7 @@ import { CrucibleRegistryError } from '../errors';
 import { CrucibleParkedError } from '../llm/errors';
 import { crucibleUnavailableCause } from '../transport-failure';
 
-/** Crucible could not take or finish the job for an infrastructure reason. The caller falls back. */
+/** Crucible could not take or finish the job for an infrastructure reason. The queue parks the task. */
 export class CrucibleAsrUnavailable extends Error {
   constructor(readonly code: string, readonly server: string, message: string) {
     super(message);
@@ -57,7 +58,7 @@ export class CrucibleAsrUnavailable extends Error {
   }
 }
 
-/** The server ran the job and it failed. Not a fallback: time was spent and the server said why. */
+/** The server ran the job and it failed. Not retried: time was spent and the server said why. */
 export class CrucibleAsrJobFailed extends Error {
   constructor(readonly server: string, readonly jobId: string, readonly code: string, readonly serverMessage: string) {
     super(`Crucible on ${server} could not transcribe this video (${code}): ${serverMessage}`);
@@ -486,8 +487,8 @@ export async function runAsrJob(options: RunAsrJobOptions): Promise<AsrJobOutcom
         }
         if (wire === null) {
           // Not weather (a protocol or auth error on the stream): the job is
-          // still admitted and holding the card. DELETE it before the caller
-          // falls back, or whisper-cli and Crucible transcribe the same video.
+          // still admitted and holding the card. DELETE it before the task
+          // parks, or a retry and the orphan transcribe the same video at once.
           await cancel(`the event stream failed: ${(err as Error)?.message ?? err}`);
           throw classifyAsrRefusal(err, server, `the events of asr job ${admitted}`);
         }

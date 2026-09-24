@@ -5,7 +5,6 @@ import { FfmpegService } from '../ffmpeg/ffmpeg.service';
 import { MediaEventService } from './media-event.service';
 import * as fs from 'fs';
 import * as path from 'path';
-import { WhisperService } from './whisper.service';
 
 export interface ProcessingOptions {
   fixAspectRatio?: boolean;
@@ -20,7 +19,6 @@ export interface ProcessingOptions {
   rmsNormalizationLevel?: number;
   useCompression?: boolean;
   compressionLevel?: number;
-  transcribeVideo?: boolean;
 }
 
 export interface ProcessingResult {
@@ -35,7 +33,6 @@ export interface ProcessingResult {
     compression?: boolean;
     compressionLevel?: number;
   };
-  transcriptFile?: string;
 }
 
 /**
@@ -48,7 +45,6 @@ export class MediaProcessingService {
   constructor(
     private readonly ffmpegService: FfmpegService,
     private readonly eventService: MediaEventService,
-    private readonly whisperService: WhisperService
   ) {}
   
   async processMedia(
@@ -61,7 +57,6 @@ export class MediaProcessingService {
       fixAspectRatio: options.fixAspectRatio,
       normalizeAudio: options.normalizeAudio,
       audioNormalizationMethod: options.audioNormalizationMethod,
-      transcribeVideo: options.transcribeVideo
     }, null, 2));
 
     try {
@@ -121,34 +116,12 @@ export class MediaProcessingService {
         }
       }
       
-      if (options.transcribeVideo && result.success) {
-        try {
-          this.logger.log(`Updating job ${jobId} status to 'transcribing'`);
-          this.eventService.emitJobStatusUpdate(jobId || '', 'transcribing', 'Starting transcription...');
-          await new Promise(resolve => setTimeout(resolve, 50));
-
-          this.logger.log(`Starting transcription for job ${jobId}`);
-          const transcriptFile = await this.whisperService.transcribeVideo(
-            result.outputFile || inputFile, // Use the re-encoded file
-            jobId
-          );
-          
-          if (transcriptFile) {
-            result.transcriptFile = transcriptFile;
-          }
-        } catch (error) {
-          const errorMessage = error instanceof Error ? (error as Error).message : String(error);
-          this.logger.error(`Transcription failed: ${errorMessage}`);
-        }
-      }
-      
       if (result.success) {
         this.eventService.emitProcessingCompleted(
           result.outputFile || inputFile,
           jobId,
           result.thumbnailFile,
           result.audioFile,
-          result.transcriptFile
         );
       } else {
         this.eventService.emitProcessingFailed(

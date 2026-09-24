@@ -5,10 +5,11 @@
  */
 import type { ServerReach } from './settings-wire';
 
-export type TranscriptionVenueChoiceWire = 'auto' | 'crucible' | 'whisper-cli';
-
+/**
+ * Transcription is Crucible's `asr` job and nothing else (P7 removed the
+ * offline whisper-cli transcriber and the `translate` option).
+ */
 export interface TranscriptionSettingWire {
-  venue: TranscriptionVenueChoiceWire;
   /** A registered server name, or null for the best-ranked running one that offers asr. */
   server: string | null;
   /** A Crucible asr model id, or null for the most accurate one installed. */
@@ -39,19 +40,17 @@ export interface TranscriptionServerView {
   unavailable: string | null;
 }
 
+/** Where a transcription queued now would run, or why it would wait (park). */
 export type TranscriptionRouteWire =
   | { kind: 'crucible'; server: string; model: string }
-  | { kind: 'cli'; reason: string; warning: string | null };
+  | { kind: 'none'; reason: string };
 
 export interface TranscriptionView {
   setting: TranscriptionSettingWire;
   /** False when nobody has saved a transcription setting yet. */
   explicit: boolean;
   ignored: string | null;
-  aiVia: 'crucible' | 'direct';
   servers: TranscriptionServerView[];
   /** Where a transcription queued now would run. */
   route: TranscriptionRouteWire;
-  /** True when whisper-cli is the transcriber in use, so its models are worth downloading. */
-  whisperCliInUse: boolean;
 }

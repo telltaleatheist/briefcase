@@ -1,20 +1,16 @@
 // Atomic media operations service - each operation is standalone and emits progress
 
 // Through Crucible, keys are the serving server's (Settings › AI): no local key is required.
-import { aiViaCrucible } from '../crucible/llm/ai-via';
 import { Injectable, Logger } from '@nestjs/common';
 import { MediaEventService } from './media-event.service';
 import { MediaProcessingService } from './media-processing.service';
-import { WhisperService, type WhisperRoute } from './whisper.service';
-import { isAsrUnavailable } from '../crucible/asr/crucible-asr-job';
-import { isParked } from '../crucible/llm/errors';
+import { WhisperService, isTranscriptionRetryable, type WhisperRoute } from './whisper.service';
 import { DownloaderService } from '../downloader/downloader.service';
 import { FileScannerService } from '../database/file-scanner.service';
 import { DatabaseService } from '../database/database.service';
 import { AIAnalysisService } from '../analysis/ai-analysis.service';
 import { parseProviderModel } from '../analysis/model-utils';
 import { isCancellation } from '../analysis/cancellation';
-import { ApiKeysService } from '../config/api-keys.service';
 import { SharedConfigService } from '../config/shared-config.service';
 import { FfmpegService } from '../ffmpeg/ffmpeg.service';
 import { ThumbnailService } from '../database/thumbnail.service';
@@ -45,7 +41,6 @@ export class MediaOperationsService {
     private readonly whisperService: WhisperService,
     private readonly aiAnalysisService: AIAnalysisService,
     private readonly eventService: MediaEventService,
-    private readonly apiKeysService: ApiKeysService,
     private readonly ffmpegService: FfmpegService,
     private readonly thumbnailService: ThumbnailService,
     private readonly webArchiveService: WebArchiveService,
@@ -456,17 +451,12 @@ export class MediaOperationsService {
   }
 
   /**
-   * Transcribe video using Whisper
+   * Transcribe a video on Crucible (the asr job the queue placed it on).
    */
   async transcribeVideo(
     videoIdOrPath: string,
-    options: {
-      model?: string;
-      language?: string;
-      translate?: boolean;
-    } = {},
     jobId?: string,
-    /** P5: the engine the queue placed this task on. Absent: the venue rule decides, falling back in place. */
+    /** The server and model the queue placed this task on. Absent: the venue rule decides now. */
     route?: WhisperRoute,
   ): Promise<TranscribeResult> {
     try {
@@ -495,22 +485,14 @@ export class MediaOperationsService {
 
       this.eventService.emitTaskProgress(jobId || '', 'transcribe', 0, 'Starting transcription...');
 
-      const outcome = await this.whisperService.transcribe(videoPath, {
-        jobId,
-        model: options.model,
-        translate: options.translate,
-        route,
-      });
+      const outcome = await this.whisperService.transcribe(videoPath, { jobId, route });
       const transcriptFile = outcome.srtPath;
+      const transcriptTxtFile = outcome.txtPath;
 
       this.eventService.emitTaskProgress(jobId || '', 'transcribe', 95, 'Saving transcript...');
 
-      // Read transcript files
       const transcriptSrt = fs.readFileSync(transcriptFile, 'utf8');
-      const transcriptTxtFile = transcriptFile.replace(/\.srt$/i, '.txt');
-      const transcriptText = fs.existsSync(transcriptTxtFile)
-        ? fs.readFileSync(transcriptTxtFile, 'utf8')
-        : transcriptSrt;
+      const transcriptText = fs.readFileSync(transcriptTxtFile, 'utf8');
 
       // If we have a videoId, save to database
       if (videoId) {
@@ -518,8 +500,8 @@ export class MediaOperationsService {
           videoId,
           plainText: transcriptText,
           srtFormat: transcriptSrt,
-          whisperModel: outcome.engine === 'crucible' ? (outcome.model ?? 'crucible') : (options.model || 'base'),
-          language: options.language || outcome.language || 'en',
+          whisperModel: outcome.model,
+          language: outcome.language || 'en',
         });
         this.logger.log(`[${jobId || 'standalone'}] Transcript saved to database for video ${videoId}`);
 
@@ -535,12 +517,11 @@ export class MediaOperationsService {
         data: {
           transcriptPath: videoId ? undefined : transcriptFile, // Only return path if not saved to DB
         },
-        ...(outcome.warnings.length > 0 ? { warnings: outcome.warnings } : {}),
       };
     } catch (error) {
-      // The queue's to act on, not a failure: a busy Crucible card parks the
-      // task, and an unavailable Crucible re-routes it to whisper-cli (P5).
-      if (isParked(error) || isAsrUnavailable(error)) throw error;
+      // The queue's to act on, not a failure: a busy card, a silent server or
+      // no server able to transcribe right now PARKS the task.
+      if (isTranscriptionRetryable(error)) throw error;
       this.logger.error(`Transcription failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
       return {
         success: false,
@@ -556,11 +537,8 @@ export class MediaOperationsService {
     videoId: string,
     options: {
       aiModel: string;
-      aiProvider?: 'ollama' | 'claude' | 'openai';
-      apiKey?: string;
-      ollamaEndpoint?: string;
+      aiProvider?: 'local' | 'ollama' | 'claude' | 'openai';
       customInstructions?: string;
-      analysisGranularity?: number;
     },
     jobId?: string,
   ): Promise<AnalyzeResult> {
@@ -628,23 +606,6 @@ export class MediaOperationsService {
         throw new Error('AI provider is required for analysis. No provider specified and none could be extracted from model name.');
       }
 
-      // Get API key from options or from stored config
-      let apiKey = options.apiKey;
-      if (!apiKey && provider !== 'ollama' && provider !== 'local' && !aiViaCrucible()) {
-        // Get API key from the API keys service
-        if (provider === 'openai') {
-          apiKey = this.apiKeysService.getOpenAiApiKey();
-          this.logger.log(`[${jobId || 'standalone'}] Using stored OpenAI API key`);
-        } else if (provider === 'claude') {
-          apiKey = this.apiKeysService.getClaudeApiKey();
-          this.logger.log(`[${jobId || 'standalone'}] Using stored Claude API key`);
-        }
-
-        if (!apiKey) {
-          throw new Error(`No API key found for ${provider}. Please configure your ${provider === 'openai' ? 'OpenAI' : 'Claude'} API key in settings.`);
-        }
-      }
-
       // Use filename (always present) - strip extension for display
       const videoTitle = video.filename.replace(/\.[^/.]+$/, '');
 
@@ -659,11 +620,8 @@ export class MediaOperationsService {
         segments,
         outputFile: analysisOutputPath,
         customInstructions: options.customInstructions,
-        analysisGranularity: options.analysisGranularity,
         videoTitle,
         categories,
-        apiKey,
-        ollamaEndpoint: options.ollamaEndpoint || 'http://localhost:11434',
         onProgress: (progress) => {
           this.eventService.emitTaskProgress(jobId || '', 'analyze', progress.progress, progress.message, {
             eta: progress.eta,
@@ -878,8 +836,6 @@ export class MediaOperationsService {
     options: {
       aiModel: string;
       aiProvider?: 'local' | 'ollama' | 'claude' | 'openai';
-      apiKey?: string;
-      ollamaEndpoint?: string;
     },
     jobId?: string,
   ): Promise<AnalyzeResult> {
@@ -949,18 +905,6 @@ export class MediaOperationsService {
         throw new Error('AI provider is required for analysis.');
       }
 
-      let apiKey = options.apiKey;
-      if (!apiKey && provider !== 'ollama' && provider !== 'local' && !aiViaCrucible()) {
-        if (provider === 'openai') {
-          apiKey = this.apiKeysService.getOpenAiApiKey();
-        } else if (provider === 'claude') {
-          apiKey = this.apiKeysService.getClaudeApiKey();
-        }
-        if (!apiKey) {
-          throw new Error(`No API key found for ${provider}. Please configure it in settings.`);
-        }
-      }
-
       // The previous suggested title is NOT cleared here — same reasoning as
       // analyzeVideo: clearing before the call means a cancelled or failed run
       // destroys the old title and puts nothing in its place. It is cleared
@@ -973,8 +917,6 @@ export class MediaOperationsService {
         {
           provider,
           model: cleanModelName,
-          apiKey,
-          ollamaEndpoint: options.ollamaEndpoint || 'http://localhost:11434',
         },
         textContent.extracted_text,
         currentTitle,

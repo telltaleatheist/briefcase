@@ -18,7 +18,7 @@ export class CrucibleTranscriptionController {
     return this.transcription.view();
   }
 
-  /** `{venue: 'auto'|'crucible'|'whisper-cli', server: string|null, model: string|null}`. */
+  /** `{server: string|null, model: string|null}`. */
   @Put()
   async save(@Body() body: unknown): Promise<TranscriptionView> {
     try {

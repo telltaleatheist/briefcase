@@ -210,15 +210,20 @@ export function renderSrt(cues: readonly TranscriptCue[]): string {
   return out;
 }
 
+/** The transcript's plain text: each cue's text on its own line (what transcript search indexes). */
+export function renderPlainText(cues: readonly TranscriptCue[]): string {
+  return cues.map((cue) => cue.text).join('\n');
+}
+
 /**
- * `transcript.json` (parsed) → SRT text and its cue count.
+ * `transcript.json` (parsed) → SRT text, its plain text and its cue count.
  *
  * A transcript with no speech is an EMPTY SRT, not a refusal: a library holds
  * music videos and silent clips, for which "no speech" is the true
- * transcript, and it is what whisper.cpp writes for them.
+ * transcript.
  */
-export function transcriptToSrt(parsed: unknown): { srt: string; cues: number; transcript: CrucibleTranscript } {
+export function transcriptToSrt(parsed: unknown): { srt: string; plainText: string; cues: number; transcript: CrucibleTranscript } {
   const transcript = readCrucibleTranscript(parsed);
   const cues = groupTranscriptCues(transcript.segments);
-  return { srt: renderSrt(cues), cues: cues.length, transcript };
+  return { srt: renderSrt(cues), plainText: renderPlainText(cues), cues: cues.length, transcript };
 }

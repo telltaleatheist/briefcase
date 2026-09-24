@@ -2,7 +2,6 @@
 
 import { Controller, Post, Get, Body, Query, HttpException, HttpStatus } from '@nestjs/common';
 import { MediaOperationsService } from './media-operations.service';
-import { WhisperManager } from './whisper-manager';
 import { LibraryManagerService } from '../database/library-manager.service';
 import { isPathInsideRoots } from '../common/utils/path-security.util';
 
@@ -10,7 +9,6 @@ import { isPathInsideRoots } from '../common/utils/path-security.util';
 export class MediaController {
   constructor(
     private readonly mediaOps: MediaOperationsService,
-    private readonly whisperManager: WhisperManager,
     private readonly libraryManager: LibraryManagerService,
   ) {}
 
@@ -202,146 +200,6 @@ export class MediaController {
     if (!result.success) {
       throw new HttpException(
         result.error || 'Normalize audio failed',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-
-    return {
-      success: true,
-      data: result.data,
-    };
-  }
-
-  /**
-   * Get available whisper models (dynamically discovered from disk)
-   * GET /media/whisper-models
-   */
-  @Get('whisper-models')
-  getWhisperModels() {
-    const models = this.whisperManager.getAvailableModelsWithInfo();
-    return {
-      success: true,
-      models,
-      default: models.length > 0 ? (models.find(m => m.id === 'base')?.id || models[0].id) : null,
-    };
-  }
-
-  /**
-   * Get Whisper GPU mode and status
-   * GET /media/whisper-gpu
-   */
-  @Get('whisper-gpu')
-  getWhisperGpuMode() {
-    return {
-      success: true,
-      mode: this.whisperManager.getGpuMode(),
-      gpuFailed: this.whisperManager.hasGpuFailed(),
-    };
-  }
-
-  /**
-   * Set Whisper GPU mode
-   * POST /media/whisper-gpu
-   * Body: { mode: 'auto' | 'gpu' | 'cpu' }
-   */
-  @Post('whisper-gpu')
-  setWhisperGpuMode(@Body() body: { mode: 'auto' | 'gpu' | 'cpu' }) {
-    if (!body.mode || !['auto', 'gpu', 'cpu'].includes(body.mode)) {
-      throw new HttpException(
-        'Invalid mode. Must be "auto", "gpu", or "cpu"',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-
-    this.whisperManager.setGpuMode(body.mode);
-
-    return {
-      success: true,
-      mode: this.whisperManager.getGpuMode(),
-    };
-  }
-
-  /**
-   * Transcribe video
-   * POST /media/transcribe
-   * Body: { videoId } or { videoPath }, model?, language?
-   */
-  @Post('transcribe')
-  async transcribe(
-    @Body()
-    body: {
-      videoId?: string;
-      videoPath?: string;
-      model?: string;
-      language?: string;
-    },
-  ) {
-    if (!body.videoId && !body.videoPath) {
-      throw new HttpException(
-        'Either videoId or videoPath is required',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-
-    const result = await this.mediaOps.transcribeVideo(
-      body.videoId || body.videoPath!,
-      {
-        model: body.model,
-        language: body.language,
-      },
-    );
-
-    if (!result.success) {
-      throw new HttpException(
-        result.error || 'Transcription failed',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-
-    return {
-      success: true,
-      data: result.data,
-    };
-  }
-
-  /**
-   * AI analysis of video
-   * POST /media/analyze
-   * Body: { videoId, aiModel, aiProvider?, apiKey?, ollamaEndpoint?, customInstructions? }
-   */
-  @Post('analyze')
-  async analyze(
-    @Body()
-    body: {
-      videoId: string;
-      aiModel: string;
-      aiProvider?: 'ollama' | 'claude' | 'openai';
-      apiKey?: string;
-      ollamaEndpoint?: string;
-      customInstructions?: string;
-      analysisGranularity?: number;
-    },
-  ) {
-    if (!body.videoId) {
-      throw new HttpException('Video ID is required', HttpStatus.BAD_REQUEST);
-    }
-
-    if (!body.aiModel) {
-      throw new HttpException('AI model is required', HttpStatus.BAD_REQUEST);
-    }
-
-    const result = await this.mediaOps.analyzeVideo(body.videoId, {
-      aiModel: body.aiModel,
-      aiProvider: body.aiProvider,
-      apiKey: body.apiKey,
-      ollamaEndpoint: body.ollamaEndpoint,
-      customInstructions: body.customInstructions,
-      analysisGranularity: body.analysisGranularity,
-    });
-
-    if (!result.success) {
-      throw new HttpException(
-        result.error || 'Analysis failed',
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }

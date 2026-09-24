@@ -1,9 +1,9 @@
 /**
  * One transcription through Crucible's `asr` job, against the fake (P5):
- * upload → submit → SSE progress → transcript.json → SRT, the ledger around
- * it, resume after a dropped stream, cancel mid-file, a failed job, a busy
- * card, and WhisperService's engine choice: the fallback to whisper-cli on an
- * unreachable server, never on a cancel, and the whisper-cli path unchanged.
+ * upload → submit → SSE progress → transcript.json → SRT + plain text, the
+ * ledger around it, resume after a dropped stream, cancel mid-file, a failed
+ * job, a busy card, and WhisperService: Crucible is the only transcriber (P7),
+ * so an unreachable or busy server is a reason to park, never a fallback.
  */
 import { createHash } from 'crypto';
 import * as fs from 'fs';
@@ -18,7 +18,7 @@ import {
 } from '../../src/crucible/asr/crucible-asr-job';
 import { CrucibleTranscriptionService, safeUploadName } from '../../src/crucible/asr/crucible-transcription.service';
 import { CrucibleParkedError, isParked } from '../../src/crucible/llm/errors';
-import { WhisperService } from '../../src/media/whisper.service';
+import { TranscriptionUnavailableError, WhisperService, isTranscriptionRetryable } from '../../src/media/whisper.service';
 import { startFakeCrucible, unusedLoopbackUrl, type FakeCrucible } from '../fake-crucible/fake-crucible';
 import { harness, type Harness } from './harness';
 import { tempDir } from './helpers';
@@ -39,7 +39,6 @@ async function wire(opts: Parameters<typeof startFakeCrucible>[0] = {}, url?: st
   ledger = InFlightLedger.inDir(h.dir, () => undefined);
   svc = new CrucibleTranscriptionService(new CrucibleServersService(h.registry, h.factory), h.probes, h.factory, ledger);
   svc.configDir = () => h.dir;
-  svc.aiVia = () => 'crucible';
   svc.jobTiming = { doorDelaysMs: [5], streamDelaysMs: [5, 5, 5] };
   const dir = tempDir('asr-video-');
   video = path.join(dir, 'My Video! (1080p).MP4');
@@ -83,6 +82,8 @@ describe('the job flow', () => {
       + '2\n00:00:04,200 --> 00:00:09,800\nToday we are talking about the news.\n\n'
       + '3\n01:00:05,500 --> 01:00:10,250\nThanks for watching.\n\n',
     );
+    // The plain text beside it, one cue per line (what transcript search indexes).
+    expect(fs.readFileSync(outcome.txtFile, 'utf8')).toBe('Welcome back to the show.\nToday we are talking about the news.\nThanks for watching.');
 
     // Progress: never backwards; each stage in its band; the decode drives no fraction.
     const percents = seen.map((s) => s.percent);
@@ -149,7 +150,7 @@ describe('the job flow', () => {
     ]);
   });
 
-  it('a stream lost past its budget cancels the job and is an infrastructure failure (the caller falls back)', async () => {
+  it('a stream lost past its budget cancels the job and is an infrastructure failure (the queue parks it)', async () => {
     await wire({ asr: { holdAfterFrames: 1 } });
     fake.faults.resetAfterBytes = [{ match: { method: 'GET', path: /\/events$/ }, afterBytes: 0 }];
     await expect(svc.transcribe(request())).rejects.toMatchObject({ name: 'CrucibleAsrUnavailable', code: 'crucible_stream_lost' });
@@ -255,7 +256,7 @@ describe('the job flow', () => {
     expect(err.message).toMatch(/Crucible on mac could not be reached/);
   });
 
-  it('a model the server does not have is refused at the submit as unavailable (the caller falls back)', async () => {
+  it('a model the server does not have is refused at the submit as unavailable (the queue parks it)', async () => {
     await wire({ asrInstalled: ['mlx-whisper-small'] });
     const err = await svc.transcribe(request()).catch((e) => e);
     expect(err).toMatchObject({ name: 'CrucibleAsrUnavailable', code: 'model_not_installed' });
@@ -273,28 +274,28 @@ describe('the pane’s view', () => {
     await wire();
     const view = await svc.view();
     expect(view.route).toEqual({ kind: 'crucible', server: 'mac', model: 'mlx-whisper-large-v3' });
-    expect(view.whisperCliInUse).toBe(false);
     expect(view.servers[0]).toMatchObject({ name: 'mac', backend: 'mlx-darwin', offersAsr: true, recommended: 'mlx-whisper-large-v3', unavailable: null });
     expect(view.servers[0].models.every((m) => m.id.startsWith('mlx-whisper-'))).toBe(true);
   });
 
-  it('a server without asr: whisper-cli is in use, with the reason', async () => {
+  it('a server without asr: the route is none, with the reason (the task would park)', async () => {
     await wire({ installedJobTypes: ['echo', 'llm'] });
     const view = await svc.view();
-    expect(view.whisperCliInUse).toBe(true);
-    expect(view.route).toMatchObject({ kind: 'cli', warning: expect.stringMatching(/no transcription engine/) });
+    expect(view.route).toMatchObject({ kind: 'none', reason: expect.stringMatching(/no transcription engine/) });
     expect(view.servers[0].unavailable).toMatch(/no transcription engine/);
   });
 
   it('saving the setting writes app-config.json and the next route reads it', async () => {
     await wire();
-    svc.saveSetting({ venue: 'whisper-cli', server: null, model: null });
-    expect(await svc.route()).toMatchObject({ kind: 'cli', warning: null });
-    expect(() => svc.saveSetting({ venue: 'nope' })).toThrow(/venue is/);
+    svc.saveSetting({ server: 'gone', model: null });
+    expect(await svc.route()).toMatchObject({ kind: 'none', reason: expect.stringMatching(/"gone"/) });
+    svc.saveSetting({ server: null, model: 'mlx-whisper-large-v3-turbo' });
+    expect(await svc.route()).toEqual({ kind: 'crucible', server: 'mac', model: 'mlx-whisper-large-v3-turbo' });
+    expect(() => svc.saveSetting({ server: 7 })).toThrow(/server is/);
   });
 });
 
-// ── WhisperService: the engine choice ─────────────────────────────────────
+// ── WhisperService: the one transcription seam ────────────────────────────
 
 function events() {
   const log: Array<[string, ...unknown[]]> = [];
@@ -309,111 +310,82 @@ function events() {
   };
 }
 
-function whisper(crucible?: CrucibleTranscriptionService) {
+function whisper(crucible: CrucibleTranscriptionService) {
   const ev = events();
-  const service = new WhisperService(ev as never, crucible);
-  const cliSrt = path.join(tempDir('cli-'), 'cli.srt');
-  fs.writeFileSync(cliSrt, '1\n00:00:00,000 --> 00:00:01,000\ncli\n\n');
-  const cli = jest.spyOn(service as any, 'transcribeWithCli').mockResolvedValue(cliSrt);
-  return { service, cli, cliSrt, ev };
+  return { service: new WhisperService(ev as never, crucible), ev };
 }
 
-describe('WhisperService picks the engine', () => {
-  it('the Crucible route: the SRT is relocated to a standalone temp file, as the whisper-cli path does', async () => {
+const MAC_ROUTE = { kind: 'crucible' as const, server: 'mac', model: 'mlx-whisper-large-v3' };
+
+describe('WhisperService: Crucible transcribes, and nothing else does', () => {
+  it('the SRT and its plain text are relocated to standalone temp files; the job dir is gone', async () => {
     await wire();
-    const { service, cli, ev } = whisper(svc);
-    const outcome = await service.transcribe(video, { jobId: 'job-1', model: 'base', route: { kind: 'crucible', server: 'mac', model: 'mlx-whisper-large-v3', fallback: 'defer' } });
-    expect(cli).not.toHaveBeenCalled();
-    expect(outcome).toMatchObject({ engine: 'crucible', model: 'mlx-whisper-large-v3', language: 'en', warnings: [] });
+    const { service, ev } = whisper(svc);
+    const outcome = await service.transcribe(video, { jobId: 'job-1', route: MAC_ROUTE });
+    expect(outcome).toMatchObject({ model: 'mlx-whisper-large-v3', language: 'en' });
     expect(path.dirname(outcome.srtPath)).toBe(os.tmpdir());
-    expect(path.basename(outcome.srtPath)).toMatch(/^whisper-[0-9a-f]{16}\.srt$/);
+    expect(path.basename(outcome.srtPath)).toMatch(/^transcribe-[0-9a-f]{16}\.srt$/);
+    expect(outcome.txtPath).toBe(outcome.srtPath.replace(/\.srt$/, '.txt'));
     expect(fs.readFileSync(outcome.srtPath, 'utf8')).toMatch(/^1\n00:00:00,000 --> 00:00:04,200\nWelcome back/);
-    expect(fs.existsSync(outcome.srtPath.replace(/\.srt$/, ''))).toBe(false); // the job dir is gone
+    expect(fs.readFileSync(outcome.txtPath, 'utf8')).toMatch(/^Welcome back to the show\.\nToday/);
+    expect(fs.existsSync(outcome.srtPath.replace(/\.srt$/, ''))).toBe(false);
     expect(ev.log.some(([n, jobId, type, pct]) => n === 'task' && jobId === 'job-1' && type === 'transcribe' && pct === 95)).toBe(true);
     fs.unlinkSync(outcome.srtPath);
+    fs.unlinkSync(outcome.txtPath);
   });
 
-  it('no route given: the venue rule decides (Crucible here), and the legacy transcribeVideo returns the path', async () => {
+  it('no route given (a caller with no queue): the venue rule decides', async () => {
     await wire();
-    const { service, cli } = whisper(svc);
-    const srt = await service.transcribeVideo(video, 'job-2', 'base');
-    expect(cli).not.toHaveBeenCalled();
+    const { service } = whisper(svc);
+    const outcome = await service.transcribe(video, { jobId: 'job-2' });
     expect(fake.jobs).toHaveLength(1);
-    expect(fs.readFileSync(srt!, 'utf8')).toMatch(/Thanks for watching\./);
+    expect(fs.readFileSync(outcome.srtPath, 'utf8')).toMatch(/Thanks for watching\./);
   });
 
-  it('unreachable with fallback inline: whisper-cli runs with the SAME arguments, and the task gets a warning', async () => {
-    await wire({}, await unusedLoopbackUrl());
-    const { service, cli, cliSrt } = whisper(svc);
-    const outcome = await service.transcribe(video, { jobId: 'job-3', model: 'small', translate: false, route: { kind: 'crucible', server: 'mac', model: 'mlx-whisper-large-v3', fallback: 'inline' } });
-    expect(cli).toHaveBeenCalledWith(video, 'job-3', 'small', false);
-    expect(outcome).toMatchObject({ srtPath: cliSrt, engine: 'whisper-cli' });
-    expect(outcome.warnings).toEqual([expect.stringMatching(/^Transcribed with the offline transcriber \(whisper\) because crucible on mac could not be reached/)]);
+  it('no route and no server that can take it: a typed error saying why, and nothing runs', async () => {
+    await wire({ installedJobTypes: ['echo', 'llm'] });
+    const { service } = whisper(svc);
+    const err = await service.transcribe(video, { jobId: 'job-3' }).catch((e) => e);
+    expect(err).toBeInstanceOf(TranscriptionUnavailableError);
+    expect((err as Error).message).toMatch(/no transcription engine/);
+    expect(isTranscriptionRetryable(err)).toBe(true);
+    expect(fake.uploads).toHaveLength(0);
   });
 
-  it('a busy card with fallback inline (no queue to park in) falls back too; with fallback defer it parks', async () => {
+  it('a busy card parks (a retry later), never a fallback', async () => {
     await wire();
     fake.inject({ serverBusy: { client: 'bookforge', type: 'tts', progress: 0.4 } });
-    const inline = whisper(svc);
-    const outcome = await inline.service.transcribe(video, { jobId: 'job-4', route: { kind: 'crucible', server: 'mac', model: 'mlx-whisper-large-v3', fallback: 'inline' } });
-    expect(outcome.engine).toBe('whisper-cli');
-    const deferred = whisper(svc);
-    const err = await deferred.service.transcribe(video, { jobId: 'job-5', route: { kind: 'crucible', server: 'mac', model: 'mlx-whisper-large-v3', fallback: 'defer' } }).catch((e) => e);
+    const { service } = whisper(svc);
+    const err = await service.transcribe(video, { jobId: 'job-5', route: MAC_ROUTE }).catch((e) => e);
     expect(isParked(err)).toBe(true);
-    expect(deferred.cli).not.toHaveBeenCalled();
+    expect(isTranscriptionRetryable(err)).toBe(true);
   });
 
-  it('unreachable with fallback defer: thrown for the queue to re-route, whisper-cli not run here', async () => {
+  it('an unreachable server is retryable (the queue parks it), by name', async () => {
     await wire({}, await unusedLoopbackUrl());
-    const { service, cli } = whisper(svc);
-    await expect(service.transcribe(video, { jobId: 'job-6', route: { kind: 'crucible', server: 'mac', model: 'mlx-whisper-large-v3', fallback: 'defer' } }))
-      .rejects.toBeInstanceOf(CrucibleAsrUnavailable);
-    expect(cli).not.toHaveBeenCalled();
+    const { service } = whisper(svc);
+    const err = await service.transcribe(video, { jobId: 'job-6', route: MAC_ROUTE }).catch((e) => e);
+    expect(err).toBeInstanceOf(CrucibleAsrUnavailable);
+    expect(isTranscriptionRetryable(err)).toBe(true);
   });
 
-  it('a cancel NEVER falls back: job.cancel-requested DELETEs the job and whisper-cli is not run', async () => {
+  it('a cancel is a cancel: job.cancel-requested DELETEs the job', async () => {
     await wire({ asr: { holdAfterFrames: 2 } });
-    const { service, cli, ev } = whisper(svc);
-    const running = service.transcribe(video, { jobId: 'job-7', route: { kind: 'crucible', server: 'mac', model: 'mlx-whisper-large-v3', fallback: 'inline' } });
+    const { service, ev } = whisper(svc);
+    const running = service.transcribe(video, { jobId: 'job-7', route: MAC_ROUTE });
     await until(() => (fake.jobs[0]?.events.filter((e) => e.event === 'progress' && e.data['stage'] === 'transcribing').length ?? 0) >= 2);
     service.handleJobCancelRequested({ jobId: 'job-7' });
     await expect(running).rejects.toBeInstanceOf(CrucibleAsrCancelled);
-    expect(cli).not.toHaveBeenCalled();
     expect(fake.requestsTo(`/v1/jobs/${fake.jobs[0].jobId}`, 'DELETE')).toHaveLength(1);
     expect(ev.log.some(([n]) => n === 'failed')).toBe(true);
   });
 
-  it('a failed job does not fall back either: the task fails with the server’s message', async () => {
+  it('a failed job fails with the server’s message, and is not retryable', async () => {
     await wire({ asr: { failWith: { code: 'asr_window_failed', message: 'window 2 failed' } } });
-    const { service, cli } = whisper(svc);
-    await expect(service.transcribe(video, { jobId: 'job-8', route: { kind: 'crucible', server: 'mac', model: 'mlx-whisper-large-v3', fallback: 'inline' } }))
-      .rejects.toThrow(/window 2 failed/);
-    expect(cli).not.toHaveBeenCalled();
-  });
-
-  it('REGRESSION: the whisper-cli route (and no Crucible at all) is the pre-P5 path, called with the same arguments', async () => {
-    await wire();
-    const withRoute = whisper(svc);
-    const a = await withRoute.service.transcribe(video, { jobId: 'job-9', model: 'base', translate: true, route: { kind: 'cli' } });
-    expect(withRoute.cli).toHaveBeenCalledWith(video, 'job-9', 'base', true);
-    expect(a).toEqual({ srtPath: withRoute.cliSrt, engine: 'whisper-cli', model: 'base', language: null, warnings: [] });
-
-    const noCrucible = whisper(undefined);
-    expect(await noCrucible.service.transcribeVideo(video, 'job-10', 'tiny', false)).toBe(noCrucible.cliSrt);
-    expect(noCrucible.cli).toHaveBeenCalledWith(video, 'job-10', 'tiny', false);
-
-    // translate through the venue rule: whisper-cli, never Crucible.
-    const translate = whisper(svc);
-    await translate.service.transcribe(video, { jobId: 'job-11', translate: true });
-    expect(translate.cli).toHaveBeenCalledWith(video, 'job-11', undefined, true);
-    expect(fake.jobs).toHaveLength(0);
-    expect(fake.uploads).toHaveLength(0);
-  });
-
-  it('REGRESSION: whisper-cli failing still resolves transcribeVideo with null, as before', async () => {
-    const { service, cli } = whisper(undefined);
-    cli.mockResolvedValue(null);
-    expect(await service.transcribeVideo(video, 'job-12')).toBeNull();
+    const { service } = whisper(svc);
+    const err = await service.transcribe(video, { jobId: 'job-8', route: MAC_ROUTE }).catch((e) => e);
+    expect((err as Error).message).toMatch(/window 2 failed/);
+    expect(isTranscriptionRetryable(err)).toBe(false);
   });
 });
 

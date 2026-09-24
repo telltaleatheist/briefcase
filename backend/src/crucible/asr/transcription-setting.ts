@@ -1,16 +1,13 @@
 /**
- * WHERE TRANSCRIPTION RUNS: the `transcription` key of app-config.json (P5).
+ * WHERE TRANSCRIPTION RUNS: the `transcription` key of app-config.json.
  *
- *   { "transcription": { "venue": "auto" | "crucible" | "whisper-cli",
- *                        "server": "<registry name>" | null,
+ *   { "transcription": { "server": "<registry name>" | null,
  *                        "model": "<crucible asr id>" | null } }
  *
- *   auto         (the default, and what an absent key means) Crucible when a
- *                server is connected and offers asr, otherwise whisper-cli.
- *                Follows the AI road: under aiVia 'direct' it is whisper-cli.
- *   crucible     Crucible, whatever the AI road; whisper-cli only as the
- *                fallback when Crucible can't (with a warning on the task).
- *   whisper-cli  the bundled whisper.cpp, as before P5.
+ * Transcription is Crucible's asr job and nothing else (P7 removed the
+ * offline whisper-cli transcriber and its `venue` choice). A `venue` a file
+ * written before P7 still carries is not read; one naming whisper-cli is
+ * reported in `ignored`, so the pane can say the offline transcriber is gone.
  *
  * `server` null means the best-ranked running server that offers asr; `model`
  * null means the most accurate asr model installed on the server that takes
@@ -18,7 +15,7 @@
  * too, because a model id is per-engine (mlx-whisper on the Mac,
  * faster-whisper on the PC).
  *
- * Read leniently, like aiVia: a value that is present and not understood is
+ * Read leniently: a value that is present and not understood is
  * reported in `ignored` and the default applies, so a hand-edited file never
  * stops transcription. Written temp-then-rename, keeping every other key.
  */
@@ -27,10 +24,7 @@ import * as path from 'path';
 
 export const TRANSCRIPTION_CONFIG_KEY = 'transcription';
 
-export type TranscriptionVenueChoice = 'auto' | 'crucible' | 'whisper-cli';
-
 export interface TranscriptionSetting {
-  venue: TranscriptionVenueChoice;
   server: string | null;
   model: string | null;
 }
@@ -42,17 +36,13 @@ export interface TranscriptionSettingRead {
   ignored?: string;
 }
 
-export const DEFAULT_TRANSCRIPTION_SETTING: TranscriptionSetting = { venue: 'auto', server: null, model: null };
+export const DEFAULT_TRANSCRIPTION_SETTING: TranscriptionSetting = { server: null, model: null };
 
 export class TranscriptionSettingError extends Error {
   constructor(readonly code: string, message: string) {
     super(message);
     this.name = 'TranscriptionSettingError';
   }
-}
-
-function parseVenue(raw: unknown): TranscriptionVenueChoice | null {
-  return raw === 'auto' || raw === 'crucible' || raw === 'whisper-cli' ? raw : null;
 }
 
 function optName(raw: unknown): string | null | undefined {
@@ -84,15 +74,14 @@ export function readTranscriptionSetting(configDir: string): TranscriptionSettin
     return { setting: { ...DEFAULT_TRANSCRIPTION_SETTING }, explicit: false, ignored: `transcription=${JSON.stringify(raw)}` };
   }
   const obj = raw as Record<string, unknown>;
-  const venue = parseVenue(obj['venue'] ?? 'auto');
   const server = optName(obj['server']);
   const model = optName(obj['model']);
   const bad: string[] = [];
-  if (venue === null) bad.push(`venue=${JSON.stringify(obj['venue'])}`);
+  if (obj['venue'] === 'whisper-cli') bad.push('venue="whisper-cli" (the offline transcriber was removed; Crucible transcribes)');
   if (server === undefined) bad.push(`server=${JSON.stringify(obj['server'])}`);
   if (model === undefined) bad.push(`model=${JSON.stringify(obj['model'])}`);
   return {
-    setting: { venue: venue ?? 'auto', server: server ?? null, model: model ?? null },
+    setting: { server: server ?? null, model: model ?? null },
     explicit: true,
     ...(bad.length > 0 ? { ignored: `transcription ${bad.join(', ')}` } : {}),
   };
@@ -101,16 +90,14 @@ export function readTranscriptionSetting(configDir: string): TranscriptionSettin
 /** Validate an incoming setting (from the pane) strictly: the pane is ours, so a bad value is a bug to name. */
 export function parseTranscriptionSettingInput(raw: unknown): TranscriptionSetting {
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new TranscriptionSettingError('invalid_setting', 'The transcription setting is {venue, server, model}.');
+    throw new TranscriptionSettingError('invalid_setting', 'The transcription setting is {server, model}.');
   }
   const obj = raw as Record<string, unknown>;
-  const venue = parseVenue(obj['venue']);
-  if (venue === null) throw new TranscriptionSettingError('invalid_venue', 'venue is "auto", "crucible" or "whisper-cli".');
   const server = optName(obj['server']);
   if (server === undefined) throw new TranscriptionSettingError('invalid_server', 'server is a registered server name, or null for the best-ranked one.');
   const model = optName(obj['model']);
   if (model === undefined) throw new TranscriptionSettingError('invalid_model', 'model is a Crucible asr model id, or null for the most accurate one.');
-  return { venue, server, model };
+  return { server, model };
 }
 
 export function writeTranscriptionSetting(configDir: string, setting: TranscriptionSetting): TranscriptionSettingRead {
@@ -125,7 +112,7 @@ export function writeTranscriptionSetting(configDir: string, setting: Transcript
         `${file} is not valid JSON (${(err as Error).message}); it was not overwritten. Repair it first.`);
     }
   }
-  config[TRANSCRIPTION_CONFIG_KEY] = { venue: setting.venue, server: setting.server, model: setting.model };
+  config[TRANSCRIPTION_CONFIG_KEY] = { server: setting.server, model: setting.model };
   config['lastUpdated'] = new Date().toISOString();
   fs.mkdirSync(configDir, { recursive: true });
   const temp = `${file}.${process.pid}.tmp`;
