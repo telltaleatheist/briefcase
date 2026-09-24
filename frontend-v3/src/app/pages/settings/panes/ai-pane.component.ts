@@ -337,7 +337,8 @@ export class AiPaneComponent {
 
   /**
    * The line under a picker holding an Ollama choice, through Crucible: the
-   * server's own model it runs as, or Ollama at its default context.
+   * server's own model it runs as, or Ollama at the window it runs at (the
+   * direct road's size from Crucible 1.0.24, else Ollama's 4K default).
    */
   runsAsLine(value: string): string | null {
     const row = this.runsAs()[value];

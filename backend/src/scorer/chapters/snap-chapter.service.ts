@@ -280,7 +280,7 @@ export class SnapChapterService {
       const scorer: ChapterScorer = {
         decide: (req, o) => handle.decide(req, o),
         generate: (messages, o) => handle.generate(messages, o),
-        countTokens: async (text, signal) => (await (await handle.decider()).engine.tokenize(text, signal)).length,
+        countTokens: (text, signal) => handle.countTokens(text, signal),
       };
       return runSnapChapters(scorer, units, opts, this.logger);
     }, opts.signal);

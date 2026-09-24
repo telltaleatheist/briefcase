@@ -1290,8 +1290,10 @@ export class AIAnalysisService {
       let snap: SnapStageResult | null = null;
       if (wantsScorer(engine)) {
         const stages = (['chapters', 'flags'] as const).filter((st) => engine[st] === 'snap');
+        // On Crucible (P6) the scorer is the decision door and there is no
+        // fallback: the run below fails by name, or parks, when it cannot serve.
         const availability = this.snapAnalysis
-          ? this.snapAnalysis.availability()
+          ? await this.snapAnalysis.availability()
           : { available: false as const, reason: 'the snap analysis service is not registered' };
         if (!availability.available) {
           this.logger.warn(`[Engine] snap selected (${engine.source}) but unavailable: ${availability.reason} — classic for ${stages.join(' + ')}`);

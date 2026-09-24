@@ -239,7 +239,8 @@ describe('SnapChapterService', () => {
         return fn({
           decide: (req: DecideRequest) => fake.decide(req),
           generate: (m: string) => fake.generate(m),
-          decider: async () => ({ engine: { tokenize: async (t: string) => (tokenized.push(t), [1, 2, 3]) } }),
+          model: 'fake',
+          countTokens: async (t: string) => (tokenized.push(t), 3),
         });
       },
     } as unknown as ScorerServerService;

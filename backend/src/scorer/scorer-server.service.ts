@@ -58,12 +58,20 @@ export interface ScorerServerStatus {
   uptimeMs: number | null;
 }
 
-/** What a lease holder can call; each call is still serialized with everyone else's. */
+/**
+ * What a lease holder can call: THE SCORER SEAM. The app's own llama-server
+ * (this file) and Crucible's decision door (crucible-scorer.service.ts) both
+ * serve it, so chapters and flags never know which transport answered.
+ */
 export interface ScorerHandle {
   decide(req: DecideRequest, options?: DecideOptions): Promise<DecideResponse>;
   generate(messages: ChatMessage[] | string, options: GenerateOptions): Promise<GenerateResult>;
-  /** The decider for the running server (its builder/props are useful for prompt sizing). */
-  decider(): Promise<ScorerDecider>;
+  /** The model the decisions are read from, as the engine names it. */
+  readonly model: string;
+  /** Tokens `text` is on this model (chunk planning). */
+  countTokens(text: string, signal?: AbortSignal): Promise<number>;
+  /** The own llama-server only: its decider (builder/props, for prompt sizing and the smoke). */
+  decider?(): Promise<ScorerDecider>;
 }
 
 /** Ask the OS for a free port on 127.0.0.1 (released immediately; llama-server binds it next). */
@@ -198,9 +206,12 @@ export class ScorerServerService implements OnModuleDestroy {
       // The start itself carries on (another caller may share it) and, with no
       // lease left, the idle timer stops it once it is up.
       await untilAborted(this.ensureReady(), signal);
+      const decider = await untilAborted(this.getDecider(), signal);
       return await fn({
         decide: (req, options) => this.decide(req, options),
         generate: (messages, options) => this.generate(messages, options),
+        model: decider.model,
+        countTokens: async (text, sig) => (await decider.engine.tokenize(text, sig)).length,
         decider: () => this.getDecider(),
       });
     } finally {

@@ -29,6 +29,11 @@ export const SCORER_ERROR_STATUS = {
   engine_error: 502,
   template_not_answer_ready: 502,
   engine_no_vision: 502,
+  // Crucible's decision door (P6): the engine cannot read this question
+  // (more options than its top-K cap, or an engine with no logprobs).
+  decide_not_served: 503,
+  // Crucible has no model its decide class can use, or is older than the door.
+  scorer_unavailable: 503,
   // Not in snap: the caller's AbortSignal fired (a cancelled analysis job).
   cancelled: 499,
 } as const;
@@ -160,12 +165,12 @@ export interface YesNoAnswer extends AnswerBase {
 export type ScorerAnswer = ChoiceAnswer | ScoreAnswer | YesNoAnswer;
 
 export interface QuestionTiming {
-  /** server timings.prompt_ms */
+  /** llama-server: timings.prompt_ms. Crucible: the door's wall clock for that completion. */
   promptMs: number;
-  /** server timings.prompt_n — tokens actually processed */
+  /** llama-server: timings.prompt_n (tokens actually processed). Crucible: usage.prompt_tokens (the whole prompt). */
   promptTokens: number;
-  /** server timings.cache_n — tokens reused from the KV cache */
-  cachedTokens: number;
+  /** Tokens reused from the KV cache; null when the engine did not say (Crucible never reports an unmeasured 0). */
+  cachedTokens: number | null;
 }
 
 export interface DecideResponse {

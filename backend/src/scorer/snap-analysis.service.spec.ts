@@ -32,8 +32,8 @@ class FakeHandle {
         this.generates++;
         return { text: this.outlineFor ? this.outlineFor(prompt) : this.outline, promptTokens: 0, completionTokens: 0, finishReason: 'stop', model: 'fake' } as GenerateResult;
       },
-      decider: async () =>
-        ({ model: 'fake-qwen', engine: { tokenize: async (t: string) => new Array(Math.ceil(t.length / 4)).fill(1) } }) as any,
+      model: 'fake-qwen',
+      countTokens: async (t: string) => Math.ceil(t.length / 4),
     };
   }
 

@@ -320,6 +320,8 @@ export interface FakeDecideQuestion {
   instructions: string;
   /** Option names (choice), levels (score), or `['Yes', 'No']`. */
   labels: string[];
+  /** A choice's option descriptions, in option order. */
+  descriptions?: string[];
 }
 
 export type FakeDecideProbs = (question: FakeDecideQuestion, state: unknown) => Record<string, number>;
@@ -1302,7 +1304,7 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
           refusal(res, 400, 'invalid_request', `question '${name}' needs 2-26 options`, { field: `questions.${name}.options` });
           return;
         }
-        questions.push({ name, type, instructions, labels });
+        questions.push({ name, type, instructions, labels, descriptions: Object.values(opts) });
       } else if (type === 'score') {
         questions.push({ name, type, instructions, labels: [...(raw['levels'] as string[])] });
       } else if (type === 'yesno') {

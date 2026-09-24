@@ -398,6 +398,11 @@ export class CrucibleChatService {
     return this.runs.getStore()?.parked ?? null;
   }
 
+  /** A door this service does not proxy made headway (the scorer's decide): the stall watchdog's heartbeat. */
+  noteActivity(): void {
+    this.touch();
+  }
+
   private touch(): void {
     try {
       this.runs.getStore()?.options.onActivity?.();

@@ -6,7 +6,7 @@ describe('probe: the four outcomes, told apart', () => {
   let fake: FakeCrucible;
   let h: Harness;
   beforeEach(async () => {
-    fake = await startFakeCrucible({ name: 'crucible@spec-mac', version: '1.0.23', backend: 'mlx-darwin' });
+    fake = await startFakeCrucible({ name: 'crucible@spec-mac', version: '1.0.24', backend: 'mlx-darwin' });
     h = harness();
   });
   afterEach(() => fake.close());
@@ -18,7 +18,7 @@ describe('probe: the four outcomes, told apart', () => {
     expect(answer.probe).toMatchObject({
       outcome: 'ok',
       facts: {
-        serverName: 'crucible@spec-mac', version: '1.0.23', apiVersion: 1, backend: 'mlx-darwin',
+        serverName: 'crucible@spec-mac', version: '1.0.24', apiVersion: 1, backend: 'mlx-darwin',
         busyLine: null, needsUpdate: false, engineUrl: null,
       },
     });

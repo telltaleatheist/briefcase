@@ -39,8 +39,12 @@ import type {
   ServerReach,
 } from './wire/settings-wire';
 
-/** The oldest Crucible Briefcase routes work to. Older servers are shown as "needs update". */
-export const MIN_CRUCIBLE = '1.0.23';
+/**
+ * The oldest Crucible Briefcase routes work to. Older servers are shown as
+ * "needs update". 1.0.24: the analysis engine reads its decisions off the
+ * decision door (`POST /v1/decide`), which older servers do not have.
+ */
+export const MIN_CRUCIBLE = '1.0.24';
 /** The clock on each probe call. */
 export const PROBE_TIMEOUT_MS = 5_000;
 /** How long a probe answers `reach()` before it is asked again. The Test button bypasses it. */

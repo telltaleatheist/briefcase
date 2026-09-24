@@ -5,7 +5,10 @@
  *
  *   (a) engine    start the scorer's own llama-server through ScorerServerService
  *                 (app-config scorerModel / BRIEFCASE_SCORER_LLAMA_SERVER, exactly
- *                 as the app does), or attach to one already running (--engine);
+ *                 as the app does), or attach to one already running (--engine),
+ *                 or run on Crucible's decision door through the app's own
+ *                 CrucibleScorerService (--crucible: its model pick, its load at
+ *                 32K, its lease across the whole run, released at the end);
  *   (b) sanity    snap's own live cases: yes/no sentiment, choice routing, score
  *                 ordering (sanity-cases.ts, from snap/tests/fixtures);
  *   (c) chapters  the TS chaptering pipeline on N YTSeg test videos, with the
@@ -36,12 +39,20 @@
  *   node dist/scorer/live/snap-smoke.js                         # starts the scorer itself
  *   node dist/scorer/live/snap-smoke.js --engine http://127.0.0.1:8481   # attach instead
  *   node dist/scorer/live/snap-smoke.js --n 4 --skip-sanity     # quick look
+ *   node dist/scorer/live/snap-smoke.js --crucible              # Crucible on this machine (~/.crucible/pairing)
+ *   node dist/scorer/live/snap-smoke.js --crucible mac --n 24   # a server in Briefcase's own registry, by name
  * The offline check was run on 2026-09-23: pen 20 -> F1@±1 0.720, Pk 0.229, the same
  * as bench_snap.py score on the same cached maps (all four swept costs match).
  *
  * FLAGS
  *   --engine URL        attach to a running llama-server (snap's serve flags:
  *                       -c 65536 --ctx-checkpoints 32 --parallel 1 --jinja); never stopped
+ *   --crucible [NAME]   the transport is Crucible's POST /v1/decide (P6). With no NAME,
+ *                       the Crucible on this machine, read from its pairing file into a
+ *                       throwaway registry; with NAME, that server in Briefcase's own
+ *                       registry. /v1/activity is read first: a card another app holds
+ *                       (a lease, a running job) stops the run before anything loads
+ *                       (--force-card to go anyway). Everything taken is released at the end.
  *   --ref DIR           content-studio-chaptering-ref (default: the sibling worktree)
  *   --sample FILE       YTSeg sample JSON (default <REF>/bench-cache/ytseg-sample-<N>.json)
  *   --n N               videos (default 24: bench.py sample(24), seed 7)
@@ -67,6 +78,15 @@ import { runSnapChapters } from '../chapters/snap-chapter.service';
 import { boundaries } from '../chapters/segmenter';
 import { PLUG } from '../chapters/snap-prompts';
 import { SnapUnit } from '../chapters/units';
+import * as os from 'os';
+import { CrucibleClientFactory } from '../../crucible/client-factory';
+import { CrucibleServersService } from '../../crucible/crucible-servers.service';
+import { CrucibleChatService } from '../../crucible/llm/crucible-chat.service';
+import { readCruciblePairingFile } from '../../crucible/pairing-file';
+import { CrucibleProbeService } from '../../crucible/probe';
+import { CrucibleRegistryService } from '../../crucible/registry.service';
+import { getBriefcaseConfigDir } from '../../bridges/runtime-paths';
+import { CrucibleScorerService } from '../crucible-scorer.service';
 import { ScorerDecider } from '../scorer-decide';
 import { ScorerEngine } from '../scorer-engine';
 import { ScorerHandle, ScorerServerService } from '../scorer-server.service';
@@ -139,6 +159,8 @@ export interface VideoScore {
   gold: number;
   byPen: Record<number, { f1_1: number; f1_3: number; pk: number; count: number }>;
   timings?: { assignMs: number; adsMs: number; totalMs: number; msPerSentence: number };
+  /** Units whose answer had a label outside the engine's top-K (floored). */
+  flooredUnits?: number;
   plugVerdicts?: Array<{ start: number; end: number; p: number }>;
 }
 
@@ -176,6 +198,9 @@ export function summarise(scores: VideoScore[], pens: number[] = SWEEP) {
 
 interface Args {
   engine?: string;
+  /** true: this machine's Crucible (pairing file); a string: that server in Briefcase's registry. */
+  crucible?: string | true;
+  forceCard: boolean;
   ref: string;
   sample?: string;
   n: number;
@@ -189,7 +214,7 @@ interface Args {
 }
 
 function parseArgs(argv: string[]): Args {
-  const a: Args = { ref: DEFAULT_REF, n: 24, outlines: 'snapseg', switchCost: REFERENCE.switchCost, ads: true, sanity: true, chapters: true, offline: false };
+  const a: Args = { forceCard: false, ref: DEFAULT_REF, n: 24, outlines: 'snapseg', switchCost: REFERENCE.switchCost, ads: true, sanity: true, chapters: true, offline: false };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     const val = () => {
@@ -198,6 +223,8 @@ function parseArgs(argv: string[]): Args {
       return v;
     };
     if (k === '--engine') a.engine = val();
+    else if (k === '--crucible') a.crucible = argv[i + 1] !== undefined && !argv[i + 1].startsWith('--') ? val() : true;
+    else if (k === '--force-card') a.forceCard = true;
     else if (k === '--ref') a.ref = val();
     else if (k === '--sample') a.sample = val();
     else if (k === '--n') a.n = Number(val());
@@ -296,8 +323,10 @@ async function runSanity(handle: ScorerHandle): Promise<SanityOutcome[]> {
           ok = ok && pass;
           notes.push(`${e.check} ${e.value}: ${seen}${pass ? '' : ' FAIL'}`);
         }
-        const mass = Object.values(res.answers).map((x) => x.labelMass.toFixed(2));
+        const mass = Object.values(res.answers).map((x) => x.labelMass.toFixed(3));
         notes.push(`labelMass ${mass.join(',')}`);
+        const missing = Object.values(res.answers).reduce((n, x) => n + (x.missingLabels?.length ?? 0), 0);
+        notes.push(`missing ${missing}`);
       } catch (err) {
         ok = false;
         notes.push(`ERROR ${(err as Error).message}`);
@@ -329,6 +358,7 @@ async function runChapters(a: Args, vids: YtsegVideo[], handle: ScorerHandle | n
     let timings: VideoScore['timings'];
     let plugVerdicts: VideoScore['plugVerdicts'];
     let headline: number[] | null = null;
+    let floored: number | undefined;
     if (a.offline) {
       // bench_snap.py scores snapseg logp as stored: confirm_plugs mutated it in place,
       // so rejected ad stretches already carry -1e9 in the plug column.
@@ -362,6 +392,7 @@ async function runChapters(a: Args, vids: YtsegVideo[], handle: ScorerHandle | n
         msPerSentence: res.timings.totalMs / Math.max(1, n),
       };
       plugVerdicts = chunk.plugVerdicts;
+      floored = chunk.flooredUnits;
     }
     const byPen = scoreMatrix(v, L, [...new Set([...SWEEP, a.switchCost])]);
     if (headline) {
@@ -370,14 +401,15 @@ async function runChapters(a: Args, vids: YtsegVideo[], handle: ScorerHandle | n
       const again = boundaries(viterbi(L, a.switchCost));
       if (again.join(',') !== headline.join(',')) console.log(`  note: ${v.id} path differs from the re-run Viterbi`);
     }
-    const s: VideoScore = { id: v.id, sentences: v.sents.length, gold: goldOf(v).length, byPen, timings, plugVerdicts };
+    const s: VideoScore = { id: v.id, sentences: v.sents.length, gold: goldOf(v).length, byPen, timings, plugVerdicts, ...(floored === undefined ? {} : { flooredUnits: floored }) };
     scores.push(s);
     const h = byPen[a.switchCost];
     console.log(
       `  [${k + 1}/${vids.length}] ${v.id} ${String(v.sents.length).padStart(3)} sents  ` +
         `F1@±1 ${h?.f1_1.toFixed(3)}  F1@±3 ${h?.f1_3.toFixed(3)}  Pk ${h?.pk.toFixed(3)}  count ${h?.count.toFixed(2)}` +
         (timings ? `  ${(timings.totalMs / 1000).toFixed(1)}s (${(timings.msPerSentence / 1000).toFixed(2)} s/sent)` : '') +
-        (plugVerdicts?.length ? `  ads ${plugVerdicts.map((p) => `${p.start}-${p.end}:${p.p.toFixed(2)}`).join(' ')}` : ''),
+        (plugVerdicts?.length ? `  ads ${plugVerdicts.map((p) => `${p.start}-${p.end}:${p.p.toFixed(2)}`).join(' ')}` : '') +
+        (floored ? `  floored ${floored}` : ''),
     );
   }
   return scores;
@@ -394,8 +426,53 @@ async function attach(url: string): Promise<ScorerHandle> {
     decide: (req, o) => decider.decide(req, o),
     generate: (messages: ChatMessage[] | string, o) =>
       engine.generate(typeof messages === 'string' ? [{ role: 'user', content: messages }] : messages, o),
+    model: decider.model,
+    countTokens: async (text, signal) => (await engine.tokenize(text, signal)).length,
     decider: async () => decider,
   };
+}
+
+/**
+ * The app's own Crucible services, wired by hand as CrucibleModule wires them:
+ * NAME from Briefcase's registry, or this machine's Crucible read from its
+ * pairing file into a throwaway registry (nothing of the user's is written).
+ */
+function crucibleServices(which: string | true): { scorer: CrucibleScorerService; chat: CrucibleChatService; server: string | null; factory: CrucibleClientFactory } {
+  let dir: string;
+  let server: string | null = null;
+  if (which === true) {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'snap-smoke-crucible-'));
+  } else {
+    dir = getBriefcaseConfigDir();
+    server = which;
+  }
+  const registry = new CrucibleRegistryService(dir);
+  if (which === true) {
+    const reading = readCruciblePairingFile();
+    if (reading === null) throw new Error('no Crucible on this machine (~/.crucible/pairing is missing); pass --crucible NAME');
+    registry.add({ name: 'local', url: reading.pairing.url, token: reading.pairing.token });
+    server = 'local';
+  } else if (!registry.names().includes(which)) {
+    throw new Error(`no Crucible server named "${which}" in ${dir} (have: ${registry.names().join(', ') || 'none'})`);
+  }
+  const factory = new CrucibleClientFactory(registry);
+  const probes = new CrucibleProbeService(factory, registry);
+  const servers = new CrucibleServersService(registry, factory);
+  const chat = new CrucibleChatService(servers, factory, probes);
+  return { scorer: new CrucibleScorerService(chat, servers), chat, server, factory };
+}
+
+/** /v1/activity's answer to "is the card someone else's?": null when free, else the sentence. */
+async function cardHeldByOther(factory: CrucibleClientFactory, server: string): Promise<string | null> {
+  const activity = await (await factory.clientFor(server)).activity();
+  const mine = (client: string | null | undefined) => client === 'briefcase';
+  if (activity.lease && !mine(activity.lease.client)) return `a lease by ${activity.lease.client ?? 'another client'} (${activity.lease.act})`;
+  const running = activity.running.filter((j) => !mine(j.client));
+  if (running.length) return `running ${running.map((j) => `${j.client ?? '?'}'s ${j.type}`).join(', ')}`;
+  const queued = activity.queued.filter((j) => !mine(j.client));
+  if (queued.length) return `queued ${queued.map((j) => `${j.client ?? '?'}'s ${j.type}`).join(', ')}`;
+  if (activity.chat.rows.length) return `${activity.chat.rows.length} chat(s) in flight`;
+  return null;
 }
 
 // ------------------------------------------------------------------ main
@@ -410,10 +487,9 @@ async function main(): Promise<number> {
 
   const work = async (handle: ScorerHandle | null) => {
     if (handle) {
-      const d = await handle.decider();
-      report.model = d.model;
+      report.model = handle.model;
       report.startupMs = Date.now() - t0;
-      console.log(`# engine ready: ${d.model} (${((Date.now() - t0) / 1000).toFixed(1)} s)`);
+      console.log(`# engine ready: ${handle.model} (${((Date.now() - t0) / 1000).toFixed(1)} s)`);
       if (a.sanity) sanity = await runSanity(handle);
     }
     if (a.chapters) chapterScores = await runChapters(a, vids, handle);
@@ -424,6 +500,15 @@ async function main(): Promise<number> {
     await work(null);
   } else if (a.engine) {
     await work(await attach(a.engine));
+  } else if (a.crucible !== undefined) {
+    const { scorer, chat, server, factory } = crucibleServices(a.crucible);
+    const held = await cardHeldByOther(factory, server!);
+    if (held !== null && !a.forceCard) throw new Error(`the card on "${server}" is in use (${held}); not starting (--force-card to go anyway)`);
+    report.transport = { crucible: server, version: await chat.serverVersion(server!) };
+    console.log(`# Crucible "${server}" ${String((report.transport as { version: string | null }).version)}: card free; the scorer takes its lease`);
+    // One run: the scorer's load + lease is held across sanity AND chapters, released at the end.
+    await chat.withRun(() => scorer.withScorer((h) => work(h)));
+    console.log(`# released: ${JSON.stringify(chat.heldInRun())}`);
   } else {
     const server = new ScorerServerService();
     const avail = server.availability();
@@ -467,7 +552,9 @@ async function main(): Promise<number> {
           `ads ${(timed.reduce((n, s) => n + s.timings!.adsMs, 0) / 1000).toFixed(0)} s)`,
       );
     }
-    report.chapters = { summary: rows, videos: chapterScores };
+    const flooredTotal = chapterScores.reduce((n, s) => n + (s.flooredUnits ?? 0), 0);
+    if (timed.length) console.log(`  floored answers (a label outside the top-K): ${flooredTotal}`);
+    report.chapters = { summary: rows, videos: chapterScores, flooredUnits: flooredTotal };
   }
   if (sanity.length) report.sanity = sanity;
   report.totalMs = Date.now() - t0;

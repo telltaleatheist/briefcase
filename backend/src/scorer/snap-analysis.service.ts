@@ -17,12 +17,20 @@
  * before ai-analysis starts any LLM stage (chapter summaries, verification,
  * metadata), so the scorer and the LLM are never both working.
  *
- * FAILURE IS PER STAGE AND NEVER THROWN, except cancellation. A scorer that
- * cannot start, an outline with < 2 items, or an engine error mid-pass comes
- * back as `chaptersError` / `flagsError`, and the caller runs that stage's
- * classic path with a job warning. Cancellation (the job's AbortSignal) is the
- * one thing that propagates, as AnalysisCancelledError, so a cancelled run
- * never falls back into more work.
+ * THE TRANSPORT (P6). Under `aiVia: 'crucible'` the scorer is Crucible's
+ * decision door (CrucibleScorerService); otherwise the app's own llama-server
+ * (ScorerServerService). Same seam, same pipelines above it.
+ *
+ * FAILURE. On the app's own llama-server, failure is per stage and never
+ * thrown, except cancellation: a scorer that cannot start, an outline with < 2
+ * items, or an engine error mid-pass comes back as `chaptersError` /
+ * `flagsError`, and the caller runs that stage's classic path with a job
+ * warning. ON CRUCIBLE THERE IS NO FALLBACK (the user's rule, 2026-09-23: if
+ * Crucible is down, Briefcase's AI is down): a stage that fails throws
+ * {@link SnapEngineError} naming why, and a busy or silent server PARKS the
+ * task (CrucibleParkedError, P4). Cancellation (the job's AbortSignal)
+ * propagates as AnalysisCancelledError on both, so a cancelled run never
+ * falls into more work.
  */
 
 import { Injectable, Logger, Optional } from '@nestjs/common';
@@ -33,6 +41,8 @@ import { ChapterTreeResult, RefineOptions, flatChapterTree, mayRefine, refineCha
 import { BuildChaptersOptions, BuildChaptersResult, ChapterScorer, runSnapChapters } from './chapters/snap-chapter.service';
 import { TranscriptSegment } from './chapters/units';
 import { SnapFlagRankOptions, SnapFlagRankResult, SnapFlagRanker } from './flags/snap-flag-ranker.service';
+import { isParked } from '../crucible/llm/errors';
+import { CrucibleScorerService } from './crucible-scorer.service';
 import { ScorerHandle, ScorerServerService } from './scorer-server.service';
 import { isScorerError } from './scorer.types';
 import { SnapTranscript, buildSnapTranscript } from './snap-transcript';
@@ -94,6 +104,17 @@ function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/**
+ * The snap engine could not produce a stage on Crucible, by name. Thrown, never
+ * turned into a fallback: the analysis fails with this sentence.
+ */
+export class SnapEngineError extends Error {
+  constructor(readonly stage: 'chapters' | 'flags' | 'start', reason: string) {
+    super(`The analysis engine on Crucible could not ${stage === 'start' ? 'start' : `make the ${stage}`}: ${reason}`);
+    this.name = 'SnapEngineError';
+  }
+}
+
 /** An engine that is gone (start failed, died, timed out) will not serve the next pass either. */
 function engineDown(err: unknown): boolean {
   return isScorerError(err, 'engine_unreachable') || isScorerError(err, 'engine_timeout');
@@ -106,10 +127,22 @@ export class SnapAnalysisService {
   constructor(
     private readonly scorerServer: ScorerServerService,
     @Optional() private readonly flagRanker: SnapFlagRanker = new SnapFlagRanker(),
+    @Optional() private readonly crucibleScorer?: CrucibleScorerService,
   ) {}
 
-  /** Can the scorer run at all (model file + a llama-server binary)? Starts nothing. */
-  availability(): { available: true } | { available: false; reason: string } {
+  /** True when the scorer is Crucible's decision door (aiVia crucible): no fallback, ever. */
+  onCrucible(): boolean {
+    return this.crucibleScorer !== undefined && this.crucibleScorer.enabled();
+  }
+
+  /**
+   * Can the scorer run at all? The app's own llama-server: a model file and a
+   * binary (starts nothing). On Crucible: always "yes" here — whether the
+   * server can serve decisions is found out by the run itself, which fails by
+   * name or parks, and never falls back.
+   */
+  async availability(): Promise<{ available: true } | { available: false; reason: string }> {
+    if (this.onCrucible()) return { available: true };
     const a = this.scorerServer.availability();
     return a.available ? { available: true } : a;
   }
@@ -121,6 +154,8 @@ export class SnapAnalysisService {
    * caller holds the scorer.
    */
   async releaseScorer(): Promise<void> {
+    // On Crucible the lease was given back when the pass settled; the card is Crucible's to manage.
+    if (this.onCrucible()) return;
     try {
       const stopped = await this.scorerServer.stopIfIdle();
       this.logger.log(stopped ? '[Snap] Scorer unloaded ahead of a local model' : '[Snap] Scorer still in use; left running');
@@ -145,26 +180,30 @@ export class SnapAnalysisService {
 
     if (!req.chapters && !req.flags) return result;
     guard('the scorer stage');
+    const crucible = this.onCrucible();
+    /** On Crucible a failed stage is thrown out of the lease; on llama-server it is recorded and the next stage runs. */
+    const stageFailed = (stage: 'chapters' | 'flags', reason: string, err: unknown): void => {
+      if (crucible) throw isParked(err) ? err : new SnapEngineError(stage, reason);
+    };
     report('start', 0, 'Starting the analysis engine...');
 
     const leased = async (handle: ScorerHandle) => {
       timings.startMs = Date.now() - t0;
-      const decider = await handle.decider();
-      result.model = decider.model;
+      result.model = handle.model;
 
       // ---- prepare: one unit list and one chunk plan for both passes.
       let t = Date.now();
       guard('transcript preparation');
       report('prepare', 0, 'Preparing the transcript for the analysis engine...');
       const transcript = await buildSnapTranscript(req.segments, {
-        countTokens: async (text, sig) => (await decider.engine.tokenize(text, sig)).length,
+        countTokens: (text, sig) => handle.countTokens(text, sig),
         signal,
       });
       result.transcript = transcript;
       timings.prepareMs = Date.now() - t;
       this.logger.log(
         `[Snap] ${transcript.sentences.length} sentences -> ${transcript.units.length} units in ` +
-          `${transcript.chunks.length} chunk(s) on ${decider.model}` +
+          `${transcript.chunks.length} chunk(s) on ${handle.model}` +
           ` (chapters: ${req.chapters ? 'yes' : 'no'}, flags: ${req.flags ? 'yes' : 'no'})`,
       );
 
@@ -220,10 +259,12 @@ export class SnapAnalysisService {
               `${(result.chapters.timings.assignMs / 1000).toFixed(1)}s, ads ${(result.chapters.timings.adsMs / 1000).toFixed(1)}s)`,
           );
         } catch (err) {
+          if (isParked(err)) throw err;
           if (isCancellation(err) || isScorerError(err, 'cancelled') || signal?.aborted) throw cancelled('snap chaptering');
           result.chaptersError =
             err instanceof OutlineError ? `the outline was unusable: ${messageOf(err)}` : `snap chaptering failed: ${messageOf(err)}`;
           this.logger.warn(`[Snap] ${result.chaptersError}`);
+          stageFailed('chapters', result.chaptersError, err);
           if (engineDown(err)) down = messageOf(err);
         }
         timings.chaptersMs = Date.now() - t;
@@ -259,9 +300,11 @@ export class SnapAnalysisService {
             },
           });
         } catch (err) {
+          if (isParked(err)) throw err;
           if (isCancellation(err) || isScorerError(err, 'cancelled') || signal?.aborted) throw cancelled('snap flag ranking');
           result.flagsError = `snap flag ranking failed: ${messageOf(err)}`;
           this.logger.warn(`[Snap] ${result.flagsError}`);
+          stageFailed('flags', result.flagsError, err);
           if (engineDown(err)) down = messageOf(err);
         }
         timings.flagsMs = Date.now() - t;
@@ -302,6 +345,7 @@ export class SnapAnalysisService {
               `${result.chapterTree.refined} section(s) refined in ${(result.chapterTree.timings.refineMs / 1000).toFixed(1)}s`,
           );
         } catch (err) {
+          if (isParked(err)) throw err;
           if (isCancellation(err) || isScorerError(err, 'cancelled') || signal?.aborted) throw cancelled('chapter refinement');
           result.chapterTreeError = `chapter refinement failed: ${messageOf(err)}`;
           this.logger.warn(`[Snap] ${result.chapterTreeError} (keeping the ${result.chapters.chapters.length} top-level chapters)`);
@@ -312,9 +356,17 @@ export class SnapAnalysisService {
     };
 
     try {
-      await this.scorerServer.withScorer(leased, signal);
+      if (crucible) await this.crucibleScorer!.withScorer(leased, signal);
+      else await this.scorerServer.withScorer(leased, signal);
     } catch (err) {
+      // A park (a busy or silent Crucible inside a queue run) is not a failure: the queue re-runs the task.
+      if (isParked(err)) throw err;
       if (isCancellation(err) || isScorerError(err, 'cancelled') || signal?.aborted) throw cancelled('the scorer stage');
+      if (err instanceof SnapEngineError) throw err;
+      if (crucible) {
+        this.logger.warn(`[Snap] the analysis engine on Crucible could not start: ${messageOf(err)}`);
+        throw new SnapEngineError('start', messageOf(err));
+      }
       // The lease itself failed: the server would not start (or its template/labels
       // failed their proof). Neither pass ran.
       const reason = `the scorer could not start: ${messageOf(err)}`;
