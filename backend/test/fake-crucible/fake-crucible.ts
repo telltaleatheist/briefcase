@@ -114,6 +114,8 @@ export interface NamedFaults {
   chatDelayMs?: number;
   /** A load-model job fails with this code and message. */
   failLoadWith?: { code: string; message: string };
+  /** Load jobs stay `running` until DELETEd (a kill mid-load, for the sweep specs). */
+  holdLoads?: boolean;
 }
 
 /** One `GET /v1/models` row, in the SDK's camelCase; served snake_case. */
@@ -408,6 +410,15 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
 
   const activityDoc = (): unknown => {
     const busy = named.serverBusy;
+    // P4: this fake's own jobs still on the lane, as the sweep and the
+    // preflight read them (a load in progress, a job nobody cancelled).
+    const ownJob = (j: FakeJob): Record<string, unknown> => ({
+      job_id: j.jobId, type: j.type, model: j.model, status: j.status, position: j.status === 'queued' ? 0 : null,
+      progress: 0, message: null, created: '2026-09-23T01:00:00Z', started: j.status === 'running' ? '2026-09-23T01:00:01Z' : null,
+      client: j.client,
+    });
+    const ownRunning = jobs.filter((j) => j.status === 'running').map(ownJob);
+    const ownQueued = jobs.filter((j) => j.status === 'queued').map(ownJob);
     const job = busy === undefined ? null : {
       job_id: 'job-held',
       type: busy.type,
@@ -422,16 +433,31 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
     };
     return {
       server: { name, version: options.version ?? '1.0.23', api_version: apiVersion(), backend, uptime_s: Math.round((Date.now() - startedAt) / 1000) },
-      resident: null,
+      resident: resident === null ? null : {
+        kind: 'llm', id: resident, since: '2026-09-23T01:00:00Z', memory_bytes_estimate: null,
+        held_by: openLease === null ? null : {
+          fact: 'a lease', who: openLease.client ?? 'unknown',
+          details: { lease_id: openLease.leaseId, kind: 'llm', client: openLease.client, act: openLease.act, since: '2026-09-23T01:00:00+00:00', expires_at: '2026-09-23T01:02:00+00:00' },
+        },
+        unclaimed_since: openLease === null ? '2026-09-23T01:00:00Z' : null,
+      },
       stopping: null,
       warming: null,
       claim: null,
       streaming: null,
-      lease: null,
+      lease: openLease === null ? null : {
+        lease_id: openLease.leaseId, kind: 'llm', client: openLease.client, act: openLease.act,
+        since: '2026-09-23T01:00:00+00:00', expires_at: '2026-09-23T01:02:00+00:00',
+      },
       chat: { in_flight: 0, max_in_flight: null, max_in_flight_basis: null, rows: [] },
-      slots: { accelerated: { busy: job === null ? 0 : 1, of: 1, queue_depth: 0, accepts_work: job === null && (named.cardHeld === undefined || named.cardHeld.times === 0) } },
-      running: job === null ? [] : [job],
-      queued: [],
+      slots: {
+        accelerated: {
+          busy: job === null && ownRunning.length === 0 ? 0 : 1, of: 1, queue_depth: ownQueued.length,
+          accepts_work: job === null && ownRunning.length === 0 && openLease === null && (named.cardHeld === undefined || named.cardHeld.times === 0),
+        },
+      },
+      running: [...(job === null ? [] : [job]), ...ownRunning],
+      queued: ownQueued,
     };
   };
 
@@ -786,6 +812,7 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
       if (job.status === 'cancelled') return;
       job.status = 'running';
       pushJobEvent(job, 'warming', { message: `loading ${String(model)}` });
+      if (named.holdLoads && type === 'load-model') return;
       setTimeout(finish, Math.max(1, (options.loadMs ?? 20) / 2)).unref?.();
     }, Math.max(1, (options.loadMs ?? 20) / 2)).unref?.();
   }

@@ -8,3 +8,6 @@ export const CRUCIBLE_PAIRING_HOST = Symbol('CRUCIBLE_PAIRING_HOST');
 
 /** Writes text to the system clipboard (a `ClipboardWriter`). */
 export const CRUCIBLE_CLIPBOARD = Symbol('CRUCIBLE_CLIPBOARD');
+
+/** The in-flight ledger (`InFlightLedger`) every Crucible hold is written to (P4). */
+export const CRUCIBLE_IN_FLIGHT_LEDGER = Symbol('CRUCIBLE_IN_FLIGHT_LEDGER');

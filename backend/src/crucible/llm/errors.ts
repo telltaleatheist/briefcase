@@ -59,3 +59,29 @@ export function parseRetryAfter(value: string | null, now: () => number = Date.n
   if (Number.isFinite(at)) return Math.max(0, at - now());
   return null;
 }
+
+/**
+ * P4: the task cannot run on Crucible RIGHT NOW (a card held by someone else,
+ * a server that stopped answering, no server that can take it) and is to be
+ * PARKED by the queue: not failed, not retried in a loop, asked again later.
+ *
+ * It carries the structural `cancelled` marker on purpose. The analysis
+ * pipeline is full of catch blocks that record a failure and carry on, or
+ * degrade to a weaker path; every one of them already re-throws a
+ * cancellation (`isCancellation`), so a park unwinds the whole run exactly as a
+ * cancel does, with nothing persisted and the previous analysis intact (the
+ * `0378d02` rule). `parked` is what tells the queue it was not the user.
+ */
+export class CrucibleParkedError extends Error {
+  readonly code = 'crucible_parked';
+  readonly cancelled = true;
+  readonly parked = true;
+  constructor(readonly server: string | null, readonly reason: string) {
+    super(reason);
+    this.name = 'CrucibleParkedError';
+  }
+}
+
+export function isParked(error: unknown): error is CrucibleParkedError {
+  return typeof error === 'object' && error !== null && (error as { parked?: unknown }).parked === true;
+}

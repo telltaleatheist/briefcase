@@ -17,7 +17,8 @@ import { CrucibleAutoConnectService } from './auto-connect.service';
 import { CrucibleClientFactory } from './client-factory';
 import { systemClipboard } from './clipboard';
 import { CrucibleConnectService } from './connect.service';
-import { CRUCIBLE_CLIPBOARD, CRUCIBLE_PAIRING_HOST, CRUCIBLE_STATE_DIR } from './crucible.constants';
+import { CRUCIBLE_CLIPBOARD, CRUCIBLE_IN_FLIGHT_LEDGER, CRUCIBLE_PAIRING_HOST, CRUCIBLE_STATE_DIR } from './crucible.constants';
+import { InFlightLedger } from './in-flight-ledger';
 import { CrucibleController } from './crucible.controller';
 import { CrucibleServersService } from './crucible-servers.service';
 import { processPairingFileHost } from './pairing-file';
@@ -70,6 +71,7 @@ function processInstallDeps(registry: CrucibleRegistryService, factory: Crucible
     { provide: CRUCIBLE_STATE_DIR, useFactory: () => getBriefcaseConfigDir() },
     { provide: CRUCIBLE_PAIRING_HOST, useFactory: () => processPairingFileHost() },
     { provide: CRUCIBLE_CLIPBOARD, useValue: systemClipboard },
+    { provide: CRUCIBLE_IN_FLIGHT_LEDGER, useFactory: (dir: string) => InFlightLedger.inDir(dir), inject: [CRUCIBLE_STATE_DIR] },
     CrucibleRegistryService,
     CrucibleClientFactory,
     CrucibleProbeService,
@@ -91,6 +93,8 @@ function processInstallDeps(registry: CrucibleRegistryService, factory: Crucible
     CrucibleCoordinationService,
     // P3: the AI pane edits the connected server's upstreams, and the key copy asks which server is this computer's.
     CrucibleSettingsBridge, CRUCIBLE_PAIRING_HOST,
+    // P4: the in-flight ledger the chat service writes and the queue's sweeps read.
+    CRUCIBLE_IN_FLIGHT_LEDGER,
   ],
 })
 export class CrucibleModule {}
