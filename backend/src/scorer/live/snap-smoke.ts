@@ -64,6 +64,9 @@
  *   --offline           no engine at all: score the CACHED Python logp matrices
  *                       (snapseg-<id>.json) with this port's Viterbi + scoring.
  *                       Proves the scoring port reproduces 0.720 / 0.229 at 20.
+ *   --generate-outline  also have the engine WRITE the first video's outline once (one
+ *                       generate: items, tokens, time), for the record; scoring still
+ *                       injects the cached outline so the numbers stay comparable
  *   --json FILE         write every per-video result and the summary
  *
  * Exit code 0 when every sanity case passes and (when chapters ran) F1@±1 at the
@@ -75,8 +78,8 @@ import * as path from 'path';
 import { Logger } from '@nestjs/common';
 
 import { runSnapChapters } from '../chapters/snap-chapter.service';
-import { boundaries } from '../chapters/segmenter';
-import { PLUG } from '../chapters/snap-prompts';
+import { boundaries, parseOutline } from '../chapters/segmenter';
+import { OUTLINE_MAX_TOKENS, PLUG, outlinePrompt } from '../chapters/snap-prompts';
 import { SnapUnit } from '../chapters/units';
 import * as os from 'os';
 import { CrucibleClientFactory } from '../../crucible/client-factory';
@@ -161,6 +164,8 @@ export interface VideoScore {
   timings?: { assignMs: number; adsMs: number; totalMs: number; msPerSentence: number };
   /** Units whose answer had a label outside the engine's top-K (floored). */
   flooredUnits?: number;
+  /** What the engine said about each decide: questions, prompt tokens and cached tokens (null: not reported). */
+  engine?: { decides: number; questions: number; engineMs: number; meanPromptTokens: number; meanCachedTokens: number | null; minLabelMass: number };
   plugVerdicts?: Array<{ start: number; end: number; p: number }>;
 }
 
@@ -201,6 +206,7 @@ interface Args {
   /** true: this machine's Crucible (pairing file); a string: that server in Briefcase's registry. */
   crucible?: string | true;
   forceCard: boolean;
+  generateOutline: boolean;
   ref: string;
   sample?: string;
   n: number;
@@ -214,7 +220,7 @@ interface Args {
 }
 
 function parseArgs(argv: string[]): Args {
-  const a: Args = { forceCard: false, ref: DEFAULT_REF, n: 24, outlines: 'snapseg', switchCost: REFERENCE.switchCost, ads: true, sanity: true, chapters: true, offline: false };
+  const a: Args = { forceCard: false, generateOutline: false, ref: DEFAULT_REF, n: 24, outlines: 'snapseg', switchCost: REFERENCE.switchCost, ads: true, sanity: true, chapters: true, offline: false };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     const val = () => {
@@ -225,6 +231,7 @@ function parseArgs(argv: string[]): Args {
     if (k === '--engine') a.engine = val();
     else if (k === '--crucible') a.crucible = argv[i + 1] !== undefined && !argv[i + 1].startsWith('--') ? val() : true;
     else if (k === '--force-card') a.forceCard = true;
+    else if (k === '--generate-outline') a.generateOutline = true;
     else if (k === '--ref') a.ref = val();
     else if (k === '--sample') a.sample = val();
     else if (k === '--n') a.n = Number(val());
@@ -347,8 +354,29 @@ async function runSanity(handle: ScorerHandle): Promise<SanityOutcome[]> {
 
 // ------------------------------------------------------------------ (c) chapters
 
-async function runChapters(a: Args, vids: YtsegVideo[], handle: ScorerHandle | null): Promise<VideoScore[]> {
+/** One outline written by the engine for the first video (--generate-outline). */
+export interface OutlineCheck {
+  id: string;
+  items: string[];
+  ms: number;
+  promptTokens: number;
+  completionTokens: number;
+  finishReason: string;
+}
+
+async function generateOutlineOnce(v: YtsegVideo, handle: ScorerHandle): Promise<OutlineCheck> {
+  const t = Date.now();
+  const res = await handle.generate(outlinePrompt(v.sents.join('\n')), { maxTokens: OUTLINE_MAX_TOKENS });
+  const check = { id: v.id, items: parseOutline(res.text), ms: Date.now() - t, promptTokens: res.promptTokens, completionTokens: res.completionTokens, finishReason: res.finishReason };
+  console.log(`\n## outline written by ${handle.model} for ${v.id}: ${check.items.length} items in ${(check.ms / 1000).toFixed(1)} s ` +
+    `(${check.promptTokens} prompt + ${check.completionTokens} completion tokens, ${check.finishReason})`);
+  for (const item of check.items) console.log(`  - ${item}`);
+  return check;
+}
+
+async function runChapters(a: Args, vids: YtsegVideo[], handle: ScorerHandle | null, report?: Record<string, unknown>): Promise<VideoScore[]> {
   const scores: VideoScore[] = [];
+  if (a.generateOutline && handle && vids.length && report) report.outlineCheck = await generateOutlineOnce(vids[0], handle);
   console.log(
     `\n## chapters: ${vids.length} YTSeg videos, ${a.outlines} outlines injected, ` +
       `${a.offline ? 'OFFLINE (cached Python logp)' : `live assign, switch cost ${a.switchCost}, ads ${a.ads ? 'on' : 'off'}`}`,
@@ -359,6 +387,7 @@ async function runChapters(a: Args, vids: YtsegVideo[], handle: ScorerHandle | n
     let plugVerdicts: VideoScore['plugVerdicts'];
     let headline: number[] | null = null;
     let floored: number | undefined;
+    let engineSeen: VideoScore['engine'];
     if (a.offline) {
       // bench_snap.py scores snapseg logp as stored: confirm_plugs mutated it in place,
       // so rejected ad stretches already carry -1e9 in the plug column.
@@ -367,8 +396,26 @@ async function runChapters(a: Args, vids: YtsegVideo[], handle: ScorerHandle | n
       const items = loadOutline(a, v.id);
       const units = unitsOf(v);
       const n = units.length;
+      const seen = { decides: 0, questions: 0, engineMs: 0, prompt: 0, cached: 0, cachedN: 0, minMass: Infinity };
       const res = await runSnapChapters(
-        { decide: (r, o) => handle!.decide(r, o), generate: (m, o) => handle!.generate(m, o) },
+        {
+          decide: async (r, o) => {
+            const out = await handle!.decide(r, o);
+            seen.decides++;
+            seen.engineMs += out.timingMs.total;
+            for (const [name, t] of Object.entries(out.timingMs.perQuestion)) {
+              seen.questions++;
+              seen.prompt += t.promptTokens;
+              if (t.cachedTokens !== null) {
+                seen.cached += t.cachedTokens;
+                seen.cachedN++;
+              }
+              seen.minMass = Math.min(seen.minMass, out.answers[name]?.labelMass ?? Infinity);
+            }
+            return out;
+          },
+          generate: (m, o) => handle!.generate(m, o),
+        },
         units,
         {
           switchCost: a.switchCost,
@@ -393,6 +440,12 @@ async function runChapters(a: Args, vids: YtsegVideo[], handle: ScorerHandle | n
       };
       plugVerdicts = chunk.plugVerdicts;
       floored = chunk.flooredUnits;
+      engineSeen = {
+        decides: seen.decides, questions: seen.questions, engineMs: seen.engineMs,
+        meanPromptTokens: seen.questions ? seen.prompt / seen.questions : 0,
+        meanCachedTokens: seen.cachedN ? seen.cached / seen.cachedN : null,
+        minLabelMass: seen.minMass,
+      };
     }
     const byPen = scoreMatrix(v, L, [...new Set([...SWEEP, a.switchCost])]);
     if (headline) {
@@ -401,7 +454,7 @@ async function runChapters(a: Args, vids: YtsegVideo[], handle: ScorerHandle | n
       const again = boundaries(viterbi(L, a.switchCost));
       if (again.join(',') !== headline.join(',')) console.log(`  note: ${v.id} path differs from the re-run Viterbi`);
     }
-    const s: VideoScore = { id: v.id, sentences: v.sents.length, gold: goldOf(v).length, byPen, timings, plugVerdicts, ...(floored === undefined ? {} : { flooredUnits: floored }) };
+    const s: VideoScore = { id: v.id, sentences: v.sents.length, gold: goldOf(v).length, byPen, timings, plugVerdicts, ...(floored === undefined ? {} : { flooredUnits: floored }), ...(engineSeen ? { engine: engineSeen } : {}) };
     scores.push(s);
     const h = byPen[a.switchCost];
     console.log(
@@ -409,7 +462,8 @@ async function runChapters(a: Args, vids: YtsegVideo[], handle: ScorerHandle | n
         `F1@±1 ${h?.f1_1.toFixed(3)}  F1@±3 ${h?.f1_3.toFixed(3)}  Pk ${h?.pk.toFixed(3)}  count ${h?.count.toFixed(2)}` +
         (timings ? `  ${(timings.totalMs / 1000).toFixed(1)}s (${(timings.msPerSentence / 1000).toFixed(2)} s/sent)` : '') +
         (plugVerdicts?.length ? `  ads ${plugVerdicts.map((p) => `${p.start}-${p.end}:${p.p.toFixed(2)}`).join(' ')}` : '') +
-        (floored ? `  floored ${floored}` : ''),
+        (floored ? `  floored ${floored}` : '') +
+        (engineSeen ? `  [${engineSeen.decides} decides, ${engineSeen.questions} q, ~${Math.round(engineSeen.meanPromptTokens)} prompt tok/q, cached ${engineSeen.meanCachedTokens === null ? 'not reported' : `~${Math.round(engineSeen.meanCachedTokens)}`}/q, min label mass ${engineSeen.minLabelMass.toFixed(3)}]` : ''),
     );
   }
   return scores;
@@ -492,7 +546,7 @@ async function main(): Promise<number> {
       console.log(`# engine ready: ${handle.model} (${((Date.now() - t0) / 1000).toFixed(1)} s)`);
       if (a.sanity) sanity = await runSanity(handle);
     }
-    if (a.chapters) chapterScores = await runChapters(a, vids, handle);
+    if (a.chapters) chapterScores = await runChapters(a, vids, handle, report);
   };
 
   if (a.offline) {
@@ -508,7 +562,8 @@ async function main(): Promise<number> {
     console.log(`# Crucible "${server}" ${String((report.transport as { version: string | null }).version)}: card free; the scorer takes its lease`);
     // One run: the scorer's load + lease is held across sanity AND chapters, released at the end.
     await chat.withRun(() => scorer.withScorer((h) => work(h)));
-    console.log(`# released: ${JSON.stringify(chat.heldInRun())}`);
+    const after = await (await factory.clientFor(server!)).activity();
+    console.log(`# after the run: lease ${after.lease ? `${after.lease.client}/${after.lease.act}` : 'none'}, resident ${after.resident?.id ?? 'none'}`);
   } else {
     const server = new ScorerServerService();
     const avail = server.availability();
