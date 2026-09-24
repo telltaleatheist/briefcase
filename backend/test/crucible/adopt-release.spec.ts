@@ -59,4 +59,14 @@ describe('REGRESSION: adopt-crucible-release reads the channel and never goes ba
                    catch (e) { return { refused: e instanceof m.AdoptRefusal, message: e.message }; }`);
     expect((r.out as { result: { refused: boolean; message: string } }).result).toEqual({ refused: true, message: expect.stringMatching(/releases\/latest answered HTTP 503/) });
   });
+
+  it('after adopting, points at the checks this repository actually has (not BookForge\'s keepers)', () => {
+    const root = path.resolve(__dirname, '..', '..', '..');
+    const r = run(`process.chdir(${JSON.stringify(root)}); return m.checksBeforeCommit(m.findManifest());`);
+    expect(r.err).toBe('');
+    expect((r.out as { result: unknown }).result).toEqual([
+      'npm --prefix backend run test:crucible',
+      'npm --prefix backend run test:no-crucible',
+    ]);
+  });
 });

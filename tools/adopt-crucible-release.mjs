@@ -22,8 +22,9 @@
  * the version inside a filename, two `//crucible-*` prose keys that name it in a
  * sentence, two tarballs to fetch and two to delete. Miss the prose and the
  * package still installs — it just describes a release it is not pinned to,
- * which is the failure `tools/test-crucible-install-seam.js` was written for
- * after it happened.
+ * which is the failure each app's pin keeper was written for after it happened
+ * (BookForge's `tools/test-crucible-install-seam.js`; Briefcase's
+ * `backend/test/crucible/sdk-seam.spec.ts` and `adopt-release.spec.ts`).
  *
  * THE VERSION IS NEVER TYPED TWICE HERE. Everything downstream of the tarballs
  * derives from the tarballs: `electron/crucible/install.ts` exports
@@ -360,13 +361,57 @@ async function main() {
         'the tarball and the version it carries disagree');
   }
   console.log(`adopt: @crucible/bootstrap reports ${actual}`);
-  console.log(`adopt: ${fetched.join(' and ')} adopted. Run the Crucible keepers before committing.`);
+  const checks = checksBeforeCommit(manifest);
+  console.log(`adopt: ${fetched.join(' and ')} adopted. Before committing, run ` +
+    (checks.length ? checks.join(', then ') : "this repository's Crucible tests") + '.');
 }
 
-// Only when RUN, never when imported. `tools/test-crucible-install-seam.js`
-// imports this to check `pinnedVersion` against the pin the app actually
-// carries — the one piece of parsing here that can silently be wrong — and an
-// import that started downloading tarballs would make that impossible.
+/**
+ * What to run before committing an adoption, from what THIS repository has,
+ * never from what one of the three apps happens to call it: BookForge runs its
+ * keepers (`tools/run-keepers.js`), Foundry has `tools/test-crucible-*.js`
+ * keepers, Briefcase has `test:crucible` / `test:no-crucible` in
+ * `backend/package.json`. Looked for at the root and beside the package.json
+ * that pins the SDK; any npm script there that names Crucible is listed.
+ */
+export function checksBeforeCommit(manifest, root = process.cwd()) {
+  const checks = [];
+  const dirs = [...new Set([path.resolve(root), manifest.dir])];
+  for (const dir of dirs) {
+    const rel = path.relative(root, dir);
+    const at = (p) => (rel ? path.join(rel, p) : p);
+    if (fs.existsSync(path.join(dir, 'tools', 'run-keepers.js'))) {
+      checks.push(`node ${at('tools/run-keepers.js')}`);
+    } else {
+      let keepers = [];
+      try {
+        keepers = fs.readdirSync(path.join(dir, 'tools')).filter((f) => /^test-crucible-.*\.js$/.test(f));
+      } catch {
+        keepers = [];
+      }
+      if (keepers.length) {
+        checks.push(`the Crucible keeper${keepers.length === 1 ? '' : 's'} (node ${at('tools/test-crucible-*.js')})`);
+      }
+    }
+    let scripts = {};
+    try {
+      scripts = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).scripts ?? {};
+    } catch {
+      scripts = {};
+    }
+    for (const [name, command] of Object.entries(scripts)) {
+      if (!/crucible/i.test(`${name} ${command}`)) continue;
+      checks.push(rel ? `npm --prefix ${rel} run ${name}` : `npm run ${name}`);
+    }
+  }
+  return checks;
+}
+
+// Only when RUN, never when imported. A repository's pin keeper (BookForge's
+// `tools/test-crucible-install-seam.js`, Briefcase's
+// `backend/test/crucible/adopt-release.spec.ts`) imports this to check its
+// parsing against the pin the app actually carries, and an import that started
+// downloading tarballs would make that impossible.
 const invokedDirectly = process.argv[1]
   && pathToFileURL(process.argv[1]).href === import.meta.url;
 if (invokedDirectly) {
