@@ -75,13 +75,16 @@ describe('the Crucible doors refuse cross-site writes', () => {
     expect(read.status).not.toBe(403);
   });
 
-  it('the rule itself', () => {
-    expect(originAllowed('POST', 'http://127.0.0.1:3000', null)).toBe(true);
-    expect(originAllowed('POST', 'http://[::1]:3000', null)).toBe(true);
-    expect(originAllowed('POST', 'null', null)).toBe(false);
-    expect(originAllowed('DELETE', 'http://192.168.1.5:3000', null)).toBe(false);
-    expect(originAllowed('DELETE', 'http://192.168.1.5:3000', { port: 3000 })).toBe(true);
-    expect(originAllowed('DELETE', 'http://192.168.1.5:4000', { port: 3000 })).toBe(false);
-    expect(originAllowed('GET', 'https://evil.example', null)).toBe(true);
+  it('the rule itself (the app-wide one, common/app-origin.ts)', () => {
+    const loopback = { port: '3000', lan: false, devServer: false };
+    const lan = { port: '3000', lan: true, devServer: false };
+    expect(originAllowed('POST', 'http://127.0.0.1:3000', loopback)).toBe(true);
+    expect(originAllowed('POST', 'http://[::1]:3000', loopback)).toBe(true);
+    expect(originAllowed('POST', 'http://localhost:8080', loopback)).toBe(false);
+    expect(originAllowed('POST', 'null', loopback)).toBe(false);
+    expect(originAllowed('DELETE', 'http://192.168.1.5:3000', loopback)).toBe(false);
+    expect(originAllowed('DELETE', 'http://192.168.1.5:3000', lan)).toBe(true);
+    expect(originAllowed('DELETE', 'http://192.168.1.5:4000', lan)).toBe(false);
+    expect(originAllowed('GET', 'https://evil.example', loopback)).toBe(true);
   });
 });

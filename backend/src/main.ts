@@ -3,27 +3,11 @@ import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { ExpressAdapter, NestExpressApplication } from '@nestjs/platform-express';
 import { environment } from './config/environment';
-import { IoAdapter } from '@nestjs/platform-socket.io';
 import { log } from './common/logger';
-import { ServerOptions } from 'socket.io';
 import * as express from 'express';  // Explicitly import express
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { installGracefulShutdown } from './common/graceful-shutdown';
-
-class ExtendedIoAdapter extends IoAdapter {
-  createIOServer(port: number, options?: ServerOptions): any {
-    const server = super.createIOServer(port, {
-      ...options,
-      path: environment.socket.path,
-      cors: {
-        origin: environment.cors.origins,
-        methods: environment.cors.methods,
-        credentials: environment.socket.credentials
-      }
-    });
-    return server;
-  }
-}
+import { applyAppOriginPolicy } from './common/app-origin.setup';
 
 async function bootstrap() {
   log.info('====================================');
@@ -48,21 +32,17 @@ async function bootstrap() {
       }
     );
 
-    // Add this block to enable CORS for HTTP requests
-    // Allow any localhost port for development
     const port = environment.port || process.env.PORT || 3000;
 
-    // CORS policy is driven by environment (loopback-permissive by default,
-    // restricted + non-credentialed in LAN mode). See config/environment.ts.
-    app.enableCors({
-      origin: environment.cors.origins,
-      methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+    // Only the app's own origins (common/app-origin.ts, via config/environment.ts):
+    // CORS keeps other pages from reading answers, and the write guard refuses
+    // their state-changing requests, which CORS cannot (a form POST needs no
+    // preflight).
+    applyAppOriginPolicy(app, {
+      policy: environment.originPolicy,
       credentials: environment.cors.credentials,
-      allowedHeaders: 'Content-Type, Accept, Authorization, Range',
-      exposedHeaders: 'Content-Range, Accept-Ranges, Content-Length'
+      socketPath: environment.socket.path,
     });
-
-    app.useWebSocketAdapter(new ExtendedIoAdapter(app));
 
     // Increase body parser limit for large payloads (e.g., console logs)
     app.useBodyParser('json', { limit: '50mb' });

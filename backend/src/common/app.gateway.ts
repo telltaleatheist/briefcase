@@ -11,6 +11,7 @@ import { Logger, Injectable } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { WebSocketService } from './websocket.service';
 import { InternalEvent } from './websocket.types';
+import { environment } from '../config/environment';
 
 /**
  * AppGateway is the core WebSocket infrastructure for the entire application.
@@ -26,7 +27,9 @@ import { InternalEvent } from './websocket.types';
  */
 @Injectable()
 @WebSocketGateway({
-  cors: true,
+  // The app's own origins only (common/app-origin.ts). main.ts's IoAdapter
+  // applies the same policy and also checks the WebSocket handshake's Origin.
+  cors: { origin: environment.cors.origins, credentials: environment.socket.credentials },
   // Performance optimizations for handling many connections
   transports: ['websocket', 'polling'],
   allowEIO3: true,
@@ -54,7 +57,7 @@ export class AppGateway
     this.logger.log('='.repeat(60));
     this.logger.log('AppGateway initialized successfully');
     this.logger.log(`Server instance: ${server ? 'ACTIVE' : 'NULL'}`);
-    this.logger.log(`CORS enabled: true`);
+    this.logger.log(`CORS: the app's own origins${environment.lanMode ? ' (LAN mode)' : ''}`);
     this.logger.log(`Transports: websocket, polling`);
     this.logger.log('='.repeat(60));
   }
