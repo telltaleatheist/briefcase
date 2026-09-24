@@ -112,6 +112,12 @@ export function classifyAsrRefusal(err: unknown, server: string, verb: string): 
 /** Retry budgets. Before admission a dead server should fall back soon; a running job is worth waiting for. */
 export const DOOR_DELAYS_MS: readonly number[] = [1_000, 3_000];
 export const STREAM_DELAYS_MS: readonly number[] = [1_000, 2_000, 5_000, 10_000, 20_000, 30_000, 45_000];
+/**
+ * An upload in flight reports this often. A big video to a remote server can
+ * take longer than the lane's stall watchdog (15 min; 10 inline) allows a
+ * task to be silent, and the server says nothing until the last byte lands.
+ */
+export const UPLOAD_TICK_MS = 5_000;
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
@@ -126,7 +132,8 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 
 /** Progress as the server reported it, already sorted by stage. */
 export type AsrJobProgress =
-  | { readonly kind: 'uploading' }
+  /** `sentBytes` is null when this runtime can't count them (the beat still comes). */
+  | { readonly kind: 'uploading'; readonly sentBytes: number | null; readonly totalBytes: number }
   | { readonly kind: 'queued'; readonly position: number | null }
   | { readonly kind: 'warming'; readonly message: string }
   | { readonly kind: 'decoding'; readonly processedS: number | null; readonly totalS: number | null; readonly message: string }
@@ -185,6 +192,8 @@ export interface RunAsrJobOptions {
   /** Only a spec overrides these. */
   readonly doorDelaysMs?: readonly number[];
   readonly streamDelaysMs?: readonly number[];
+  /** How often an upload in flight reports (bytes sent, or at least that it is alive). */
+  readonly uploadTickMs?: number;
 }
 
 export interface AsrJobOutcome {
@@ -196,6 +205,51 @@ export interface AsrJobOutcome {
 /** `fs.openAsBlob` typed as the optional it is on older runtimes. */
 const openAsBlob: ((p: string) => Promise<Blob>) | undefined =
   (fs as unknown as { openAsBlob?: (p: string) => Promise<Blob> }).openAsBlob;
+
+/**
+ * The file as a blob-like whose stream counts the bytes read from it as the
+ * request body pulls them (under backpressure, so: roughly bytes sent). A
+ * plain object and not a Blob subclass on purpose: FormData re-wraps a Blob
+ * (subclass or not) in a fresh File, which reads the file itself and bypasses
+ * any override, while a blob-LIKE is wrapped by delegation. Null when this
+ * runtime's FormData refuses one: the upload then goes as the plain blob and
+ * the progress beat carries no byte count.
+ */
+function countingBlob(blob: Blob, filename: string, onBytes: (n: number) => void): Blob | null {
+  const like = {
+    size: blob.size,
+    type: blob.type,
+    name: filename,
+    lastModified: Date.now(),
+    [Symbol.toStringTag]: 'File',
+    arrayBuffer: () => blob.arrayBuffer(),
+    text: () => blob.text(),
+    slice: (start?: number, end?: number, type?: string) => blob.slice(start, end, type),
+    stream: (): ReadableStream<Uint8Array> => {
+      const reader = (blob.stream() as ReadableStream<Uint8Array>).getReader();
+      return new ReadableStream<Uint8Array>({
+        async pull(controller) {
+          const { done, value } = await reader.read();
+          if (done) {
+            controller.close();
+            return;
+          }
+          onBytes(value.byteLength);
+          controller.enqueue(value);
+        },
+        cancel(reason) {
+          return reader.cancel(reason);
+        },
+      });
+    },
+  };
+  try {
+    new FormData().append('probe', like as unknown as Blob, filename);
+    return like as unknown as Blob;
+  } catch {
+    return null;
+  }
+}
 
 function numOrNull(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
@@ -266,11 +320,20 @@ export async function runAsrJob(options: RunAsrJobOptions): Promise<AsrJobOutcom
 
   // ── Upload. A re-upload is harmless (a second blob), so weather is retried. ──
   const upload = async (): Promise<string> => {
-    options.onProgress?.({ kind: 'uploading' });
     let uploaded: { blobId: string; sha256: string; bytes: number } | undefined;
     for (let attempt = 0; uploaded === undefined; attempt++) {
+      // Reported at once, then every tick until the server answers: bytes sent
+      // when they can be counted, and a beat for the stall watchdog either way.
+      let sent = 0;
+      const blob = await openAsBlob(options.file);
+      const counted = countingBlob(blob, options.filename, (n) => { sent += n; });
+      const report = (): void => options.onProgress?.({ kind: 'uploading', sentBytes: counted === null ? null : Math.min(sent, size), totalBytes: size });
+      report();
+      const ticker = setInterval(report, options.uploadTickMs ?? UPLOAD_TICK_MS);
+      ticker.unref?.();
       try {
-        uploaded = await client.upload(await openAsBlob(options.file), { filename: options.filename });
+        uploaded = await client.upload(counted ?? blob, { filename: options.filename });
+        report();
       } catch (err) {
         // A cancel during the retry wait wakes the sleep early; the attempt that
         // follows must not turn it into "unreachable", which would fall back.
@@ -284,6 +347,8 @@ export async function runAsrJob(options: RunAsrJobOptions): Promise<AsrJobOutcom
           continue;
         }
         throw classified;
+      } finally {
+        clearInterval(ticker);
       }
     }
     options.blobCache?.set(uploaded);

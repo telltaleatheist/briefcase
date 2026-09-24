@@ -87,7 +87,7 @@ describe('the job flow', () => {
     // Progress: never backwards; each stage in its band; the decode drives no fraction.
     const percents = seen.map((s) => s.percent);
     expect(percents).toEqual([...percents].sort((a, b) => a - b));
-    expect(seen[0]).toEqual({ percent: 5, message: 'Sending the video to Crucible on mac...' });
+    expect(seen[0]).toEqual({ percent: 3, message: 'Uploading the video to Crucible on mac...' });
     expect(seen).toContainEqual({ percent: 7, message: 'Queued on Crucible on mac...' });
     expect(seen).toContainEqual({ percent: 9, message: 'Crucible on mac: loading mlx-whisper-large-v3' });
     expect(seen).toContainEqual({ percent: 12, message: 'Reading the audio on mac... 00:30:00 of 01:00:00' });
@@ -97,6 +97,19 @@ describe('the job flow', () => {
 
     // The ledger: written at admission, settled at the end.
     expect(ledger.read()).toEqual([]);
+  });
+
+  it('REGRESSION: a slow upload keeps reporting (bytes sent, labelled uploading), so the stall watchdog sees it alive', async () => {
+    await wire();
+    svc.jobTiming = { ...svc.jobTiming, uploadTickMs: 10 };
+    fake.faults.connectDelay = [{ match: { method: 'POST', path: '/v1/uploads' }, ms: 120, thenDestroy: false, times: 1 }];
+    const seen: Array<{ percent: number; message: string }> = [];
+    await svc.transcribe(request({ onProgress: (percent, message) => seen.push({ percent, message }) }));
+    const uploading = seen.filter((s) => s.message.startsWith('Uploading the video to Crucible on mac'));
+    // Not one line at the start and silence until the server answers: a beat while the bytes go.
+    expect(uploading.length).toBeGreaterThanOrEqual(4);
+    expect(uploading).toContainEqual({ percent: 6, message: 'Uploading the video to Crucible on mac... 64.0 KB of 64.0 KB' });
+    expect(uploading.every((s) => s.percent >= 3 && s.percent <= 6)).toBe(true);
   });
 
   it('on cuda-linux the job names faster-whisper and sends vad_filter true', async () => {

@@ -72,6 +72,18 @@ export interface CrucibleTranscriptionOutcome {
   readonly language: string;
 }
 
+/** `812.0 KB`, `1.4 GB`: one decimal, binary units. */
+export function formatBytes(bytes: number): string {
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let value = Math.max(0, bytes);
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return unit === 0 ? `${value} B` : `${value.toFixed(1)} ${units[unit]}`;
+}
+
 /** `HH:MM:SS`, the app's time format. */
 export function hms(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds));
@@ -81,8 +93,8 @@ export function hms(seconds: number): string {
 /**
  * Crucible's progress → the transcribe task's `{percent, message}`.
  *
- *   0–5     WhisperService's own start
- *   5       uploading the video
+ *   0–2     WhisperService's own start
+ *   3–6     uploading the video (by bytes sent; the message says how many)
  *   7       queued on the server
  *   9       warming (the whisper model loading)
  *   10–14   decoding (drives no fraction on the server; moved by processed_s/total_s when sent)
@@ -93,8 +105,13 @@ export function asrProgressToTask(server: string, p: AsrJobProgress): { percent:
   const where = (processed: number | null, total: number | null): string =>
     processed !== null && total !== null && total > 0 ? ` ${hms(processed)} of ${hms(total)}` : '';
   switch (p.kind) {
-    case 'uploading':
-      return { percent: 5, message: `Sending the video to Crucible on ${server}...` };
+    case 'uploading': {
+      if (p.sentBytes === null || p.totalBytes <= 0 || p.sentBytes <= 0) {
+        return { percent: 3, message: `Uploading the video to Crucible on ${server}...` };
+      }
+      const share = Math.min(1, p.sentBytes / p.totalBytes);
+      return { percent: 3 + Math.round(share * 3), message: `Uploading the video to Crucible on ${server}... ${formatBytes(p.sentBytes)} of ${formatBytes(p.totalBytes)}` };
+    }
     case 'queued':
       return { percent: 7, message: `Queued on Crucible on ${server}${p.position !== null && p.position > 0 ? ` (position ${p.position})` : ''}...` };
     case 'warming':
@@ -127,7 +144,7 @@ export class CrucibleTranscriptionService {
   configDir: () => string = () => getBriefcaseConfigDir();
   aiVia: () => AiVia = () => resolveAiVia({ configDir: this.configDir() }).via;
   /** Only a spec shortens these. */
-  jobTiming: Pick<RunAsrJobOptions, 'doorDelaysMs' | 'streamDelaysMs'> = {};
+  jobTiming: Pick<RunAsrJobOptions, 'doorDelaysMs' | 'streamDelaysMs' | 'uploadTickMs'> = {};
 
   constructor(
     private readonly servers: CrucibleServersService,
