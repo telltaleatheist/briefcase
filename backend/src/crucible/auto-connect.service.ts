@@ -76,7 +76,9 @@ export const AUTO_CONNECT_RETRY_MS = [15_000, 60_000, 300_000];
 export class CrucibleAutoConnectService implements OnApplicationBootstrap, OnApplicationShutdown {
   private readonly logger = new Logger('CrucibleAutoConnect');
   private timer: NodeJS.Timeout | null = null;
+  private running = false;
   private stopped = false;
+  private idleWaiters: Array<() => void> = [];
   /** Replaceable by a spec. */
   retryDelaysMs: readonly number[] = AUTO_CONNECT_RETRY_MS;
 
@@ -95,13 +97,35 @@ export class CrucibleAutoConnectService implements OnApplicationBootstrap, OnApp
     this.stopped = true;
     if (this.timer !== null) clearTimeout(this.timer);
     this.timer = null;
+    this.notifyIfIdle();
+  }
+
+  /**
+   * Resolves once the boot-time attempts are over: nothing running and no
+   * retry scheduled, whatever they concluded. For callers (and specs) that must
+   * see the outcome, instead of guessing how long it takes.
+   */
+  whenIdle(): Promise<void> {
+    if (!this.running && this.timer === null) return Promise.resolve();
+    return new Promise((resolve) => this.idleWaiters.push(resolve));
+  }
+
+  private notifyIfIdle(): void {
+    if (this.running || this.timer !== null) return;
+    const waiters = this.idleWaiters;
+    this.idleWaiters = [];
+    for (const resolve of waiters) resolve();
   }
 
   private schedule(delayMs: number, attempt: number): void {
     if (this.stopped) return;
     this.timer = setTimeout(() => {
       this.timer = null;
-      void this.attempt(attempt);
+      this.running = true;
+      void this.attempt(attempt).finally(() => {
+        this.running = false;
+        this.notifyIfIdle();
+      });
     }, delayMs);
     this.timer.unref?.();
   }

@@ -12,6 +12,7 @@ import { CrucibleAutoConnectService } from '../../src/crucible/auto-connect.serv
 import { WebSocketService } from '../../src/common/websocket.service';
 import { pairingHost, pairingLineFor, tempDir } from './helpers';
 import type { PairingFileHost } from '../../src/crucible/pairing-file';
+import { PROBE_TIMEOUT_MS } from '../../src/crucible/probe';
 
 const emitted: unknown[] = [];
 
@@ -62,14 +63,6 @@ describe('CrucibleController', () => {
     };
   }
 
-  async function settle(predicate: () => Promise<boolean>): Promise<void> {
-    const deadline = Date.now() + 5_000;
-    while (!(await predicate())) {
-      if (Date.now() > deadline) throw new Error('timed out waiting');
-      await new Promise((r) => setTimeout(r, 20));
-    }
-  }
-
   beforeAll(async () => {
     fake = await startFakeCrucible({ name: 'crucible@owens-mac-studio', upstreams: { anthropic: { key: 'sk-ant-never-shown-4321' } } });
     other = await startFakeCrucible({ name: 'crucible@owens-pc', backend: 'cuda-linux' });
@@ -84,13 +77,18 @@ describe('CrucibleController', () => {
   });
 
   it('adopts the Crucible on this computer at boot, without being asked', async () => {
-    await settle(async () => (await http().get('/crucible/servers')).body.servers.length === 1);
+    // The adoption is fire-and-forget after boot. Wait for it to be OVER, not
+    // for a wall-clock guess: under a loaded run a 5 s poll could end before
+    // it did, and every later test that names this row then failed with it.
+    // Its one probe is bounded by PROBE_TIMEOUT_MS, which is also Jest's default
+    // test budget, so this test's budget is set from that bound, not raced by it.
+    await app.get(CrucibleAutoConnectService).whenIdle();
     const view = (await http().get('/crucible/servers')).body;
     expect(view.servers[0]).toMatchObject({ name: 'crucible@owens-mac-studio', url: fake.url, tokenMasked: `****${fake.token.slice(-4)}` });
     expect(view.routing).toEqual({ ranked: [{ name: 'crucible@owens-mac-studio', enabled: true }], unknown: [] });
     expect(view.discovered).toMatchObject({ present: true, registeredAs: 'crucible@owens-mac-studio' });
     expect(emitted).toContainEqual({ reason: 'added', server: 'crucible@owens-mac-studio' });
-  });
+  }, 2 * PROBE_TIMEOUT_MS);
 
   it('probes (cached) and tests (fresh) a row', async () => {
     const name = encodeURIComponent('crucible@owens-mac-studio');
@@ -199,10 +197,14 @@ describe('boot tolerance', () => {
   it('app.init() does not wait for a Crucible that never answers', async () => {
     const asleep = await startFakeCrucible();
     asleep.inject({ stallMs: 60_000 });
-    const started = Date.now();
     const app = await appWith(pairingHost(pairingLineFor('crucible@asleep', asleep.url, asleep.token)), []);
     try {
-      expect(Date.now() - started).toBeLessThan(2_000);
+      // Ordering, not a stopwatch: init has returned while the boot adoption
+      // is still out (the server stalls for 60 s), so init did not wait on it.
+      let adoptionOver = false;
+      void app.get(CrucibleAutoConnectService).whenIdle().then(() => { adoptionOver = true; });
+      await Promise.resolve();
+      expect(adoptionOver).toBe(false);
       const list = await request(app.getHttpServer()).get('/crucible/servers');
       expect(list.status).toBe(200);
       expect(list.body.servers).toEqual([]);

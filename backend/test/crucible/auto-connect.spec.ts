@@ -75,9 +75,12 @@ describe('auto-connect: adopting the Crucible on this computer', () => {
     fake.inject({ stallMs: 60_000 });
     const h = harness(pairingHost(line()));
     h.autoConnect.retryDelaysMs = [];
-    const started = Date.now();
-    h.autoConnect.onApplicationBootstrap();
-    expect(Date.now() - started).toBeLessThan(50);
+    // Ordering, not a stopwatch: the hook has returned while its attempt is still out.
+    expect(h.autoConnect.onApplicationBootstrap()).toBeUndefined();
+    let over = false;
+    void h.autoConnect.whenIdle().then(() => { over = true; });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(over).toBe(false);
     h.autoConnect.onApplicationShutdown();
   });
 
@@ -86,8 +89,7 @@ describe('auto-connect: adopting the Crucible on this computer', () => {
     h.autoConnect.retryDelaysMs = [50, 50];
     fake.faults.connectDelay = [{ match: { path: '/v1/info' }, ms: 10, times: 1 }];
     h.autoConnect.onApplicationBootstrap();
-    const deadline = Date.now() + 5_000;
-    while (!h.registry.exists() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+    await h.autoConnect.whenIdle(); // the attempts are over, whatever they concluded
     h.autoConnect.onApplicationShutdown();
     expect(h.registry.names()).toEqual(['crucible@owens-mac-studio']);
   });
