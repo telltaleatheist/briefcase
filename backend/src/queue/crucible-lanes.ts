@@ -11,8 +11,10 @@
  *                  (`anthropic/…`, `openai/…`, `ollama/…`). It holds no card;
  *                  rate limits come back as 429 + Retry-After.
  *
- * The main pool (5) is not touched: downloads, imports, transcribes and every
- * other non-AI task never read anything in this file. Under `aiVia: 'direct'`
+ * The main pool (5) is not touched: downloads, imports and every other non-AI
+ * task never read anything in this file. A `transcribe` (P5) is placed here:
+ * a GPU lane when the venue rule puts it on Crucible (its reservation is the
+ * asr submit), else back to the main pool as a whisper-cli task. Under `aiVia: 'direct'`
  * the queue keeps today's AI pool exactly (QueueManagerService.processQueue).
  *
  * This service DECIDES; the queue (queue-manager.service.ts) holds the slots.
@@ -57,6 +59,7 @@ import { CrucibleRegistryService } from '../crucible/registry.service';
 import { decideVenue, type VenueAnswer } from '../crucible/venue-decision';
 import type { ServerReach } from '../crucible/wire/settings-wire';
 import type { Task } from '../common/interfaces/task.interface';
+import { CrucibleTranscriptionService } from '../crucible/asr/crucible-transcription.service';
 
 export const GPU_LANE_WIDTH = 1;
 export const CLOUD_LANE_WIDTH = 2;
@@ -71,8 +74,21 @@ export const STARVATION_MS = 10 * 60_000;
 export const PARK_FIRST_MS = 5_000;
 export const PARK_MAX_MS = 60_000;
 
-/** The AI task types that go to lanes (P5 adds `transcribe`). */
-export const LANE_TASK_TYPES: ReadonlySet<string> = new Set(['analyze', 'analyze-webpage']);
+/**
+ * The task types that go to lanes. `transcribe` (P5) goes to a GPU lane when
+ * the venue rule puts it on Crucible; otherwise it is handed to the main pool
+ * as a whisper-cli task (capped there, see QueueManagerService).
+ */
+export const LANE_TASK_TYPES: ReadonlySet<string> = new Set(['analyze', 'analyze-webpage', 'transcribe']);
+
+/** The asr model a transcribe placement names, in the shape the lanes carry every target in. */
+export function asrTarget(model: string): CrucibleTarget {
+  return { model, route: 'local', upstream: null, bareModel: model };
+}
+
+export type TranscribePlaceAnswer =
+  | { kind: 'lane'; placement: LanePlacement }
+  | { kind: 'cli'; reason: string; warning: string | null };
 
 export function gpuLaneOf(server: string): string {
   return `gpu:${server}`;
@@ -129,6 +145,24 @@ function shortClient(client: string | null | undefined): string {
 }
 
 /**
+ * The holder's sentence when someone OTHER than us has the server's JOB lane
+ * (a job running or queued, a claim, a streaming session), else null. PURE.
+ *
+ * For an `asr` job. A lease is NOT in the way of one: Crucible refuses a lease
+ * only to jobs that would change the card's contents, and asr is not one of
+ * them (SDK `CrucibleLeased`). The door still decides: a 409 at the submit parks.
+ */
+export function busyLineForJob(activity: Activity, ours: ReadonlySet<string>): string | null {
+  const job = [...activity.running, ...activity.queued].find((j) => !ours.has(j.jobId));
+  if (job !== undefined) {
+    return `Crucible is busy: ${shortClient(job.client)}, ${job.type} ${Math.round(job.progress * 100)}% done`;
+  }
+  if (activity.claim !== null) return `Crucible is busy: ${shortClient(activity.claim.heldBy)} holds the card`;
+  if (activity.streaming !== null) return 'Crucible is busy: a streaming session holds the card';
+  return null;
+}
+
+/**
  * The holder's sentence when someone OTHER than us holds `server`'s card in a
  * way that a load of `target` would be refused, else null. PURE.
  *
@@ -174,6 +208,8 @@ export class CrucibleLanesService implements OnModuleInit, BeforeApplicationShut
     private readonly factory: CrucibleClientFactory,
     private readonly registry: CrucibleRegistryService,
     @Optional() @Inject(CRUCIBLE_IN_FLIGHT_LEDGER) private readonly ledger?: InFlightLedger,
+    /** P5: the transcription venue rule. Absent: every transcribe is whisper-cli in the main pool. */
+    @Optional() private readonly transcription?: CrucibleTranscriptionService,
   ) {
     registry.onChange((change) => {
       if (change.server !== null) this.activityCache.delete(change.server);
@@ -226,6 +262,27 @@ export class CrucibleLanesService implements OnModuleInit, BeforeApplicationShut
     if (answer.kind !== 'venue') return answer;
     const lane = target.route === 'upstream' ? CLOUD_LANE : gpuLaneOf(answer.server);
     return { kind: 'lane', placement: { lane, server: answer.server, target } };
+  }
+
+  /**
+   * Where a transcribe task runs (P5): a GPU lane when the venue rule puts it
+   * on Crucible, else whisper-cli in the main pool, with the warning to put on
+   * the task when that is a fallback. Never 'wait': a transcription always has
+   * whisper-cli to fall back to (the user's rule, 2026-09-23).
+   */
+  async placeTranscribe(task: Task): Promise<TranscribePlaceAnswer> {
+    if (this.transcription === undefined) return { kind: 'cli', reason: 'Crucible transcription is not available in this build.', warning: null };
+    const translate = (task.options as { translate?: unknown } | undefined)?.translate === true;
+    const route = await this.transcription.route({ translate });
+    if (route.kind === 'cli') return route;
+    return { kind: 'lane', placement: { lane: gpuLaneOf(route.server), server: route.server, target: asrTarget(route.model) } };
+  }
+
+  /** The holder's sentence when another client has `server`'s job lane, else null (the asr preflight). */
+  async preflightJob(server: string): Promise<string | null> {
+    const activity = await this.activity(server);
+    if (activity === null) return null;
+    return busyLineForJob(activity, this.ledger?.idsOn(server) ?? new Set());
   }
 
   /** `/v1/activity` on `server`, cached {@link ACTIVITY_CACHE_MS}; null when it cannot be read. */

@@ -21,6 +21,8 @@ import * as os from 'os';
 import * as path from 'path';
 import { atomicReplaceFile } from '../common/utils/temp-file.util';
 import { isParked } from '../crucible/llm/errors';
+import { isAsrUnavailable } from '../crucible/asr/crucible-asr-job';
+import type { WhisperRoute } from '../media/whisper.service';
 import {
   CLOUD_LANE,
   CrucibleLanesService,
@@ -107,6 +109,11 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
   // Concurrency limits (5+1 model)
   private readonly MAX_MAIN_CONCURRENT = 5;  // 5 general tasks
   private readonly MAX_AI_CONCURRENT = 1;     // 1 AI task
+  // P5 (migration plan §7.1): at most 2 of the main pool's 5 slots run a
+  // whisper-cli transcription at once (each is a whole CPU/GPU-heavy process;
+  // before P5 up to 5 ran together). Transcriptions on Crucible hold a GPU
+  // lane instead and never count here.
+  private readonly MAX_MAIN_TRANSCRIBES = 2;
 
   constructor(
     private readonly mediaOps: MediaOperationsService,
@@ -703,16 +710,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
    */
   private processQueue(): void {
     // Fill main pool (up to 5 concurrent tasks)
-    let dispatched = 0;
-    while (this.mainPool.size < this.MAX_MAIN_CONCURRENT) {
-      const nextTask = this.getNextMainTask();
-      if (!nextTask) break;
-
-      this.executeTask(nextTask, 'main').catch(err => {
-        this.logger.error(`Main pool task failed: ${err?.message || err}`);
-      });
-      dispatched++;
-    }
+    let dispatched = this.fillMainPool();
 
     // AI tasks. Under aiVia 'crucible' they go to Crucible lanes, admitted
     // asynchronously (venue, activity, reservation) so nothing here waits on
@@ -733,6 +731,21 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       }
     }
 
+  }
+
+  /** Fill the main pool (up to 5 concurrent tasks). Returns how many were dispatched. */
+  private fillMainPool(): number {
+    let dispatched = 0;
+    while (this.mainPool.size < this.MAX_MAIN_CONCURRENT) {
+      const nextTask = this.getNextMainTask();
+      if (!nextTask) break;
+
+      this.executeTask(nextTask, 'main').catch(err => {
+        this.logger.error(`Main pool task failed: ${err?.message || err}`);
+      });
+      dispatched++;
+    }
+    return dispatched;
   }
 
   /**
@@ -797,11 +810,37 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       }
 
       // Only return non-AI tasks
-      if (currentTask.type !== 'analyze' && currentTask.type !== 'analyze-webpage') {
-        return { task: currentTask, job };
+      if (currentTask.type === 'analyze' || currentTask.type === 'analyze-webpage') continue;
+
+      if (currentTask.type === 'transcribe') {
+        // Under Crucible lanes a transcription is PLACED first (P5): a GPU
+        // lane, or back here as whisper-cli. Unplaced, it isn't main-pool work.
+        if (this.aiMode() === 'crucible' && !this.transcribeRoutedToCli(job)) continue;
+        if (this.runningMainTranscribes() >= this.MAX_MAIN_TRANSCRIBES) continue;
       }
+      return { task: currentTask, job };
     }
     return null;
+  }
+
+  /** The job's current transcribe task was routed to whisper-cli (the venue rule, or a fallback). */
+  private transcribeRoutedToCli(job: QueueJob): boolean {
+    return job.transcribeRoute !== undefined && job.transcribeRoute.index === job.currentTaskIndex;
+  }
+
+  /** whisper-cli transcriptions running in the main pool now. */
+  private runningMainTranscribes(): number {
+    let n = 0;
+    for (const task of this.mainPool.values()) if (task.type === 'transcribe') n++;
+    return n;
+  }
+
+  /** Hand a job's transcribe task to the main pool as whisper-cli. It is no longer the lanes' to place. */
+  private routeTranscribeToCli(job: QueueJob, index: number, warning: string | null): void {
+    job.transcribeRoute = { index, kind: 'cli', warning };
+    this.clearPark(job);
+    delete job.lane;
+    delete job.venue;
   }
 
   /**
@@ -905,7 +944,9 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         server: placement.server,
         model: placement.target.model,
         abort: new AbortController(),
-        message: `Reserving ${placement.target.model} on ${placement.server}...`,
+        message: task.type === 'transcribe'
+          ? `Sending to Crucible on ${placement.server}...`
+          : `Reserving ${placement.target.model} on ${placement.server}...`,
       }),
     };
 
@@ -935,6 +976,16 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
     // Set when this task parked: its own lane freeing then says nothing about
     // the server being free (someone else holds it), so nothing is re-asked.
     let parkedHere = false;
+    // P5: a transcription placed on a GPU lane reserves with its asr submit
+    // (a 409 there parks it), not with a model load and lease.
+    const asrOnLane = placement !== undefined && task.type === 'transcribe';
+    const transcribeRoute: WhisperRoute | undefined = task.type !== 'transcribe'
+      ? undefined
+      : asrOnLane
+        ? { kind: 'crucible', server: placement!.server, model: placement!.target.model, fallback: 'defer', signal: activeTask.abort!.signal }
+        : this.transcribeRoutedToCli(job)
+          ? { kind: 'cli', warning: job.transcribeRoute!.warning }
+          : undefined;
     try {
       const run = async (): Promise<TaskResult> => {
         // Ensure correct library is active for this job (all tasks need the right DB context)
@@ -965,14 +1016,14 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         });
 
         // Execute the task
-        return this.executeTaskLogic(job, task, taskId);
+        return this.executeTaskLogic(job, task, taskId, transcribeRoute);
       };
 
       // A lane task RESERVES first (load + lease on its server, §7.2 step 3)
       // and only then switches library and starts, so a task that parks at
       // the door never touched the shared DB connection. The reservation is
       // held (heartbeaten) across the whole task and released when it settles.
-      const result = placement === undefined
+      const result = placement === undefined || asrOnLane
         ? await run()
         : await this.lanes!.runAdmitted({
             ...placement,
@@ -1092,6 +1143,20 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         return;
       }
 
+      // P5: Crucible couldn't take the transcription for an infrastructure
+      // reason (unreachable, no asr engine, the stream lost). It goes to
+      // whisper-cli in the main pool, and the task says so when it finishes.
+      // A cancel never gets here (isJobCancelled above).
+      if (asrOnLane && isAsrUnavailable(error) && !activeTask.abandoned) {
+        const why = error.message.replace(/[.\s]+$/, '');
+        const warning = `Transcribed with the offline transcriber (whisper) because ${why.charAt(0).toLowerCase()}${why.slice(1)}.`;
+        this.logger.warn(`[${job.id}] ${warning}`);
+        this.routeTranscribeToCli(job, job.currentTaskIndex, warning);
+        this.eventService.emitTaskProgress(job.id, 'transcribe', 0, 'Crucible unavailable, using the offline transcriber...');
+        parkedHere = true; // the server is not free because this lane is: re-ask nothing
+        return;
+      }
+
       // If the watchdog already force-failed and finalized this task, don't emit
       // a second failure or clobber state — just fall through to the finally.
       if (activeTask.abandoned) {
@@ -1198,6 +1263,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       if (job.status !== 'pending' && job.status !== 'processing') continue;
       const task = job.tasks[job.currentTaskIndex];
       if (!task || !LANE_TASK_TYPES.has(task.type)) continue;
+      if (task.type === 'transcribe' && this.transcribeRoutedToCli(job)) continue;
       if (this.isTaskRunning(job.id, job.currentTaskIndex)) continue;
       let previousRunning = false;
       for (let i = 0; i < job.currentTaskIndex; i++) {
@@ -1236,10 +1302,30 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
 
     // 1. Venue, once per model per pass.
     const decisions = new Map<string, ReturnType<CrucibleLanesService['place']>>();
+    const transcribeDecisions = new Map<string, ReturnType<CrucibleLanesService['placeTranscribe']>>();
     const byLane = new Map<string, Array<{ task: Task; job: QueueJob; index: number; placement: LanePlacement }>>();
+    let toMain = false;
     for (const { task, job } of candidates) {
       const index = job.currentTaskIndex;
       if (!this.canStartJobLibrary(job)) continue;
+      if (task.type === 'transcribe') {
+        // P5: the transcription venue rule, once per pass per translate flag.
+        const key = (task.options as { translate?: unknown } | undefined)?.translate === true ? 'translate' : 'transcribe';
+        if (!transcribeDecisions.has(key)) transcribeDecisions.set(key, lanes.placeTranscribe(task));
+        const answer = await transcribeDecisions.get(key)!;
+        if (!this.stillWaiting(job, index)) continue;
+        if (answer.kind === 'cli') {
+          this.routeTranscribeToCli(job, index, answer.warning);
+          toMain = true;
+          continue;
+        }
+        job.lane = answer.placement.lane;
+        job.venue = answer.placement.server;
+        const list = byLane.get(answer.placement.lane) ?? [];
+        list.push({ task, job, index, placement: answer.placement });
+        byLane.set(answer.placement.lane, list);
+        continue;
+      }
       let target;
       try {
         target = lanes.targetOf(task);
@@ -1277,7 +1363,9 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         if (free <= 0) break;
         if (!this.stillWaiting(c.job, c.index) || !this.canStartJobLibrary(c.job)) continue;
         if (isGpu) {
-          const busy = await lanes.preflight(c.placement.server, c.placement.target);
+          const busy = c.task.type === 'transcribe'
+            ? await lanes.preflightJob(c.placement.server)
+            : await lanes.preflight(c.placement.server, c.placement.target);
           if (!this.stillWaiting(c.job, c.index)) continue;
           if (busy !== null) {
             this.parkJob(c.job, busy, c.placement.server);
@@ -1292,6 +1380,9 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         free--;
       }
     }
+
+    // Transcriptions the venue rule sent to whisper-cli: the main pool takes them.
+    if (toMain) this.fillMainPool();
   }
 
   /**
@@ -1431,6 +1522,8 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
     job: QueueJob,
     task: Task,
     taskId: string,
+    /** P5: the engine a transcribe task was placed on; absent, the venue rule decides in place. */
+    transcribeRoute?: WhisperRoute,
   ): Promise<TaskResult> {
     let result: TaskResult;
 
@@ -1692,6 +1785,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
           job.videoId || job.videoPath!,
           task.options,
           taskId,
+          transcribeRoute,
         );
         if (result.success && result.data) {
           job.transcriptPath = result.data.transcriptPath;

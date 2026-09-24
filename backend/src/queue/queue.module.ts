@@ -8,9 +8,10 @@ import { LibraryModule } from '../library/library.module';
 import { CrucibleModule } from '../crucible/crucible.module';
 import { CrucibleLlmModule } from '../crucible/llm/crucible-llm.module';
 import { CrucibleLanesService } from './crucible-lanes';
+import { CrucibleAsrModule } from '../crucible/asr/crucible-asr.module';
 
 @Module({
-  imports: [forwardRef(() => MediaModule), forwardRef(() => LibraryModule), CrucibleModule, CrucibleLlmModule],
+  imports: [forwardRef(() => MediaModule), forwardRef(() => LibraryModule), CrucibleModule, CrucibleLlmModule, CrucibleAsrModule],
   controllers: [QueueController],
   // P4: the Crucible lanes (admission, parking, the ledger sweeps).
   providers: [QueueManagerService, CrucibleLanesService],

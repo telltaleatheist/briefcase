@@ -285,7 +285,9 @@ describe('REGRESSION: downloads, imports and processing are untouched', () => {
     directRig.qm.onModuleDestroy();
   }, 30_000);
 
-  it('non-AI tasks (normalize, transcribe, process-video) never touch the lanes', async () => {
+  // P5: a transcribe IS placed by the lanes now (placeTranscribe); with no
+  // transcription service it is whisper-cli in the main pool, and never an LLM venue.
+  it('non-AI tasks (normalize, transcribe, process-video) never ask for an LLM venue, and run in the main pool', async () => {
     await wire(await unusedLoopbackUrl());
     const spy = jest.spyOn(lanes, 'place');
     const rig = makeRig(lanes);

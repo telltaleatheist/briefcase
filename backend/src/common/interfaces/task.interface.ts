@@ -262,6 +262,12 @@ export interface QueueJob {
   /** When the current AI task became runnable (the same-model preference's starvation guard). */
   aiWaitingSince?: number;
   aiWaitingIndex?: number;
+  /**
+   * P5: the transcribe task at `index` runs on whisper-cli in the main pool
+   * (the venue rule said so, or Crucible couldn't take it). `warning` is put on
+   * the job when it finishes, when that was a fallback.
+   */
+  transcribeRoute?: { index: number; kind: 'cli'; warning: string | null };
 }
 
 // Queue status

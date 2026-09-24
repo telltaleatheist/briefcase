@@ -9,8 +9,10 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Logger } from '@nestjs/common';
 import { QueueManagerService } from '../../src/queue/queue-manager.service';
 import {
+  asrTarget,
   CLOUD_LANE,
   gpuLaneOf,
+  type TranscribePlaceAnswer,
   type CrucibleLanesService,
   type LanePlacement,
   type LanesStatus,
@@ -20,6 +22,7 @@ import {
 import { crucibleTargetOf, type CrucibleTarget } from '../../src/crucible/llm/target';
 import { CrucibleParkedError } from '../../src/crucible/llm/errors';
 import type { Task, TaskResult } from '../../src/common/interfaces/task.interface';
+import type { WhisperRoute } from '../../src/media/whisper.service';
 
 Logger.overrideLogger(false);
 
@@ -59,6 +62,10 @@ export class StubMedia {
   delayMs = 5;
   /** Replaces analyzeVideo's body (runs inside the task's Crucible run when admitted to a lane). */
   analyze?: (videoId: string, options: Record<string, unknown>, taskId: string) => Promise<TaskResult>;
+  /** Replaces transcribeVideo's body (P5): sees the engine route the queue chose. */
+  transcribe?: (videoId: string, options: Record<string, unknown>, taskId: string, route: WhisperRoute | undefined) => Promise<TaskResult>;
+  /** The route every transcribeVideo call was given, in call order (P5). */
+  readonly transcribeRoutes: Array<{ taskId: string; route: WhisperRoute | undefined }> = [];
   private nextVideo = 1;
 
   private async op(op: string, arg: string, taskId: string, result: () => TaskResult): Promise<TaskResult> {
@@ -93,7 +100,14 @@ export class StubMedia {
   getVideoInfo = (url: string, taskId: string) => this.op('get-info', url, taskId, () => ({ success: true, data: { title: url } }));
   downloadVideo = (url: string, _o: unknown, taskId: string) => this.op('download', url, taskId, () => ({ success: true, data: { videoPath: `/tmp/${encodeURIComponent(url)}.mp4`, title: url } }));
   importToLibrary = (p: string, _o: unknown, taskId: string) => this.op('import', p, taskId, () => ({ success: true, data: { videoId: `v${this.nextVideo++}` } }));
-  transcribeVideo = (id: string, _o: unknown, taskId: string) => this.op('transcribe', id, taskId, () => ({ success: true, data: { transcriptPath: '/tmp/t.srt' } }));
+  transcribeVideo = (id: string, options: unknown, taskId: string, route?: WhisperRoute): Promise<TaskResult> => {
+    this.transcribeRoutes.push({ taskId, route });
+    if (this.transcribe) {
+      this.calls.push({ op: 'transcribe', arg: id, taskId });
+      return this.transcribe(id, (options ?? {}) as Record<string, unknown>, taskId, route);
+    }
+    return this.op('transcribe', id, taskId, () => ({ success: true, data: { transcriptPath: '/tmp/t.srt' } }));
+  };
   normalizeAudio = (id: string, _o: unknown, taskId: string) => this.op('normalize-audio', id, taskId, () => ({ success: true, data: {} }));
   fixAspectRatio = (id: string, _o: unknown, taskId: string) => this.op('fix-aspect-ratio', id, taskId, () => ({ success: true, data: {} }));
   processVideo = (id: string, _o: unknown, taskId: string) => this.op('process-video', id, taskId, () => ({ success: true, data: {} }));
@@ -140,6 +154,14 @@ export class StubLanes {
   busy = new Map<string, string>();
   /** server → holder sentence at the reservation (the door's 409). */
   doorBusy = new Map<string, string>();
+  /**
+   * P5: where a transcribe goes. `{server, model}` for a GPU lane, or
+   * `{cli: warning|null}` for whisper-cli in the main pool. Default: whisper-cli, no warning.
+   */
+  transcribeTo: { server: string; model: string } | { cli: string | null } = { cli: null };
+  placeTranscribeCalls = 0;
+  /** server → holder sentence at the asr (job-lane) preflight. */
+  jobBusy = new Map<string, string>();
   resident = new Map<string, string>();
   readonly admitted: Array<{ jobId: string; lane: string; model: string }> = [];
   readonly signals = new Map<string, AbortSignal>();
@@ -163,6 +185,13 @@ export class StubLanes {
     const server = this.serverOf.get(target.model) ?? 'mac';
     return { kind: 'lane', placement: { lane: gpuLaneOf(server), server, target } };
   }
+  async placeTranscribe(_task: Task): Promise<TranscribePlaceAnswer> {
+    this.placeTranscribeCalls++;
+    const to = this.transcribeTo;
+    if ('cli' in to) return { kind: 'cli', reason: 'scripted', warning: to.cli };
+    return { kind: 'lane', placement: { lane: gpuLaneOf(to.server), server: to.server, target: asrTarget(to.model) } };
+  }
+  async preflightJob(server: string) { return this.jobBusy.get(server) ?? null; }
   async residentOn(server: string) { return this.resident.get(server) ?? null; }
   async preflight(server: string) { return this.busy.get(server) ?? null; }
   forgetActivity() { /* nothing cached */ }
@@ -230,6 +259,10 @@ export function analyzeJob(videoId: string, aiModel: string, extra: Record<strin
     tasks: [{ type: 'analyze', options: { aiModel } } as Task],
     ...extra,
   };
+}
+
+export function transcribeJob(videoId: string, options: Record<string, unknown> = {}) {
+  return { videoId, displayName: `video ${videoId}`, tasks: [{ type: 'transcribe', options } as Task] };
 }
 
 export function downloadJob(url: string, withAnalyze?: string) {
