@@ -129,7 +129,7 @@ export class TourService {
         {
           element: '.settings-section:nth-child(1)',
           title: 'AI Engine',
-          description: 'AI runs on Crucible. This card shows the connected server; Claude, OpenAI and Ollama are that server\'s upstreams.',
+          description: 'AI runs on Crucible. This card shows the connected server; Claude, OpenAI and Ollama via Crucible are that server\'s upstreams.',
           side: 'right',
         },
         {

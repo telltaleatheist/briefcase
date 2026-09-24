@@ -16,9 +16,9 @@ interface UpstreamRow {
 }
 
 const ROWS: UpstreamRow[] = [
-  { name: 'anthropic', label: 'Claude (Anthropic)', field: 'key', placeholder: 'sk-ant-…', getLink: 'https://console.anthropic.com/settings/keys', getLabel: 'Get a key' },
-  { name: 'openai', label: 'OpenAI', field: 'key', placeholder: 'sk-…', getLink: 'https://platform.openai.com/api-keys', getLabel: 'Get a key' },
-  { name: 'ollama', label: 'Ollama', field: 'url', placeholder: 'http://127.0.0.1:11434', getLink: 'https://ollama.com/download', getLabel: 'Get Ollama' },
+  { name: 'anthropic', label: 'Claude via Crucible', field: 'key', placeholder: 'sk-ant-…', getLink: 'https://console.anthropic.com/settings/keys', getLabel: 'Get a key' },
+  { name: 'openai', label: 'OpenAI via Crucible', field: 'key', placeholder: 'sk-…', getLink: 'https://platform.openai.com/api-keys', getLabel: 'Get a key' },
+  { name: 'ollama', label: 'Ollama via Crucible', field: 'url', placeholder: 'http://127.0.0.1:11434', getLink: 'https://ollama.com/download', getLabel: 'Get Ollama' },
 ];
 
 /**
@@ -69,9 +69,6 @@ const ROWS: UpstreamRow[] = [
         }
       </div>
     }
-    @if (showOllamaNote()) {
-      <p class="up-note">Ollama runs at its own default context length through Crucible; set OLLAMA_CONTEXT_LENGTH on the Ollama side to change it.</p>
-    }
   `,
   styles: [`
     :host { display: block; }
@@ -88,7 +85,6 @@ const ROWS: UpstreamRow[] = [
     .up-result { margin: 6px 0 0; font-size: 12px; color: var(--success); }
     .up-result.bad, .up-error { color: var(--warning); }
     .up-error { font-size: 12.5px; margin: 0 0 8px; }
-    .up-note { font-size: 12px; color: var(--text-tertiary); margin: 4px 0 0; }
   `],
 })
 export class CrucibleUpstreamsComponent {
@@ -132,10 +128,6 @@ export class CrucibleUpstreamsComponent {
     }
     const card = doc.upstreams[name];
     return card === null ? null : { configured: card.configured, hint: card.keyHint };
-  }
-
-  showOllamaNote(): boolean {
-    return this.settings()?.upstreams.ollama?.configured === true;
   }
 
   setDraft(name: UpstreamName, value: string): void {

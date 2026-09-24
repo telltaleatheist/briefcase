@@ -15,33 +15,13 @@ export class ErrorParser {
     if (typeof error === 'string') {
       technical = error;
 
-      // Extract just the actual error from verbose logs
-      const errorMatch = error.match(/Claude request error: Error code: (\d+) - (.+)/);
-      if (errorMatch) {
-        const errorCode = errorMatch[1];
-        const errorDetails = errorMatch[2];
-
-        // Try to parse the JSON error details
-        try {
-          const jsonMatch = errorDetails.match(/\{[^}]+\}/);
-          if (jsonMatch) {
-            const errorObj = JSON.parse(jsonMatch[0]);
-            if (errorObj.error && errorObj.error.message) {
-              technical = `Error ${errorCode}: ${errorObj.error.message}`;
-            }
-          }
-        } catch (e) {
-          technical = `Error ${errorCode}: ${errorDetails}`;
-        }
-      }
-
       // Check for common patterns in error strings
       if (error.includes('model:') && (error.includes('not_found_error') || error.includes('404'))) {
         const modelMatch = error.match(/['"]?model['"]?:\s*['"]?([\w\-.:]+)['"]?/);
         if (modelMatch) {
           const modelName = modelMatch[1];
           title = 'Invalid AI Model';
-          message = `The AI model "${modelName}" is not available.\n\nThis usually means:\n• The model name is misspelled\n• The model has been deprecated\n• You need to update to a newer model version\n\nPlease check your Settings and select a valid model.`;
+          message = `The AI model "${modelName}" is not available on the Crucible server.\n\nPick a model the server offers in Settings › AI Analysis.`;
         }
       } else if (error.includes('THREADS_NO_VIDEO:')) {
         // Named by backend/src/downloader/threads-extractor.ts. Checked ahead of the
@@ -57,7 +37,7 @@ export class ErrorParser {
         message = 'The requested resource could not be found.';
       } else if (error.includes('401') || error.includes('Unauthorized')) {
         title = 'Authentication Error';
-        message = 'Your API key is invalid or has expired. Please check your settings.';
+        message = 'The request was refused as unauthorized. If it was an AI call, check the Crucible server in Settings › Crucible Servers (its connection, or the Claude or OpenAI key set on it).';
       } else if (error.includes('429') || error.includes('rate limit')) {
         title = 'Rate Limited';
         message = 'Too many requests. Please wait a moment and try again.';
