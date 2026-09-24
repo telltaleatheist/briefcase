@@ -258,6 +258,16 @@ describe('startup and quit sweeps through the lanes service', () => {
   });
 });
 
+describe('REGRESSION: the quit sweep runs once', () => {
+  it('beforeApplicationShutdown asked twice (two shutdown paths) sweeps once', async () => {
+    await wire();
+    const sweep = jest.spyOn(lanes, 'sweep');
+    await Promise.all([lanes.beforeApplicationShutdown(), lanes.beforeApplicationShutdown()]);
+    await lanes.beforeApplicationShutdown();
+    expect(sweep.mock.calls.filter(([reason]) => reason === 'quitting')).toHaveLength(1);
+  });
+});
+
 describe('REGRESSION: downloads, imports and processing are untouched', () => {
   async function run(rig: Rig): Promise<{ ms: number; ids: string[] }> {
     rig.media.delayMs = 15;

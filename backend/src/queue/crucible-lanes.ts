@@ -222,9 +222,16 @@ export class CrucibleLanesService implements OnModuleInit, BeforeApplicationShut
       .then(() => undefined, () => undefined);
   }
 
-  async beforeApplicationShutdown(): Promise<void> {
-    await this.sweep('quitting', this.quitDeadlineMs);
+  /**
+   * The quit sweep, ONCE per process however many shutdown paths ask
+   * (graceful-shutdown.ts is the one path now; this keeps a second from
+   * spending the kill deadline sweeping again).
+   */
+  beforeApplicationShutdown(): Promise<void> {
+    this.quitSweep ??= this.sweep('quitting', this.quitDeadlineMs).then(() => undefined, () => undefined);
+    return this.quitSweep;
   }
+  private quitSweep: Promise<void> | null = null;
 
   /** 'crucible' when AI tasks go to lanes, 'direct' for today's AI pool. */
   mode(): AiVia {

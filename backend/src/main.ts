@@ -9,6 +9,7 @@ import { ServerOptions } from 'socket.io';
 import * as express from 'express';  // Explicitly import express
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { AIProviderService } from './analysis/ai-provider.service';
+import { installGracefulShutdown } from './common/graceful-shutdown';
 
 class ExtendedIoAdapter extends IoAdapter {
   createIOServer(port: number, options?: ServerOptions): any {
@@ -92,39 +93,20 @@ async function bootstrap() {
     // config/environment.ts.
     const host = environment.host;
 
-    // Graceful shutdown. The Electron parent sends SIGTERM and waits before
-    // force-killing; without a handler here the backend was ALWAYS force-killed,
-    // so nothing ever got a chance to clean up — most visibly, Ollama models
-    // stayed resident (17-25GB) after quitting until keep_alive expired.
-    app.enableShutdownHooks();
-
-    let shuttingDown = false;
-    const gracefulShutdown = async (signal: string) => {
-      if (shuttingDown) return; // several paths can fire; run once
-      shuttingDown = true;
-      log.info(`Received ${signal} — releasing resources before exit...`);
-      try {
-        // Release Ollama models we loaded. Bounded so a hung daemon cannot keep
-        // us past the parent's grace period; we get force-killed either way.
-        const aiProvider = app.get(AIProviderService, { strict: false });
-        await Promise.race([
-          aiProvider.releaseOllamaModels(),
-          new Promise((resolve) => setTimeout(resolve, 3000)),
-        ]);
-      } catch (error) {
-        log.warn(`Error releasing Ollama models: ${(error as Error).message}`);
-      }
-      try {
-        await app.close();
-      } catch (error) {
-        log.warn(`Error closing Nest application: ${(error as Error).message}`);
-      }
-      log.info('Graceful shutdown complete');
-      process.exit(0);
-    };
-
-    process.on('SIGTERM', () => void gracefulShutdown('SIGTERM'));
-    process.on('SIGINT', () => void gracefulShutdown('SIGINT'));
+    // Graceful shutdown. The Electron parent sends SIGTERM and SIGKILLs 12 s
+    // later; without a handler here the backend was ALWAYS force-killed, so
+    // nothing ever got a chance to clean up (most visibly, Ollama models
+    // stayed resident, 17-25GB, until keep_alive expired).
+    //
+    // ONE path (graceful-shutdown.ts): NOT `app.enableShutdownHooks()` as
+    // well, whose own listener ran every hook, the 8 s Crucible quit sweep
+    // included, a second time beside ours.
+    installGracefulShutdown({
+      close: () => app.close(),
+      releaseOllama: () => app.get(AIProviderService, { strict: false }).releaseOllamaModels(),
+      exit: (code) => process.exit(code),
+      log: { info: (m) => log.info(m), warn: (m) => log.warn(m) },
+    });
 
     await app.listen(port, host);
     log.info(`=== APPLICATION STARTED ===`);
