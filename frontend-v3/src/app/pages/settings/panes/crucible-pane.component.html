@@ -74,11 +74,7 @@
 
           @if (probes()[row.name]; as answer) {
             @if (answer.probe.outcome === 'ok') {
-              <div class="cru-facts">
-                Crucible {{ answer.probe.facts.version }} · {{ answer.probe.facts.backend }} ·
-                {{ answer.probe.facts.gpu.name }} ({{ gb(answer.probe.facts.gpu.vramBytes) }})
-                @if (answer.probe.facts.engineUrl) { · engine at {{ answer.probe.facts.engineUrl }} }
-              </div>
+              <div class="cru-facts">{{ factsLine(answer.probe.facts) }}</div>
               @if (answer.probe.facts.capabilities; as caps) {
                 <div class="cru-caps">
                   @for (cap of caps; track cap.capability) {

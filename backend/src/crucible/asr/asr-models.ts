@@ -131,7 +131,8 @@ export function chooseAsrModel(rows: readonly AsrRow[]): AsrChoice {
 
 /** What a server's `/v1/info` says about asr: its backend, whether it offers asr, and its rows for that backend's engine. */
 export interface AsrOffer {
-  readonly backend: string;
+  /** The host's backend, or null when `/v1/info` did not state it (rows are then not filtered by engine). */
+  readonly backend: string | null;
   /** `asr` is an installed job type with at least one row for this backend's engine. */
   readonly offersAsr: boolean;
   readonly choice: AsrChoice;

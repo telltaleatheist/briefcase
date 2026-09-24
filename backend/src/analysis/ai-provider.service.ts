@@ -8,7 +8,7 @@ import {
 } from './model-utils';
 import { AnalysisCancelledError, ensureNotCancelled } from './cancellation';
 import { CrucibleChatService, OLLAMA_CONTEXT_VERSION, isAnalysisModel, type CrucibleChatResult } from '../crucible/llm/crucible-chat.service';
-import { isVisionAlias } from '../crucible/llm/ollama-map';
+import { isVisionAlias, servedContextOf } from '../crucible/llm/ollama-map';
 import { CrucibleBusyError, CrucibleChatCancelled, CrucibleChatError, CrucibleNoVenueError, CrucibleParkedError } from '../crucible/llm/errors';
 import { crucibleTargetOf, type CrucibleTarget } from '../crucible/llm/target';
 import { CRUCIBLE_ANALYSIS_CONTEXT } from '../crucible/llm/ollama-map';
@@ -128,11 +128,16 @@ export class AIProviderService {
       const [models, pageReaders] = await Promise.all([this.crucibleChat.modelsOn(venue), this.crucibleChat.pageReadersOn(venue)]);
       // By capability class (never a page reader), and the base form over its
       // `-vl` alias: switching a card between the two is a full reload.
-      const usable = models.filter((m) => m.backendSupported && m.installed && isAnalysisModel(m, pageReaders) && m.paramsB > 0 && m.paramsB <= maxParamsB);
+      // Only STATED facts qualify: a row whose support, install or size the
+      // server did not state (null, 1.0.25+) can't be shown to be a small
+      // installed model, so it is not a candidate.
+      const usable = models.flatMap((m) =>
+        m.backendSupported === true && m.installed === true && m.paramsB !== null && m.paramsB > 0 && m.paramsB <= maxParamsB
+          && isAnalysisModel(m, pageReaders) ? [{ model: m, paramsB: m.paramsB }] : []);
       const small = usable
-        .filter((m) => !isVisionAlias(m) || !usable.some((b) => b.id === m.weightsOf))
-        .sort((a, b) => a.paramsB - b.paramsB || Number(isVisionAlias(b)) - Number(isVisionAlias(a)));
-      return small.length > 0 ? `local:${small[small.length - 1].id}` : null;
+        .filter(({ model: m }) => !isVisionAlias(m) || !usable.some(({ model: b }) => b.id === m.weightsOf))
+        .sort((a, b) => a.paramsB - b.paramsB || Number(isVisionAlias(b.model)) - Number(isVisionAlias(a.model)));
+      return small.length > 0 ? `local:${small[small.length - 1].model.id}` : null;
     } catch (error) {
       this.logger.debug(`[Placement] Crucible catalog not readable: ${(error as Error).message}`);
       return null;
@@ -186,10 +191,14 @@ export class AIProviderService {
       // The context this host serves it at, never more than what is in force,
       // and capped at 32K: a larger chunk is slower on a local card for no gain.
       // A model this run loads at a larger context (ollama-map.ts rule 4) is served at that.
-      const served = loadContext !== undefined
-        ? loadContext
-        : Math.min(info.contextDefault, info.maxModelLen ?? Number.POSITIVE_INFINITY);
-      return Number.isFinite(served) && served > 0 ? Math.min(served, CRUCIBLE_ANALYSIS_CONTEXT) : null;
+      // Null when the server stated neither context (1.0.25+): the caller's
+      // documented unread-context sizing applies (ai-analysis
+      // CRUCIBLE_LOCAL_CONTEXT_FALLBACK), said here by field name.
+      const served = loadContext !== undefined ? loadContext : servedContextOf(info);
+      if (served === null) {
+        this.logger.warn(`[Model Limits] "${venue}" states neither contextDefault nor maxModelLen for ${target.model}; its context is unknown`);
+      }
+      return served !== null && Number.isFinite(served) && served > 0 ? Math.min(served, CRUCIBLE_ANALYSIS_CONTEXT) : null;
     } catch {
       return null;
     }
@@ -410,7 +419,7 @@ export class AIProviderService {
       }
       const info = (await chat.modelsOn(venue, true)).find((m) => m.id === target.model);
       if (!info) return { success: false, error: `"${target.model}" is not in the catalog of "${venue}".` };
-      if (!info.installed) return { success: false, error: `"${target.model}" is not downloaded on "${venue}".` };
+      if (info.installed === false) return { success: false, error: `"${target.model}" is not downloaded on "${venue}".` };
       return info.loadable || info.resident ? { success: true } : { success: false, error: info.reason ?? `"${target.model}" can't load on "${venue}" right now.` };
     } catch (error) {
       return { success: false, error: (error as Error).message };

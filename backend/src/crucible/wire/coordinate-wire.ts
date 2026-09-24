@@ -10,10 +10,14 @@
  * Type-only; the renderer imports it through `@crucible-wire/*`.
  */
 
-/** A class Briefcase asked for that this engine does not serve, in the engine's own words. */
+/**
+ * A class Briefcase asked for that this engine does not serve, in the engine's
+ * own words. Mirrors the SDK's capability row / UnmetNeed: `reason` is
+ * informational there, null when the server gave none.
+ */
 export interface CrucibleUnmetClass {
   readonly class: string;
-  readonly reason: string;
+  readonly reason: string | null;
 }
 
 export type CrucibleMissingEntry =
@@ -41,16 +45,20 @@ export type CrucibleMissingEntry =
       readonly inCatalog: boolean;
     };
 
-/** One module task's progress, off `GET /v1/tasks/{id}/events`. */
+/**
+ * One module task's progress, off `GET /v1/tasks/{id}/events`. Mirrors the
+ * SDK's TaskStepData / TaskBytesProgress (this file may not import the SDK):
+ * their informational fields are null where the server did not state them.
+ */
 export interface CrucibleModuleProgress {
   readonly server: string;
   readonly taskId: string;
   readonly state: 'running' | 'done' | 'failed' | 'cancelled';
-  readonly step: { readonly name: string; readonly index: number; readonly total: number } | null;
+  readonly step: { readonly name: string | null; readonly index: number | null; readonly total: number | null } | null;
   /** An install's line (pip's text); not load-bearing. */
   readonly line: string | null;
   /** A pull's byte counts. */
-  readonly bytes: { readonly done: number; readonly total: number | null; readonly file: string } | null;
+  readonly bytes: { readonly done: number; readonly total: number | null; readonly file: string | null } | null;
   readonly skipped: string | null;
   /** What the `reload` step said became reachable. */
   readonly jobTypes: readonly string[] | null;
@@ -61,9 +69,10 @@ export interface CrucibleModuleProgress {
 
 /** Who holds the card, in the server's own words. Shown verbatim, never as a failure. */
 export interface CrucibleCoordinationHolder {
-  /** `a job`, `a lease`, `the claim` or `a chat`. */
+  /** `a job`, `a lease`, `the claim` or `a chat`. Always stated. */
   readonly fact: string;
-  readonly who: string;
+  /** Who, in the server's words; null when it did not name them (the SDK's CrucibleCardHeld.who). */
+  readonly who: string | null;
 }
 
 export type CrucibleCoordinationState =

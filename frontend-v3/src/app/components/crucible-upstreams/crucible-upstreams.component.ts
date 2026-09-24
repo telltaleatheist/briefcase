@@ -37,7 +37,7 @@ const ROWS: UpstreamRow[] = [
     @if (loadError(); as error) {
       <p class="up-error">{{ error }}</p>
     }
-    @for (row of rows; track row.name) {
+    @for (row of offeredRows(); track row.name) {
       <div class="up-row">
         <div class="up-head">
           <span class="up-name">{{ row.label }}</span>
@@ -117,15 +117,25 @@ export class CrucibleUpstreamsComponent {
     }, { allowSignalWrites: true });
   }
 
+  /** The rows this server offers: a card it sends as null is an upstream it does not have, and is left out. */
+  offeredRows(): readonly UpstreamRow[] {
+    const doc = this.settings();
+    return doc === null ? this.rows : this.rows.filter((row) => doc.upstreams[row.name] !== null);
+  }
+
   stateOf(name: UpstreamName): { configured: boolean; hint: string | null } | null {
     const doc = this.settings();
     if (doc === null) return null;
-    if (name === 'ollama') return { configured: doc.upstreams.ollama.configured, hint: doc.upstreams.ollama.url };
-    return { configured: doc.upstreams[name].configured, hint: doc.upstreams[name].keyHint };
+    if (name === 'ollama') {
+      const card = doc.upstreams.ollama;
+      return card === null ? null : { configured: card.configured, hint: card.url };
+    }
+    const card = doc.upstreams[name];
+    return card === null ? null : { configured: card.configured, hint: card.keyHint };
   }
 
   showOllamaNote(): boolean {
-    return this.settings()?.upstreams.ollama.configured === true;
+    return this.settings()?.upstreams.ollama?.configured === true;
   }
 
   setDraft(name: UpstreamName, value: string): void {

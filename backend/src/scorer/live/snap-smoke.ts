@@ -385,10 +385,11 @@ async function runChapters(a: Args, vids: YtsegVideo[], handle: ScorerHandle | n
           decide: async (r, o) => {
             const out = await handle!.decide(r, o);
             seen.decides++;
-            seen.engineMs += out.timingMs.total;
+            // Informational: a figure the server did not state is left out of the sums.
+            if (out.timingMs.total !== null) seen.engineMs += out.timingMs.total;
             for (const [name, t] of Object.entries(out.timingMs.perQuestion)) {
               seen.questions++;
-              seen.prompt += t.promptTokens;
+              if (t.promptTokens !== null) seen.prompt += t.promptTokens;
               if (t.cachedTokens !== null) {
                 seen.cached += t.cachedTokens;
                 seen.cachedN++;

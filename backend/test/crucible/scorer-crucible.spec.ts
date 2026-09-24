@@ -233,7 +233,7 @@ describe('crucible-decide: Briefcase\'s floor, client-side, and the label-mass g
 describe('pickDecideModel: the 9B, one form per server session', () => {
   const row = (id: string, extra: Partial<ModelInfo> = {}): ModelInfo => ({
     id, family: id.split('-')[0], paramsB: 9, revision: 'r', fingerprint: `${id}@r`, modalities: ['text'], backendSupported: true,
-    installed: true, weightsOf: null, resident: false, loadable: true, memoryBytesEstimate: 1, contextDefault: 16384, maxModelLen: 16384, ...extra,
+    installed: true, weightsOf: null, resident: false, loadable: true, reason: null, memoryBytesEstimate: 1, contextDefault: 16384, maxModelLen: 16384, ...extra,
   });
   const models = [row('qwen3.8-27b-4bit'), row('qwen3.5-9b'), row('qwen3.5-9b-vl', { modalities: ['text', 'image'], weightsOf: 'qwen3.5-9b' }), row('dots-ocr', { family: 'dots' })];
 

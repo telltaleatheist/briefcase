@@ -22,6 +22,7 @@
  */
 
 import type {
+  DecideCallTiming,
   DecideAnswer as WireAnswer,
   DecideQuestion as WireQuestion,
   DecideRequest as WireRequest,
@@ -127,7 +128,7 @@ export function toWireRequest(model: string, req: DecideRequest): WireRequest {
 }
 
 /** One answer's distribution over its labels, in label order, as the wire gave it (null = missing, or p exactly 0). */
-function wireLogprobs(answer: WireAnswer, labels: string[]): Array<number | null> {
+function wireLogprobs(answer: WireAnswer, labels: string[], question: string): Array<number | null> {
   if (answer.type === 'yesno') {
     // p is the renormalised P(Yes) over the letters returned.
     const missing = new Set(answer.missingLabels ?? []);
@@ -135,8 +136,15 @@ function wireLogprobs(answer: WireAnswer, labels: string[]): Array<number | null
     const no = missing.has('No') ? null : answer.p < 1 ? Math.log1p(-answer.p) : null;
     return [yes, no];
   }
+  // Load-bearing for Briefcase (Viterbi reads log P), though the SDK reads
+  // `logprobs` as informational since 1.0.25: absent is refused by name.
+  const logprobs = answer.logprobs;
+  if (logprobs === null) {
+    throw new ScorerError('decide_field_missing',
+      `question '${question}': Crucible's ${answer.type} answer carries no per-option logprobs (answers.${question}.logprobs), which the analysis engine reads`);
+  }
   return labels.map((l) => {
-    const lp = answer.logprobs[l];
+    const lp = logprobs[l];
     return typeof lp === 'number' && Number.isFinite(lp) ? lp : null;
   });
 }
@@ -175,7 +183,7 @@ export interface FlooredDistribution {
 export function floorAnswer(answer: WireAnswer, labels: string[], question: string): FlooredDistribution {
   const mass = answer.labelMass;
   const lnMass = mass > 0 ? Math.log(mass) : -Infinity;
-  const given = wireLogprobs(answer, labels);
+  const given = wireLogprobs(answer, labels, question);
   const missingSet = new Set(answer.missingLabels ?? []);
   const missing = labels.filter((l) => missingSet.has(l));
   // Raw (full-vocabulary) logprobs: renormalised + ln(mass). null = outside the
@@ -243,11 +251,16 @@ export function toScorerAnswer(q: ScorerQuestion, answer: WireAnswer): ScorerAns
   return { type: 'score', score, level: labels[best], confidence: dist.probs[best], ...base };
 }
 
-function timingOf(t: { wallMs: number; promptTokens: number; cachedTokens: number | null }): QuestionTiming {
+function timingOf(t: DecideCallTiming): QuestionTiming {
   return { promptMs: t.wallMs, promptTokens: t.promptTokens, cachedTokens: t.cachedTokens };
 }
 
-/** The wire's response as Briefcase's {@link DecideResponse}. */
+/**
+ * The wire's response as Briefcase's {@link DecideResponse}. The answers are
+ * load-bearing (a missing one, or a choice/score answer with no logprobs, is
+ * refused by name); model, timing and tokens are informational and carried as
+ * the server stated them — null, or the question left out, where it did not.
+ */
 export function fromWireResponse(req: DecideRequest, res: WireResponse): DecideResponse & { gated: number } {
   const answers: Record<string, ScorerAnswer> = {};
   const perQuestion: Record<string, QuestionTiming> = {};
@@ -259,19 +272,21 @@ export function fromWireResponse(req: DecideRequest, res: WireResponse): DecideR
     const answer = toScorerAnswer(q, wire);
     if (answer.gated) gated++;
     answers[q.name] = answer;
-    const t = res.timingMs.perQuestion[q.name];
+    const t = res.timingMs?.perQuestion?.[q.name];
     if (t !== undefined) perQuestion[q.name] = timingOf(t);
-    perQuestionTokens[q.name] = res.tokens.perQuestion[q.name] ?? 0;
+    const n = res.tokens?.perQuestion?.[q.name];
+    if (typeof n === 'number') perQuestionTokens[q.name] = n;
   }
+  const prime = res.timingMs?.prime ?? null;
   return {
-    model: res.model.id,
+    model: res.model?.id ?? null,
     answers,
     timingMs: {
-      total: res.timingMs.total,
+      total: res.timingMs?.total ?? null,
       perQuestion,
-      ...(res.timingMs.prime ? { prime: timingOf(res.timingMs.prime) } : {}),
+      ...(prime !== null ? { prime: timingOf(prime) } : {}),
     },
-    tokens: { perQuestion: perQuestionTokens, images: res.tokens.images },
+    tokens: { perQuestion: perQuestionTokens, images: res.tokens?.images ?? null },
     gated,
   };
 }

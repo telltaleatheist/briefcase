@@ -10,16 +10,17 @@ export interface AiModelOption {
   value: string;
   label: string;
   provider: 'local' | 'claude' | 'openai' | 'ollama';
-  /** Local models only: the weights are on the server. */
-  installed?: boolean;
+  /** Local models only: the weights are on the server; null when the server did not say. */
+  installed?: boolean | null;
   /** Local models only: why it cannot load right now, in the server's words. */
   note?: string | null;
 }
 
+/** The connected server's upstream cards; null for one it does not offer. */
 export interface AiUpstreamsView {
-  anthropic: { configured: boolean; keyHint: string | null };
-  openai: { configured: boolean; keyHint: string | null };
-  ollama: { configured: boolean; url: string | null };
+  anthropic: { configured: boolean; keyHint: string | null } | null;
+  openai: { configured: boolean; keyHint: string | null } | null;
+  ollama: { configured: boolean; url: string | null } | null;
 }
 
 /** `GET /crucible/ai/models`: the connected server's catalog and upstreams, as picker options. */

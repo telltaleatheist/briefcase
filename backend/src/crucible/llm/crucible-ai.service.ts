@@ -122,13 +122,15 @@ export class CrucibleAiService {
     try {
       const pageReaders = await this.chat.pageReadersOn(server);
       for (const info of await this.chat.modelsOn(server, true)) {
-        if (!info.backendSupported || !isAnalysisModel(info, pageReaders)) continue;
+        // Left out only when the server STATES this backend can't run it; an
+        // unstated support, install or size (null, 1.0.25+) is shown as unknown.
+        if (info.backendSupported === false || !isAnalysisModel(info, pageReaders)) continue;
         models.push({
           value: `local:${info.id}`,
-          label: `${info.id}${info.paramsB ? ` (${info.paramsB}B)` : ''}`,
+          label: `${info.id}${info.paramsB !== null && info.paramsB > 0 ? ` (${info.paramsB}B)` : ''}`,
           provider: 'local',
           installed: info.installed,
-          note: info.installed ? (info.loadable ? null : info.reason ?? null) : 'Not downloaded on this server yet',
+          note: info.installed === false ? 'Not downloaded on this server yet' : info.loadable ? null : info.reason,
         });
       }
     } catch (err) {
@@ -136,7 +138,7 @@ export class CrucibleAiService {
     }
 
     for (const upstream of ['anthropic', 'openai', 'ollama'] as const) {
-      if (!upstreams[upstream].configured) continue;
+      if (upstreams[upstream]?.configured !== true) continue;
       const listed = await this.upstreamIds(server, upstream);
       if (listed.error !== null) upstreamErrors[upstream] = listed.error;
       for (const id of listed.ids ?? []) {
@@ -244,7 +246,9 @@ export class CrucibleAiService {
     const patch: { upstreams: Record<string, { key: string }> } = { upstreams: {} };
     for (const [upstream, key] of pairs) {
       const current = before.upstreams[upstream];
-      if (current.configured && hintMatches(current.keyHint, key)) {
+      if (current === null) {
+        outcome.skipped.push({ upstream, reason: `"${server}" does not offer ${UPSTREAM_LABEL[upstream]}, so the key was not copied there.` });
+      } else if (current.configured && hintMatches(current.keyHint, key)) {
         outcome.alreadyThere.push(upstream);
       } else if (current.configured) {
         outcome.skipped.push({
@@ -264,7 +268,8 @@ export class CrucibleAiService {
     const after = await this.settings.get(server);
     for (const upstream of Object.keys(patch.upstreams) as Array<'anthropic' | 'openai'>) {
       const key = pairs.find(([u]) => u === upstream)![1];
-      if (after.upstreams[upstream].configured && hintMatches(after.upstreams[upstream].keyHint, key)) outcome.copied.push(upstream);
+      const card = after.upstreams[upstream];
+      if (card !== null && card.configured && hintMatches(card.keyHint, key)) outcome.copied.push(upstream);
       else outcome.skipped.push({ upstream, reason: `"${server}" did not confirm the ${UPSTREAM_LABEL[upstream]} key after saving it.` });
     }
     this.forget(server);

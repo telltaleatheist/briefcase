@@ -5,6 +5,7 @@ import { CrucibleService, type CrucibleRefusal } from '../../../services/crucibl
 import { WebsocketService } from '../../../services/websocket.service';
 import { UiButtonComponent } from '../../../ui';
 import { CrucibleDoorsComponent } from '../../../components/crucible-doors/crucible-doors.component';
+import { serverFactsLine } from '../../../components/crucible-doors/crucible-words';
 import type { ConnectCodeReading, CruciblePairingPrompt } from '@crucible-wire/connect-wire';
 import type {
   CapabilityFact,
@@ -12,6 +13,7 @@ import type {
   CrucibleServerRow,
   CrucibleServersView,
   RankedServerRow,
+  ServerFacts,
   ServerReach,
 } from '@crucible-wire/settings-wire';
 
@@ -130,8 +132,8 @@ export class CruciblePaneComponent {
     return CAPABILITY_WORDS[fact.capability];
   }
 
-  gb(bytes: number): string {
-    return `${Math.round(bytes / 1024 ** 3)} GB`;
+  factsLine(facts: ServerFacts): string {
+    return serverFactsLine(facts);
   }
 
   /** Read the list, then probe each row (a probe is at most 10 s old unless Test asks again). */

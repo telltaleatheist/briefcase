@@ -6,8 +6,9 @@
  * Rules: name the holder on a wait, never say "maybe", never tell the user to
  * open Crucible's own page for a normal workflow.
  */
-import type { CrucibleCoordinationState, CrucibleUnmetClass } from '@crucible-wire/coordinate-wire';
+import type { CrucibleCoordinationHolder, CrucibleCoordinationState, CrucibleUnmetClass } from '@crucible-wire/coordinate-wire';
 import type { CrucibleInstallProgress } from '@crucible-wire/install-wire';
+import type { ServerFacts } from '@crucible-wire/settings-wire';
 import type { LaneView } from '../../models/queue-lanes.model';
 
 const CLASS_WORDS: Record<string, string> = {
@@ -24,11 +25,39 @@ export function classWord(name: string): string {
 
 export function unmetLine(unmet: readonly CrucibleUnmetClass[]): string | null {
   if (unmet.length === 0) return null;
-  return `Not on this server: ${unmet.map((u) => `${classWord(u.class)} (${u.reason})`).join('; ')}.`;
+  return `Not on this server: ${unmet.map((u) => (u.reason === null ? classWord(u.class) : `${classWord(u.class)} (${u.reason})`)).join('; ')}.`;
 }
 
 function gb(bytes: number): string {
   return bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / 1024 ** 2))} MB`;
+}
+
+/** A module step, with whatever of its place and name the server stated. */
+function stepWords(step: { readonly name: string | null; readonly index: number | null; readonly total: number | null }): string {
+  const place = step.index === null ? 'a step' : step.total === null ? `step ${step.index}` : `step ${step.index} of ${step.total}`;
+  return step.name === null ? place : `${place}, ${step.name}`;
+}
+
+/** Who holds the card: the server's name for them, else the fact it held (a job, a lease, ...). */
+function holderWords(holder: CrucibleCoordinationHolder): string {
+  return holder.who ?? `held by ${holder.fact}`;
+}
+
+/**
+ * A reachable server's self-description for its row: `Crucible 1.0.25 ·
+ * mlx-darwin · Apple M2 Ultra (192 GB)`. What the server did not state is left
+ * out, except the version, which reads "version unknown".
+ */
+export function serverFactsLine(facts: Pick<ServerFacts, 'version' | 'backend' | 'gpu' | 'engineUrl'>): string {
+  const parts = [facts.version === null ? 'Crucible, version unknown' : `Crucible ${facts.version}`];
+  if (facts.backend !== null) parts.push(facts.backend);
+  const gpu = facts.gpu;
+  const size = gpu?.vramBytes == null ? null : `${Math.round(gpu.vramBytes / 1024 ** 3)} GB`;
+  const name = gpu?.name ?? null;
+  if (name !== null) parts.push(size === null ? name : `${name} (${size})`);
+  else if (size !== null) parts.push(size);
+  if (facts.engineUrl) parts.push(`engine at ${facts.engineUrl}`);
+  return parts.join(' · ');
 }
 
 /** One sentence for a server's coordination state. */
@@ -45,7 +74,7 @@ export function coordinationLine(state: CrucibleCoordinationState): string {
       if (p.state === 'done') return `${state.server} is ready for Briefcase.`;
       if (p.state === 'failed') return `${state.server}: preparing stopped. ${p.error?.code ?? 'failed'}: ${p.error?.message ?? ''}`.trim();
       if (p.state === 'cancelled') return `${state.server}: preparing was cancelled.`;
-      const step = p.step === null ? 'starting' : `step ${p.step.index} of ${p.step.total}, ${p.step.name}`;
+      const step = p.step === null ? 'starting' : stepWords(p.step);
       const bytes = p.bytes === null ? '' : p.bytes.total === null
         ? ` (${gb(p.bytes.done)})`
         : ` (${Math.round((p.bytes.done / Math.max(1, p.bytes.total)) * 100)}% of ${gb(p.bytes.total)})`;
@@ -54,8 +83,8 @@ export function coordinationLine(state: CrucibleCoordinationState): string {
     }
     case 'waiting':
       return state.stopped
-        ? `${state.server} stayed busy (${state.holder.who}). Briefcase will ask again the next time it connects.`
-        : `${state.server} is busy: ${state.holder.who}. Briefcase will prepare it when the card is free.`;
+        ? `${state.server} stayed busy (${holderWords(state.holder)}). Briefcase will ask again the next time it connects.`
+        : `${state.server} is busy: ${holderWords(state.holder)}. Briefcase will prepare it when the card is free.`;
     case 'refused':
       return `${state.server} refused Briefcase's request. ${state.message}`;
     case 'unreachable':

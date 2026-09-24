@@ -151,6 +151,11 @@ export function claimBusyLine(activity: Activity): string | null {
   return `Crucible is busy: the card is held by ${heldBy}`;
 }
 
+/** ` 40% done`, or nothing when the server did not state the job's progress. */
+function percentDone(progress: number | null): string {
+  return progress === null ? '' : ` ${Math.round(progress * 100)}% done`;
+}
+
 /**
  * The holder's sentence when someone OTHER than us has the server's JOB lane
  * (a job running or queued, a claim, a streaming session), else null. PURE.
@@ -162,7 +167,7 @@ export function claimBusyLine(activity: Activity): string | null {
 export function busyLineForJob(activity: Activity, ours: ReadonlySet<string>): string | null {
   const job = [...activity.running, ...activity.queued].find((j) => !ours.has(j.jobId));
   if (job !== undefined) {
-    return `Crucible is busy: ${shortClient(job.client)}, ${job.type} ${Math.round(job.progress * 100)}% done`;
+    return `Crucible is busy: ${shortClient(job.client)}, ${job.type}${percentDone(job.progress)}`;
   }
   const claimed = claimBusyLine(activity);
   if (claimed !== null) return claimed;
@@ -180,7 +185,7 @@ export function busyLineForJob(activity: Activity, ours: ReadonlySet<string>): s
 export function busyLineFor(activity: Activity, ours: ReadonlySet<string>, target: CrucibleTarget): string | null {
   const job = [...activity.running, ...activity.queued].find((j) => !ours.has(j.jobId));
   if (job !== undefined) {
-    return `Crucible is busy: ${shortClient(job.client)}, ${job.type} ${Math.round(job.progress * 100)}% done`;
+    return `Crucible is busy: ${shortClient(job.client)}, ${job.type}${percentDone(job.progress)}`;
   }
   const claimed = claimBusyLine(activity);
   if (claimed !== null) return claimed;

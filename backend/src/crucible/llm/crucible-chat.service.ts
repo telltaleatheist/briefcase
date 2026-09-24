@@ -106,12 +106,12 @@ export function localTimeoutMs(promptChars: number): number {
  * ollama-map's modality rule (image-capable and not an alias) stand in.
  */
 export function isAnalysisModel(
-  model: Pick<ModelInfo, 'id' | 'modalities'> & { readonly weightsOf?: string | null },
+  model: Pick<MappableModel, 'id' | 'modalities' | 'weightsOf' | 'classes'>,
   pageReaders: Iterable<string> | null,
 ): boolean {
   if (!model.modalities.includes('text')) return false;
   const readers = pageReaders === null ? null : new Set(pageReaders);
-  return !isPageReader(model as MappableModel, readers);
+  return !isPageReader(model, readers);
 }
 
 /** The first Crucible whose chat door takes `context_tokens` for an `ollama/` model (PHASE15-HOST §3.4a). */
@@ -708,7 +708,12 @@ export class CrucibleChatService {
       const record = await client.capability({ timeoutMs: 5_000 });
       readers = record.classes.filter((row) => row.capability === 'pages' && row.selected !== '').map((row) => row.selected);
       const generate = record.classes.find((row) => row.capability === 'generate');
-      if (generate?.contextCeilings) ceilings = new Map(generate.contextCeilings.map((c) => [c.model, c.tokens]));
+      if (generate?.contextCeilings) {
+        // A row that names no model or states no tokens (both informational
+        // since 1.0.25) is no ceiling at all: left out, never guessed.
+        ceilings = new Map();
+        for (const c of generate.contextCeilings) if (c.model !== null && c.tokens !== null) ceilings.set(c.model, c.tokens);
+      }
     } catch {
       readers = null;
     }
@@ -754,7 +759,9 @@ export class CrucibleChatService {
         return configured[target.upstream!] === true;
       }
       const models = await this.modelsOn(server);
-      return models.some((m) => m.id === target.model && m.backendSupported && m.installed);
+      // Resident is strict and settles it; otherwise only a STATED backend
+      // support and install count (null since 1.0.25 = the server did not say).
+      return models.some((m) => m.id === target.model && (m.resident || (m.backendSupported === true && m.installed === true)));
     } catch {
       return false;
     }
@@ -766,10 +773,11 @@ export class CrucibleChatService {
     if (cached !== undefined && this.now() - cached.at < SETTINGS_CACHE_MS) return cached.configured;
     const client = await this.servers.clientFor(server);
     const doc = await client.settings();
+    // A null card is an upstream this server does not offer (SettingsDocument.upstreams): not configured.
     const configured = {
-      anthropic: doc.upstreams.anthropic.configured,
-      openai: doc.upstreams.openai.configured,
-      ollama: doc.upstreams.ollama.configured,
+      anthropic: doc.upstreams.anthropic?.configured === true,
+      openai: doc.upstreams.openai?.configured === true,
+      ollama: doc.upstreams.ollama?.configured === true,
     };
     this.settingsCache.set(server, { at: this.now(), configured });
     return configured;
@@ -904,9 +912,12 @@ export class CrucibleChatService {
         throw this.mapRefusal(err, server);
       }
     }
-    if (!info.backendSupported || !info.installed) {
-      throw new CrucibleChatError(409, info.installed ? 'unsupported_model' : 'model_not_installed',
-        `"${model}" ${info.installed ? `can't run on "${server}"` : `isn't downloaded on "${server}"`}`
+    // Refused here only on what the server STATED (false). Unstated (null,
+    // 1.0.25+) goes to the load, and the server's own refusal names the cause.
+    if (info.backendSupported === false || info.installed === false) {
+      const unsupported = info.installed !== false;
+      throw new CrucibleChatError(409, unsupported ? 'unsupported_model' : 'model_not_installed',
+        `"${model}" ${unsupported ? `can't run on "${server}"` : `isn't downloaded on "${server}"`}`
           + `${info.reason ? ` (${info.reason})` : ''}. Pick another model, or download it in Settings › AI.`, server);
     }
     return this.load(client, server, model, signal, lease, loadContext);

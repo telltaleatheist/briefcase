@@ -9,6 +9,7 @@ import * as path from 'path';
 import { getBriefcaseConfigDir } from '../../bridges/runtime-paths';
 import { CrucibleClientFactory } from '../../crucible/client-factory';
 import { CrucibleServersService } from '../../crucible/crucible-servers.service';
+import { chatsInFlight } from '../../crucible/in-flight-sweep';
 import { CrucibleChatService } from '../../crucible/llm/crucible-chat.service';
 import { readCruciblePairingFile } from '../../crucible/pairing-file';
 import { CrucibleProbeService } from '../../crucible/probe';
@@ -54,6 +55,8 @@ export async function cardHeldByOther(factory: CrucibleClientFactory, server: st
   if (running.length) return `running ${running.map((j) => `${j.client ?? '?'}'s ${j.type}`).join(', ')}`;
   const queued = activity.queued.filter((j) => !mine(j.client));
   if (queued.length) return `queued ${queued.map((j) => `${j.client ?? '?'}'s ${j.type}`).join(', ')}`;
-  if (activity.chat.rows.length) return `${activity.chat.rows.length} chat(s) in flight`;
+  const chats = chatsInFlight(activity);
+  if (chats === null) return 'chats the server does not count (it states no chat activity)';
+  if (chats > 0) return `${chats} chat(s) in flight`;
   return null;
 }

@@ -51,21 +51,26 @@ export interface CrucibleServersView {
   discovered: DiscoveredCrucibleRow;
 }
 
-/** What a reachable server says about itself: `/v1/info` plus `/v1/activity`. */
+/**
+ * What a reachable server says about itself: `/v1/info` plus `/v1/activity`.
+ * Mirrors the SDK's ServerInfo (this file may not import it): the descriptive
+ * fields are null where the server did not state them, and are shown as
+ * unknown or left out, never guessed.
+ */
 export interface ServerFacts {
   serverName: string;
-  version: string;
+  version: string | null;
   apiVersion: number;
-  platform: string;
-  arch: string;
-  backend: string;
-  gpu: { vendor: string; name: string; vramBytes: number };
+  platform: string | null;
+  arch: string | null;
+  backend: string | null;
+  gpu: { vendor: string | null; name: string | null; vramBytes: number | null } | null;
   jobTypes: string[];
   /** The card's holder, in one sentence, or null when the lane accepts work. */
   busyLine: string | null;
   /** The resident model id, or null. */
   resident: string | null;
-  /** True when the server is older than Briefcase's floor (`MIN_CRUCIBLE`). */
+  /** True when the server STATES a version older than Briefcase's floor (`MIN_CRUCIBLE`); false when it states none. */
   needsUpdate: boolean;
   /** Set when the registered address is an orchestrator and this is its engine. */
   engineUrl: string | null;
@@ -84,8 +89,8 @@ export interface CapabilityFact {
   /** The model that serves it (an upstream id when routed), or '' when none does. */
   selected: string;
   route: 'local' | 'upstream';
-  /** Why, in the server's own words. */
-  reason: string;
+  /** Why, in the server's own words; null when it gave none. */
+  reason: string | null;
 }
 
 /**
@@ -115,13 +120,16 @@ export interface CrucibleProbeAnswer {
 /** The engine's settings document, as the renderer may see it. Keys never; hints only. */
 export interface CrucibleSettingsView {
   routes: Record<string, { route: 'local' | 'upstream'; model: string | null }>;
+  /** One card per upstream; null for one this server does not offer (the pane leaves it out). */
   upstreams: {
-    anthropic: { configured: boolean; keyHint: string | null };
-    openai: { configured: boolean; keyHint: string | null };
-    ollama: { configured: boolean; url: string | null };
+    anthropic: { configured: boolean; keyHint: string | null } | null;
+    openai: { configured: boolean; keyHint: string | null } | null;
+    ollama: { configured: boolean; url: string | null } | null;
   };
-  localModels: Record<string, string | null>;
-  backendKind: string;
+  /** Class → explicit local model (null = the engine's own choice); the whole map null when the server did not state it. */
+  localModels: Record<string, string | null> | null;
+  /** Null when the server did not state it. */
+  backendKind: string | null;
 }
 
 export type UpstreamName = 'anthropic' | 'openai' | 'ollama';

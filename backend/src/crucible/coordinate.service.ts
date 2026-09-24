@@ -48,6 +48,7 @@ import {
 import { WebSocketService } from '../common/websocket.service';
 import { CrucibleClientFactory } from './client-factory';
 import { CRUCIBLE_STATE_DIR } from './crucible.constants';
+import { CrucibleFieldMissing } from './errors';
 import { FirstRunGate } from './first-run';
 import { followCrucibleTask, moduleForBackend, postBriefcaseModule } from './module-setup';
 import { CrucibleRegistryService } from './registry.service';
@@ -104,6 +105,11 @@ export function missingForBriefcase(
 ): { missing: CrucibleMissingEntry[]; unmet: CrucibleUnmetClass[] } {
   const missing: CrucibleMissingEntry[] = [];
   const unmet: CrucibleUnmetClass[] = [];
+  // Load-bearing here (the SDK reads it as informational): which module
+  // entries apply is a per-backend fact, and no backend is a safe guess.
+  if (capability.backendKind === null) {
+    throw new CrucibleFieldMissing(null, 'backendKind (GET /v1/capability)', 'work out which parts of its module this machine needs');
+  }
   const module = moduleForBackend(capability.backendKind);
   const localJobTypes = new Set<string>();
 
@@ -130,7 +136,7 @@ export function missingForBriefcase(
       continue;
     }
     const subject = catalog.find((item) => item.id === row.selected && (item.kind === 'model' || item.kind === 'engine'));
-    if (subject !== undefined) localJobTypes.add(subject.jobType);
+    if (subject !== undefined && subject.jobType !== null) localJobTypes.add(subject.jobType);
     if (subject !== undefined && subject.installed) continue;
     missing.push({
       what: 'class',
@@ -159,7 +165,9 @@ export function missingForBriefcase(
   }
 
   for (const engine of catalog) {
-    if (engine.kind !== 'engine' || engine.installed || !localJobTypes.has(engine.jobType)) continue;
+    // An engine row that states no job type can't be tied to a local selection:
+    // not listed here (a load that needs it is refused by the server, by name).
+    if (engine.kind !== 'engine' || engine.installed || engine.jobType === null || !localJobTypes.has(engine.jobType)) continue;
     if (missing.some((entry) => entry.what !== 'job-type' && entry.kind === engine.kind && entry.id === engine.id)) continue;
     missing.push({
       what: 'subject', kind: engine.kind, id: engine.id, name: engine.name,
@@ -176,6 +184,7 @@ export function describeRead(err: unknown, server: string): string {
   if (err instanceof CrucibleAuthError) return `"${server}" refused Briefcase's key: ${err.message}`;
   if (err instanceof CrucibleVersionError) return `"${server}" speaks a different API version: ${err.message}`;
   if (err instanceof CrucibleRefused) return `"${server}" refused ${err.code}: ${err.message}`;
+  if (err instanceof CrucibleFieldMissing) return `"${server}" did not state ${err.field}, which Briefcase needs to ${err.neededFor}`;
   return err instanceof Error ? err.message : String(err);
 }
 
@@ -327,7 +336,13 @@ export class CrucibleCoordinationService implements OnApplicationBootstrap, OnAp
       return this.report({ server, phase: 'unreachable', message: describeRead(err, server) });
     }
 
-    const { missing, unmet } = missingForBriefcase(installedJobTypes, catalog, capability);
+    let needs: { missing: CrucibleMissingEntry[]; unmet: CrucibleUnmetClass[] };
+    try {
+      needs = missingForBriefcase(installedJobTypes, catalog, capability);
+    } catch (err) {
+      return this.report({ server, phase: 'unreachable', message: describeRead(err, server) });
+    }
+    const { missing, unmet } = needs;
     if (missing.length === 0) {
       return this.report({ server, phase: 'stocked', checkedAt: this.deps.now(), unmet });
     }
@@ -350,7 +365,7 @@ export class CrucibleCoordinationService implements OnApplicationBootstrap, OnAp
       let taskId: string;
       let followed = false;
       try {
-        taskId = await postBriefcaseModule(client);
+        taskId = await postBriefcaseModule(client, server);
       } catch (err) {
         if (err instanceof CrucibleCardHeld) {
           attempts += 1;

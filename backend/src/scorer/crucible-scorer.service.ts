@@ -39,6 +39,7 @@ import {
   CrucibleRefused,
   CrucibleServerError,
   CrucibleUnreachable,
+  type CapabilityRow,
   type CrucibleClient,
   type ModelInfo,
 } from '@crucible/client';
@@ -94,9 +95,27 @@ export interface CruciblePick {
   model: string;
 }
 
-/** A model the decide class can read decisions from, installed and served here. */
+/**
+ * A model the decide class can read decisions from, installed and served here
+ * — on the row's STATED facts: an unstated family, install or backend support
+ * (null, 1.0.25+) does not qualify a model by itself (see pickDecideModel for
+ * the server's own selection).
+ */
 export function isDecideModel(model: Pick<ModelInfo, 'family' | 'installed' | 'backendSupported' | 'modalities'>): boolean {
-  return DECIDE_FAMILIES.includes(model.family.toLowerCase()) && model.installed && model.backendSupported && model.modalities.includes('text');
+  return model.family !== null && DECIDE_FAMILIES.includes(model.family.toLowerCase())
+    && model.installed === true && model.backendSupported === true && model.modalities.includes('text');
+}
+
+/**
+ * The decide class's own selection, taken on the server's word where the row
+ * does not state family/install/support (null, 1.0.25+): the capability row
+ * (enabled + selected, load-bearing) says it serves decisions. A row that
+ * STATES a family outside {@link DECIDE_FAMILIES}, or that it is not installed
+ * or not supported, is still refused here.
+ */
+function selectionServes(model: Pick<ModelInfo, 'family' | 'installed' | 'backendSupported' | 'modalities'>): boolean {
+  return (model.family === null || DECIDE_FAMILIES.includes(model.family.toLowerCase()))
+    && model.modalities.includes('text') && model.installed !== false && model.backendSupported !== false;
 }
 
 /**
@@ -117,6 +136,8 @@ export function pickDecideModel(
   if (usable.has(preferred)) return preferred;
   if (aliasOfPreferred) return aliasOfPreferred.id;
   if (options.selected && usable.has(options.selected)) return options.selected;
+  const selected = options.selected ? models.find((m) => m.id === options.selected) : undefined;
+  if (selected !== undefined && selectionServes(selected)) return selected.id;
   return null;
 }
 
@@ -178,7 +199,7 @@ export class CrucibleScorerService {
         `Crucible "${server}" is ${version ?? 'an unknown version'}; the analysis engine needs its decision door (${DECIDE_MIN_VERSION} or newer). Update Crucible.`);
     }
     let models: ModelInfo[];
-    let decide: { enabled: boolean; selected: string; reason: string } | null = null;
+    let decide: Pick<CapabilityRow, 'enabled' | 'selected' | 'reason'> | null = null;
     let resident: string | null = null;
     try {
       models = await this.chat.modelsOn(server, true);
@@ -191,7 +212,7 @@ export class CrucibleScorerService {
       throw this.mapFailure(err, server);
     }
     if (decide !== null && !decide.enabled) {
-      throw new ScorerError('scorer_unavailable', `Crucible "${server}" does not serve decisions on this machine: ${decide.reason}`);
+      throw new ScorerError('scorer_unavailable', `Crucible "${server}" does not serve decisions on this machine: ${decide.reason ?? 'it gave no reason'}`);
     }
     const kept = this.sessionForm.get(server) ?? null;
     const model = pickDecideModel(models, { kept, resident, selected: decide?.selected ?? null });

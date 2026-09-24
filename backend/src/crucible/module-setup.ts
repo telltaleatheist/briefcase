@@ -12,6 +12,7 @@
  * says something is missing). This file only posts and follows.
  */
 import type { CrucibleClient, CrucibleModule, SubjectKind } from '@crucible/client';
+import { CrucibleFieldMissing } from './errors';
 import type { CrucibleModuleProgress, CrucibleUnmetClass } from './wire/coordinate-wire';
 
 // `import = require`: the backend compiles to CommonJS without esModuleInterop,
@@ -55,8 +56,11 @@ export function moduleForBackend(backend: string, module: CrucibleModule = BRIEF
  * The backend is ASKED of the server immediately before posting, not cached:
  * which transcriber a machine can hold is its own fact.
  */
-export async function postBriefcaseModule(client: CrucibleClient): Promise<string> {
+export async function postBriefcaseModule(client: CrucibleClient, server: string | null = null): Promise<string> {
   const backend = (await client.info()).host.backend;
+  // Load-bearing here (the SDK reads it as informational): the module's
+  // entries are filtered to it, and no backend is a safe guess.
+  if (backend === null) throw new CrucibleFieldMissing(server, 'host.backend (GET /v1/info)', 'choose the parts of its module this machine can run');
   return client.submitTask({ type: 'module', module: moduleForBackend(backend) });
 }
 

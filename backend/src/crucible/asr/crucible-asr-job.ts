@@ -44,7 +44,7 @@ import {
   CrucibleUnreachable,
   CrucibleVersionError,
 } from '@crucible/client';
-import type { CrucibleClient, JobEvent } from '@crucible/client';
+import type { CrucibleClient, JobEvent, UploadResult } from '@crucible/client';
 import { EngineResolveError } from '../engine-resolve';
 import { CrucibleRegistryError } from '../errors';
 import { CrucibleParkedError } from '../llm/errors';
@@ -136,9 +136,11 @@ export type AsrJobProgress =
   /** `sentBytes` is null when this runtime can't count them (the beat still comes). */
   | { readonly kind: 'uploading'; readonly sentBytes: number | null; readonly totalBytes: number }
   | { readonly kind: 'queued'; readonly position: number | null }
-  | { readonly kind: 'warming'; readonly message: string }
-  | { readonly kind: 'decoding'; readonly processedS: number | null; readonly totalS: number | null; readonly message: string }
-  | { readonly kind: 'transcribing'; readonly fraction: number; readonly processedS: number | null; readonly totalS: number | null; readonly message: string };
+  /** `message`: the engine's readiness line, or null when the frame carried none. */
+  | { readonly kind: 'warming'; readonly message: string | null }
+  | { readonly kind: 'decoding'; readonly processedS: number | null; readonly totalS: number | null; readonly message: string | null }
+  /** `fraction`: the server's own, or where it last put it when a frame states none (0 before any). */
+  | { readonly kind: 'transcribing'; readonly fraction: number; readonly processedS: number | null; readonly totalS: number | null; readonly message: string | null };
 
 /** The asr params, exactly the three the server takes (it refuses anything else). */
 export interface AsrParams {
@@ -153,8 +155,9 @@ export interface AsrParams {
  * park. A job consumes the blob it names, so it is dropped at admission.
  */
 export interface AsrBlobCache {
-  get(): { readonly blobId: string; readonly sha256: string } | null;
-  set(upload: { readonly blobId: string; readonly sha256: string; readonly bytes: number }): void;
+  /** The SDK's own upload answer: `blobId` is load-bearing; `sha256`/`bytes` are informational (null when unstated). */
+  get(): Pick<UploadResult, 'blobId' | 'sha256'> | null;
+  set(upload: UploadResult): void;
   drop(): void;
 }
 
@@ -256,8 +259,9 @@ function numOrNull(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-/** A warming line without the engine's log tail (Crucible appends it after an em dash). */
-export function warmingHeadline(message: string): string {
+/** A warming line without the engine's log tail (Crucible appends it after an em dash); null when the frame carried none. */
+export function warmingHeadline(message: string | null): string | null {
+  if (message === null) return null;
   const cut = message.indexOf(' — ');
   return cut < 0 ? message : message.slice(0, cut);
 }
@@ -321,7 +325,7 @@ export async function runAsrJob(options: RunAsrJobOptions): Promise<AsrJobOutcom
 
   // ── Upload. A re-upload is harmless (a second blob), so weather is retried. ──
   const upload = async (): Promise<string> => {
-    let uploaded: { blobId: string; sha256: string; bytes: number } | undefined;
+    let uploaded: UploadResult | undefined;
     for (let attempt = 0; uploaded === undefined; attempt++) {
       // Reported at once, then every tick until the server answers: bytes sent
       // when they can be counted, and a beat for the stall watchdog either way.
@@ -363,7 +367,7 @@ export async function runAsrJob(options: RunAsrJobOptions): Promise<AsrJobOutcom
   let blobId: string;
   if (cached !== null) {
     blobId = cached.blobId;
-    log(`reusing the earlier upload of this video on ${server} (blob ${cached.blobId}, sha256 ${cached.sha256.slice(0, 12)})`);
+    log(`reusing the earlier upload of this video on ${server} (blob ${cached.blobId}, sha256 ${cached.sha256?.slice(0, 12) ?? 'not stated'})`);
   } else {
     blobId = await upload();
   }
@@ -454,6 +458,7 @@ export async function runAsrJob(options: RunAsrJobOptions): Promise<AsrJobOutcom
   // ── Follow the events, re-opening above the last one on weather. ──
   let terminal: JobEvent | null = null;
   let lastEventId = 0;
+  let lastFraction = 0;
   let failures = 0;
   try {
     while (terminal === null) {
@@ -473,7 +478,9 @@ export async function runAsrJob(options: RunAsrJobOptions): Promise<AsrJobOutcom
             if (extra['stage'] === 'decoding') {
               options.onProgress?.({ kind: 'decoding', processedS, totalS, message: event.data.message });
             } else {
-              options.onProgress?.({ kind: 'transcribing', fraction: event.data.fraction, processedS, totalS, message: event.data.message });
+              // A frame that states no fraction leaves it where the server last put it.
+              if (event.data.fraction !== null) lastFraction = event.data.fraction;
+              options.onProgress?.({ kind: 'transcribing', fraction: lastFraction, processedS, totalS, message: event.data.message });
             }
           } else if (event.event === 'done' || event.event === 'failed' || event.event === 'cancelled') {
             terminal = event;

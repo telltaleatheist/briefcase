@@ -23,6 +23,7 @@ import { randomBytes } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getBriefcaseConfigDir } from '../../bridges/runtime-paths';
+import type { UploadResult } from '@crucible/client';
 import { CrucibleClientFactory } from '../client-factory';
 import { CRUCIBLE_IN_FLIGHT_LEDGER } from '../crucible.constants';
 import { CrucibleServersService } from '../crucible-servers.service';
@@ -115,7 +116,7 @@ export function asrProgressToTask(server: string, p: AsrJobProgress): { percent:
     case 'queued':
       return { percent: 7, message: `Queued on Crucible on ${server}${p.position !== null && p.position > 0 ? ` (position ${p.position})` : ''}...` };
     case 'warming':
-      return { percent: 9, message: `Crucible on ${server}: ${p.message}` };
+      return { percent: 9, message: `Crucible on ${server}: ${p.message ?? 'loading the model...'}` };
     case 'decoding': {
       const share = p.processedS !== null && p.totalS !== null && p.totalS > 0 ? Math.min(1, Math.max(0, p.processedS / p.totalS)) : 0;
       return { percent: 10 + Math.round(share * 4), message: `Reading the audio on ${server}...${where(p.processedS, p.totalS)}` };
@@ -137,7 +138,7 @@ export class CrucibleTranscriptionService {
    * busy) keeps its upload here, so its next run names the same blob instead
    * of sending the whole video again.
    */
-  private readonly blobs = new Map<string, { blobId: string; sha256: string; bytes: number }>();
+  private readonly blobs = new Map<string, UploadResult>();
 
   /** Replaceable by a spec. */
   now: () => number = Date.now;
@@ -325,7 +326,7 @@ export class CrucibleTranscriptionService {
       get: () => this.blobs.get(key) ?? null,
       set: (upload) => {
         this.blobs.delete(key);
-        this.blobs.set(key, { blobId: upload.blobId, sha256: upload.sha256, bytes: upload.bytes });
+        this.blobs.set(key, upload);
         while (this.blobs.size > ASR_BLOB_CACHE_MAX) this.blobs.delete(this.blobs.keys().next().value!);
       },
       drop: () => { this.blobs.delete(key); },

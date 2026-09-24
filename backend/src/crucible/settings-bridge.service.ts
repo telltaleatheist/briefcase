@@ -33,14 +33,16 @@ export function isUpstreamName(value: string): value is UpstreamName {
 function viewOf(doc: SettingsDocument): CrucibleSettingsView {
   const routes: CrucibleSettingsView['routes'] = {};
   for (const [name, setting] of Object.entries(doc.routes)) routes[name] = { route: setting.route, model: setting.model };
+  const { anthropic, openai, ollama } = doc.upstreams;
   return {
     routes,
+    // A null card is an upstream this server does not offer: carried as null for the pane to leave out.
     upstreams: {
-      anthropic: { configured: doc.upstreams.anthropic.configured, keyHint: doc.upstreams.anthropic.keyHint ?? null },
-      openai: { configured: doc.upstreams.openai.configured, keyHint: doc.upstreams.openai.keyHint ?? null },
-      ollama: { configured: doc.upstreams.ollama.configured, url: doc.upstreams.ollama.url ?? null },
+      anthropic: anthropic === null ? null : { configured: anthropic.configured, keyHint: anthropic.keyHint ?? null },
+      openai: openai === null ? null : { configured: openai.configured, keyHint: openai.keyHint ?? null },
+      ollama: ollama === null ? null : { configured: ollama.configured, url: ollama.url ?? null },
     },
-    localModels: { ...doc.localModels },
+    localModels: doc.localModels === null ? null : { ...doc.localModels },
     backendKind: doc.backendKind,
   };
 }

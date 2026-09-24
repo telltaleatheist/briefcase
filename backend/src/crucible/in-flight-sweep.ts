@@ -78,6 +78,18 @@ export interface SweepReport {
 }
 
 /**
+ * Chat completions open on the card, as `/v1/activity` states them: its
+ * count, else the rows it listed; null when it states neither (informational
+ * since 1.0.25).
+ */
+export function chatsInFlight(activity: Pick<Activity, 'chat'>): number | null {
+  const chat = activity.chat;
+  if (chat === null) return null;
+  if (chat.inFlight !== null) return chat.inFlight;
+  return chat.rows === null ? null : chat.rows.length;
+}
+
+/**
  * Who, other than something in `ours`, holds this card, or null when nobody
  * does. PURE, and the whole safety rule: an unload is asked for only on null.
  * Wider than the server's own `resident.heldBy` on purpose: a chat in flight
@@ -91,7 +103,10 @@ export function cardHeldBy(activity: Activity, ours: ReadonlySet<string>): strin
   if (activity.claim !== null) return `a claim held by ${activity.claim.heldBy}`;
   if (activity.lease !== null && !ours.has(activity.lease.leaseId)) return `a lease held by ${activity.lease.client ?? 'another app'} for ${activity.lease.act}`;
   if (activity.streaming !== null) return 'a streaming session';
-  if (activity.chat.inFlight > 0) return `${activity.chat.inFlight} chat completion(s) in flight`;
+  // Unstated is not free: the unload is asked for only when the server says no chat is open.
+  const chats = chatsInFlight(activity);
+  if (chats === null) return 'chat completions the server does not count (it states no chat activity)';
+  if (chats > 0) return `${chats} chat completion(s) in flight`;
   if (activity.stopping !== null) return 'a stop already under way';
   return null;
 }

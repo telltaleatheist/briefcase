@@ -34,6 +34,10 @@ export const SCORER_ERROR_STATUS = {
   decide_not_served: 503,
   // Crucible has no model its decide class can use, or is older than the door.
   scorer_unavailable: 503,
+  // Crucible answered without a field the scorer cannot work without (the
+  // message names it, e.g. a choice answer's per-option `logprobs`). Never
+  // filled in: a guessed distribution would be a guessed decision.
+  decide_field_missing: 502,
   // Not in snap: the caller's AbortSignal fired (a cancelled analysis job).
   cancelled: 499,
 } as const;
@@ -172,28 +176,35 @@ export interface YesNoAnswer extends AnswerBase {
 
 export type ScorerAnswer = ChoiceAnswer | ScoreAnswer | YesNoAnswer;
 
+/**
+ * One completion's timing, off the door's `DecideCallTiming` (every field
+ * informational: null where the server did not state it).
+ */
 export interface QuestionTiming {
   /** The decision door's wall clock for that completion. */
-  promptMs: number;
+  promptMs: number | null;
   /** usage.prompt_tokens (the whole prompt). */
-  promptTokens: number;
+  promptTokens: number | null;
   /** Tokens reused from the KV cache; null when the engine did not say (Crucible never reports an unmeasured 0). */
   cachedTokens: number | null;
 }
 
 export interface DecideResponse {
-  model: string;
+  /** The model that answered, as the server stated it; null when it did not (provenance, informational). */
+  model: string | null;
   answers: Record<string, ScorerAnswer>;
+  /** Informational: what the server stated. A question the server gave no timing for is absent. */
   timingMs: {
-    total: number;
+    total: number | null;
     perQuestion: Record<string, QuestionTiming>;
-    /** Present when the request carried more than one question (the shared prefix was primed). */
+    /** Present when the request carried more than one question (the shared prefix was primed) and the server timed it. */
     prime?: QuestionTiming;
   };
+  /** Informational: what the server stated. A question the server gave no count for is absent. */
   tokens: {
     /** server tokens_evaluated per question (whole prompt length, image tokens included) */
     perQuestion: Record<string, number>;
-    images: number;
+    images: number | null;
   };
 }
 

@@ -120,7 +120,8 @@ export function busyLineOf(activity: Activity): string | null {
   if (activity.slots.accelerated.acceptsWork) return null;
   const job = activity.running[0];
   if (job !== undefined) {
-    return `busy: ${job.client ?? 'another app'}, ${job.type} ${Math.round(job.progress * 100)}% done`;
+    const done = job.progress === null ? '' : ` ${Math.round(job.progress * 100)}% done`;
+    return `busy: ${job.client ?? 'another app'}, ${job.type}${done}`;
   }
   return 'busy: the GPU is not accepting work right now';
 }
@@ -203,11 +204,12 @@ export async function probeWith(steps: ProbeSteps, at: string): Promise<Crucible
     platform: info.host.platform,
     arch: info.host.arch,
     backend: info.host.backend,
-    gpu: { vendor: info.host.gpu.vendor, name: info.host.gpu.name, vramBytes: info.host.gpu.vramBytes },
+    gpu: info.host.gpu === null ? null : { vendor: info.host.gpu.vendor, name: info.host.gpu.name, vramBytes: info.host.gpu.vramBytes },
     jobTypes: [...info.jobTypes],
     busyLine,
     resident,
-    needsUpdate: compareVersions(info.server.version, MIN_CRUCIBLE) < 0,
+    // An unstated version is not an old one: nothing to warn about (the calls themselves answer).
+    needsUpdate: info.server.version !== null && compareVersions(info.server.version, MIN_CRUCIBLE) < 0,
     engineUrl: resolved.through === null ? null : resolved.url,
     capabilities,
   };

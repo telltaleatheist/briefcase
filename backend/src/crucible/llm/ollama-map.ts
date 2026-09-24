@@ -51,6 +51,8 @@
  * served-context rule stands and the 4-bit is kept.
  */
 
+import type { ModelInfo } from '@crucible/client';
+
 /**
  * The context an `ollama/` model is chunked for through a Crucible OLDER THAN
  * 1.0.24, which forwards no `num_ctx`, so Ollama serves the call at its own
@@ -65,21 +67,22 @@ export const CRUCIBLE_OLLAMA_CONTEXT = 4096;
 /** The window an analysis is chunked for through Crucible (ai-provider's cap on a local model's context). */
 export const CRUCIBLE_ANALYSIS_CONTEXT = 32768;
 
-/** The facts of one `GET /v1/models` llm row the mapping reads (the SDK's ModelInfo is one). */
-export interface MappableModel {
-  readonly id: string;
-  readonly family: string;
-  readonly paramsB: number;
-  readonly modalities: readonly string[];
-  readonly backendSupported: boolean;
-  readonly installed: boolean;
-  readonly contextDefault: number;
-  readonly maxModelLen: number | null;
-  /** Crucible 1.0.24+: the base whose weights this alias shares; null on a base. */
-  readonly weightsOf?: string | null;
-  /** Capability classes this model serves, when the server reports them per row. */
-  readonly classes?: readonly string[] | null;
-}
+/**
+ * The facts of one `GET /v1/models` llm row the mapping reads: the SDK's own
+ * {@link ModelInfo} fields, so a row read off the server IS one. Since 1.0.25
+ * the informational ones (family, paramsB, backendSupported, installed,
+ * contextDefault, maxModelLen) are `null` where the server did not state
+ * them; the mapping reads each null on purpose: an unstated family, size,
+ * support or install never matches (rule 1), and an unstated context never
+ * counts as fitting (rule 4). `weightsOf` is optional so a hand-built row may omit it.
+ */
+export type MappableModel =
+  Pick<ModelInfo, 'id' | 'family' | 'paramsB' | 'modalities' | 'backendSupported' | 'installed' | 'contextDefault' | 'maxModelLen'>
+  & Partial<Pick<ModelInfo, 'weightsOf'>>
+  & {
+    /** Capability classes this model serves, when the server reports them per row. */
+    readonly classes?: readonly string[] | null;
+  };
 
 export interface OllamaMapOptions {
   /** The context a candidate must be served at to "fit". Default CRUCIBLE_ANALYSIS_CONTEXT. */
@@ -126,9 +129,16 @@ export function precisionBitsOf(id: string): number {
   return bits ? parseInt(bits[1], 10) : 16;
 }
 
-/** The context a model is served at here: its manifest's, never more than what is in force. */
-export function servedContextOf(model: Pick<MappableModel, 'contextDefault' | 'maxModelLen'>): number {
-  return Math.min(model.contextDefault, model.maxModelLen ?? Number.POSITIVE_INFINITY);
+/**
+ * The context a model is served at here: its manifest's, never more than what
+ * is in force. Either figure alone is enough (the one the server stated);
+ * null when it stated neither — an unknown context, never a guessed one.
+ */
+export function servedContextOf(model: Pick<MappableModel, 'contextDefault' | 'maxModelLen'>): number | null {
+  const { contextDefault, maxModelLen } = model;
+  if (contextDefault === null) return maxModelLen;
+  if (maxModelLen === null) return contextDefault;
+  return Math.min(contextDefault, maxModelLen);
 }
 
 /** A `-vl` alias of a base model (same weights, other engine form). */
@@ -137,7 +147,7 @@ export function isVisionAlias(model: Pick<MappableModel, 'id' | 'weightsOf'>): b
 }
 
 /** A page reader, by capability class; by modality only when the server gave no class record. */
-export function isPageReader(model: MappableModel, pageReaders: ReadonlySet<string> | null): boolean {
+export function isPageReader(model: Pick<MappableModel, 'id' | 'modalities' | 'weightsOf' | 'classes'>, pageReaders: ReadonlySet<string> | null): boolean {
   if (Array.isArray(model.classes) && model.classes.length > 0) return model.classes.every((c) => c === 'pages');
   if (pageReaders !== null) return pageReaders.has(model.id);
   return model.modalities.includes('image') && !isVisionAlias(model);
@@ -159,11 +169,14 @@ export function crucibleChoiceForOllama(tag: string, models: readonly MappableMo
   const minContext = options.minContext ?? CRUCIBLE_ANALYSIS_CONTEXT;
   const pageReaders = options.pageReaders === undefined || options.pageReaders === null ? null : new Set(options.pageReaders);
 
+  // Rule 1 on stated facts only: a row whose family, size, backend support or
+  // install the server did not state (null, 1.0.25+) is not "the same model"
+  // — the call stays on the `ollama/` upstream rather than guess.
   const same = models.filter((m) =>
-    m.family.toLowerCase() === wanted.family
-    && Math.abs(m.paramsB - wanted.sizeB) < 1e-6
-    && m.backendSupported
-    && m.installed
+    m.family !== null && m.family.toLowerCase() === wanted.family
+    && m.paramsB !== null && Math.abs(m.paramsB - wanted.sizeB) < 1e-6
+    && m.backendSupported === true
+    && m.installed === true
     && m.modalities.includes('text')
     && !isPageReader(m, pageReaders));
   const bases = same.filter((m) => !isVisionAlias(m));
@@ -171,8 +184,9 @@ export function crucibleChoiceForOllama(tag: string, models: readonly MappableMo
   if (candidates.length === 0) return null;
 
   const ceilingOf = (m: MappableModel): number => options.ceilings?.get(m.id) ?? 0;
-  // What a candidate can serve: its served context, or its host ceiling when that is larger.
-  const reach = (m: MappableModel): number => Math.max(servedContextOf(m), ceilingOf(m));
+  // What a candidate can serve: its served context, or its host ceiling when
+  // that is larger. An unstated served context counts as 0: only a ceiling can make it fit.
+  const reach = (m: MappableModel): number => Math.max(servedContextOf(m) ?? 0, ceilingOf(m));
   const ranked = [...candidates].sort((a, b) => {
     const ctxA = reach(a);
     const ctxB = reach(b);
@@ -189,6 +203,6 @@ export function crucibleChoiceForOllama(tag: string, models: readonly MappableMo
     return bits !== 0 ? bits : a.id.localeCompare(b.id);
   });
   const best = ranked[0];
-  if (servedContextOf(best) < minContext && ceilingOf(best) >= minContext) return { id: best.id, loadContext: minContext };
+  if ((servedContextOf(best) ?? 0) < minContext && ceilingOf(best) >= minContext) return { id: best.id, loadContext: minContext };
   return { id: best.id };
 }
