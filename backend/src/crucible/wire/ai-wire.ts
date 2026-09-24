@@ -51,6 +51,21 @@ export interface AiModelsView {
   upstreamErrors: Partial<Record<'anthropic' | 'openai' | 'ollama', string>>;
 }
 
+/**
+ * `GET /crucible/ai/runs-as?models=a,b`: what a stored `ollama:<tag>` choice
+ * actually runs as through Crucible (ollama-map.ts). Other values are not listed.
+ */
+export interface AiRunsAs {
+  /** The stored `ollama:<tag>` value. */
+  value: string;
+  /** The server that answers for it: the one with a model of its own, else the connected one. */
+  server: string | null;
+  /** The server's own model it runs as, or null: it goes to Ollama through Crucible. */
+  runsAs: string | null;
+  /** The context it is served at: the model's, or Ollama's default when it goes to Ollama. */
+  contextTokens: number | null;
+}
+
 /** `GET /crucible/ai/keys/legacy`: what Briefcase's own api-keys.json still holds. */
 export interface LegacyKeysView {
   claude: boolean;

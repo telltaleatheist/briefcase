@@ -9,7 +9,7 @@ import { CrucibleError } from '@crucible/client';
 import { failureOutcome } from '../probe';
 import { CrucibleRegistryError, CrucibleRoutingError } from '../errors';
 import { CrucibleSettingsInputError } from '../settings-bridge.service';
-import type { AiModelsView, AiTaskModels, AiViaView, KeyCopyOutcome, LegacyKeysView } from '../wire/ai-wire';
+import type { AiModelsView, AiRunsAs, AiTaskModels, AiViaView, KeyCopyOutcome, LegacyKeysView } from '../wire/ai-wire';
 import { parseAiVia, writeAiVia } from './ai-via';
 import { CrucibleAiInputError, CrucibleAiService } from './crucible-ai.service';
 
@@ -56,6 +56,12 @@ export class CrucibleAiController {
   @Get('models')
   models(@Query('server') server?: string): Promise<AiModelsView> {
     return this.guard(() => this.ai.models(server || undefined));
+  }
+
+  /** What stored `ollama:<tag>` choices run as through Crucible: `?models=ollama:a,ollama:b`. */
+  @Get('runs-as')
+  runsAs(@Query('models') models?: string): Promise<AiRunsAs[]> {
+    return this.guard(() => this.ai.runsAs(typeof models === 'string' ? models.split(',') : []));
   }
 
   /** Drop cached model lists after the pane saved a server's settings. */

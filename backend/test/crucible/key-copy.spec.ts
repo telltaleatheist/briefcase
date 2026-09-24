@@ -150,6 +150,23 @@ describe('the AI pane\'s model list, from the connected server', () => {
     expect(view.unavailable).toMatch(/No Crucible server is connected/);
   });
 
+  it('runs-as: an ollama: choice shows the server\'s own model it runs as, or Ollama at its 4K default; other choices are left out', async () => {
+    fake = await startFakeCrucible({
+      models: [
+        { id: 'qwen3.8-27b-4bit', paramsB: 27, contextDefault: 98304, maxModelLen: 98304 },
+        { id: 'qwen3.8-27b-8bit', paramsB: 27, contextDefault: 12288, maxModelLen: 12288 },
+      ],
+    });
+    const h = harness();
+    h.registry.add({ name: 'mac', url: fake.url, token: fake.token });
+    const servers = new CrucibleServersService(h.registry, h.factory);
+    const ai = new CrucibleAiService(servers, h.probes, h.settings, new CrucibleChatService(servers, h.factory, h.probes), new FakeKeys({}) as never, pairingHost(null));
+    await expect(ai.runsAs(['ollama:qwen3.8:27b', 'ollama:qwen3:14b', 'local:qwen3.8-27b-8bit', 'claude:claude-sonnet-5', 'ollama:qwen3.8:27b'])).resolves.toEqual([
+      { value: 'ollama:qwen3.8:27b', server: 'mac', runsAs: 'qwen3.8-27b-4bit', contextTokens: 98304 },
+      { value: 'ollama:qwen3:14b', server: 'mac', runsAs: null, contextTokens: 4096 },
+    ]);
+  });
+
   it('optionValueOf maps Crucible strings back to the stored format', () => {
     expect(optionValueOf('anthropic/claude-x')).toBe('claude:claude-x');
     expect(optionValueOf('ollama/qwen3.5:4b')).toBe('ollama:qwen3.5:4b');

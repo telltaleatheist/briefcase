@@ -32,6 +32,13 @@
  * with no load and no lease. The body rules (no sampling to cloud, ever) live
  * in target.ts.
  *
+ * AN OLLAMA CHOICE runs on the server's own model when it has one
+ * ({@link CrucibleChatService.effectiveTarget}, rule in ollama-map.ts): the
+ * first ranked server that answers and has a match serves it as a local model
+ * (loaded and leased like any other); only with no match anywhere does it go to
+ * the `ollama/` upstream. Decided per call, fixed for the rest of a run, and
+ * said in the log once per model.
+ *
  * A LOAD'S EVENT STREAM that drops is followed again after the last event seen
  * (`Last-Event-ID`): first after 5 s, the waits doubling to 30 s, for up to
  * 5 minutes from the drop (BookForge's stream-reconnect). Past that, and for
@@ -69,6 +76,7 @@ import {
   parseRetryAfter,
 } from './errors';
 import { buildChatBody, crucibleTargetOf, type ChatBodyInput, type CrucibleTarget, type UpstreamName } from './target';
+import { crucibleModelForOllama } from './ollama-map';
 
 /** Capability class sent as `X-Crucible-Act` and as every lease's act. */
 export const BRIEFCASE_ACT = 'analysis';
@@ -170,6 +178,15 @@ function isUnknownLease(err: unknown): boolean {
   return err instanceof CrucibleRefused && (err.code === 'unknown_lease' || err.status === 404);
 }
 
+/** What a Briefcase model choice runs as on Crucible, and where (see effectiveTarget). */
+export interface EffectiveTarget {
+  target: CrucibleTarget;
+  /** The server the mapping was decided on; null when the target was taken as it is. */
+  server: string | null;
+  /** The `ollama/<tag>` this target stands in for, or null when it was not mapped. */
+  mappedFrom: string | null;
+}
+
 /** How the queue asks for a run (P4). Every field is optional; a bare `withRun(fn)` is P3's run. */
 export interface RunOptions {
   /**
@@ -192,6 +209,8 @@ interface RunScope {
   parked: { server: string | null; reason: string } | null;
   /** The server each model was placed on in this run, so a run never re-ranks mid-way. */
   placed: Map<string, string>;
+  /** What each `ollama/` choice was decided to run as in this run, so it never flips mid-way. */
+  mapped: Map<string, EffectiveTarget>;
   /** Serialises acquisitions inside the run. */
   lock: Promise<unknown>;
 }
@@ -232,6 +251,9 @@ export class CrucibleChatService {
   private readonly runs = new AsyncLocalStorage<RunScope>();
   private readonly settingsCache = new Map<string, { at: number; configured: Record<UpstreamName, boolean> }>();
   private readonly modelsCache = new Map<string, { at: number; models: ModelInfo[] }>();
+  private readonly pagesCache = new Map<string, { at: number; readers: string[] | null }>();
+  /** `server\nollama/<tag>` already said in the log (once per model per process). */
+  private readonly mappingNoted = new Set<string>();
 
   /** The clock and the sleeper, replaceable by a spec. */
   now: () => number = Date.now;
@@ -270,7 +292,7 @@ export class CrucibleChatService {
    */
   async withRun<T>(fn: () => Promise<T>, options: RunOptions = {}): Promise<T> {
     if (this.runs.getStore() !== undefined) return fn();
-    const scope: RunScope = { held: new Map(), placed: new Map(), lock: Promise.resolve(), options, parked: null };
+    const scope: RunScope = { held: new Map(), placed: new Map(), mapped: new Map(), lock: Promise.resolve(), options, parked: null };
     try {
       return await this.runs.run(scope, fn);
     } finally {
@@ -289,9 +311,10 @@ export class CrucibleChatService {
     options: { signal?: AbortSignal; busyWait?: BusyWait; provider?: string } = {},
   ): Promise<T> {
     return this.withRun(async () => {
-      const target = crucibleTargetOf(options.provider, model);
+      const chosen = await this.effectiveTarget(crucibleTargetOf(options.provider, model), server);
+      const target = chosen.target;
       const scope = this.runs.getStore()!;
-      const venue = server ?? scope.placed.get(target.model) ?? await this.venueFor(target);
+      const venue = server ?? scope.placed.get(target.model) ?? chosen.server ?? await this.venueFor(target);
       scope.placed.set(target.model, venue);
       if (target.route === 'local') await this.ensureLocal(venue, target.model, options.signal, options.busyWait);
       return fn({ server: venue, model: target.model, target });
@@ -337,12 +360,13 @@ export class CrucibleChatService {
   async chat(request: CrucibleChatRequest): Promise<CrucibleChatResult> {
     const signal = request.signal;
     throwIfAborted(signal);
-    const target = crucibleTargetOf(request.provider, request.model);
+    const chosen = await this.effectiveTarget(crucibleTargetOf(request.provider, request.model), request.server);
+    const target = chosen.target;
     const messages: CrucibleChatMessage[] = request.messages ?? (request.prompt !== undefined ? [{ role: 'user', content: request.prompt }] : []);
     if (messages.length === 0) throw new CrucibleChatError(400, 'invalid_request', 'A chat needs a prompt or messages.');
 
     const scope = this.runs.getStore();
-    const server = request.server ?? scope?.placed.get(target.model) ?? await this.venueFor(target);
+    const server = request.server ?? scope?.placed.get(target.model) ?? chosen.server ?? await this.venueFor(target);
     scope?.placed.set(target.model, server);
 
     const body = buildChatBody(target, {
@@ -478,6 +502,80 @@ export class CrucibleChatService {
     };
   }
 
+  // ── an ollama choice, on Crucible's own model ─────────────────────────
+
+  /**
+   * What `target` runs as. Anything but `ollama/<tag>` is itself. An Ollama
+   * tag is looked up on `server` (when the caller pinned one), else on each
+   * enabled server in rank order that answers; the first with a matching local
+   * model (ollama-map.ts) serves it as that model. No match anywhere: the
+   * `ollama/` upstream, as chosen. Inside a run the answer is kept, so a run
+   * never switches models between calls.
+   */
+  async effectiveTarget(target: CrucibleTarget, server?: string): Promise<EffectiveTarget> {
+    if (target.upstream !== 'ollama') return { target, server: null, mappedFrom: null };
+    const scope = this.runs.getStore();
+    const key = `${server ?? ''}\n${target.model}`;
+    const kept = scope?.mapped.get(key);
+    if (kept !== undefined) return kept;
+
+    let candidates: string[];
+    if (server !== undefined) {
+      candidates = [server];
+    } else {
+      candidates = [];
+      try {
+        for (const row of this.servers.ranked()) {
+          const answer = await this.probes.reach(row.name);
+          if (answer.reach === 'ready' || answer.reach === 'busy') candidates.push(row.name);
+        }
+      } catch {
+        candidates = [];
+      }
+    }
+    let chosen: EffectiveTarget = { target, server: null, mappedFrom: null };
+    for (const name of candidates) {
+      let local: string | null;
+      try {
+        const [models, pageReaders] = await Promise.all([this.modelsOn(name), this.pageReadersOn(name)]);
+        local = crucibleModelForOllama(target.bareModel, models, { pageReaders });
+      } catch {
+        continue;
+      }
+      if (local === null) continue;
+      chosen = { target: { model: local, route: 'local', upstream: null, bareModel: local }, server: name, mappedFrom: target.model };
+      break;
+    }
+    const note = `${chosen.server ?? '*'}\n${target.model}`;
+    if (!this.mappingNoted.has(note)) {
+      this.mappingNoted.add(note);
+      if (chosen.mappedFrom !== null) this.logger.log(`[${chosen.server}] ${target.model} runs as ${chosen.target.model}, this server's own copy of that model`);
+      else this.logger.log(`${target.model}: no Crucible server has that model of its own, so it goes to Ollama through Crucible`);
+    }
+    scope?.mapped.set(key, chosen);
+    return chosen;
+  }
+
+  /**
+   * The page readers on a server, by capability class: what its `pages` class
+   * selected (cached with the models). Null when the record can't be read, so
+   * the mapping falls back to its modality rule.
+   */
+  async pageReadersOn(server: string): Promise<string[] | null> {
+    const cached = this.pagesCache.get(server);
+    if (cached !== undefined && this.now() - cached.at < MODELS_CACHE_MS) return cached.readers;
+    let readers: string[] | null;
+    try {
+      const client = await this.servers.clientFor(server);
+      const record = await client.capability({ timeoutMs: 5_000 });
+      readers = record.classes.filter((row) => row.capability === 'pages' && row.selected !== '').map((row) => row.selected);
+    } catch {
+      readers = null;
+    }
+    this.pagesCache.set(server, { at: this.now(), readers });
+    return readers;
+  }
+
   // ── venue ──────────────────────────────────────────────────────────────
 
   /**
@@ -551,10 +649,12 @@ export class CrucibleChatService {
     if (server === undefined) {
       this.settingsCache.clear();
       this.modelsCache.clear();
+      this.pagesCache.clear();
       return;
     }
     this.settingsCache.delete(server);
     this.modelsCache.delete(server);
+    this.pagesCache.delete(server);
   }
 
   // ── residency and leases ──────────────────────────────────────────────

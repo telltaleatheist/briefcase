@@ -48,7 +48,10 @@ describe('generateText through Crucible: the provider mapping', () => {
   it.each<[AIProviderConfig['provider'], string, string, boolean]>([
     ['claude', 'claude-sonnet-5', 'anthropic/claude-sonnet-5', false],
     ['openai', 'gpt-5.1', 'openai/gpt-5.1', false],
-    ['ollama', 'qwen3.5:4b', 'ollama/qwen3.5:4b', true],
+    // An Ollama model this server has no model of its own for stays on the ollama/ upstream;
+    // one it has (qwen3.5-4b is installed here) runs as that local model (ollama-map.ts).
+    ['ollama', 'qwen3:14b', 'ollama/qwen3:14b', true],
+    ['ollama', 'qwen3.5:4b', 'qwen3.5-4b', true],
     ['local', 'qwen3.5-9b', 'qwen3.5-9b', true],
   ])('%s:%s → %s (temperature sent: %s)', async (prov, model, crucibleModel, sendsTemperature) => {
     // No apiKey and no ollamaEndpoint: the serving Crucible holds both.
@@ -149,6 +152,12 @@ describe('the direct road is untouched', () => {
     expect(fake.requests.filter((r) => r.path.startsWith('/v1/'))).toHaveLength(0);
   });
 
+  it('BRIEFCASE_AI_VIA=direct: an Ollama choice is never mapped and never looked up on Crucible', async () => {
+    process.env[AI_VIA_ENV] = 'direct';
+    await expect(provider.crucibleOllamaStandIn('qwen3.5:4b')).resolves.toBeNull();
+    expect(fake.requests.filter((r) => r.path.startsWith('/v1/'))).toHaveLength(0);
+  });
+
   it('without the Crucible service (a hand-built provider) it is always direct', () => {
     expect(new AIProviderService(noLlama).via()).toBe('direct');
   });
@@ -223,6 +232,77 @@ describe('a whole analysis through Crucible', () => {
     expect(fake.chatBodies().some((b) => 'num_ctx' in b || 'options' in b)).toBe(false);
     // Said once, not per run or per chunk.
     expect([...logged, ...warned].filter((m) => /Ollama's default context/.test(m))).toHaveLength(1);
+  });
+
+  it('an ollama: choice the server has a model of its own for runs AS that model: loaded, leased, sized at its context, the stored config untouched', async () => {
+    await fake.close();
+    // The Mac's real catalog: the 27B 8-bit is served at 12K, the 4-bit at 98K, and dots-ocr reads pages.
+    fake = await startFakeCrucible({
+      models: [
+        { id: 'dots-ocr', paramsB: 3, modalities: ['text', 'image'] },
+        { id: 'qwen3.5-9b', paramsB: 9, contextDefault: 16384, maxModelLen: 16384 },
+        { id: 'qwen3.8-27b-4bit', paramsB: 27, contextDefault: 98304, maxModelLen: 98304 },
+        { id: 'qwen3.8-27b-8bit', paramsB: 27, contextDefault: 12288, maxModelLen: 12288 },
+      ],
+      upstreams: { ollama: { url: 'http://127.0.0.1:11434' } },
+      chatReplies: { '*': '{"title":"A chapter","summary":"About it.","verdict":"skip","flags":[],"people":[],"topics":["cooking"],"hook":"Hook.","body":"Body.","description":"Desc.","tags":["x"]}' },
+    });
+    h.registry.remove('mac');
+    h.registry.add({ name: 'mac', url: fake.url, token: fake.token });
+    const logged: string[] = [];
+    const spy = jest.spyOn(Logger.prototype, 'log').mockImplementation(function (this: unknown, message: unknown) { logged.push(String(message)); });
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(function (this: unknown, message: unknown) { logged.push(String(message)); });
+    const opts = { ...options('qwen3.8:27b'), provider: 'ollama' as never };
+    try {
+      const service = analysis();
+      await service.analyzeTranscript(opts);
+      await service.analyzeTranscript(opts);
+    } finally {
+      spy.mockRestore();
+      warnSpy.mockRestore();
+    }
+    expect(fake.chatBodies().length).toBeGreaterThan(1);
+    expect(fake.chatBodies().every((b) => b['model'] === 'qwen3.8-27b-4bit')).toBe(true);
+    // Loaded once (the second run finds it resident), leased and released per run.
+    expect(fake.jobs.filter((j) => j.type === 'load-model').map((j) => j.model)).toEqual(['qwen3.8-27b-4bit']);
+    expect(fake.leases.taken).toHaveLength(2);
+    expect(fake.leases.released).toEqual(fake.leases.taken.map((l) => l.leaseId));
+    // Sized at the local model's context (capped at the 32K analysis window), not Ollama's 4K.
+    const limits = logged.filter((m) => m.startsWith('[Model Limits] effective ctx='));
+    expect(limits).toHaveLength(2);
+    expect(limits.every((m) => m.startsWith('[Model Limits] effective ctx=32768:'))).toBe(true);
+    expect(logged.some((m) => /Ollama's default context/.test(m))).toBe(false);
+    // Said once per model, not per call or per run.
+    expect(logged.filter((m) => /ollama\/qwen3\.8:27b runs as qwen3\.8-27b-4bit/.test(m))).toHaveLength(1);
+    // The choice itself is unchanged: still ollama:qwen3.8:27b.
+    expect(opts).toMatchObject({ provider: 'ollama', model: 'qwen3.8:27b' });
+  });
+
+  it('an ollama: choice with no match on the server stays on the ollama/ upstream at Ollama\'s 4K context', async () => {
+    await fake.close();
+    fake = await startFakeCrucible({
+      // The 27B is known but not downloaded here: no match.
+      models: [{ id: 'qwen3.5-9b', paramsB: 9 }, { id: 'qwen3.8-27b-4bit', paramsB: 27, installed: false, contextDefault: 98304 }],
+      upstreams: { ollama: { url: 'http://127.0.0.1:11434' } },
+      chatReplies: { '*': '{"title":"A chapter","summary":"About it.","verdict":"skip","flags":[],"people":[],"topics":["cooking"],"hook":"Hook.","body":"Body.","description":"Desc.","tags":["x"]}' },
+    });
+    h.registry.remove('mac');
+    h.registry.add({ name: 'mac', url: fake.url, token: fake.token });
+    const logged: string[] = [];
+    const spy = jest.spyOn(Logger.prototype, 'log').mockImplementation(function (this: unknown, message: unknown) { logged.push(String(message)); });
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(function (this: unknown, message: unknown) { logged.push(String(message)); });
+    try {
+      await analysis().analyzeTranscript({ ...options('qwen3.8:27b'), provider: 'ollama' as never });
+    } finally {
+      spy.mockRestore();
+      warnSpy.mockRestore();
+    }
+    expect(fake.chatBodies().every((b) => b['model'] === 'ollama/qwen3.8:27b')).toBe(true);
+    expect(fake.jobs.filter((j) => j.type === 'load-model')).toHaveLength(0);
+    const limits = logged.filter((m) => m.startsWith('[Model Limits] effective ctx='));
+    expect(limits).toHaveLength(1);
+    expect(limits[0]).toMatch(/^\[Model Limits\] effective ctx=4096:/);
+    expect(logged.filter((m) => /no Crucible server has that model of its own/.test(m))).toHaveLength(1);
   });
 
   it('zero successful chapters throws, never completes empty, and still releases the lease', async () => {

@@ -24,6 +24,7 @@ import { CrucibleSettingsBridge } from '../settings-bridge.service';
 import type {
   AiModelOption,
   AiModelsView,
+  AiRunsAs,
   AiTaskModels,
   AiTaskName,
   AiUpstreamsView,
@@ -33,7 +34,8 @@ import type {
 } from '../wire/ai-wire';
 import { AI_VIA_ENV, resolveAiVia } from './ai-via';
 import { CrucibleChatService, isTextChatModel } from './crucible-chat.service';
-import type { UpstreamName } from './target';
+import { crucibleTargetOf, type UpstreamName } from './target';
+import { CRUCIBLE_OLLAMA_CONTEXT, servedContextOf } from './ollama-map';
 
 export const AI_TASKS: readonly AiTaskName[] = ['boundary', 'chapter', 'flags', 'description', 'tags', 'title'];
 const UPSTREAM_LIST_CACHE_MS = 60_000;
@@ -160,6 +162,41 @@ export class CrucibleAiService {
     }
 
     return { via, server, reach, unavailable: null, upstreams, models, analysisDefault, upstreamErrors };
+  }
+
+  /**
+   * What each stored `ollama:<tag>` value runs as through Crucible: the
+   * decision chat() makes at call time (CrucibleChatService.effectiveTarget),
+   * for Settings › AI to show beside the choice. Values that aren't Ollama
+   * choices are left out.
+   */
+  async runsAs(values: string[]): Promise<AiRunsAs[]> {
+    const out: AiRunsAs[] = [];
+    let connected: string | null | undefined;
+    for (const value of [...new Set(values.map((v) => v.trim()).filter(Boolean))]) {
+      let target;
+      try {
+        target = crucibleTargetOf(undefined, value);
+      } catch {
+        continue;
+      }
+      if (target.upstream !== 'ollama') continue;
+      const chosen = await this.chat.effectiveTarget(target);
+      if (chosen.mappedFrom !== null && chosen.server !== null) {
+        let contextTokens: number | null = null;
+        try {
+          const info = (await this.chat.modelsOn(chosen.server)).find((m) => m.id === chosen.target.model);
+          contextTokens = info ? servedContextOf(info) : null;
+        } catch {
+          contextTokens = null;
+        }
+        out.push({ value, server: chosen.server, runsAs: chosen.target.model, contextTokens });
+      } else {
+        if (connected === undefined) connected = (await this.connectedServer()).server;
+        out.push({ value, server: connected, runsAs: null, contextTokens: CRUCIBLE_OLLAMA_CONTEXT });
+      }
+    }
+    return out;
   }
 
   private async upstreamIds(server: string, upstream: UpstreamName): Promise<{ ids: string[] | null; error: string | null }> {

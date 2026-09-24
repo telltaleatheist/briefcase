@@ -257,7 +257,10 @@ export class CrucibleLanesService implements OnModuleInit, BeforeApplicationShut
     return lane === CLOUD_LANE ? CLOUD_LANE_WIDTH : GPU_LANE_WIDTH;
   }
 
-  async place(target: CrucibleTarget): Promise<PlaceAnswer> {
+  async place(chosen: CrucibleTarget): Promise<PlaceAnswer> {
+    // An ollama/ choice the server has a model of its own for runs on the
+    // GPU lane as that model (ollama-map.ts), leased like any local model.
+    const target = (await this.chat.effectiveTarget(chosen)).target;
     const answer: VenueAnswer = await decideVenue(target, {
       enabled: () => this.servers.ranked(),
       reach: async (server) => {

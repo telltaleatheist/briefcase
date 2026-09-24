@@ -98,6 +98,25 @@ describe('the reservation', () => {
   });
 });
 
+describe('an ollama: choice the server has a model of its own for', () => {
+  it('is placed on the GPU lane as that local model, loaded and leased before the task, and every call runs on it', async () => {
+    await wire();
+    const rig = makeRig(lanes);
+    rig.media.analyze = async (): Promise<TaskResult> => {
+      await provider.generateText('prompt', { provider: 'ollama', model: 'qwen3.5:9b' }, 'chapter');
+      await provider.generateText('prompt', { provider: 'ollama', model: 'qwen3.5:9b' }, 'flags');
+      return { success: true, data: { sectionsCount: 1 } };
+    };
+    const id = rig.qm.addJob(analyzeJob('v1', 'ollama:qwen3.5:9b'));
+    await until(() => rig.qm.getJob(id)?.status === 'completed');
+    expect(rig.qm.getJob(id)).toMatchObject({ lane: 'gpu:mac', venue: 'mac' });
+    expect(fake.jobs.map((j) => [j.type, j.model])).toEqual([['load-model', 'qwen3.5-9b']]);
+    expect(fake.chatBodies().map((b) => b['model'])).toEqual(['qwen3.5-9b', 'qwen3.5-9b']);
+    expect(fake.leases.taken).toHaveLength(1);
+    expect(fake.leases.released).toEqual([fake.leases.taken[0].leaseId]);
+  });
+});
+
 describe('parking against the fake', () => {
   it("parks on the holder's sentence when another app has the card, and starts by itself when it frees", async () => {
     await wire();

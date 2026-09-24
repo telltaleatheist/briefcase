@@ -15,6 +15,7 @@ import { resolveAiVia, type AiVia } from '../crucible/llm/ai-via';
 import { CrucibleChatService, isTextChatModel, type CrucibleChatResult } from '../crucible/llm/crucible-chat.service';
 import { CrucibleBusyError, CrucibleChatCancelled, CrucibleChatError, CrucibleNoVenueError, CrucibleParkedError } from '../crucible/llm/errors';
 import { crucibleTargetOf, type CrucibleTarget } from '../crucible/llm/target';
+import { CRUCIBLE_ANALYSIS_CONTEXT } from '../crucible/llm/ollama-map';
 
 /**
  * A Crucible busy with someone else's work, OUTSIDE a queue-admitted run (the
@@ -169,6 +170,22 @@ export class AIProviderService {
     }
   }
 
+  /**
+   * The Crucible model an `ollama:<tag>` choice runs as (ollama-map.ts), or
+   * null when it stays on the `ollama/` upstream, or this isn't the Crucible road.
+   * The same decision chat() makes at call time, so analysis sizes its chunks
+   * for the model that will actually answer.
+   */
+  async crucibleOllamaStandIn(model: string): Promise<string | null> {
+    if (this.via() !== 'crucible' || this.crucibleChat === undefined) return null;
+    try {
+      const chosen = await this.crucibleChat.effectiveTarget(crucibleTargetOf('ollama', model));
+      return chosen.mappedFrom !== null ? chosen.target.model : null;
+    } catch {
+      return null;
+    }
+  }
+
   /** The context window a Crucible local model is served at, or null when it can't be read. */
   async crucibleContextWindow(model: string): Promise<number | null> {
     if (this.via() !== 'crucible' || this.crucibleChat === undefined) return null;
@@ -180,7 +197,7 @@ export class AIProviderService {
       // The context this host serves it at, never more than what is in force,
       // and capped at 32K: a larger chunk is slower on a local card for no gain.
       const served = Math.min(info.contextDefault, info.maxModelLen ?? Number.POSITIVE_INFINITY);
-      return Number.isFinite(served) && served > 0 ? Math.min(served, 32768) : null;
+      return Number.isFinite(served) && served > 0 ? Math.min(served, CRUCIBLE_ANALYSIS_CONTEXT) : null;
     } catch {
       return null;
     }
@@ -382,6 +399,7 @@ export class AIProviderService {
     const outputTokens = result.usage?.completionTokens ?? 0;
     const pricedAs = target.upstream === 'anthropic' ? 'claude' : target.upstream === 'openai' ? 'openai' : null;
     const estimatedCost = pricedAs === null ? 0 : this.calculateCost(pricedAs, target.bareModel, inputTokens, outputTokens);
+    target = result.target ?? target;
     this.logger.log(
       `Crucible (${result.server}) ${target.model}: ${inputTokens} input + ${outputTokens} output tokens`
         + `${pricedAs ? ` (≈$${estimatedCost.toFixed(4)})` : ''}${result.attempts > 1 ? `, ${result.attempts} attempts` : ''}`,
@@ -865,8 +883,9 @@ export class AIProviderService {
   private async testViaCrucible(config: AIProviderConfig): Promise<{ success: boolean; error?: string }> {
     const chat = this.crucibleChat!;
     try {
-      const target = crucibleTargetOf(config.provider, config.model);
-      const venue = await chat.venueFor(target);
+      const chosen = await chat.effectiveTarget(crucibleTargetOf(config.provider, config.model));
+      const target = chosen.target;
+      const venue = chosen.server ?? await chat.venueFor(target);
       if (target.upstream !== null) {
         const configured = await chat.upstreamsConfigured(venue);
         if (!configured[target.upstream]) return { success: false, error: `"${venue}" has no ${target.upstream} configured. Add it in Settings › AI.` };

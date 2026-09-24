@@ -16,6 +16,7 @@ import { ensureNotCancelled, isCancellation } from './cancellation';
 import { OllamaService } from './ollama.service';
 import { estimateNumCtx, numCtxMaxForModel, parseProviderModel, AITaskKind } from './model-utils';
 import { crucibleTargetOf } from '../crucible/llm/target';
+import { CRUCIBLE_OLLAMA_CONTEXT } from '../crucible/llm/ollama-map';
 import { ChapterDetectionService } from './chapter-detection.service';
 import {
   NliRankerService,
@@ -258,16 +259,11 @@ const PREFERRED_PLACEMENT_MODELS = ['qwen3.5:4b'] as const;
 const CRUCIBLE_LOCAL_CONTEXT_FALLBACK = 16384;
 
 /**
- * The context an `ollama/` model is chunked for THROUGH CRUCIBLE. Crucible
- * forwards no `num_ctx` (target.ts), so Ollama serves the call at its own
- * default: 4096 tokens (its documented default, and the server-side
- * OLLAMA_CONTEXT_LENGTH default; older releases used 2048, but a transcript
- * chunk at that size is too small to chapter). Sizing to numCtxMaxForModel
- * instead (12-16K, what the DIRECT path requests) would hand Ollama a prompt
- * three or four times its window, which it truncates silently. The direct
- * path is unchanged: it sends num_ctx and keeps its larger windows.
+ * The context an `ollama/` model is chunked for THROUGH CRUCIBLE, when the
+ * server has no model of its own to run it as (ollama-map.ts has the constant
+ * and why: Crucible forwards no num_ctx, so Ollama serves its 4K default).
  */
-export const CRUCIBLE_OLLAMA_CONTEXT = 4096;
+export { CRUCIBLE_OLLAMA_CONTEXT };
 
 /**
  * How many chapters have their flags extracted at once (Pass 2b).
@@ -1169,26 +1165,39 @@ export class AIAnalysisService {
       // at the context its manifest sizes for this host: read it once per model.
       const crucibleLocalContext = new Map<string, number>();
       const viaCrucible = this.aiProviderService.via() === 'crucible';
+      // An ollama choice the serving Crucible has a model of its own for runs
+      // as that model (ollama-map.ts, decided again by chat() at call time):
+      // sized at that model's context. `null`: it stays on the ollama/ upstream.
+      const crucibleStandIn = new Map<string, string | null>();
+      const ollamaTagOf = (cfg: AIProviderConfig): string | null => {
+        if (!viaCrucible) return null;
+        try {
+          const target = crucibleTargetOf(cfg.provider, cfg.model);
+          return target.route === 'upstream' && target.upstream === 'ollama' ? target.bareModel : null;
+        } catch {
+          return null;
+        }
+      };
       // An Ollama model forwarded by Crucible runs at Ollama's default
       // context, since Crucible has no num_ctx to send (CRUCIBLE_OLLAMA_CONTEXT).
       const isCrucibleOllama = (cfg: AIProviderConfig): boolean => {
-        if (!viaCrucible) return false;
-        try {
-          const target = crucibleTargetOf(cfg.provider, cfg.model);
-          return target.route === 'upstream' && target.upstream === 'ollama';
-        } catch {
-          return false;
-        }
+        const tag = ollamaTagOf(cfg);
+        return tag !== null && !crucibleStandIn.get(tag);
       };
       if (viaCrucible) {
-        for (const t of ['chapter', 'flags'] as AITaskKind[]) {
-          const cfg = this.resolveTaskConfig(aiConfig, t, taskModels);
-          if (cfg.provider !== 'local' || crucibleLocalContext.has(cfg.model)) continue;
-          const window = await this.aiProviderService.crucibleContextWindow(cfg.model);
-          crucibleLocalContext.set(cfg.model, window ?? CRUCIBLE_LOCAL_CONTEXT_FALLBACK);
+        const sized = [aiConfig, ...(['chapter', 'flags'] as AITaskKind[]).map((t) => this.resolveTaskConfig(aiConfig, t, taskModels))];
+        for (const cfg of sized) {
+          const tag = ollamaTagOf(cfg);
+          if (tag !== null && !crucibleStandIn.has(tag)) crucibleStandIn.set(tag, await this.aiProviderService.crucibleOllamaStandIn(tag));
+          const local = tag !== null ? crucibleStandIn.get(tag) ?? null : cfg.provider === 'local' ? cfg.model : null;
+          if (local === null || crucibleLocalContext.has(local)) continue;
+          const window = await this.aiProviderService.crucibleContextWindow(local);
+          crucibleLocalContext.set(local, window ?? CRUCIBLE_LOCAL_CONTEXT_FALLBACK);
         }
       }
       const contextFor = (cfg: AIProviderConfig): number => {
+        const standIn = crucibleStandIn.get(ollamaTagOf(cfg) ?? '');
+        if (standIn && crucibleLocalContext.has(standIn)) return crucibleLocalContext.get(standIn)!;
         if (isCrucibleOllama(cfg)) {
           if (!this.crucibleOllamaNoted.has(cfg.model)) {
             this.crucibleOllamaNoted.add(cfg.model);
