@@ -5,6 +5,7 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
+import { Logger } from '@nestjs/common';
 import { AIProviderService, type AIGenerateOverrides, type AIProviderConfig } from '../../src/analysis/ai-provider.service';
 import { AIAnalysisService } from '../../src/analysis/ai-analysis.service';
 import { AnalysisCancelledError } from '../../src/analysis/cancellation';
@@ -192,6 +193,36 @@ describe('a whole analysis through Crucible', () => {
     expect(fake.leases.released).toEqual([fake.leases.taken[0].leaseId]);
     expect(fake.chatBodies().length).toBeGreaterThan(1);
     expect(fake.chatBodies().every((b) => b['model'] === 'qwen3.5-9b')).toBe(true);
+  });
+
+  it('REGRESSION: an ollama/ model through Crucible is chunked for Ollama\'s default context (Crucible can\'t send num_ctx), said once', async () => {
+    await fake.close();
+    fake = await startFakeCrucible({
+      models: [{ id: 'qwen3.5-9b', paramsB: 9 }],
+      upstreams: { ollama: { url: 'http://127.0.0.1:11434' } },
+      chatReplies: { '*': '{"title":"A chapter","summary":"About it.","verdict":"skip","flags":[],"people":[],"topics":["cooking"],"hook":"Hook.","body":"Body.","description":"Desc.","tags":["x"]}' },
+    });
+    h.registry.remove('mac');
+    h.registry.add({ name: 'mac', url: fake.url, token: fake.token });
+    const logged: string[] = [];
+    const spy = jest.spyOn(Logger.prototype, 'log').mockImplementation(function (this: unknown, message: unknown) { logged.push(String(message)); });
+    const warned: string[] = [];
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(function (this: unknown, message: unknown) { warned.push(String(message)); });
+    try {
+      const service = analysis();
+      await service.analyzeTranscript({ ...options('qwen3:14b'), provider: 'ollama' as never });
+      await service.analyzeTranscript({ ...options('qwen3:14b'), provider: 'ollama' as never });
+    } finally {
+      spy.mockRestore();
+      warnSpy.mockRestore();
+    }
+    const limits = logged.filter((m) => m.startsWith('[Model Limits] effective ctx='));
+    expect(limits).toHaveLength(2);
+    expect(limits.every((m) => m.startsWith('[Model Limits] effective ctx=4096:'))).toBe(true);
+    expect(fake.chatBodies().every((b) => b['model'] === 'ollama/qwen3:14b')).toBe(true);
+    expect(fake.chatBodies().some((b) => 'num_ctx' in b || 'options' in b)).toBe(false);
+    // Said once, not per run or per chunk.
+    expect([...logged, ...warned].filter((m) => /Ollama's default context/.test(m))).toHaveLength(1);
   });
 
   it('zero successful chapters throws, never completes empty, and still releases the lease', async () => {

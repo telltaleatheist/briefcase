@@ -15,6 +15,7 @@ import { AIProviderService, AIProviderConfig } from './ai-provider.service';
 import { ensureNotCancelled, isCancellation } from './cancellation';
 import { OllamaService } from './ollama.service';
 import { estimateNumCtx, numCtxMaxForModel, parseProviderModel, AITaskKind } from './model-utils';
+import { crucibleTargetOf } from '../crucible/llm/target';
 import { ChapterDetectionService } from './chapter-detection.service';
 import {
   NliRankerService,
@@ -255,6 +256,18 @@ const PREFERRED_PLACEMENT_MODELS = ['qwen3.5:4b'] as const;
 
 /** A Crucible catalog model whose context could not be read is sized as 16K. */
 const CRUCIBLE_LOCAL_CONTEXT_FALLBACK = 16384;
+
+/**
+ * The context an `ollama/` model is chunked for THROUGH CRUCIBLE. Crucible
+ * forwards no `num_ctx` (target.ts), so Ollama serves the call at its own
+ * default: 4096 tokens (its documented default, and the server-side
+ * OLLAMA_CONTEXT_LENGTH default; older releases used 2048, but a transcript
+ * chunk at that size is too small to chapter). Sizing to numCtxMaxForModel
+ * instead (12-16K, what the DIRECT path requests) would hand Ollama a prompt
+ * three or four times its window, which it truncates silently. The direct
+ * path is unchanged: it sends num_ctx and keeps its larger windows.
+ */
+export const CRUCIBLE_OLLAMA_CONTEXT = 4096;
 
 /**
  * How many chapters have their flags extracted at once (Pass 2b).
@@ -570,6 +583,8 @@ export function isReportedFinding(section: Pick<AnalyzedSection, 'verdict'>): bo
 @Injectable()
 export class AIAnalysisService {
   private readonly logger = new Logger(AIAnalysisService.name);
+  /** `ollama/` models already told they are chunked for Ollama's default context (said once per process). */
+  private readonly crucibleOllamaNoted = new Set<string>();
 
   constructor(
     private readonly aiProviderService: AIProviderService,
@@ -1153,7 +1168,19 @@ export class AIAnalysisService {
       // Through Crucible a 'local' model is one in the server's catalog, served
       // at the context its manifest sizes for this host: read it once per model.
       const crucibleLocalContext = new Map<string, number>();
-      if (this.aiProviderService.via() === 'crucible') {
+      const viaCrucible = this.aiProviderService.via() === 'crucible';
+      // An Ollama model forwarded by Crucible runs at Ollama's default
+      // context, since Crucible has no num_ctx to send (CRUCIBLE_OLLAMA_CONTEXT).
+      const isCrucibleOllama = (cfg: AIProviderConfig): boolean => {
+        if (!viaCrucible) return false;
+        try {
+          const target = crucibleTargetOf(cfg.provider, cfg.model);
+          return target.route === 'upstream' && target.upstream === 'ollama';
+        } catch {
+          return false;
+        }
+      };
+      if (viaCrucible) {
         for (const t of ['chapter', 'flags'] as AITaskKind[]) {
           const cfg = this.resolveTaskConfig(aiConfig, t, taskModels);
           if (cfg.provider !== 'local' || crucibleLocalContext.has(cfg.model)) continue;
@@ -1161,14 +1188,25 @@ export class AIAnalysisService {
           crucibleLocalContext.set(cfg.model, window ?? CRUCIBLE_LOCAL_CONTEXT_FALLBACK);
         }
       }
-      const contextFor = (cfg: AIProviderConfig): number =>
-        cfg.provider === 'local' && crucibleLocalContext.has(cfg.model)
+      const contextFor = (cfg: AIProviderConfig): number => {
+        if (isCrucibleOllama(cfg)) {
+          if (!this.crucibleOllamaNoted.has(cfg.model)) {
+            this.crucibleOllamaNoted.add(cfg.model);
+            this.logger.warn(
+              `[Model Limits] ${cfg.model} goes to Ollama through Crucible, which can't set num_ctx: ` +
+              `chunking for Ollama's default context (${CRUCIBLE_OLLAMA_CONTEXT} tokens) so no prompt is truncated`,
+            );
+          }
+          return CRUCIBLE_OLLAMA_CONTEXT;
+        }
+        return cfg.provider === 'local' && crucibleLocalContext.has(cfg.model)
           ? crucibleLocalContext.get(cfg.model)!
           : cfg.provider === 'local'
           ? 8192 // pinned llama.cpp server context (-c 8192)
           : cfg.provider === 'ollama'
             ? numCtxMaxForModel(cfg.model) // what we request as num_ctx
             : 128000; // claude/openai have large windows
+      };
 
       // 'boundary' is NOT in this list. Placement reads a fixed ~90-second
       // window it sizes itself (chapter-detection.service pins one num_ctx from
