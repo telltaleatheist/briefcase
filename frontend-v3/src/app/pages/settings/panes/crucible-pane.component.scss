@@ -96,32 +96,6 @@
 }
 
 .cru-main {
-    opacity: 0.7;
-  }
-
-  &.busy-switch {
-    cursor: progress;
-  }
-}
-
-.cru-grip {
-  flex: none;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 6px 2px;
-  cursor: grab;
-
-  span {
-    display: block;
-    width: 12px;
-    height: 2px;
-    border-radius: 1px;
-    background: var(--text-tertiary);
-  }
-}
-
-.cru-main {
   flex: 1;
   min-width: 0;
 
@@ -248,8 +222,7 @@
   }
 
   &.on {
-    border-color: var(--primary-orange);
-    cursor: default;
+    border-color: rgba(255, 107, 53, 0.5);
   }
 
   input {
