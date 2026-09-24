@@ -34,10 +34,6 @@ export const SCORER_ERROR_STATUS = {
   decide_not_served: 503,
   // Crucible has no model its decide class can use, or is older than the door.
   scorer_unavailable: 503,
-  // Crucible answered without a field the scorer cannot work without (the
-  // message names it, e.g. a choice answer's per-option `logprobs`). Never
-  // filled in: a guessed distribution would be a guessed decision.
-  decide_field_missing: 502,
   // Not in snap: the caller's AbortSignal fired (a cancelled analysis job).
   cancelled: 499,
 } as const;

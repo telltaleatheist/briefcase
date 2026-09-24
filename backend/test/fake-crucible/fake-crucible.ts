@@ -267,11 +267,12 @@ export type FieldOmissions = Readonly<Record<string, readonly string[]>>;
  * absent) on the routes Briefcase calls — what a leaner or older server may
  * leave out without the SDK refusing it. Load-bearing fields (ids, states,
  * decide answers, resident/loadable/modalities, capability enabled/selected,
- * chat content) are never here. Note three Briefcase DEPENDS on although the
- * SDK calls them informational: `host.backend` / `backend_kind` (the module is
- * filtered to them), decide `logprobs`, and chat `usage.prompt_tokens` for
- * countTokens; `logprobs` is left out of this set so the scorer can run, the
- * other two are in it (see {@link informationalExcept}).
+ * chat content) are never here. Some are load-bearing to one of Briefcase's
+ * paths ("informational to the read, load-bearing to YOUR path"): `host.backend`
+ * / `backend_kind` (the module is filtered to them), chat
+ * `usage.prompt_tokens` (countTokens) and a model's context (analysis sizing)
+ * are refused by name there; decide `logprobs` is read from `probabilities`.
+ * Keep any back with {@link informationalExcept}.
  */
 export const INFORMATIONAL_FIELDS: FieldOmissions = {
   'GET /v1/info': ['server.version', 'host.platform', 'host.arch', 'host.backend', 'host.gpu',
@@ -288,7 +289,7 @@ export const INFORMATIONAL_FIELDS: FieldOmissions = {
   'POST /v1/uploads': ['bytes', 'sha256'],
   'GET /v1/jobs/:id': ['progress', 'created'],
   'GET /v1/tasks/:id': ['request', 'created', 'started', 'finished'],
-  'POST /v1/decide': ['model', 'engine', 'timing_ms', 'tokens', 'answers.*.confidence'],
+  'POST /v1/decide': ['model', 'engine', 'timing_ms', 'tokens', 'answers.*.confidence', 'answers.*.logprobs'],
   'POST /v1/openai/chat/completions': ['id', 'model', 'usage'],
   'job-event:queued': ['position'],
   'job-event:warming': ['message'],

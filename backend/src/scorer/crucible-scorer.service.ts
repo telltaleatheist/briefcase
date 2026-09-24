@@ -334,7 +334,7 @@ export class CrucibleScorerService {
         text: result.text,
         promptTokens: result.usage?.promptTokens ?? null,
         completionTokens: result.usage?.completionTokens ?? null,
-        finishReason: result.finishReason ?? 'stop',
+        finishReason: result.finishReason,
         model: result.model,
       };
     } catch (err) {

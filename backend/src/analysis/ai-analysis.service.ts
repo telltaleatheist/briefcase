@@ -232,9 +232,6 @@ const ROUTABLE_TASKS = ['chapter', 'flags', 'description', 'tags', 'title'] as c
  */
 const RETIRED_TASKS: ReadonlySet<string> = new Set(['boundary']);
 
-/** A Crucible catalog model whose context could not be read is sized as 16K. */
-const CRUCIBLE_LOCAL_CONTEXT_FALLBACK = 16384;
-
 /**
  * The context an `ollama/` model is chunked for THROUGH CRUCIBLE, when the
  * server has no model of its own to run it as (ollama-map.ts has the constant
@@ -765,8 +762,8 @@ export class AIAnalysisService {
           }
           const local = tag !== null ? crucibleStandIn.get(tag) ?? null : cfg.provider === 'local' ? cfg.model : null;
           if (local === null || crucibleLocalContext.has(local)) continue;
-          const window = await this.aiProviderService.crucibleContextWindow(local, crucibleStandInLoad.get(local));
-          crucibleLocalContext.set(local, window ?? CRUCIBLE_LOCAL_CONTEXT_FALLBACK);
+          // What the server states, or a failure by name: never an invented window.
+          crucibleLocalContext.set(local, await this.aiProviderService.crucibleContextWindow(local, crucibleStandInLoad.get(local)));
         }
       }
       const contextFor = (cfg: AIProviderConfig): number => {
@@ -783,7 +780,12 @@ export class AIAnalysisService {
           }
           return CRUCIBLE_OLLAMA_CONTEXT;
         }
-        if (cfg.provider === 'local') return crucibleLocalContext.get(cfg.model) ?? CRUCIBLE_LOCAL_CONTEXT_FALLBACK;
+        if (cfg.provider === 'local') {
+          const window = crucibleLocalContext.get(cfg.model);
+          // Every local model the tasks resolve to was sized in the loop above.
+          if (window === undefined) throw new Error(`No context window was resolved for Crucible model ${cfg.model}`);
+          return window;
+        }
         // An ollama/ choice the server runs as its own model was answered above.
         if (cfg.provider === 'ollama') return numCtxMaxForModel(cfg.model);
         return 128000; // claude/openai have large windows

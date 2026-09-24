@@ -29,7 +29,7 @@ let provider: AIProviderService;
 beforeEach(async () => {
   process.env = { ...savedEnv, APPDATA: tempDir('ai-appdata-') };
   fake = await startFakeCrucible({
-    // dots-ocr is the live Mac catalog's page reader: 3B, text+image. It must never be picked for placement.
+    // dots-ocr is the live Mac catalog's page reader: 3B, text+image.
     models: [{ id: 'dots-ocr', paramsB: 3, modalities: ['text', 'image'] }, { id: 'qwen3.5-9b', paramsB: 9 }, { id: 'qwen3.5-4b', paramsB: 4 }],
     upstreams: { anthropic: { key: 'sk-ant-9999' }, openai: { key: 'sk-oa-8888' }, ollama: { url: 'http://127.0.0.1:11434' } },
   });
@@ -133,8 +133,7 @@ describe('every generateText call site, through Crucible', () => {
     await expect(provider.generateText('p', { provider: 'openai', model: 'gpt-5.1' }, 'title')).rejects.toThrow(/upstream_unconfigured/);
   });
 
-  it('the small-placement model comes from the Crucible catalog', async () => {
-    await expect(provider.smallLocalCrucibleModel()).resolves.toBe('local:qwen3.5-4b');
+  it('a local model\'s analysis window is the context the server states for it, capped at 32K', async () => {
     await expect(provider.crucibleContextWindow('qwen3.5-9b')).resolves.toBe(32768);
   });
 });

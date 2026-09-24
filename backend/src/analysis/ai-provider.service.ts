@@ -7,9 +7,11 @@ import {
   stripThinkTags,
 } from './model-utils';
 import { AnalysisCancelledError, ensureNotCancelled } from './cancellation';
-import { CrucibleChatService, OLLAMA_CONTEXT_VERSION, isAnalysisModel, type CrucibleChatResult } from '../crucible/llm/crucible-chat.service';
-import { isVisionAlias, servedContextOf } from '../crucible/llm/ollama-map';
+import { CrucibleChatService, OLLAMA_CONTEXT_VERSION, type CrucibleChatResult } from '../crucible/llm/crucible-chat.service';
+import { CrucibleUnreachable } from '@crucible/client';
+import { CrucibleFieldMissing } from '../crucible/errors';
 import { CrucibleBusyError, CrucibleChatCancelled, CrucibleChatError, CrucibleNoVenueError, CrucibleParkedError } from '../crucible/llm/errors';
+import { crucibleUnavailableCause } from '../crucible/transport-failure';
 import { crucibleTargetOf, type CrucibleTarget } from '../crucible/llm/target';
 import { CRUCIBLE_ANALYSIS_CONTEXT } from '../crucible/llm/ollama-map';
 
@@ -118,33 +120,6 @@ export class AIProviderService {
   }
 
   /**
-   * A small model in the connected Crucible's own catalog, installed and
-   * loadable, for boundary placement. Returns `local:<id>`, or null when the
-   * catalog has none.
-   */
-  async smallLocalCrucibleModel(maxParamsB = 5): Promise<string | null> {
-    try {
-      const venue = await this.crucibleChat.venueFor(crucibleTargetOf('local', '_'));
-      const [models, pageReaders] = await Promise.all([this.crucibleChat.modelsOn(venue), this.crucibleChat.pageReadersOn(venue)]);
-      // By capability class (never a page reader), and the base form over its
-      // `-vl` alias: switching a card between the two is a full reload.
-      // Only STATED facts qualify: a row whose support, install or size the
-      // server did not state (null, 1.0.25+) can't be shown to be a small
-      // installed model, so it is not a candidate.
-      const usable = models.flatMap((m) =>
-        m.backendSupported === true && m.installed === true && m.paramsB !== null && m.paramsB > 0 && m.paramsB <= maxParamsB
-          && isAnalysisModel(m, pageReaders) ? [{ model: m, paramsB: m.paramsB }] : []);
-      const small = usable
-        .filter(({ model: m }) => !isVisionAlias(m) || !usable.some(({ model: b }) => b.id === m.weightsOf))
-        .sort((a, b) => a.paramsB - b.paramsB || Number(isVisionAlias(b.model)) - Number(isVisionAlias(a.model)));
-      return small.length > 0 ? `local:${small[small.length - 1].model.id}` : null;
-    } catch (error) {
-      this.logger.debug(`[Placement] Crucible catalog not readable: ${(error as Error).message}`);
-      return null;
-    }
-  }
-
-  /**
    * The Crucible model an `ollama:<tag>` choice runs as (ollama-map.ts), or
    * null when it stays on the `ollama/` upstream. The same decision chat()
    * makes at call time, so analysis sizes its chunks for the model that will
@@ -181,27 +156,39 @@ export class AIProviderService {
     }
   }
 
-  /** The context window a Crucible local model is served at, or null when it can't be read. */
-  async crucibleContextWindow(model: string, loadContext?: number): Promise<number | null> {
+  /**
+   * The context window a Crucible local model is sized for in an analysis:
+   * the context this run loads it at (`loadContext`, ollama-map rule 4), else
+   * what the server STATES (CrucibleChatService.statedLocalContext: the row's
+   * served context, or this host's ceiling, which chat() then loads it at),
+   * capped at 32K (a larger chunk is slower on a local card for no gain).
+   * Never a guessed number: a server that states none of them is refused by
+   * name (CrucibleFieldMissing); a model it does not list is refused as
+   * unknown; a server that can't be read parks or fails as a chat would.
+   */
+  async crucibleContextWindow(model: string, loadContext?: number): Promise<number> {
+    if (loadContext !== undefined) return Math.min(loadContext, CRUCIBLE_ANALYSIS_CONTEXT);
+    const target = crucibleTargetOf('local', model);
+    let venue: string | null = null;
+    let stated: { tokens: number } | null;
+    let listed: boolean;
     try {
-      const target = crucibleTargetOf('local', model);
-      const venue = await this.crucibleChat.venueFor(target);
-      const info = (await this.crucibleChat.modelsOn(venue)).find((m) => m.id === target.model);
-      if (!info) return null;
-      // The context this host serves it at, never more than what is in force,
-      // and capped at 32K: a larger chunk is slower on a local card for no gain.
-      // A model this run loads at a larger context (ollama-map.ts rule 4) is served at that.
-      // Null when the server stated neither context (1.0.25+): the caller's
-      // documented unread-context sizing applies (ai-analysis
-      // CRUCIBLE_LOCAL_CONTEXT_FALLBACK), said here by field name.
-      const served = loadContext !== undefined ? loadContext : servedContextOf(info);
-      if (served === null) {
-        this.logger.warn(`[Model Limits] "${venue}" states neither contextDefault nor maxModelLen for ${target.model}; its context is unknown`);
-      }
-      return served !== null && Number.isFinite(served) && served > 0 ? Math.min(served, CRUCIBLE_ANALYSIS_CONTEXT) : null;
-    } catch {
-      return null;
+      venue = await this.crucibleChat.venueFor(target);
+      listed = (await this.crucibleChat.modelsOn(venue)).some((m) => m.id === target.model);
+      stated = listed ? await this.crucibleChat.statedLocalContext(venue, target.model) : null;
+    } catch (error) {
+      throw this.crucibleFailure(error, venue, 'sizing the analysis');
     }
+    if (!listed) {
+      throw new CrucibleChatError(404, 'unknown_model',
+        `"${target.model}" is not a model Crucible "${venue}" knows. Pick one from its catalog in Settings › AI.`, venue);
+    }
+    if (stated === null || !(stated.tokens > 0)) {
+      throw new CrucibleFieldMissing(venue,
+        `a context for ${target.model} (maxModelLen / contextDefault on GET /v1/models, or its context_ceilings row on GET /v1/capability)`,
+        'size the analysis chunks for it');
+    }
+    return Math.min(stated.tokens, CRUCIBLE_ANALYSIS_CONTEXT);
   }
 
   // Pricing per 1M tokens (as of May 2025)
@@ -298,6 +285,40 @@ export class AIProviderService {
   }
 
   /**
+   * A Crucible failure as analysis sees it. Inside a queue-admitted run, a card
+   * someone else holds, a server that stopped answering, or no server at all
+   * PARKS the task (P4, §7.2, §11): never a failure, never a wait inside the
+   * task. Everything else keeps its name.
+   */
+  private crucibleFailure(error: unknown, server: string | null, what: string): Error {
+    if (error instanceof CrucibleChatCancelled) return new AnalysisCancelledError(`Crucible request cancelled: job was cancelled`);
+    if (error instanceof CrucibleFieldMissing) return error;
+    const chat = this.crucibleChat;
+    if (chat.parksOnBusy()) {
+      const unreachable = error instanceof CrucibleUnreachable || (!(error instanceof CrucibleChatError) && crucibleUnavailableCause(error) !== null);
+      const parked = error instanceof CrucibleBusyError ? new CrucibleParkedError(error.server, error.busyLine)
+        : error instanceof CrucibleNoVenueError ? new CrucibleParkedError(null, error.message)
+          : error instanceof CrucibleChatError && error.code === 'unreachable' ? new CrucibleParkedError(error.server, `Crucible on ${error.server ?? 'the server'} isn't answering.`)
+            : unreachable ? new CrucibleParkedError(server, `Crucible on ${server ?? 'the server'} isn't answering.`)
+              : null;
+      if (parked !== null) {
+        chat.markParked(parked.server, parked.reason);
+        this.logger.log(`[Crucible] parking ${what}: ${parked.reason}`);
+        return parked;
+      }
+    }
+    if (error instanceof CrucibleBusyError) {
+      return new Error(`Crucible "${error.server}" stayed busy for ${Math.round(CRUCIBLE_BUSY_WAIT_MS / 60_000)} min (${error.busyLine}).`);
+    }
+    if (error instanceof CrucibleChatError) {
+      this.logger.error(`Crucible chat error (${error.server ?? 'no server'}): ${error.code}: ${error.message}`);
+      return new Error(`Crucible ${error.code}: ${error.message}`);
+    }
+    if (error instanceof CrucibleNoVenueError) return new Error(`Crucible: ${error.message}`);
+    return new Error(`Crucible error: ${(error as Error).message}`);
+  }
+
+  /**
    * THE ROAD (P3). What crosses the wire is decided in crucible/llm/target.ts: cloud upstreams get no sampling
    * parameters at all, ollama/ and local models keep the per-task temperature,
    * 'json' and schemas become response_format where the target takes one.
@@ -344,32 +365,8 @@ export class AIProviderService {
         },
       });
     } catch (error) {
-      if (signal?.aborted || error instanceof CrucibleChatCancelled) {
-        throw new AnalysisCancelledError(`Crucible request cancelled: job was cancelled`);
-      }
-      // P4: inside a queue-admitted run, a card someone else holds, a server
-      // that stopped answering, or no server at all PARKS the task (§7.2, §11):
-      // never a failure, never a wait inside the task.
-      if (parkOnBusy) {
-        const parked = error instanceof CrucibleBusyError ? new CrucibleParkedError(error.server, error.busyLine)
-          : error instanceof CrucibleNoVenueError ? new CrucibleParkedError(null, error.message)
-            : error instanceof CrucibleChatError && error.code === 'unreachable' ? new CrucibleParkedError(error.server, `Crucible on ${error.server ?? 'the server'} isn't answering.`)
-              : null;
-        if (parked !== null) {
-          chat.markParked(parked.server, parked.reason);
-          this.logger.log(`[Crucible] parking ${task ?? 'the call'}: ${parked.reason}`);
-          throw parked;
-        }
-      }
-      if (error instanceof CrucibleBusyError) {
-        throw new Error(`Crucible "${error.server}" stayed busy for ${Math.round(CRUCIBLE_BUSY_WAIT_MS / 60_000)} min (${error.busyLine}).`);
-      }
-      if (error instanceof CrucibleChatError) {
-        this.logger.error(`Crucible chat error (${error.server ?? 'no server'}): ${error.code}: ${error.message}`);
-        throw new Error(`Crucible ${error.code}: ${error.message}`);
-      }
-      if (error instanceof CrucibleNoVenueError) throw new Error(`Crucible: ${error.message}`);
-      throw new Error(`Crucible error: ${(error as Error).message}`);
+      if (signal?.aborted) throw new AnalysisCancelledError(`Crucible request cancelled: job was cancelled`);
+      throw this.crucibleFailure(error, null, task ?? 'the call');
     }
 
     if (result.sampling) this.logger.debug(`[Crucible] ${result.server} sampling sources: ${JSON.stringify(result.sampling)}`);
@@ -403,7 +400,7 @@ export class AIProviderService {
       estimatedCost,
       provider: config.provider,
       model: config.model,
-      doneReason: result.finishReason ?? undefined,
+      doneReason: result.finishReason,
     };
   }
 

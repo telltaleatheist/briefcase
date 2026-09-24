@@ -7,8 +7,9 @@
  * host facts, model family/size/install, timings, counts, progress fractions,
  * upload digests, reasons). What each absence becomes is pinned here:
  * unknown in a sentence, a row left out of a match, a skipped statistic — or,
- * for decide `logprobs`, chat `usage.prompt_tokens` and the host backend a
- * module is filtered to, a failure that names the field.
+ * for chat `usage.prompt_tokens` and `finish_reason`, a model's analysis
+ * context and the host backend a module is filtered to, a failure that names
+ * the field. Decide `logprobs` is read from `probabilities` (its source).
  */
 import * as fs from 'fs';
 import * as path from 'path';
@@ -16,6 +17,7 @@ import { Logger } from '@nestjs/common';
 import { AIProviderService } from '../../src/analysis/ai-provider.service';
 import { CrucibleTranscriptionService } from '../../src/crucible/asr/crucible-transcription.service';
 import { CrucibleCoordinationService } from '../../src/crucible/coordinate.service';
+import { CrucibleFieldMissing } from '../../src/crucible/errors';
 import { CrucibleServersService } from '../../src/crucible/crucible-servers.service';
 import { InFlightLedger } from '../../src/crucible/in-flight-ledger';
 import { CrucibleAiService } from '../../src/crucible/llm/crucible-ai.service';
@@ -171,16 +173,29 @@ describe('a server that states no informational field', () => {
 });
 
 describe('what Briefcase depends on is refused by name', () => {
-  it('a decide answer with no per-option logprobs fails the stage naming the field', async () => {
-    const { servers, chat } = await rig({ omit: { 'POST /v1/decide': ['answers.*.logprobs'] } });
-    const scorer = new CrucibleScorerService(chat, servers);
-    const err = await chat.withRun(() => scorer.withScorer((sh) => sh.decide({
+  it('a decide answer with no logprobs is read from its probabilities (the server\'s own ln): the same scores as with them', async () => {
+    const ask = {
       state: 's',
-      questions: [{ type: 'choice', name: 'topic', instructions: 'Which?', options: [{ name: 'cooking', description: 'Cooking' }, { name: 'travel', description: 'Travel' }] }],
-    }))).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(ScorerError);
-    expect((err as ScorerError).code).toBe('decide_field_missing');
-    expect((err as ScorerError).message).toMatch(/answers\.topic\.logprobs/);
+      questions: [
+        { type: 'choice' as const, name: 'topic', instructions: 'Which?', options: [{ name: 'cooking', description: 'Cooking' }, { name: 'travel', description: 'Travel' }, { name: 'none', description: 'None' }] },
+        { type: 'score' as const, name: 'level', instructions: 'How much?', levels: ['low', 'mid', 'high'] },
+      ],
+    };
+    // 'none' at probability exactly 0: the server's null-for-0 and ln(0) = -Infinity read alike.
+    const decideProbs = (q: { labels: string[] }) => Object.fromEntries(q.labels.map((l, i) => [l, [0.7, 0.25, 0][i]]));
+    const run = async (omit: FakeCrucibleOptions['omit']) => {
+      const { servers, chat } = await rig({ omit, decideProbs });
+      const scorer = new CrucibleScorerService(chat, servers);
+      return chat.withRun(() => scorer.withScorer((sh) => sh.decide(ask)));
+    };
+    const stated = await run({});
+    const derived = await run({ 'POST /v1/decide': ['answers.*.logprobs'] });
+    // The fake rounds the logprobs it sends to 6 places, as JSON does: equal to that.
+    for (const name of ['topic', 'level']) {
+      derived.answers[name].logProbs.forEach((lp, i) => expect(lp).toBeCloseTo(stated.answers[name].logProbs[i], 5));
+      for (const [label, p] of Object.entries(stated.answers[name].probabilities)) expect(derived.answers[name].probabilities[label]).toBeCloseTo(p, 5);
+    }
+    expect(derived.answers['topic']).toMatchObject({ type: 'choice', choice: 'cooking' });
   });
 
   it('a yes/no answer needs no logprobs (its p is load-bearing and stated)', async () => {
@@ -188,6 +203,30 @@ describe('what Briefcase depends on is refused by name', () => {
     const scorer = new CrucibleScorerService(chat, servers);
     const res = await chat.withRun(() => scorer.withScorer((sh) => sh.decide({ state: 's', questions: [{ type: 'yesno', name: 'ad', instructions: 'An ad?' }] })));
     expect(res.answers['ad'].type).toBe('yesno');
+  });
+
+  it('an analysis window the server states nowhere is refused BY NAME, never sized with an invented number', async () => {
+    const { chat } = await rig();
+    const err = await new AIProviderService(chat).crucibleContextWindow('qwen3.5-9b').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(CrucibleFieldMissing);
+    expect((err as CrucibleFieldMissing).field).toMatch(/maxModelLen \/ contextDefault .*context_ceilings/);
+  });
+
+  it('a row with no stated context but a stated host ceiling: sized at the ceiling (capped at 32K), and the chat LOADS it there', async () => {
+    const { chat, fake } = await rig({
+      omit: informationalExcept({ 'GET /v1/capability': ['classes[].context_ceilings'] }),
+      contextCeilings: { 'qwen3.5-9b': 24576 },
+    });
+    const provider = new AIProviderService(chat);
+    await expect(provider.crucibleContextWindow('qwen3.5-9b')).resolves.toBe(24576);
+    await provider.generateText('prompt', { provider: 'local', model: 'qwen3.5-9b' }, 'chapter');
+    expect(fake.residentContext()).toBe(24576);
+  });
+
+  it('a chat reply with no finish_reason is refused by name (a missing one would hide truncation)', async () => {
+    const { chat } = await rig({ omit: { 'POST /v1/openai/chat/completions': ['choices[].finish_reason'] } });
+    await expect(new AIProviderService(chat).generateText('prompt', { provider: 'local', model: 'qwen3.5-9b' }, 'chapter'))
+      .rejects.toThrow(/choices\[0\]\.finish_reason/);
   });
 
   it('countTokens with no usage.prompt_tokens on the chat fails naming the field, never counting 0', async () => {

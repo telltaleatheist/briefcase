@@ -128,7 +128,7 @@ export function toWireRequest(model: string, req: DecideRequest): WireRequest {
 }
 
 /** One answer's distribution over its labels, in label order, as the wire gave it (null = missing, or p exactly 0). */
-function wireLogprobs(answer: WireAnswer, labels: string[], question: string): Array<number | null> {
+function wireLogprobs(answer: WireAnswer, labels: string[]): Array<number | null> {
   if (answer.type === 'yesno') {
     // p is the renormalised P(Yes) over the letters returned.
     const missing = new Set(answer.missingLabels ?? []);
@@ -136,13 +136,14 @@ function wireLogprobs(answer: WireAnswer, labels: string[], question: string): A
     const no = missing.has('No') ? null : answer.p < 1 ? Math.log1p(-answer.p) : null;
     return [yes, no];
   }
-  // Load-bearing for Briefcase (Viterbi reads log P), though the SDK reads
-  // `logprobs` as informational since 1.0.25: absent is refused by name.
-  const logprobs = answer.logprobs;
-  if (logprobs === null) {
-    throw new ScorerError('decide_field_missing',
-      `question '${question}': Crucible's ${answer.type} answer carries no per-option logprobs (answers.${question}.logprobs), which the analysis engine reads`);
-  }
+  // Viterbi reads log P. `logprobs` is informational in the SDK (1.0.25: "informational
+  // to the read, load-bearing to YOUR path", crucible README a317a62); the server
+  // computes it as ln(probabilities) (decide.py), and `probabilities` is strict. So an
+  // answer without it is read from `probabilities` — the same number, not a guess. A
+  // probability of exactly 0 gives -Infinity, which reads as null below, exactly as
+  // the server's own null-for-0 does.
+  const logprobs: Readonly<Record<string, number | null>> = answer.logprobs
+    ?? Object.fromEntries(Object.entries(answer.probabilities).map(([l, p]) => [l, p === null ? null : Math.log(p)]));
   return labels.map((l) => {
     const lp = logprobs[l];
     return typeof lp === 'number' && Number.isFinite(lp) ? lp : null;
@@ -183,7 +184,7 @@ export interface FlooredDistribution {
 export function floorAnswer(answer: WireAnswer, labels: string[], question: string): FlooredDistribution {
   const mass = answer.labelMass;
   const lnMass = mass > 0 ? Math.log(mass) : -Infinity;
-  const given = wireLogprobs(answer, labels, question);
+  const given = wireLogprobs(answer, labels);
   const missingSet = new Set(answer.missingLabels ?? []);
   const missing = labels.filter((l) => missingSet.has(l));
   // Raw (full-vocabulary) logprobs: renormalised + ln(mass). null = outside the
@@ -257,8 +258,8 @@ function timingOf(t: DecideCallTiming): QuestionTiming {
 
 /**
  * The wire's response as Briefcase's {@link DecideResponse}. The answers are
- * load-bearing (a missing one, or a choice/score answer with no logprobs, is
- * refused by name); model, timing and tokens are informational and carried as
+ * load-bearing (a missing one is refused by name; a choice/score answer's
+ * logprobs are read from its probabilities when absent); model, timing and tokens are informational and carried as
  * the server stated them — null, or the question left out, where it did not.
  */
 export function fromWireResponse(req: DecideRequest, res: WireResponse): DecideResponse & { gated: number } {

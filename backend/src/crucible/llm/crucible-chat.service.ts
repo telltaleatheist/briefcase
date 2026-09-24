@@ -76,7 +76,7 @@ import {
   parseRetryAfter,
 } from './errors';
 import { buildChatBody, crucibleTargetOf, type ChatBodyInput, type CrucibleTarget, type UpstreamName } from './target';
-import { crucibleChoiceForOllama, isPageReader, type MappableModel } from './ollama-map';
+import { CRUCIBLE_ANALYSIS_CONTEXT, crucibleChoiceForOllama, isPageReader, servedContextOf, type MappableModel } from './ollama-map';
 
 /** Capability class sent as `X-Crucible-Act` and as every lease's act. */
 export const BRIEFCASE_ACT = 'analysis';
@@ -177,7 +177,8 @@ export interface CrucibleChatResult {
   model: string;
   target: CrucibleTarget;
   server: string;
-  finishReason: string | null;
+  /** The reply's `finish_reason`, always stated (a reply without one is refused). */
+  finishReason: string;
   usage: CrucibleChatUsage | null;
   /** `X-Crucible-Sampling`, parsed: where each sampling value came from. */
   sampling: Record<string, string> | null;
@@ -477,7 +478,12 @@ export class CrucibleChatService {
     const promptChars = messages.reduce((sum, m) => sum + m.content.length, 0);
     const timeoutMs = request.timeoutMs ?? (target.route === 'local' ? localTimeoutMs(promptChars) : UPSTREAM_TIMEOUT_MS);
 
-    const loadContext = request.loadContext ?? chosen.loadContext;
+    // A row that states no served context is loaded at the host's stated
+    // ceiling (statedLocalContext), so the window it was sized for is real. A
+    // catalog that can't be read here is read again by the load, which
+    // reports the failure in its own terms.
+    const loadContext = request.loadContext ?? chosen.loadContext
+      ?? (target.route === 'local' ? (await this.statedLocalContext(server, target.model).catch(() => null))?.loadAt : undefined);
     if (target.route === 'local') await this.ensureLocal(server, target.model, signal, request.busyWait, loadContext);
 
     let attempts = 0;
@@ -568,10 +574,26 @@ export class CrucibleChatService {
     } catch {
       throw new CrucibleChatError(502, 'protocol_error', `Crucible "${server}" answered a chat with something that is not JSON.`, server);
     }
-    const choices = Array.isArray(doc['choices']) ? doc['choices'] as Array<Record<string, unknown>> : [];
-    const first = choices[0] ?? {};
-    const message = (first['message'] ?? {}) as Record<string, unknown>;
-    let text = typeof message['content'] === 'string' ? message['content'] : '';
+    // Load-bearing (the SDK's rule too): the first choice, its message, its
+    // content and its finish_reason. Each is refused BY NAME when absent,
+    // never defaulted: an empty answer or a 'stop' nobody said would hide a
+    // broken reply or a truncated one. `content: null` is the chat format's
+    // own "no text" and reads as ''.
+    const refuse = (field: string): CrucibleChatError => new CrucibleChatError(502, 'protocol_error',
+      `Crucible "${server}" answered a chat without ${field}, which Briefcase needs to read the reply.`, server);
+    const choices = doc['choices'];
+    if (!Array.isArray(choices) || choices.length === 0) throw refuse('choices[0]');
+    const first = choices[0] as unknown;
+    if (first === null || typeof first !== 'object') throw refuse('choices[0]');
+    const choice = first as Record<string, unknown>;
+    const rawMessage = choice['message'];
+    if (rawMessage === null || typeof rawMessage !== 'object') throw refuse('choices[0].message');
+    const message = rawMessage as Record<string, unknown>;
+    const content = message['content'];
+    if (content !== null && typeof content !== 'string') throw refuse('choices[0].message.content');
+    const finishReason = choice['finish_reason'];
+    if (typeof finishReason !== 'string') throw refuse('choices[0].finish_reason');
+    let text = content ?? '';
     let fromReasoning = false;
     // A reasoning model under a grammar can put the whole object in its
     // reasoning channel and leave content empty. Crucible returns `reasoning`
@@ -621,7 +643,7 @@ export class CrucibleChatService {
       model: target.model,
       target,
       server,
-      finishReason: typeof first['finish_reason'] === 'string' ? first['finish_reason'] : null,
+      finishReason,
       usage,
       sampling,
       fromReasoning,
@@ -789,6 +811,27 @@ export class CrucibleChatService {
     };
     this.settingsCache.set(server, { at: this.now(), configured });
     return configured;
+  }
+
+  /**
+   * The context a local model is served at on `server`, from what the server
+   * STATES, never a guess: the row's served context (`maxModelLen` /
+   * `contextDefault`); else, when the row states neither, this host's ceiling
+   * for it (the `generate` class's `context_ceilings`, the per-host
+   * max_context), capped at the analysis window and returned as `loadAt` — the
+   * call must then LOAD it at that context (load-model `params.context`), since
+   * a model loaded without one serves a default nobody stated. Null when the
+   * server states none of them, or does not list the model.
+   */
+  async statedLocalContext(server: string, model: string): Promise<{ tokens: number; loadAt?: number } | null> {
+    const info = (await this.modelsOn(server)).find((m) => m.id === model);
+    if (info === undefined) return null;
+    const served = servedContextOf(info);
+    if (served !== null) return { tokens: served };
+    const ceiling = (await this.classFactsOn(server)).ceilings?.get(model);
+    if (ceiling === undefined) return null;
+    const tokens = Math.min(ceiling, CRUCIBLE_ANALYSIS_CONTEXT);
+    return { tokens, loadAt: tokens };
   }
 
   /** `GET /v1/models` on a server (cached 15 s; a load or a settings change drops it). */
