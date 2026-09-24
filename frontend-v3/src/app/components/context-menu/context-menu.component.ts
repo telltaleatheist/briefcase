@@ -24,6 +24,7 @@ import { ContextMenuAction, ContextMenuPosition } from '../../models/file.model'
               [class.disabled]="action.disabled"
               [class.has-submenu]="action.submenu && action.submenu.length > 0"
               [disabled]="action.disabled"
+              [attr.title]="action.title ?? null"
               (click)="onActionClick(action)"
               (mouseenter)="onItemHover(action, $event)"
             >

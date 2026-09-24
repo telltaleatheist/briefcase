@@ -17,14 +17,9 @@
           [hasSelection]="selection.hasSelection()"
           [singleSelection]="selection.count() === 1"
           [selectionCount]="selection.count()"
-          [aiReady]="aiReady()"
-          [aiCheckFailed]="aiCheckFailed()"
           (submitAdd)="onSubmitAdd($event)"
           (importFiles)="dispatchToWorkspace({ type: 'import' })"
           (openAdvanced)="dispatchToWorkspace({ type: 'openDownloadDialog' })"
-          (setupAi)="dispatchToWorkspace({ type: 'openAiSetup' })"
-          (retryAi)="onRetryAi()"
-          (openComponents)="onOpenComponents()"
           (openEditor)="dispatchToWorkspace({ type: 'openEditor' })"
           (viewInfo)="dispatchToWorkspace({ type: 'viewInfo' })"
           (revealProcess)="onRevealProcess()" />
@@ -63,9 +58,11 @@
         (widthChange)="nav.setInspectorWidth($event)"
         (resetWidth)="nav.resetInspectorWidth()"
         title="Drag to resize · double-click to reset"></div>
-      <app-inspector-panel [aiReady]="aiReady()" [aiCheckFailed]="aiCheckFailed()" [collections]="collections()" />
+      <app-inspector-panel [collections]="collections()" />
     </div>
   }
+
+  <app-crucible-prompt />
 
   <app-context-menu
     [visible]="collectionMenuVisible()"

@@ -4,7 +4,8 @@ import { Observable, of } from 'rxjs';
 import { map, catchError } from 'rxjs/operators';
 import { getApiBase } from '../core/runtime-url';
 
-export type ComponentKind = 'binary' | 'whisper-model' | 'llama-model' | 'python-env';
+/** Briefcase's own components are its tools; AI models live on the Crucible server (P7). */
+export type ComponentKind = 'binary';
 
 export interface ComponentStatus {
   id: string;
@@ -19,16 +20,8 @@ export interface ComponentStatus {
 }
 
 /**
- * Whether the analysis scorer could start, from GET /config/analysis-engine
- * (ScorerServerService.availability). Nothing is started to answer it.
- */
-export type ScorerAvailability =
-  | { available: true; binarySource: 'env' | 'config' | 'homebrew' | 'bundled' }
-  | { available: false; reason: string };
-
-/**
  * Frontend access to the download-on-demand component system
- * (ComponentManagerService). Mirrors AiSetupService's HTTP style; download
+ * (ComponentManagerService): ffmpeg-tools and yt-dlp. Download
  * progress arrives via WebsocketService 'component.download.*' events.
  */
 @Injectable({ providedIn: 'root' })
@@ -80,8 +73,7 @@ export class ComponentService {
   /**
    * Components that must be present before the app is usable: downloading
    * (yt-dlp) and transcoding/probing (ffmpeg + ffprobe, both shipped inside the
-   * ffmpeg-tools component). Everything else — the whisper/llama engines and all
-   * models — can finish downloading in the background while the library loads.
+   * ffmpeg-tools component).
    */
   static readonly ESSENTIAL_IDS = ['ffmpeg-tools', 'yt-dlp'];
 
@@ -94,13 +86,9 @@ export class ComponentService {
     return components.some((c) => this.isEssential(c.id) && c.supported && !c.installed);
   }
 
-  /**
-   * Start an install. `force` is the repair path for locally-constructed
-   * components (the NLI Python environment): it rebuilds instead of no-opping on
-   * an environment that already looks present. Ignored for downloads.
-   */
-  installComponent(id: string, force = false): Observable<{ success: boolean; message: string }> {
-    return this.http.post<any>(`${this.API_BASE}/config/install-component`, { id, force }).pipe(
+  /** Start an install; progress follows on the socket. */
+  installComponent(id: string): Observable<{ success: boolean; message: string }> {
+    return this.http.post<any>(`${this.API_BASE}/config/install-component`, { id }).pipe(
       map((res) => ({ success: res.success || false, message: res.message || 'Install started' })),
       catchError((error) => {
         console.error('Error installing component:', error);
@@ -116,23 +104,6 @@ export class ComponentService {
         console.error('Error cancelling component:', error);
         throw error;
       }),
-    );
-  }
-
-  /**
-   * Scorer availability, or null when the backend has no scorer module or the
-   * request failed (the pane then shows no status rather than a wrong one).
-   */
-  getScorerAvailability(): Observable<ScorerAvailability | null> {
-    return this.http.get<any>(`${this.API_BASE}/config/analysis-engine`).pipe(
-      map((res) => {
-        const s = res?.scorer;
-        if (!s || typeof s.available !== 'boolean') return null;
-        return s.available
-          ? { available: true as const, binarySource: s.binarySource }
-          : { available: false as const, reason: String(s.reason || 'unavailable') };
-      }),
-      catchError(() => of(null)),
     );
   }
 

@@ -143,9 +143,8 @@ export class AppComponent implements OnInit {
 
   /**
    * Auto-open the setup wizard only when an essential component (ffmpeg/ffprobe
-   * or yt-dlp) is missing. Models and the whisper/llama engines are allowed to
-   * download in the background while the library loads — their dropdowns refresh
-   * on completion.
+   * or yt-dlp) is missing. AI (transcription included) is Crucible's, and boot
+   * never waits on it.
    */
   private checkComponents() {
     if (this.componentsChecked) return;

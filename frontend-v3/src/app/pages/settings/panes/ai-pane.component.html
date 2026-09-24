@@ -1,51 +1,33 @@
 <h2 class="pane-title">AI Analysis</h2>
 <p class="pane-lede">
-  Optional. Transcription works without any of this — configure a provider only
-  if you want AI-powered video analysis.
+  Every AI action runs on a Crucible server: this computer's, or one you
+  connect. Claude, OpenAI and Ollama are that server's upstreams, and their
+  keys live on it.
 </p>
 
 <div class="pane-section">
   <p class="section-label">AI engine</p>
-  <label class="field-label" for="ai-via">Where AI runs</label>
-  <select
-    id="ai-via"
-    class="select"
-    [ngModel]="viaChoice()"
-    [disabled]="!!viaView()?.envOverride"
-    (ngModelChange)="onViaChange($event)">
-    <option value="default">Automatic: through Crucible once a server is connected</option>
-    <option value="crucible">Through Crucible</option>
-    <option value="direct">Directly from Briefcase (the old providers)</option>
-  </select>
-  @if (viaView()?.envOverride; as env) {
-    <p class="hint">Set by BRIEFCASE_AI_VIA={{ env }} for this session.</p>
-  }
-
-  @if (via() === 'crucible') {
-    @if (connectedServer(); as server) {
-      <div class="row-card engine-card">
-        <div class="row-main">
-          <div class="row-name">
-            Crucible on {{ server }}
-            <span class="pill" [class.ok]="crucibleView()?.reach === 'ready'" [class.accent]="crucibleView()?.reach === 'busy'">
-              {{ crucibleView()?.reach === 'busy' ? 'Busy' : 'Connected' }}
-            </span>
-          </div>
-          <div class="row-desc">Every AI call goes through this server, including Claude, OpenAI and Ollama. Their keys live on it.</div>
+  @if (connectedServer(); as server) {
+    <div class="row-card engine-card">
+      <div class="row-main">
+        <div class="row-name">
+          Crucible on {{ server }}
+          <span class="pill" [class.ok]="crucibleView()?.reach === 'ready'" [class.accent]="crucibleView()?.reach === 'busy'">
+            {{ crucibleView()?.reach === 'busy' ? 'Busy' : 'Connected' }}
+          </span>
         </div>
-        <ui-button variant="secondary" size="sm" (pressed)="openCrucibleServers()">Crucible Servers…</ui-button>
+        <div class="row-desc">Every AI call goes through this server, including Claude, OpenAI and Ollama.</div>
       </div>
-    } @else {
-      <div class="row-card engine-card">
-        <div class="row-main">
-          <div class="row-name">AI needs Crucible</div>
-          <div class="row-desc wrap">{{ crucibleView()?.unavailable ?? 'No Crucible server is answering.' }}</div>
-        </div>
-        <ui-button variant="primary" size="sm" (pressed)="openCrucibleServers()">Crucible Servers…</ui-button>
+      <ui-button variant="secondary" size="sm" (pressed)="openCrucibleServers()">Crucible Servers…</ui-button>
+    </div>
+  } @else {
+    <div class="row-card engine-card">
+      <div class="row-main">
+        <div class="row-name">AI needs Crucible</div>
+        <div class="row-desc wrap">{{ crucibleView()?.unavailable ?? 'No Crucible server is answering.' }}</div>
       </div>
-    }
-  } @else if ((viaView()?.registeredServers ?? 0) === 0) {
-    <p class="hint">AI can run through Crucible, a shared engine on this computer or another. Connect one in Settings › Crucible Servers.</p>
+      <ui-button variant="primary" size="sm" (pressed)="openCrucibleServers()">Crucible Servers…</ui-button>
+    </div>
   }
 </div>
 
@@ -80,41 +62,6 @@
   </div>
 }
 
-@if (via() !== 'crucible') {
-<div class="pane-section">
-  <p class="section-label">Providers</p>
-
-  @if (statusCheckFailed()) {
-    <div class="row-card">
-      <div class="row-main">
-        <div class="row-name">Couldn't check provider status</div>
-        <div class="row-desc">Statuses below may be stale or wrong — the availability check failed.</div>
-      </div>
-      <ui-button variant="secondary" size="sm" (pressed)="retryStatusCheck()">Retry</ui-button>
-    </div>
-  }
-
-  @for (provider of providers(); track provider.key) {
-    <div class="row-card">
-      <div class="row-main">
-        <div class="row-name">{{ provider.name }}</div>
-        <div class="row-desc">{{ provider.description }}</div>
-      </div>
-      <span class="pill" [class.ok]="provider.ready" [class.off]="!provider.ready">
-        {{ provider.ready ? 'Connected' : statusCheckFailed() ? 'Unknown' : 'Not configured' }}
-      </span>
-    </div>
-  }
-
-  <div class="actions-row">
-    <ui-button variant="primary" (pressed)="openWizard()">
-      {{ aiConfigured() ? 'Guided setup…' : 'Set up AI…' }}
-    </ui-button>
-  </div>
-  <p class="hint">The guided setup walks through local models, Ollama, and API keys step by step.</p>
-</div>
-}
-
 <div class="pane-section">
   <p class="section-label">Default model</p>
   <label class="field-label" for="default-model">Used automatically when analyzing videos</label>
@@ -141,7 +88,7 @@
     <span class="save-flash">✓ Saved</span>
   }
   @if (availableModels().length === 0) {
-    <div class="warn">No AI models available. {{ via() === 'crucible' ? 'Add a cloud key above, or download a model on the Crucible server.' : 'Configure a provider above first.' }}</div>
+    <div class="warn">No AI models available. Add a cloud key above, or download a model on the Crucible server.</div>
   }
 </div>
 
@@ -316,9 +263,3 @@
     </div>
   }
 </div>
-
-@if (wizardOpen()) {
-  <app-ai-setup-wizard
-    (closed)="onWizardDone()"
-    (completed)="onWizardDone()" />
-}

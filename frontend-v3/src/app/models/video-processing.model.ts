@@ -23,10 +23,8 @@ export interface VideoJobSettings {
   aspectRatio?: '16:9' | '4:3' | '1:1' | '9:16';
   normalizeAudio: boolean;
   audioLevel?: number; // Target loudness in LUFS (-24 quiet to -14 loud, default -16)
+  /** Transcribe on Crucible (the asr model is Settings › Transcription's). */
   transcribe: boolean;
-  whisperModel?: 'tiny' | 'base' | 'small' | 'medium' | 'large';
-  whisperLanguage?: string;
-  whisperTranslate?: boolean; // Translate to English
   aiAnalysis: boolean;
   aiModel?: string; // Full model ID from available models
   customInstructions?: string;

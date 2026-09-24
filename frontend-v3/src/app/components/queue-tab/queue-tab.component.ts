@@ -91,11 +91,8 @@ export class QueueTabComponent {
   processingCount = computed(() => this.queueService.processingJobs().length);
   completedCount = computed(() => this.queueService.completedJobs().length);
 
-  /** Crucible admission lanes: drawn only in crucible mode, and only when there are any. */
-  showLanes = computed(() => {
-    const status = this.queueService.lanes();
-    return status?.mode === 'crucible' && status.lanes.length > 0;
-  });
+  /** Crucible admission lanes: drawn only when there are any. */
+  showLanes = computed(() => (this.queueService.lanes()?.lanes.length ?? 0) > 0);
 
   // ── Clear ▾ menu (two-click confirmed per option) ──────────────────────────
   clearMenuOpen = signal(false);

@@ -50,8 +50,8 @@ export const PIPELINE_STEPS: {
   {
     type: 'transcribe',
     label: 'Transcribe',
-    description: 'Whisper transcript — no AI setup needed',
-    defaultConfig: { model: 'base', language: 'en', translate: false },
+    description: 'Transcript on Crucible, in the language spoken',
+    defaultConfig: {},
   },
   {
     type: 'ai-analyze',
@@ -76,7 +76,7 @@ const STARTER_PRESETS: PipelinePreset[] = [
     id: 'starter-transcribe-analyze',
     name: 'Transcribe + Analyze',
     steps: [
-      { type: 'transcribe', config: { model: 'base', language: 'en', translate: false } },
+      { type: 'transcribe', config: {} },
       { type: 'ai-analyze', config: { customInstructions: '', aiModel: '' } },
     ],
   },
@@ -224,14 +224,30 @@ export class PipelinePresetsService {
       }
       const saved = JSON.parse(raw) as Partial<StoredState>;
       return {
-        presets: Array.isArray(saved.presets) ? saved.presets.filter(isValidPreset) : [],
-        lastSteps: Array.isArray(saved.lastSteps) ? saved.lastSteps.filter(isValidStep) : [],
+        presets: Array.isArray(saved.presets)
+          ? saved.presets.filter(isValidPreset).map(p => ({ ...p, steps: p.steps.map(withoutRetiredKeys) }))
+          : [],
+        lastSteps: Array.isArray(saved.lastSteps) ? saved.lastSteps.filter(isValidStep).map(withoutRetiredKeys) : [],
       };
     } catch (error) {
       console.warn('[PipelinePresets] Failed to restore', error);
       return { presets: [...STARTER_PRESETS], lastSteps: [] };
     }
   }
+}
+
+/**
+ * Transcribe options Briefcase no longer has (P7): the asr model comes only
+ * from Settings › Transcription, speech is transcribed in its own language,
+ * and there is no translate. Dropped from stored presets so they are not sent.
+ */
+const RETIRED_TRANSCRIBE_KEYS = ['model', 'language', 'translate'];
+
+export function withoutRetiredKeys(step: PipelineStep): PipelineStep {
+  if (step.type !== 'transcribe') return step;
+  const config = { ...step.config };
+  for (const key of RETIRED_TRANSCRIBE_KEYS) delete config[key];
+  return { ...step, config };
 }
 
 function isValidStep(step: unknown): step is PipelineStep {

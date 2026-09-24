@@ -1,19 +1,16 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { HttpClient } from '@angular/common/http';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom, timer } from 'rxjs';
-import { AiSetupService } from '../../../services/ai-setup.service';
 import { LibraryService } from '../../../services/library.service';
-import { AiSetupWizardComponent } from '../../../components/ai-setup-wizard/ai-setup-wizard.component';
 import { UiButtonComponent } from '../../../ui';
 import { getApiBase } from '../../../core/runtime-url';
 import { ErrorSurface } from '../../../core/error-surface.service';
 import { PipelinePresetsService } from '../../../core/stores/pipeline-presets.service';
 import { Router } from '@angular/router';
-import { CrucibleService, type CrucibleRefusal } from '../../../services/crucible.service';
+import { CrucibleService, pickerOptions, type CrucibleRefusal } from '../../../services/crucible.service';
 import { CrucibleUpstreamsComponent } from '../../../components/crucible-upstreams/crucible-upstreams.component';
-import type { AiModelsView, AiRunsAs, AiTaskModels, AiTaskName, AiViaView, LegacyKeysView } from '@crucible-wire/ai-wire';
+import type { AiModelsView, AiRunsAs, AiTaskModels, AiTaskName, LegacyKeysView } from '@crucible-wire/ai-wire';
 
 interface AnalysisCategory {
   id: string;
@@ -37,13 +34,6 @@ interface PromptsResponse {
   hasCustom: Record<keyof AnalysisPrompts, boolean>;
 }
 
-interface ProviderCard {
-  key: 'local' | 'ollama' | 'claude' | 'openai';
-  name: string;
-  description: string;
-  ready: boolean;
-}
-
 interface ModelOption {
   value: string;
   label: string;
@@ -61,8 +51,6 @@ const AI_TASKS: { key: AiTaskName; label: string; hint: string }[] = [
   { key: 'tags', label: 'Tags', hint: '' },
   { key: 'title', label: 'Suggested title', hint: '' },
 ];
-
-type ViaChoice = 'default' | 'crucible' | 'direct';
 
 const PROMPT_LABELS: Record<string, string> = {
   description: 'Video Description Prompt',
@@ -91,23 +79,21 @@ const DEFAULT_CATEGORIES: AnalysisCategory[] = [
 ];
 
 /**
- * Settings → AI: provider status, guided setup, default model, analysis
- * categories and prompts. AI is optional throughout — transcription works
- * without any of this. Consolidates the AI sections of the old settings page;
- * the step-by-step wizard stays available as "Guided setup".
+ * Settings → AI: the Crucible server AI runs on (its cloud keys and Ollama
+ * are that server's upstreams), the default and per-task models, analysis
+ * categories and prompts. Every AI call goes through Crucible; there is no
+ * other road.
  */
 @Component({
   selector: 'app-ai-pane',
   standalone: true,
-  imports: [FormsModule, AiSetupWizardComponent, UiButtonComponent, CrucibleUpstreamsComponent],
+  imports: [FormsModule, UiButtonComponent, CrucibleUpstreamsComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styleUrls: ['./panes-shared.scss', './ai-pane.component.scss'],
   templateUrl: './ai-pane.component.html'
 })
 export class AiPaneComponent {
-  private aiSetupService = inject(AiSetupService);
   private libraryService = inject(LibraryService);
-  private http = inject(HttpClient);
   private destroyRef = inject(DestroyRef);
   private errorSurface = inject(ErrorSurface);
   private presetsService = inject(PipelinePresetsService);
@@ -115,14 +101,10 @@ export class AiPaneComponent {
   private router = inject(Router);
   private readonly apiBase = getApiBase();
 
-  // ── AI engine: which road, and the connected Crucible (P3) ────────────
-  /** 'crucible' | 'direct' as the backend resolves it right now. */
-  readonly via = this.aiSetupService.via;
-  readonly viaView = signal<AiViaView | null>(null);
-  readonly viaChoice = computed<ViaChoice>(() => this.viaView()?.stored ?? 'default');
+  // ── The connected Crucible (P3) ─────────────────────────────────────────
   readonly crucibleView = signal<AiModelsView | null>(null);
-  /** The server whose upstreams the pane edits: the connected one, under Crucible only. */
-  readonly connectedServer = computed(() => (this.via() === 'crucible' ? this.crucibleView()?.server ?? null : null));
+  /** The server whose upstreams the pane edits: the connected one. */
+  readonly connectedServer = computed(() => this.crucibleView()?.server ?? null);
   readonly legacy = signal<LegacyKeysView | null>(null);
   readonly copyingKeys = signal(false);
   readonly copyLine = signal<{ ok: boolean; text: string } | null>(null);
@@ -132,18 +114,10 @@ export class AiPaneComponent {
   readonly runsAs = signal<Record<string, AiRunsAs>>({});
   /** The chosen Ollama values to ask about (the default and every task), as one key. */
   private readonly ollamaChoices = computed<string>(() => {
-    if (this.via() !== 'crucible') return '';
     const values = [this.selectedModel(), ...Object.values(this.taskModels())]
       .filter((v): v is string => typeof v === 'string' && v.startsWith('ollama:'));
     return [...new Set(values)].sort().join(',');
   });
-
-  // Provider status
-  providers = signal<ProviderCard[]>([]);
-  aiConfigured = signal(false);
-  /** The availability check itself failed — provider states are unknown. */
-  statusCheckFailed = signal(false);
-  wizardOpen = signal(false);
 
   // Default model
   /** The configured server-side default ("provider:model"), or null. */
@@ -216,11 +190,6 @@ export class AiPaneComponent {
     void this.loadDefaultModel();
     void this.loadCategories();
     void this.loadPrompts();
-
-    // New downloads should appear in the model picker without a restart.
-    this.aiSetupService.modelsChanged$
-      .pipe(takeUntilDestroyed())
-      .subscribe(() => { void this.refreshStatus(); });
   }
 
   promptLabel(key: string): string {
@@ -233,37 +202,16 @@ export class AiPaneComponent {
 
   // ── Providers / status ──────────────────────────────────────────────────
 
+  /** The connected server and its models, Briefcase's leftover keys and the per-task models. */
   private async refreshStatus(): Promise<void> {
-    await this.refreshEngine();
-    const availability = await this.aiSetupService.checkAIAvailability();
-    this.statusCheckFailed.set(availability.checkFailed);
-    this.aiConfigured.set(
-      availability.hasLocal || availability.hasOllama || availability.hasClaudeKey || availability.hasOpenAIKey
-    );
-    this.providers.set([
-      { key: 'local', name: 'Local AI', description: 'Runs on this machine — private, offline, free.', ready: availability.hasLocal },
-      { key: 'ollama', name: 'Ollama', description: 'Open models via a separate Ollama install.', ready: availability.hasOllama },
-      { key: 'claude', name: 'Claude API', description: 'Anthropic cloud models. Requires an API key.', ready: availability.hasClaudeKey },
-      { key: 'openai', name: 'OpenAI API', description: 'OpenAI cloud models. Requires an API key.', ready: availability.hasOpenAIKey },
-    ]);
-    await this.loadAvailableModels();
-  }
-
-  /** The road, the connected server, Briefcase's leftover keys and the per-task models. */
-  private async refreshEngine(): Promise<void> {
     try {
-      this.viaView.set(await firstValueFrom(this.crucible.aiVia()));
+      const view = await firstValueFrom(this.crucible.aiModels());
+      this.crucibleView.set(view);
+      this.availableModels.set(pickerOptions(view).map((m) => ({ value: m.value, label: m.label, provider: m.provider })));
     } catch (error) {
-      this.errorSurface.surfaceError("Couldn't read where AI runs", error);
-    }
-    const via = await this.aiSetupService.refreshVia();
-    if (via === 'crucible') {
-      try {
-        this.crucibleView.set(await this.aiSetupService.loadCrucibleModels());
-      } catch (error) {
-        this.crucibleView.set(null);
-        this.errorSurface.surfaceError("Couldn't list the Crucible server's models", error);
-      }
+      this.crucibleView.set(null);
+      this.availableModels.set([]);
+      this.errorSurface.surfaceError("Couldn't list the Crucible server's models", error);
     }
     try {
       this.legacy.set(await firstValueFrom(this.crucible.legacyKeys()));
@@ -276,16 +224,6 @@ export class AiPaneComponent {
       this.taskModels.set({});
     }
     void this.loadRunsAs(this.ollamaChoices());
-  }
-
-  async onViaChange(choice: ViaChoice): Promise<void> {
-    try {
-      this.viaView.set(await firstValueFrom(this.crucible.setAiVia(choice === 'default' ? null : choice)));
-      this.flashSaved();
-      await this.refreshStatus();
-    } catch (error) {
-      this.errorSurface.surfaceError("Where AI runs didn't save", error);
-    }
   }
 
   openCrucibleServers(): void {
@@ -371,19 +309,6 @@ export class AiPaneComponent {
     return models.length === 0 || models.some((m) => m.value === current) ? null : current;
   }
 
-  retryStatusCheck(): void {
-    void this.refreshStatus();
-  }
-
-  openWizard(): void {
-    this.wizardOpen.set(true);
-  }
-
-  async onWizardDone(): Promise<void> {
-    this.wizardOpen.set(false);
-    await this.refreshStatus();
-  }
-
   // ── Default model ───────────────────────────────────────────────────────
 
   private async loadDefaultModel(): Promise<void> {
@@ -399,67 +324,6 @@ export class AiPaneComponent {
       this.configuredDefault.set(null);
       this.errorSurface.surfaceError("Couldn't load the default AI model setting", error);
     }
-  }
-
-  private async loadAvailableModels(): Promise<void> {
-    // Through Crucible: the connected server's catalog and upstreams.
-    let viaCrucible: ModelOption[] | null;
-    try {
-      viaCrucible = await this.aiSetupService.modelOptionsIfCrucible();
-    } catch (error) {
-      this.errorSurface.surfaceError("Couldn't list the Crucible server's models", error);
-      viaCrucible = [];
-    }
-    if (viaCrucible !== null) {
-      this.availableModels.set(viaCrucible.map((m) => ({ value: m.value, label: m.label, provider: m.provider })));
-      return;
-    }
-
-    const availability = await this.aiSetupService.checkAIAvailability();
-    const models: ModelOption[] = [];
-
-    if (availability.hasLocal) {
-      try {
-        const local = await firstValueFrom(this.aiSetupService.getLocalModels());
-        local?.models?.filter(m => m.downloaded).forEach(model => {
-          models.push({ value: `local:${model.id}`, label: `${model.name} (Local)`, provider: 'local' });
-        });
-      } catch (error) {
-        // Local AI IS configured, so a listing failure hides real models.
-        this.errorSurface.surfaceError("Couldn't list local AI models", error);
-      }
-    }
-
-    if (availability.hasOllama) {
-      availability.ollamaModels.forEach(model => {
-        models.push({ value: `ollama:${model}`, label: `${model} (Ollama)`, provider: 'ollama' });
-      });
-    }
-
-    if (availability.hasClaudeKey) {
-      try {
-        const response = await firstValueFrom(
-          this.http.get<{ success: boolean; models: ModelOption[] }>(`${this.apiBase}/config/claude-models`)
-        );
-        if (response.success) models.push(...response.models);
-      } catch (error) {
-        // Key IS configured — a listing failure silently hides usable models.
-        this.errorSurface.surfaceError("Couldn't list Claude models", error);
-      }
-    }
-
-    if (availability.hasOpenAIKey) {
-      try {
-        const response = await firstValueFrom(
-          this.http.get<{ success: boolean; models: ModelOption[] }>(`${this.apiBase}/config/openai-models`)
-        );
-        if (response.success) models.push(...response.models);
-      } catch (error) {
-        this.errorSurface.surfaceError("Couldn't list OpenAI models", error);
-      }
-    }
-
-    this.availableModels.set(models);
   }
 
   async onDefaultModelChange(value: string): Promise<void> {

@@ -8,7 +8,6 @@ import { LibrarySearchFiltersComponent, LibraryFilters } from '../../components/
 import { CascadeComponent, CascadeEmptyAction, CascadeEmptyState } from '../../components/cascade/cascade.component';
 import { LibraryManagerModalComponent } from '../../components/library-manager-modal/library-manager-modal.component';
 import { QueueItemConfigModalComponent } from '../../components/queue-item-config-modal/queue-item-config-modal.component';
-import { AiSetupWizardComponent } from '../../components/ai-setup-wizard/ai-setup-wizard.component';
 import { VideoPreviewModalComponent, PreviewItem } from '../../components/video-preview-modal/video-preview-modal.component';
 import { VideoConfigDialogComponent } from '../../components/video-config-dialog/video-config-dialog.component';
 import { TabsTabComponent } from '../../components/tabs-tab/tabs-tab.component';
@@ -21,7 +20,7 @@ import { QueueItemTask } from '../../models/queue.model';
 import { TaskType, AVAILABLE_TASKS } from '../../models/task.model';
 import { LibraryService } from '../../services/library.service';
 import { WebsocketService, TaskStarted, TaskCompleted, TaskProgress, TaskFailed, AnalysisCompleted } from '../../services/websocket.service';
-import { AiSetupService } from '../../services/ai-setup.service';
+import { CrucibleReadinessService, taskNeedsCrucible } from '../../services/crucible-readiness.service';
 import { NotificationService } from '../../services/notification.service';
 import { TabsService } from '../../services/tabs.service';
 import { FileImportService } from '../../services/file-import.service';
@@ -80,7 +79,6 @@ export interface ProcessingTask {
     CascadeComponent,
     LibraryManagerModalComponent,
     QueueItemConfigModalComponent,
-    AiSetupWizardComponent,
     VideoPreviewModalComponent,
     VideoConfigDialogComponent,
     TabsTabComponent,
@@ -101,7 +99,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   private route = inject(ActivatedRoute);
   private http = inject(HttpClient);
   private websocketService = inject(WebsocketService);
-  private aiSetupService = inject(AiSetupService);
+  private readiness = inject(CrucibleReadinessService);
   private notificationService = inject(NotificationService);
   private errorSurface = inject(ErrorSurface);
   private pipelinePresets = inject(PipelinePresetsService);
@@ -146,17 +144,11 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   // Deferred analysis-trigger timeout (cleared on destroy so it can't fire after teardown)
   private triggerAnalysisTimeout?: ReturnType<typeof setTimeout>;
 
-  // Track videos pending analysis (waiting for AI wizard to complete)
-  private pendingAnalysisVideos: VideoItem[] = [];
-
   // Tabbed video IDs - local signal synced from TabsService for OnPush cascade @Input
   tabbedVideoIds = signal<Set<string>>(new Set());
 
   // Drag and drop state
   isDraggingOver = signal(false);
-
-  // AI Setup wizard state
-  aiWizardOpen = signal(false);
 
   videoWeeks = signal<VideoWeek[]>([]);
   filteredWeeks = signal<VideoWeek[]>([]);
@@ -520,9 +512,6 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
             action.trimEndSeconds
           );
           break;
-        case 'openAiSetup':
-          this.aiWizardOpen.set(true);
-          break;
         case 'addSelectionToTab':
           this.addVideosToTab(action.tabId, this.getSelectedLibraryVideos().map(v => v.id));
           break;
@@ -692,94 +681,8 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       return;
     }
 
-    // Libraries exist - load them. AI is no longer prompted at startup; it's
-    // configured from Settings, or on demand when the user runs an analysis.
-    this.aiSetupService.checkAIAvailability();
+    // Libraries exist - load them. Nothing here waits on Crucible.
     this.loadCurrentLibrary();
-  }
-
-  // Handle AI wizard completion
-  onAiWizardCompleted() {
-    this.aiWizardOpen.set(false);
-
-    // Refresh AI availability after setup
-    this.aiSetupService.checkAIAvailability();
-
-    // If there were videos pending analysis, reveal the Process config seeded
-    // for them now that AI is set up (rather than reopening the old modal).
-    if (this.pendingAnalysisVideos.length > 0) {
-      const videos = [...this.pendingAnalysisVideos];
-      this.pendingAnalysisVideos = [];
-      // Let the wizard close fully before revealing the inspector.
-      setTimeout(() => this.revealProcessForAnalyze(videos), 100);
-      return;
-    }
-
-    // Load libraries after AI setup
-    this.loadLibraries();
-
-    // Check if user has any libraries
-    this.libraryService.getLibraries().subscribe({
-      next: (response) => {
-        if (response.success) {
-          this.libraries.set(response.data);
-
-          if (response.data.length === 0) {
-            // No libraries - open library manager
-            this.libraryManagerOpen.set(true);
-          } else {
-            // Has libraries - load current library
-            this.loadCurrentLibrary();
-          }
-        } else {
-          // Error loading libraries - open manager
-          this.libraryManagerOpen.set(true);
-        }
-      },
-      error: () => {
-        // Error - open library manager
-        this.libraryManagerOpen.set(true);
-      }
-    });
-  }
-
-  // Handle AI wizard closed/skipped
-  onAiWizardClosed() {
-    this.aiWizardOpen.set(false);
-
-    // Clear any pending analysis videos since user skipped AI setup
-    if (this.pendingAnalysisVideos.length > 0) {
-      this.notificationService.info(
-        'AI Setup Required',
-        'Video analysis requires AI to be configured. Set up AI in Settings when ready.'
-      );
-      this.pendingAnalysisVideos = [];
-    }
-
-    // Still need to load libraries even if AI setup was skipped
-    this.loadLibraries();
-
-    // Check if user has any libraries
-    this.libraryService.getLibraries().subscribe({
-      next: (response) => {
-        if (response.success) {
-          this.libraries.set(response.data);
-
-          if (response.data.length === 0) {
-            // No libraries - open library manager
-            this.libraryManagerOpen.set(true);
-          } else {
-            // Has libraries - load current library
-            this.loadCurrentLibrary();
-          }
-        } else {
-          this.libraryManagerOpen.set(true);
-        }
-      },
-      error: () => {
-        this.libraryManagerOpen.set(true);
-      }
-    });
   }
 
   // Start the tutorial tour for the current tab
@@ -2136,11 +2039,12 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
    * "Run Analysis" entry point. Instead of the old right-click modal, this now
    * seeds the inspector's Process config (analyze step, plus transcribe when any
    * selected video still lacks a transcript — the same auto-inject the modal
-   * did) and reveals it. AI readiness is handled inside the card's "Set up AI…"
-   * affordance, so we reveal even when AI isn't configured yet.
+   * did) and reveals it. When Crucible is not ready the steps show locked with
+   * the reason and the door, and the global prompt asks to bring it up.
    */
   private analyzeVideos(videos: VideoItem[]) {
     if (videos.length === 0) return;
+    this.readiness.requireReady();
     this.revealProcessForAnalyze(videos);
   }
 
@@ -2162,11 +2066,9 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     const webpages = videos.filter(v => v.mediaType === 'webpage');
     if (webpages.length === 0) return;
 
-    // Check if AI is configured before proceeding
-    const setupStatus = this.aiSetupService.getSetupStatus();
-    if (setupStatus.needsSetup) {
-      this.pendingAnalysisVideos = webpages;
-      this.aiWizardOpen.set(true);
+    // Webpage analysis runs on Crucible: say why it can't, and offer the door.
+    if (!this.readiness.requireReady()) {
+      this.notificationService.warning('Crucible is needed', this.readiness.reason());
       return;
     }
 
@@ -2251,6 +2153,17 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     steps: PipelineStep[],
     opts?: { onlyMissingTranscript?: boolean }
   ) {
+    // Steps that need Crucible can't be queued while it is not ready: leave
+    // them out (the rest still runs), say why, and raise the prompt.
+    if (steps.some(s => taskNeedsCrucible(s.type)) && !this.readiness.requireReady()) {
+      steps = steps.filter(s => !taskNeedsCrucible(s.type));
+      this.notificationService.warning(
+        steps.length ? 'Queued without transcription and analysis' : 'Crucible is needed',
+        this.readiness.reason()
+      );
+      if (steps.length === 0) return;
+    }
+
     const selected = this.getSelectedLibraryVideos();
     if (selected.length === 0 || steps.length === 0) {
       this.notificationService.warning('Nothing to Process', 'Select at least one video and one step');
@@ -2513,8 +2426,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
    */
   /**
    * Transcribe the selection (inspector Run / batch action): exactly a
-   * single-step Process pipeline — one code path, honoring the user's
-   * sticky whisper model/language options. Auto-submits.
+   * single-step Process pipeline, one code path. Auto-submits.
    */
   transcribeSelected() {
     void this.processSelection([this.stepFromStickyOptions('transcribe')], {
@@ -2815,6 +2727,14 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   async onDownloadSubmit(items: AddDownloadsPayload['items']) {
     this.downloadDialogOpen.set(false);
 
+    // A download never waits on Crucible: steps that need it are dropped from
+    // this batch (with the reason) while it is not ready, and the rest goes.
+    if (!this.readiness.ready() && items.some(i => i.steps.some(s => taskNeedsCrucible(s.type)))) {
+      this.readiness.requireReady();
+      items = items.map(i => ({ ...i, steps: i.steps.filter(s => !taskNeedsCrucible(s.type)) }));
+      this.notificationService.warning('Downloading without transcription and analysis', this.readiness.reason());
+    }
+
     const addedJobs: QueueJob[] = [];
 
     // Add all items to QueueService IMMEDIATELY with placeholder titles
@@ -2822,8 +2742,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       // A URL download always begins with download-import (quality rides its
       // options → yt-dlp height cap; 'best'/absent keeps the per-site default).
       // The Add popover's fully-composed pipeline steps follow verbatim, so every
-      // option survives — translate, granularity, stripBlackBars,
-      // customInstructions — that the old lossy settings→tasks conversion dropped.
+      // option survives (stripBlackBars, customInstructions, the AI model).
       const downloadOptions: Record<string, unknown> =
         item.quality && item.quality !== 'best' ? { quality: item.quality } : {};
       const tasks: QueueTask[] = [
@@ -2929,7 +2848,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       steps.push({ type: 'normalize-audio', config: { targetLevel: settings.audioLevel || -16 } });
     }
     if (settings.transcribe) {
-      steps.push({ type: 'transcribe', config: { model: settings.whisperModel || 'base', language: settings.whisperLanguage } });
+      steps.push({ type: 'transcribe', config: {} });
     }
     if (settings.aiAnalysis) {
       steps.push({

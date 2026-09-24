@@ -99,11 +99,7 @@
       [persistSticky]="true"
       [showHeader]="false"
       [showFooter]="false"
-      [aiReady]="aiReady()"
-      [aiCheckFailed]="aiCheckFailed()"
-      (setupAi)="setupAi.emit()"
-      (retryAi)="retryAi.emit()"
-      (openComponents)="openComponents.emit()" />
+      (doorOpened)="$event !== 'start' && dismissed.emit()" />
 
     <p class="hint">Quality, trim, and steps are remembered — change anytime.</p>
   </div>

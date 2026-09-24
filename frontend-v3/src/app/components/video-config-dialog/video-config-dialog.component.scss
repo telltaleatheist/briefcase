@@ -200,9 +200,28 @@
   }
 }
 
-.task-icon {
-  font-size: 20px;
+.task-item.locked .task-header {
+  cursor: default;
+
+  .task-info {
+    opacity: 0.6;
+  }
+}
+
+.door-btn {
   flex-shrink: 0;
+  padding: 4px 10px;
+  border: 1px solid var(--primary-orange);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--primary-orange);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--bg-card);
+  }
 }
 
 .task-info {

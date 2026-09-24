@@ -12,6 +12,7 @@ import { ElectronService } from '../../services/electron.service';
 import { LibraryService } from '../../services/library.service';
 import { NotificationService } from '../../services/notification.service';
 import { TabsService } from '../../services/tabs.service';
+import { CrucibleReadinessService } from '../../services/crucible-readiness.service';
 import { extractTitleFromFilename, extractDateFromFilename, formatDateForDisplay } from '@shared/filename-utils';
 
 /**
@@ -63,6 +64,8 @@ export class CascadeComponent implements OnDestroy {
   private notificationService = inject(NotificationService);
   private router = inject(Router);
   private tabsService = inject(TabsService);
+  /** AI menu items (Run Analysis, Generate Title) are disabled with the reason while Crucible is not ready. */
+  private readiness = inject(CrucibleReadinessService);
   private cdr = inject(ChangeDetectorRef);
 
   /** Which empty state to render when there are no rows (dumb: parent decides). */
@@ -341,6 +344,17 @@ export class CascadeComponent implements OnDestroy {
   }
 
   // Context menu actions - computed based on selection
+  /**
+   * An AI menu item: as is when Crucible is ready; otherwise disabled with the
+   * reason as its tooltip, followed by the one door (Start / Install / Connect).
+   */
+  private aiActions(item: VideoContextMenuAction): VideoContextMenuAction[] {
+    if (this.readiness.ready()) return [item];
+    const locked: VideoContextMenuAction = { ...item, disabled: true, title: this.readiness.reason() };
+    const door = this.readiness.doorLabel();
+    return door ? [locked, { label: door, icon: '', action: 'crucibleDoor', title: this.readiness.reason() }] : [locked];
+  }
+
   contextMenuActions = computed<VideoContextMenuAction[]>(() => {
     // Check if this is a header context menu
     const header = this.contextMenuHeader();
@@ -555,7 +569,7 @@ export class CascadeComponent implements OnDestroy {
       }
 
       // Generate Title with AI - reads extracted text, calls LLM for title suggestion
-      actions.push({ label: `Generate Title with AI${countSuffix}`, icon: '🧠', action: 'analyzeWebpage' });
+      actions.push(...this.aiActions({ label: `Generate Title with AI${countSuffix}`, icon: '', action: 'analyzeWebpage' }));
 
       actions.push({ label: '', icon: '', action: '', divider: true });
       if (this.tabsMode) {
@@ -628,7 +642,7 @@ export class CascadeComponent implements OnDestroy {
 
     // Processing actions
     actions.push({ label: `Refresh Thumbnail${countSuffix}`, icon: '🖼️', action: 'refreshThumbnail' });
-    actions.push({ label: `Run Analysis${countSuffix}`, icon: '', action: 'analyze' });
+    actions.push(...this.aiActions({ label: `Run Analysis${countSuffix}`, icon: '', action: 'analyze' }));
     actions.push({ label: `Move to...${countSuffix}`, icon: '📦', action: 'moveToLibrary' });
 
     // Final divider and delete/remove
@@ -859,6 +873,10 @@ export class CascadeComponent implements OnDestroy {
 
       case 'analyze':
         this.videoAction.emit({ action: 'analyze', videos });
+        break;
+
+      case 'crucibleDoor':
+        void this.readiness.openDoor();
         break;
 
       case 'analyzeWebpage':

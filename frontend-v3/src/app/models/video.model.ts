@@ -55,6 +55,8 @@ export interface VideoContextMenuAction {
   action: string;
   divider?: boolean;
   disabled?: boolean;
+  /** Tooltip, e.g. why a disabled item can't run. */
+  title?: string;
   submenu?: VideoContextMenuAction[]; // For nested submenu items
   hasArrow?: boolean; // Show arrow indicator for submenu
 }

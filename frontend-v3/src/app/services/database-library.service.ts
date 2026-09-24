@@ -310,30 +310,6 @@ export class DatabaseLibraryService {
   }
 
   /**
-   * Start batch analysis
-   */
-  async startBatchAnalysis(options?: {
-    aiModel?: string;
-    aiProvider?: 'local' | 'ollama' | 'claude' | 'openai';
-    whisperModel?: string;
-    ollamaEndpoint?: string;
-    limit?: number;
-    videoIds?: string[];
-    transcribeOnly?: boolean;
-    forceReanalyze?: boolean;
-    claudeApiKey?: string;
-    openaiApiKey?: string;
-  }): Promise<{ success: boolean; jobId: string; message: string }> {
-    const baseUrl = await this.getBaseUrl();
-    return firstValueFrom(
-      this.http.post<{ success: boolean; jobId: string; message: string }>(
-        `${baseUrl}/batch/start`,
-        options || {}
-      )
-    );
-  }
-
-  /**
    * Queue videos for analysis without starting processing
    */
   async queueVideosForAnalysis(options: {

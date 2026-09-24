@@ -2,7 +2,7 @@
  * Queue admission lanes (Crucible migration §7.6).
  *
  * Mirrors the backend's GET /queue/lanes and the `queue.lanes` socket event.
- * In `mode: 'direct'` the lane list is empty and the queue UI draws nothing new.
+ * The lane list is empty when no Crucible server is registered.
  */
 
 /** A task currently occupying a lane. */
@@ -29,11 +29,8 @@ export interface LaneView {
   waiting: number;            // tasks waiting/parked for this lane
 }
 
-export type LanesMode = 'crucible' | 'direct';
-
 /** The lanes snapshot the queue tab draws from. */
 export interface LanesStatus {
-  mode: LanesMode;
   lanes: LaneView[];
   timestamp: string;
 }

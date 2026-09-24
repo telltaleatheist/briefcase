@@ -8,7 +8,7 @@ import { ElectronService } from '../../services/electron.service';
 import { NotificationService } from '../../services/notification.service';
 import { LibraryService } from '../../services/library.service';
 import { QueueService } from '../../services/queue.service';
-import { AiSetupService } from '../../services/ai-setup.service';
+import { CrucibleReadinessService } from '../../services/crucible-readiness.service';
 import { WebsocketService } from '../../services/websocket.service';
 import { TabsService } from '../../services/tabs.service';
 import { createQueueTask } from '../../models/queue-job.model';
@@ -30,7 +30,7 @@ export class ArchivesTabComponent implements OnInit, OnDestroy {
   private notificationService = inject(NotificationService);
   private libraryService = inject(LibraryService);
   private queueService = inject(QueueService);
-  private aiSetupService = inject(AiSetupService);
+  private readiness = inject(CrucibleReadinessService);
   private webSocketService = inject(WebsocketService);
   private tabsService = inject(TabsService);
   private http = inject(HttpClient);
@@ -334,12 +334,9 @@ export class ArchivesTabComponent implements OnInit, OnDestroy {
     const webpages = videos.filter(v => v.mediaType === 'webpage');
     if (webpages.length === 0) return;
 
-    const setupStatus = this.aiSetupService.getSetupStatus();
-    if (setupStatus.needsSetup) {
-      this.notificationService.error(
-        'AI Not Configured',
-        'Please set up an AI provider first.'
-      );
+    // Webpage analysis runs on Crucible: say why it can't, and offer the door.
+    if (!this.readiness.requireReady()) {
+      this.notificationService.warning('Crucible is needed', this.readiness.reason());
       return;
     }
 

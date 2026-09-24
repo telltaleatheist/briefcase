@@ -1,12 +1,11 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, effect, inject, input, output, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { HttpClient } from '@angular/common/http';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom } from 'rxjs';
-import { getApiBase } from '../../../core/runtime-url';
 import { ErrorSurface } from '../../../core/error-surface.service';
 import { LibraryService } from '../../../services/library.service';
-import { AiSetupService } from '../../../services/ai-setup.service';
+import { CrucibleService } from '../../../services/crucible.service';
+import { CrucibleReadinessService, taskNeedsCrucible } from '../../../services/crucible-readiness.service';
 import {
   PIPELINE_STEPS,
   PipelinePreset,
@@ -14,14 +13,8 @@ import {
   PipelineStep,
   PipelineStepType,
   sortPipelineSteps,
+  withoutRetiredKeys,
 } from '../../../core/stores/pipeline-presets.service';
-
-/** An installed whisper model as reported by GET /media/whisper-models. */
-interface WhisperModelOption {
-  id: string;
-  name: string;
-  description?: string;
-}
 
 type AiProvider = 'local' | 'ollama' | 'claude' | 'openai';
 
@@ -45,8 +38,13 @@ interface InstructionHistoryItem {
  * with one click. Lives in the right inspector (single- and multi-select
  * alike); it replaced the toolbar's Process popover.
  *
- * Dumb component: selection counts + AI readiness in via inputs, intents out
- * via outputs. Sticky last-used state restores from PipelinePresetsService.
+ * Selection counts in via inputs, intents out via outputs. The steps that need
+ * Crucible (transcribe, AI analyze) read CrucibleReadinessService: while it is
+ * not ready they show disabled and unchecked with the reason and the one door,
+ * and are left out of the composed pipeline, so a download or processing job
+ * still goes through without them. The user's choice stays sticky, so they
+ * come back on when Crucible does. Sticky last-used state restores from
+ * PipelinePresetsService.
  */
 @Component({
   selector: 'app-process-config',
@@ -58,19 +56,16 @@ interface InstructionHistoryItem {
 })
 export class ProcessConfigComponent {
   private presetsService = inject(PipelinePresetsService);
-  private http = inject(HttpClient);
   private destroyRef = inject(DestroyRef);
   private library = inject(LibraryService);
-  private aiSetup = inject(AiSetupService);
+  private crucible = inject(CrucibleService);
+  readonly readiness = inject(CrucibleReadinessService);
   private errorSurface = inject(ErrorSurface);
 
   selectionCount = input(0);
   /** Selected videos lacking a transcript / analysis (from InspectorStore). */
   withoutTranscript = input(0);
   notAnalyzed = input(0);
-  aiReady = input(false);
-  /** AI readiness unknown — the availability probe failed (retry, don't lie). */
-  aiCheckFailed = input(false);
 
   /**
    * Per-job mode. When non-null, this panel edits ONE already-staged job's
@@ -103,10 +98,8 @@ export class ProcessConfigComponent {
   submitBlockedReason = input<string | null>(null);
 
   submitSteps = output<PipelineStep[]>();
-  setupAi = output<void>();
-  retryAi = output<void>();
-  /** No whisper models installed — take the user to Settings → Components. */
-  openComponents = output<void>();
+  /** A step's Crucible door was pressed (the action it took), so a host overlay can close before navigating. */
+  doorOpened = output<string | null>();
 
   readonly stepDefs = PIPELINE_STEPS;
   presets = this.presetsService.presets;
@@ -127,13 +120,6 @@ export class ProcessConfigComponent {
   private lastSeenEnableToken = this.presetsService.enableStepsRequest().token;
 
   constructor() {
-    // Installed models gate the transcribe step (submit stays blocked until we
-    // know one is installed), so fetch as soon as transcribe is on — not only
-    // when its options happen to be expanded.
-    if (this.enabled()['transcribe']) {
-      this.loadWhisperModels();
-    }
-
     // Per-job mode: (re)seed enabled/configs from the selected job's steps
     // whenever the input changes (selection moving to a different job re-seeds
     // in place, no component recreation). Merged over defaults so a job saved
@@ -157,9 +143,8 @@ export class ProcessConfigComponent {
       untracked(() => this.applyEnableSteps(req.types));
     }, { allowSignalWrites: true });
 
-    // AI-analyze options (sensitivity default, model list, instruction history)
-    // load once the step is both enabled and AI is ready — mirrors how the
-    // transcribe step gates on installed whisper models.
+    // AI-analyze options (model list, instruction history) load once the step
+    // is both enabled and Crucible is ready.
     effect(() => {
       if (this.isEnabled('ai-analyze')) {
         untracked(() => this.ensureAiData());
@@ -185,9 +170,6 @@ export class ProcessConfigComponent {
       for (const type of types) next[type] = true;
       return next;
     });
-    if (types.includes('transcribe')) {
-      this.ensureWhisperModels();
-    }
     this.persistStickyState();
   }
 
@@ -200,7 +182,7 @@ export class ProcessConfigComponent {
   private seedFromSteps(steps: PipelineStep[]): void {
     const enabled = { ...this.blankEnabled() };
     const configs = { ...this.defaultConfigs() };
-    for (const step of steps) {
+    for (const step of steps.map(withoutRetiredKeys)) {
       if (!(step.type in enabled)) continue;
       enabled[step.type] = true;
       configs[step.type] = { ...configs[step.type], ...step.config };
@@ -208,17 +190,35 @@ export class ProcessConfigComponent {
     this.enabled.set(enabled);
     this.configs.set(configs);
     this.expandedSteps.set({});
-    if (enabled['transcribe']) {
-      this.ensureWhisperModels();
-    }
   }
 
   isExpanded(type: PipelineStepType): boolean {
     return this.expandedSteps()[type] === true;
   }
 
+  /**
+   * The step needs Crucible and Crucible is not ready: shown disabled and
+   * unchecked with the reason. In per-job mode a staged job's own AI steps are
+   * kept (checked, locked) instead: editing a job never silently drops them.
+   */
+  aiLocked(type: PipelineStepType): boolean {
+    return taskNeedsCrucible(type) && !this.readiness.ready();
+  }
+
   isEnabled(type: PipelineStepType): boolean {
-    return this.enabled()[type] && (type !== 'ai-analyze' || this.aiReady());
+    if (!this.enabled()[type]) return false;
+    return !this.aiLocked(type) || this.initialSteps() !== null;
+  }
+
+  /** Only steps with options get the chevron: transcribe has none (its model is Settings › Transcription's). */
+  openDoor(): void {
+    const action = this.readiness.action();
+    void this.readiness.openDoor();
+    this.doorOpened.emit(action);
+  }
+
+  hasOptions(type: PipelineStepType): boolean {
+    return type !== 'transcribe';
   }
 
   config(type: PipelineStepType): Record<string, unknown> {
@@ -227,10 +227,9 @@ export class ProcessConfigComponent {
 
   /** The composed pipeline, in canonical run order. */
   steps = computed<PipelineStep[]>(() => {
-    const enabled = this.enabled();
     const configs = this.configs();
     return this.stepDefs
-      .filter(def => enabled[def.type] && (def.type !== 'ai-analyze' || this.aiReady()))
+      .filter(def => this.isEnabled(def.type))
       .map(def => ({ type: def.type, config: { ...configs[def.type] } }));
   });
 
@@ -259,73 +258,8 @@ export class ProcessConfigComponent {
     return null;
   }
 
-  // ── Installed whisper models (fetched when transcribe is enabled) ──────────
-
-  /** null = not fetched yet; [] = fetched, none installed. */
-  whisperModels = signal<WhisperModelOption[] | null>(null);
-  whisperModelsLoading = signal(false);
-  whisperModelsError = signal(false);
-
-  /** Fetched and nothing is installed — transcribe cannot run. */
-  whisperModelsEmpty = computed(() => {
-    const models = this.whisperModels();
-    return models !== null && models.length === 0;
-  });
-
-  /**
-   * The persisted model value when it isn't among the installed models — shown
-   * as a "(not installed)" option rather than silently dropped. Only when other
-   * models exist; with nothing installed we show install guidance instead.
-   */
-  missingModelValue = computed<string | null>(() => {
-    const models = this.whisperModels();
-    if (models === null || models.length === 0) return null;
-    const current = String(this.config('transcribe')['model'] ?? '');
-    if (!current) return null;
-    return models.some(m => m.id === current) ? null : current;
-  });
-
-  loadWhisperModels(): void {
-    this.whisperModelsLoading.set(true);
-    this.whisperModelsError.set(false);
-    this.http
-      .get<{ success: boolean; models: WhisperModelOption[] }>(`${getApiBase()}/media/whisper-models`)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: response => {
-          this.whisperModels.set(response?.models ?? []);
-          this.whisperModelsLoading.set(false);
-        },
-        error: () => {
-          // Surfaced inline (with a retry) and blocks submit — never silently
-          // fall back to a model that might not be installed.
-          this.whisperModelsError.set(true);
-          this.whisperModelsLoading.set(false);
-        },
-      });
-  }
-
-  private ensureWhisperModels(): void {
-    if (this.whisperModels() === null && !this.whisperModelsLoading()) {
-      this.loadWhisperModels();
-    }
-  }
-
-  /**
-   * transcribe is enabled but no installed model is verified/selected — Start
-   * must stay disabled so we never queue a transcribe that fails at runtime.
-   */
-  transcribeBlocked = computed(() => {
-    if (!this.isEnabled('transcribe')) return false;
-    if (this.whisperModelsLoading() || this.whisperModelsError()) return true;
-    const models = this.whisperModels();
-    if (models === null) return true; // never fetched — can't verify
-    const current = String(this.config('transcribe')['model'] ?? '');
-    return !models.some(m => m.id === current);
-  });
-
   // ── AI analyze options: custom instructions, model picker ─────────────────
-  // Loaded lazily (once) when the analyze step is enabled and AI is ready.
+  // Loaded lazily (once) when the analyze step is enabled and Crucible is ready.
 
   private aiDataLoaded = false;
 
@@ -347,10 +281,7 @@ export class ProcessConfigComponent {
   // So this surface no longer sets `analysisGranularity` at all — it is not sent
   // with the job, and the field survives in the request models only as an
   // optional one for API compatibility. The stored `defaultGranularity` in
-  // app-config.json is now config-file-only: the DISCOVERY fallback flag path
-  // (a machine with no NLI worker environment) still reads it as a real run
-  // input, because it asks one open-ended question per chapter and has no scored
-  // candidate list to filter afterwards. There is no UI in front of it anywhere.
+  // app-config.json is config-file-only. There is no UI in front of it anywhere.
 
   // Custom instructions + history --------------------------------------------
 
@@ -398,7 +329,7 @@ export class ProcessConfigComponent {
   defaultAiModel = signal('');
 
   private readonly providerLabels: Record<AiProvider, string> = {
-    local: 'Local',
+    local: 'Crucible',
     ollama: 'Ollama',
     claude: 'Claude',
     openai: 'OpenAI',
@@ -411,7 +342,7 @@ export class ProcessConfigComponent {
     return order
       .map(provider => ({
         provider,
-        label: provider === 'local' && this.aiSetup.via() === 'crucible' ? 'Crucible' : this.providerLabels[provider],
+        label: this.providerLabels[provider],
         models: models.filter(m => m.provider === provider),
       }))
       .filter(group => group.models.length > 0);
@@ -434,51 +365,9 @@ export class ProcessConfigComponent {
     this.aiModelsLoading.set(true);
     this.aiModelsError.set(false);
     try {
-      const models: AiModelOption[] = [];
-
-      // Through Crucible the list is the connected server's: its catalog and
-      // its configured upstreams, in the same provider:model values.
-      const viaCrucible = await this.aiSetup.modelOptionsIfCrucible();
-      if (viaCrucible !== null) {
-        for (const m of viaCrucible) models.push({ value: m.value, label: m.label, provider: m.provider });
-      } else {
-        // Downloaded local (bundled) models — getLocalModels never throws.
-        const local = await firstValueFrom(this.aiSetup.getLocalModels());
-        for (const model of local.models.filter(m => m.downloaded)) {
-          models.push({ value: `local:${model.id}`, label: `${model.name} (Local)`, provider: 'local' });
-        }
-
-        const availability = await this.aiSetup.checkAIAvailability();
-
-        if (availability.hasOllama) {
-          for (const model of availability.ollamaModels) {
-            models.push({ value: `ollama:${model}`, label: model, provider: 'ollama' });
-          }
-        }
-
-        if (availability.hasClaudeKey) {
-          const claude = await firstValueFrom(
-            this.http.get<{ success: boolean; models: { value: string; label: string }[] }>(
-              `${getApiBase()}/config/claude-models`
-            )
-          );
-          if (claude.success) {
-            for (const m of claude.models) models.push({ value: m.value, label: m.label, provider: 'claude' });
-          }
-        }
-
-        if (availability.hasOpenAIKey) {
-          const openai = await firstValueFrom(
-            this.http.get<{ success: boolean; models: { value: string; label: string }[] }>(
-              `${getApiBase()}/config/openai-models`
-            )
-          );
-          if (openai.success) {
-            for (const m of openai.models) models.push({ value: m.value, label: m.label, provider: 'openai' });
-          }
-        }
-      }
-
+      // The connected Crucible server's catalog and its configured upstreams.
+      const models: AiModelOption[] = (await firstValueFrom(this.crucible.modelOptions()))
+        .map(m => ({ value: m.value, label: m.label, provider: m.provider }));
       this.aiModels.set(models);
 
       // Resolve the configured server-side default — it drives the "This is your
@@ -584,12 +473,6 @@ export class ProcessConfigComponent {
     if (external) return external;
     if (this.selectionCount() === 0) return 'Select at least one video';
     if (this.steps().length === 0) return 'Pick at least one step';
-    if (this.isEnabled('transcribe')) {
-      if (this.whisperModelsLoading()) return 'Checking installed models…';
-      if (this.whisperModelsError()) return "Couldn't verify installed models";
-      if (this.whisperModelsEmpty()) return 'No transcription models installed';
-      if (this.missingModelValue()) return "Chosen model isn't installed";
-    }
     return null;
   });
 
@@ -597,7 +480,6 @@ export class ProcessConfigComponent {
     () =>
       this.steps().length > 0 &&
       this.selectionCount() > 0 &&
-      !this.transcribeBlocked() &&
       !this.submitBlockedReason()
   );
 
@@ -612,20 +494,19 @@ export class ProcessConfigComponent {
   }
 
   toggleStep(type: PipelineStepType): void {
+    if (this.aiLocked(type)) {
+      this.readiness.requireReady();
+      return;
+    }
     this.enabled.update(state => ({ ...state, [type]: !state[type] }));
     if (!this.enabled()[type]) {
       this.expandedSteps.update(state => ({ ...state, [type]: false }));
-    } else if (type === 'transcribe') {
-      this.ensureWhisperModels();
     }
     this.persistStickyState();
   }
 
   toggleExpanded(type: PipelineStepType): void {
     this.expandedSteps.update(state => ({ ...state, [type]: !state[type] }));
-    if (type === 'transcribe') {
-      this.ensureWhisperModels();
-    }
   }
 
   setOption(type: PipelineStepType, key: string, value: unknown): void {
@@ -639,8 +520,8 @@ export class ProcessConfigComponent {
   /**
    * Options are sticky: every toggle/option change persists the current
    * composition immediately (not just on submit). Persisted from the raw
-   * enabled set — a temporarily AI-unready analyze step is remembered, not
-   * silently dropped. No-op in per-job mode (persistSticky = false), so
+   * enabled set: a step waiting on Crucible is remembered, not silently
+   * dropped. No-op in per-job mode (persistSticky = false), so
    * editing one staged job never rewrites the shared last-used state.
    */
   private persistStickyState(): void {
@@ -677,9 +558,6 @@ export class ProcessConfigComponent {
     this.enabled.set(enabled);
     this.configs.set(configs);
     this.expandedSteps.set({});
-    if (enabled['transcribe']) {
-      this.ensureWhisperModels();
-    }
     this.persistStickyState();
   }
 

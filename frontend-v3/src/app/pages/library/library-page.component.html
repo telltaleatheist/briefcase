@@ -125,14 +125,6 @@
   (libraryOpened)="onLibraryOpened($event)"
 />
 
-<!-- AI Setup Wizard -->
-@if (aiWizardOpen()) {
-  <app-ai-setup-wizard
-    (completed)="onAiWizardCompleted()"
-    (closed)="onAiWizardClosed()"
-  />
-}
-
 <!-- Video Preview Modal -->
 <app-video-preview-modal
   [show]="previewModalOpen()"

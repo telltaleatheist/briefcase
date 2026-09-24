@@ -2,36 +2,23 @@ import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, signa
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { HttpClient } from '@angular/common/http';
 import { timer } from 'rxjs';
-import { getApiBase } from '../../../core/runtime-url';
 import { ErrorSurface } from '../../../core/error-surface.service';
 import { UiButtonComponent } from '../../../ui';
 import { CrucibleService, type CrucibleRefusal } from '../../../services/crucible.service';
 import type {
   TranscriptionServerView,
   TranscriptionSettingWire,
-  TranscriptionVenueChoiceWire,
   TranscriptionView,
 } from '@crucible-wire/transcription-wire';
-
-type GpuMode = 'auto' | 'gpu' | 'cpu';
-
-const GPU_MODE_DESCRIPTIONS: Record<GpuMode, string> = {
-  auto: 'Tries GPU first, falls back to CPU if GPU fails',
-  gpu: 'Always use GPU (faster, but may fail on some systems)',
-  cpu: 'Always use CPU (slower, but more compatible)',
-};
 
 /**
  * Settings → Transcription.
  *
- * Where transcription runs (P5): Crucible's `asr` job on a connected server
- * (mlx-whisper on the Mac, faster-whisper on the PC), or the offline
- * transcriber (whisper-cli) on this computer, which also stands in when
- * Crucible can't transcribe and does every translate-to-English task.
- * The offline transcriber's GPU mode stays here for those cases.
- * Transcription never requires an AI provider.
+ * Transcription is Crucible's `asr` job and nothing else (P7): mlx-whisper on
+ * a Mac server, faster-whisper on a PC one, in the language spoken. The pane
+ * picks the server and the asr model, and says where a transcription queued
+ * now would run, or why it would wait.
  */
 @Component({
   selector: 'app-transcription-pane',
@@ -41,41 +28,25 @@ const GPU_MODE_DESCRIPTIONS: Record<GpuMode, string> = {
   styleUrls: ['./panes-shared.scss'],
   styles: [`
     .row-desc.wrap { white-space: normal; overflow: visible; }
-    .route-card.fallback { border-color: var(--warning); }
+    .route-card.waiting { border-color: var(--warning); }
     .field-gap { margin-top: 12px; }
   `],
   template: `
     <h2 class="pane-title">Transcription</h2>
     <p class="pane-lede">
-      Speech-to-text for your videos. It runs on Crucible when a server offers
-      it, or on this computer with the offline transcriber, and works without
-      any AI provider configured.
+      Speech-to-text for your videos, in the language spoken. It runs on a
+      Crucible server that offers transcription.
     </p>
 
     <div class="pane-section">
       <p class="section-label">Where transcription runs</p>
-      <label class="field-label" for="transcribe-venue">Transcriber</label>
-      <select
-        id="transcribe-venue"
-        class="select"
-        [ngModel]="venue()"
-        [disabled]="!view() || savingVenue()"
-        (ngModelChange)="onVenueChange($event)">
-        <option value="auto">Automatic: Crucible when a server offers it, otherwise this computer</option>
-        <option value="crucible">Through Crucible</option>
-        <option value="whisper-cli">The offline transcriber on this computer (whisper)</option>
-      </select>
-      @if (venueSavedFlash()) {
-        <span class="save-flash">Saved</span>
-      }
-
-      @if (venue() !== 'whisper-cli' && servers().length > 0) {
-        <label class="field-label field-gap" for="transcribe-server">Server</label>
+      @if (servers().length > 0) {
+        <label class="field-label" for="transcribe-server">Server</label>
         <select
           id="transcribe-server"
           class="select"
           [ngModel]="serverChoice()"
-          [disabled]="savingVenue()"
+          [disabled]="saving()"
           (ngModelChange)="onServerChange($event)">
           <option value="">Best available server</option>
           @for (s of servers(); track s.name) {
@@ -89,7 +60,7 @@ const GPU_MODE_DESCRIPTIONS: Record<GpuMode, string> = {
             id="transcribe-model"
             class="select"
             [ngModel]="modelChoice()"
-            [disabled]="savingVenue() || target.models.length === 0"
+            [disabled]="saving() || target.models.length === 0"
             (ngModelChange)="onModelChange($event)">
             <option value="">{{ target.recommended ? 'Most accurate downloaded (' + target.recommended + ')' : 'Most accurate downloaded' }}</option>
             @for (m of target.models; track m.id) {
@@ -99,6 +70,9 @@ const GPU_MODE_DESCRIPTIONS: Record<GpuMode, string> = {
           @if (target.betterNotInstalled; as better) {
             <p class="hint">{{ better }} is more accurate and can be downloaded on {{ target.name }} from Crucible's catalog.</p>
           }
+        }
+        @if (savedFlash()) {
+          <span class="save-flash">Saved</span>
         }
       }
 
@@ -117,18 +91,20 @@ const GPU_MODE_DESCRIPTIONS: Record<GpuMode, string> = {
             <ui-button variant="secondary" size="sm" (pressed)="reload()">Re-check</ui-button>
           </div>
         } @else {
-          <div class="row-card route-card field-gap" [class.fallback]="!!routeWarning()">
+          <div class="row-card route-card waiting field-gap">
             <div class="row-main">
               <div class="row-name">
-                Transcribing on this computer (whisper)
-                @if (routeWarning()) {
-                  <span class="pill accent">Fallback</span>
-                }
+                Transcription can't run now
+                <span class="pill accent">Waiting</span>
               </div>
               <div class="row-desc wrap">{{ routeReason() }}</div>
             </div>
             <ui-button variant="secondary" size="sm" (pressed)="reload()">Re-check</ui-button>
           </div>
+          <p class="hint">
+            Start, install or connect a server in
+            <a [routerLink]="['/settings/crucible']">Settings › Crucible Servers</a>.
+          </p>
         }
         @if (v.ignored) {
           <p class="hint">Ignored an unreadable saved value ({{ v.ignored }}); the default applies.</p>
@@ -136,59 +112,19 @@ const GPU_MODE_DESCRIPTIONS: Record<GpuMode, string> = {
       } @else if (loadError()) {
         <div class="warn">{{ loadError() }}</div>
       }
-      <p class="hint">Translating speech to English always uses the offline transcriber on this computer.</p>
-    </div>
-
-    <div class="pane-section">
-      <p class="section-label">Offline transcriber (whisper)</p>
-      <p class="hint" style="margin: 0 0 10px;">
-        Used when transcription runs on this computer, when Crucible can't
-        transcribe, and for translation.
-      </p>
-      <label class="field-label" for="gpu-mode">Processing mode</label>
-      <select
-        id="gpu-mode"
-        class="select"
-        [value]="gpuMode()"
-        [disabled]="loading() || saving()"
-        (change)="saveMode($event)">
-        <option value="auto">Auto (recommended)</option>
-        <option value="gpu">Always GPU</option>
-        <option value="cpu">Always CPU</option>
-      </select>
-      @if (savedFlash()) {
-        <span class="save-flash">Saved</span>
-      }
-      <p class="hint">{{ modeDescription() }}</p>
-      @if (gpuFailed()) {
-        <div class="warn">GPU transcription failed on this system. Auto mode will use CPU.</div>
-      }
-      <p class="hint">
-        Whisper model downloads live in
-        <a [routerLink]="['/settings/components']">Settings → Components</a>.
-      </p>
     </div>
   `
 })
 export class TranscriptionPaneComponent {
-  private http = inject(HttpClient);
   private destroyRef = inject(DestroyRef);
   private errorSurface = inject(ErrorSurface);
   private crucible = inject(CrucibleService);
-  private readonly apiBase = getApiBase();
-
-  gpuMode = signal<GpuMode>('auto');
-  gpuFailed = signal(false);
-  loading = signal(true);
-  saving = signal(false);
-  savedFlash = signal(false);
 
   readonly view = signal<TranscriptionView | null>(null);
   readonly loadError = signal<string | null>(null);
-  readonly savingVenue = signal(false);
-  readonly venueSavedFlash = signal(false);
+  readonly saving = signal(false);
+  readonly savedFlash = signal(false);
 
-  readonly venue = computed<TranscriptionVenueChoiceWire>(() => this.view()?.setting.venue ?? 'auto');
   readonly serverChoice = computed(() => this.view()?.setting.server ?? '');
   readonly modelChoice = computed(() => this.view()?.setting.model ?? '');
   readonly servers = computed<TranscriptionServerView[]>(() => this.view()?.servers ?? []);
@@ -206,28 +142,9 @@ export class TranscriptionPaneComponent {
 
   readonly routeServer = computed(() => { const r = this.view()?.route; return r?.kind === 'crucible' ? r.server : ''; });
   readonly routeModel = computed(() => { const r = this.view()?.route; return r?.kind === 'crucible' ? r.model : ''; });
-  readonly routeReason = computed(() => {
-    const r = this.view()?.route;
-    return r?.kind === 'cli' ? (r.warning ?? r.reason) : '';
-  });
-  readonly routeWarning = computed(() => { const r = this.view()?.route; return r?.kind === 'cli' ? r.warning : null; });
-
-  modeDescription = () => GPU_MODE_DESCRIPTIONS[this.gpuMode()];
+  readonly routeReason = computed(() => { const r = this.view()?.route; return r?.kind === 'none' ? r.reason : ''; });
 
   constructor() {
-    this.http.get<{ mode?: GpuMode; gpuFailed?: boolean }>(`${this.apiBase}/media/whisper-gpu`)
-      .pipe(takeUntilDestroyed())
-      .subscribe({
-        next: data => {
-          this.gpuMode.set(data.mode ?? 'auto');
-          this.gpuFailed.set(data.gpuFailed ?? false);
-          this.loading.set(false);
-        },
-        error: error => {
-          this.loading.set(false);
-          this.errorSurface.surfaceError("Couldn't load transcription settings", error);
-        },
-      });
     this.reload();
   }
 
@@ -249,13 +166,9 @@ export class TranscriptionPaneComponent {
     return '';
   }
 
-  onVenueChange(venue: TranscriptionVenueChoiceWire): void {
-    this.save({ ...this.current(), venue });
-  }
-
   onServerChange(server: string): void {
     // A model id is per engine (mlx-whisper on a Mac, faster-whisper on a PC): a new server starts on its own best.
-    this.save({ ...this.current(), server: server || null, model: null });
+    this.save({ server: server || null, model: null });
   }
 
   onModelChange(model: string): void {
@@ -263,48 +176,25 @@ export class TranscriptionPaneComponent {
   }
 
   private current(): TranscriptionSettingWire {
-    return this.view()?.setting ?? { venue: 'auto', server: null, model: null };
+    const setting = this.view()?.setting;
+    return { server: setting?.server ?? null, model: setting?.model ?? null };
   }
 
   private save(setting: TranscriptionSettingWire): void {
-    this.savingVenue.set(true);
+    this.saving.set(true);
     this.crucible.saveTranscription(setting)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (view) => {
           this.view.set(view);
-          this.savingVenue.set(false);
-          this.venueSavedFlash.set(true);
-          timer(1200).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.venueSavedFlash.set(false));
+          this.saving.set(false);
+          this.savedFlash.set(true);
+          timer(1200).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.savedFlash.set(false));
         },
         error: (refusal: CrucibleRefusal) => {
-          this.savingVenue.set(false);
+          this.saving.set(false);
           this.errorSurface.surfaceError("Transcription setting didn't save", refusal.message);
         },
       });
-  }
-
-  saveMode(event: Event): void {
-    const mode = (event.target as HTMLSelectElement).value as GpuMode;
-    this.saving.set(true);
-    this.http.post<{ mode: GpuMode }>(`${this.apiBase}/media/whisper-gpu`, { mode })
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: data => {
-          this.gpuMode.set(data.mode);
-          if (mode !== 'auto') this.gpuFailed.set(false);
-          this.saving.set(false);
-          this.flashSaved();
-        },
-        error: error => {
-          this.saving.set(false);
-          this.errorSurface.surfaceError("Transcription setting didn't save", error);
-        },
-      });
-  }
-
-  private flashSaved(): void {
-    this.savedFlash.set(true);
-    timer(1200).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.savedFlash.set(false));
   }
 }

@@ -581,13 +581,8 @@ export class LibraryService {
         }];
 
       case 'transcribe':
-        return [{
-          type: 'transcribe',
-          options: {
-            model: config?.model || 'base',
-            language: config?.language || 'en'
-          }
-        }];
+        // No options: the asr model is Settings › Transcription's (P7).
+        return [{ type: 'transcribe', options: {} }];
 
       case 'ai-analyze':
         // Parse model value in format "provider:model" (e.g., "ollama:qwen2.5:7b", "openai:gpt-4o")

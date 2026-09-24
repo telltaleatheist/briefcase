@@ -25,11 +25,12 @@ export interface DownloadImportConfig {
   format?: 'mp4' | 'webm' | 'mkv';
 }
 
-export interface TranscribeConfig {
-  model?: 'tiny' | 'base' | 'small' | 'medium' | 'large';
-  language?: string;
-  translate?: boolean;
-}
+/**
+ * Transcribe has no per-task options (P7): it is Crucible's asr job, the model
+ * comes from Settings › Transcription, and speech is transcribed in its own
+ * language.
+ */
+export type TranscribeConfig = Record<string, never>;
 
 export type AnalysisQuality = 'fast' | 'thorough';
 
@@ -96,7 +97,7 @@ export const AVAILABLE_TASKS: Task[] = [
   {
     type: 'transcribe',
     label: 'Transcribe',
-    description: 'Generate transcript using Whisper',
+    description: 'Generate a transcript on Crucible',
     icon: '📝',
     requiresUrl: false,
     requiresFile: true
@@ -104,7 +105,7 @@ export const AVAILABLE_TASKS: Task[] = [
   {
     type: 'ai-analyze',
     label: 'AI Analyze',
-    description: 'Analyze content with AI (GPT-4/Claude)',
+    description: 'Analyze content with AI on Crucible',
     icon: '🤖',
     requiresUrl: false,
     requiresFile: true

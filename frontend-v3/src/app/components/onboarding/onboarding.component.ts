@@ -5,15 +5,14 @@ import { firstValueFrom } from 'rxjs';
 import { LibraryService } from '../../services/library.service';
 import { ElectronService } from '../../services/electron.service';
 import { Library, NewLibrary } from '../../models/library.model';
-import { AiSetupWizardComponent } from '../ai-setup-wizard/ai-setup-wizard.component';
 
-type OnboardingStep = 'welcome' | 'library' | 'ai-setup' | 'complete';
+type OnboardingStep = 'welcome' | 'library' | 'complete';
 type LibraryMode = 'select' | 'create' | 'open';
 
 @Component({
   selector: 'app-onboarding',
   standalone: true,
-  imports: [CommonModule, FormsModule, AiSetupWizardComponent],
+  imports: [CommonModule, FormsModule],
   templateUrl: './onboarding.component.html',
   styleUrls: ['./onboarding.component.scss']
 })
@@ -39,9 +38,6 @@ export class OnboardingComponent implements OnInit {
 
   // Track if library was successfully created/selected
   libraryReady = signal(false);
-
-  // Show AI wizard as overlay
-  showAiWizard = signal(false);
 
   // Computed: has existing libraries
   hasExistingLibraries = computed(() => this.existingLibraries().length > 0);
@@ -73,15 +69,6 @@ export class OnboardingComponent implements OnInit {
   // Navigation
   goToLibraryStep() {
     this.currentStep.set('library');
-  }
-
-  goToAiStep() {
-    this.currentStep.set('ai-setup');
-    this.showAiWizard.set(true);
-  }
-
-  skipAiSetup() {
-    this.completeOnboarding();
   }
 
   completeOnboarding() {
@@ -136,9 +123,8 @@ export class OnboardingComponent implements OnInit {
       const response = await firstValueFrom(this.libraryService.createLibrary(newLibrary));
       if (response.success) {
         this.libraryReady.set(true);
-        // Advance to the AI setup step (skippable) rather than finishing here,
-        // so the AI step is actually reachable (FC-23).
-        this.goToAiStep();
+        // AI setup is Crucible's, in the setup wizard and Settings › Crucible Servers.
+        this.completeOnboarding();
       } else {
         this.error.set('Failed to create library');
       }
@@ -163,9 +149,8 @@ export class OnboardingComponent implements OnInit {
       const response = await firstValueFrom(this.libraryService.openLibrary(this.openLibraryPath()));
       if (response.success) {
         this.libraryReady.set(true);
-        // Advance to the AI setup step (skippable) rather than finishing here,
-        // so the AI step is actually reachable (FC-23).
-        this.goToAiStep();
+        // AI setup is Crucible's, in the setup wizard and Settings › Crucible Servers.
+        this.completeOnboarding();
       } else {
         this.error.set('Failed to open library');
       }
@@ -191,9 +176,8 @@ export class OnboardingComponent implements OnInit {
       const response = await firstValueFrom(this.libraryService.switchLibrary(library.id));
       if (response.success) {
         this.libraryReady.set(true);
-        // Advance to the AI setup step (skippable) rather than finishing here,
-        // so the AI step is actually reachable (FC-23).
-        this.goToAiStep();
+        // AI setup is Crucible's, in the setup wizard and Settings › Crucible Servers.
+        this.completeOnboarding();
       } else {
         this.error.set('Failed to switch to library');
       }
@@ -202,16 +186,5 @@ export class OnboardingComponent implements OnInit {
     } finally {
       this.isLoading.set(false);
     }
-  }
-
-  // AI Wizard events
-  onAiWizardClosed() {
-    this.showAiWizard.set(false);
-    this.completeOnboarding();
-  }
-
-  onAiWizardCompleted() {
-    this.showAiWizard.set(false);
-    this.completeOnboarding();
   }
 }

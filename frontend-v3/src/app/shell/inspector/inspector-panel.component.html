@@ -41,12 +41,7 @@
             [persistSticky]="false"
             [submitLabel]="'Save to ' + queueSelection.count() + ' pending'"
             [submitBlockedReason]="queueTrimInvalid() ? 'Fix the invalid trim time' : null"
-            [aiReady]="aiReady()"
-            [aiCheckFailed]="aiCheckFailed()"
-            (submitSteps)="onSavePendingSteps($event)"
-            (setupAi)="dispatch({ type: 'openAiSetup' })"
-            (retryAi)="onRetryAi()"
-            (openComponents)="onOpenComponents()" />
+            (submitSteps)="onSavePendingSteps($event)" />
         </div>
       </section>
     </div>
@@ -75,12 +70,7 @@
               [selectionCount]="store.selectedItems().length"
               [withoutTranscript]="store.withoutTranscript()"
               [notAnalyzed]="store.notAnalyzed()"
-              [aiReady]="aiReady()"
-              [aiCheckFailed]="aiCheckFailed()"
-              (submitSteps)="onProcessSteps($event)"
-              (setupAi)="dispatch({ type: 'openAiSetup' })"
-              (retryAi)="onRetryAi()"
-              (openComponents)="onOpenComponents()" />
+              (submitSteps)="onProcessSteps($event)" />
           </div>
         </div>
       </section>
@@ -142,7 +132,7 @@
               } @else {
                 <span class="state pending" aria-hidden="true">—</span>
                 <span>Transcribed</span>
-                <button class="run" type="button" (click)="dispatch({ type: 'transcribeSelection' })">Run</button>
+                <ng-container *ngTemplateOutlet="aiRun; context: { $implicit: 'transcribeSelection' }" />
               }
             </div>
           }
@@ -153,13 +143,7 @@
             } @else {
               <span class="state pending" aria-hidden="true">—</span>
               <span>Analyzed</span>
-              @if (aiReady()) {
-                <button class="run" type="button" (click)="dispatch({ type: 'analyzeSelection' })">Run</button>
-              } @else if (aiCheckFailed()) {
-                <span class="run muted" title="AI status unknown — the availability check failed">Unknown</span>
-              } @else {
-                <button class="run" type="button" (click)="dispatch({ type: 'openAiSetup' })">Set up AI…</button>
-              }
+              <ng-container *ngTemplateOutlet="aiRun; context: { $implicit: 'analyzeSelection' }" />
             }
           </div>
 
@@ -349,3 +333,14 @@
   </div>
 </ng-template>
 }
+
+<!-- An AI "Run": runs when Crucible is ready, else offers the one door with the reason. -->
+<ng-template #aiRun let-action>
+  @if (readiness.ready()) {
+    <button class="run" type="button" (click)="dispatch({ type: action })">Run</button>
+  } @else if (readiness.doorLabel()) {
+    <button class="run" type="button" [title]="readiness.reason()" (click)="readiness.openDoor()">{{ readiness.doorLabel() }}</button>
+  } @else {
+    <span class="run muted" [title]="readiness.reason()">Waiting for Crucible</span>
+  }
+</ng-template>

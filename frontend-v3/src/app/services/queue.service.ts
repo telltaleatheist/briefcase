@@ -1,4 +1,4 @@
-import { Injectable, inject, signal, computed, effect, OnDestroy } from '@angular/core';
+import { Injectable, Injector, inject, signal, computed, effect, OnDestroy } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom, Observable, of } from 'rxjs';
 import { map, tap, catchError } from 'rxjs/operators';
@@ -18,6 +18,7 @@ import {
 import { TaskType } from '../models/task.model';
 import { WebsocketService, TaskStarted, TaskProgress, TaskCompleted, TaskFailed, TaskParked, TaskUnparked } from './websocket.service';
 import { LanesStatus } from '../models/queue-lanes.model';
+import { CrucibleReadinessService, taskNeedsCrucible } from './crucible-readiness.service';
 import { LibraryService, BackendJobRequest, BackendTask } from './library.service';
 import { ErrorSurface } from '../core/error-surface.service';
 import { getApiBase } from '../core/runtime-url';
@@ -35,6 +36,8 @@ export class QueueService implements OnDestroy {
   private websocketService = inject(WebsocketService);
   private libraryService = inject(LibraryService);
   private errorSurface = inject(ErrorSurface);
+  /** Readiness is looked up only when AI tasks are submitted: nothing non-AI reads it. */
+  private injector = inject(Injector);
 
   // True while the last restoreFromBackend attempt failed — used to notify
   // once per outage (not once per poll) and to reconcile when it heals.
@@ -58,7 +61,7 @@ export class QueueService implements OnDestroy {
   private wsUnsubscribes: (() => void)[] = [];
 
   // Queue admission lanes (Crucible). null until the first GET /queue/lanes
-  // answers, or when the backend predates lanes. mode 'direct' => lanes [].
+  // answers; empty when no server is registered.
   private lanesState = signal<LanesStatus | null>(null);
   readonly lanes = this.lanesState.asReadonly();
 
@@ -649,8 +652,12 @@ export class QueueService implements OnDestroy {
    */
   submitJobs(jobIds?: string[]): Observable<{ jobIdMap: Map<string, string>; warnings: string[] }> {
     const allPending = this.pendingJobs();
-    const pendingJobs = jobIds ? allPending.filter(job => jobIds.includes(job.id)) : allPending;
+    let pendingJobs = jobIds ? allPending.filter(job => jobIds.includes(job.id)) : allPending;
     if (pendingJobs.length === 0) return of({ jobIdMap: new Map(), warnings: [] });
+
+    const crucibleWarnings = this.withoutCrucibleIfNotReady(pendingJobs);
+    pendingJobs = crucibleWarnings.startable;
+    if (pendingJobs.length === 0) return of({ jobIdMap: new Map(), warnings: crucibleWarnings.warnings });
 
     // Get current library ID - REQUIRED for processing
     const currentLibrary = this.libraryService.currentLibrary();
@@ -696,12 +703,52 @@ export class QueueService implements OnDestroy {
         const combined = new Map<string, string>();
         unpausedMap.forEach((v, k) => combined.set(k, v));
         createResult.map.forEach((v, k) => combined.set(k, v));
-        subscriber.next({ jobIdMap: combined, warnings: createResult.warnings });
+        subscriber.next({ jobIdMap: combined, warnings: [...crucibleWarnings.warnings, ...createResult.warnings] });
         subscriber.complete();
       }).catch(error => {
         subscriber.error(error);
       });
     });
+  }
+
+  /**
+   * Transcription and analysis need Crucible; the backend refuses a new job
+   * carrying them while it is not ready (409 `crucible_required`), which would
+   * also block the job's download. So when Crucible is not ready: raise the
+   * prompt, start each staged job WITHOUT its Crucible steps (said in a
+   * warning, never silently), and leave a job that is nothing but Crucible
+   * steps staged with the reason. Already-created (paused) backend jobs are
+   * left to the backend.
+   */
+  private withoutCrucibleIfNotReady(jobs: QueueJob[]): { startable: QueueJob[]; warnings: string[] } {
+    const needs = (job: QueueJob) => !job.backendJobId && job.tasks.some(t => taskNeedsCrucible(t.type));
+    if (!jobs.some(needs)) return { startable: jobs, warnings: [] };
+    const readiness = this.injector.get(CrucibleReadinessService);
+    if (readiness.requireReady()) return { startable: jobs, warnings: [] };
+
+    const reason = readiness.reason();
+    const startable: QueueJob[] = [];
+    let stripped = 0;
+    let held = 0;
+    for (const job of jobs) {
+      if (!needs(job)) {
+        startable.push(job);
+        continue;
+      }
+      const rest = job.tasks.filter(t => !taskNeedsCrucible(t.type));
+      if (rest.length === 0) {
+        this.updateJobError(job.id, reason);
+        held++;
+        continue;
+      }
+      this.updateJobTasks(job.id, rest);
+      startable.push({ ...job, tasks: rest });
+      stripped++;
+    }
+    const warnings: string[] = [];
+    if (stripped) warnings.push(`${stripped} job${stripped === 1 ? '' : 's'} started without transcription and analysis. ${reason}`);
+    if (held) warnings.push(`${held} job${held === 1 ? '' : 's'} left staged: ${reason}`);
+    return { startable, warnings };
   }
 
   /**
@@ -726,7 +773,8 @@ export class QueueService implements OnDestroy {
       // Revert jobs back to pending so user can try again
       jobs.forEach(job => {
         this.updateJobState(job.id, 'pending');
-        this.updateJobError(job.id, error.message || 'Failed to start paused jobs');
+        // A `crucible_required` refusal carries its own sentence (the prompt shows the door).
+        this.updateJobError(job.id, CrucibleReadinessService.refusalOf(error)?.message ?? (error.message || 'Failed to start paused jobs'));
       });
     }
 
@@ -806,7 +854,8 @@ export class QueueService implements OnDestroy {
       // Revert jobs back to pending so user can try again
       jobs.forEach(job => {
         this.updateJobState(job.id, 'pending');
-        this.updateJobError(job.id, error.message || 'Unknown error');
+        // A `crucible_required` refusal carries its own sentence (the prompt shows the door).
+        this.updateJobError(job.id, CrucibleReadinessService.refusalOf(error)?.message ?? (error.message || 'Unknown error'));
       });
     }
 
@@ -1058,7 +1107,7 @@ export class QueueService implements OnDestroy {
       })
     ).subscribe(response => {
       if (response && Array.isArray(response.lanes)) {
-        this.lanesState.set({ mode: response.mode, lanes: response.lanes, timestamp: response.timestamp });
+        this.lanesState.set({ lanes: response.lanes, timestamp: response.timestamp });
       }
     });
   }
@@ -1072,7 +1121,7 @@ export class QueueService implements OnDestroy {
       `${this.API_BASE}/queue/lanes/${encodeURIComponent(server)}/paused`,
       { paused }
     ).pipe(
-      map(response => ({ mode: response.mode, lanes: response.lanes ?? [], timestamp: response.timestamp })),
+      map(response => ({ lanes: response.lanes ?? [], timestamp: response.timestamp })),
       tap(status => this.lanesState.set(status))
     );
   }
@@ -1472,14 +1521,9 @@ export class QueueService implements OnDestroy {
 
     const transcribeTask = tasks.find(t => t.type === 'transcribe');
     if (transcribeTask) {
-      backendTasks.push({
-        type: 'transcribe',
-        options: {
-          model: transcribeTask.options?.['model'] || 'base',
-          language: transcribeTask.options?.['language'],
-          translate: transcribeTask.options?.['translate'] === true
-        }
-      });
+      // No options: the asr model is Settings › Transcription's, and speech is
+      // transcribed in its own language (P7). Stale keys on old jobs are dropped.
+      backendTasks.push({ type: 'transcribe', options: {} });
     }
 
     const exportClipTask = tasks.find(t => t.type === 'export-clip');

@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, computed, effect, inject, input, signal, viewChild } from '@angular/core';
-import { Router } from '@angular/router';
+import { NgTemplateOutlet } from '@angular/common';
 import { CdkOverlayOrigin, OverlayModule } from '@angular/cdk/overlay';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { timer } from 'rxjs';
@@ -11,7 +11,7 @@ import { SelectionStore } from '../../core/stores/selection.store';
 import { WorkspaceAction, WorkspaceActionsService } from '../../core/stores/workspace-actions.service';
 import { formatBytes, formatDate } from '../../core/format';
 import { QueueJob } from '../../models/queue-job.model';
-import { AiSetupService } from '../../services/ai-setup.service';
+import { CrucibleReadinessService } from '../../services/crucible-readiness.service';
 import { QueueService } from '../../services/queue.service';
 import { VideoTab } from '../../services/tabs.service';
 import { UiButtonComponent, UiTimecodeInputComponent } from '../../ui';
@@ -41,6 +41,7 @@ const PENDING_OPEN_KEY = 'briefcase-inspector-pending-open';
   selector: 'app-inspector-panel',
   standalone: true,
   imports: [
+    NgTemplateOutlet,
     OverlayModule,
     UiButtonComponent,
     UiTimecodeInputComponent,
@@ -58,14 +59,10 @@ export class InspectorPanelComponent {
   connectionsStore = inject(ConnectionsStore);
   private queueService = inject(QueueService);
   private actions = inject(WorkspaceActionsService);
-  private aiSetup = inject(AiSetupService);
-  private router = inject(Router);
+  /** Whether Crucible is there for the Transcribe / Analyze "Run" affordances. */
+  readiness = inject(CrucibleReadinessService);
   private destroyRef = inject(DestroyRef);
 
-  /** Whether an AI provider is configured (Analyze affordances). */
-  aiReady = input(false);
-  /** AI readiness unknown — the availability probe failed. */
-  aiCheckFailed = input(false);
   /** Collections ("tabs") for the Add to Collection menu. */
   collections = input<VideoTab[]>([]);
 
@@ -319,16 +316,6 @@ export class InspectorPanelComponent {
   /** Queue the composed pipeline for the selection (same channel as before). */
   onProcessSteps(steps: PipelineStep[]): void {
     this.dispatch({ type: 'processSelection', steps });
-  }
-
-  /** Re-run the AI availability probe (config's "AI check failed — retry"). */
-  onRetryAi(): void {
-    void this.aiSetup.checkAIAvailability();
-  }
-
-  /** No transcription models installed — take the user to Settings → Components. */
-  onOpenComponents(): void {
-    this.router.navigate(['/settings/components']);
   }
 
   addToCollection(tabId: string): void {

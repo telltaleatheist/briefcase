@@ -12,8 +12,8 @@ export interface AddDownloadsPayload {
     quality: DownloadQuality;
     /** Fully-composed pipeline steps from the Add popover's embedded
      *  process-config (fix-aspect / normalize / transcribe / ai-analyze), in
-     *  canonical run order. Carries EVERY option — translate, granularity,
-     *  stripBlackBars, customInstructions, aiModel — that the old settings bag
+     *  canonical run order. Carries EVERY option — stripBlackBars,
+     *  customInstructions, aiModel — that the old settings bag
      *  silently dropped. The download-import task is injected downstream. */
     steps: PipelineStep[];
     /** Seconds to remove from the START after download (0/undefined = none).
@@ -54,7 +54,6 @@ export type WorkspaceAction =
       trimStartSeconds: number | null;
       trimEndSeconds: number | null;
     }
-  | { type: 'openAiSetup' }
   // Inspector: add the current selection to a collection ("tab")
   | { type: 'addSelectionToTab'; tabId: string }
   | { type: 'createTabWithSelection' };

@@ -3,27 +3,24 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ComponentService, ComponentStatus } from '../../services/component.service';
 import { SetupDownloadService } from '../../services/setup-download.service';
-import { AiSetupService, SystemInfo } from '../../services/ai-setup.service';
-import { ElectronService } from '../../services/electron.service';
-import { isChatModelComponent } from '../../models/chat-model-component';
 import { CrucibleService } from '../../services/crucible.service';
 import { CrucibleDoorsComponent } from '../crucible-doors/crucible-doors.component';
 import { CrucibleUpstreamsComponent } from '../crucible-upstreams/crucible-upstreams.component';
-import type { AiModelsView, AiViaView } from '@crucible-wire/ai-wire';
+import type { AiModelsView } from '@crucible-wire/ai-wire';
 import { firstValueFrom } from 'rxjs';
 
-type Step = 'welcome' | 'tools' | 'engine' | 'models' | 'ai' | 'review' | 'finishing';
+type Step = 'welcome' | 'tools' | 'engine' | 'ai' | 'review' | 'finishing';
 
 /**
- * Minutes-style paginated setup wizard for download-on-demand components
- * (binaries + whisper models). Selections are queued through SetupDownloadService,
- * which also drives the bottom-right download dock. The existing AI-provider
- * wizard (app-ai-setup-wizard) remains separate for engine/API-key config.
+ * Minutes-style paginated setup wizard for download-on-demand tools (ffmpeg,
+ * yt-dlp). Selections are queued through SetupDownloadService, which also
+ * drives the bottom-right download dock.
  *
  * The `engine` step (Crucible, migration plan §5.1) comes before the AI step:
  * it finds the Crucible on this computer, adopts one another app installed,
  * installs one where this computer can hold it, or connects one elsewhere.
- * Skipping it is Next: AI is optional. In first-run mode the wizard holds
+ * All AI (transcription included) runs on Crucible; skipping the step is Next,
+ * and only AI actions wait for it. In first-run mode the wizard holds
  * Crucible's coordination while it is open, so nothing is downloaded before the
  * user has chosen, and releases it when it closes.
  */
@@ -56,22 +53,14 @@ type Step = 'welcome' | 'tools' | 'engine' | 'models' | 'ai' | 'review' | 'finis
             @case ('welcome') {
               <div class="step-head">
                 <h3>Welcome to Briefcase</h3>
-                <p class="sub">Briefcase downloads the tools and models it needs on demand. Pick what to install — you can add more later from Settings.</p>
+                <p class="sub">Briefcase downloads the tools it needs on demand, and runs its AI on Crucible. You can change all of this later from Settings.</p>
               </div>
-              @if (system(); as sys) {
-                <div class="system-info">
-                  <span class="chip">{{ sys.platform }}</span>
-                  <span class="chip">{{ sys.totalMemoryGB }} GB RAM</span>
-                  <span class="chip">{{ sys.cpuCores }} cores</span>
-                  @if (sys.gpu) { <span class="chip chip-accent">{{ sys.gpu.name }}</span> }
-                </div>
-              }
             }
 
             @case ('tools') {
               <div class="step-head">
                 <h3>Required tools</h3>
-                <p class="sub">These power downloading, transcoding, and transcription. Required tools are selected automatically.</p>
+                <p class="sub">These power downloading and transcoding. Required tools are selected automatically.</p>
               </div>
               <div class="select-list">
                 @for (c of requiredTools(); track c.id) {
@@ -83,122 +72,30 @@ type Step = 'welcome' | 'tools' | 'engine' | 'models' | 'ai' | 'review' | 'finis
                     <ng-container *ngTemplateOutlet="card; context: { $implicit: c, locked: false }"></ng-container>
                   }
                 }
-                @if (pythonEnvs().length) {
-                  <div class="group-label">Flag detection — recommended</div>
-                  @for (c of pythonEnvs(); track c.id) {
-                    <ng-container *ngTemplateOutlet="card; context: { $implicit: c, locked: false, recommended: true }"></ng-container>
-                  }
-                  <p class="hint">Skip it and flag detection still works — it falls back to a per-chapter AI pass, which is slower and finds fewer flags. You can add it later from Settings.</p>
-                }
               </div>
             }
 
             @case ('engine') {
               <div class="step-head">
                 <h3>AI engine</h3>
-                <p class="sub">Briefcase's AI features (chapters, flags, titles) run on Crucible, a shared engine that also serves BookForge and Foundry. It can run on this computer or on another one you connect. You can skip this: your library, downloads and the editor work without it.</p>
+                <p class="sub">Briefcase's AI features (transcription, chapters, flags, titles) run on Crucible, a shared engine that also serves BookForge and Foundry. It can run on this computer or on another one you connect. You can skip this: your library, downloads and the editor work without it.</p>
               </div>
               <app-crucible-doors mode="probing" />
             }
 
-            @case ('models') {
-              <div class="step-head">
-                <h3>Transcription model</h3>
-                <p class="sub">Whisper models power speech-to-text. Larger models are more accurate but slower and bigger.</p>
-              </div>
-              @if (models().length) {
-                <div class="select-list">
-                  @for (c of models(); track c.id) {
-                    <ng-container *ngTemplateOutlet="card; context: { $implicit: c, locked: false }"></ng-container>
-                  }
-                </div>
-              } @else {
-                <p class="sub">No downloadable models are listed in the manifest yet.</p>
-              }
-            }
-
             @case ('ai') {
-              @if (aiRoad() === 'crucible') {
-                @if (crucibleAi()?.server; as server) {
-                  <div class="step-head">
-                    <h3>Cloud models and Ollama</h3>
-                    <p class="sub">AI runs through Crucible on {{ server }}. A Claude or OpenAI key, or an Ollama address, is saved on that server, not in Briefcase. Local models come from its catalog, and Crucible prepares them when you finish. All of this is optional.</p>
-                  </div>
-                  <app-crucible-upstreams [server]="server" />
-                } @else {
-                  <div class="step-head">
-                    <h3>AI needs Crucible</h3>
-                    <p class="sub">Briefcase's AI features (chapters, flags, titles) run on Crucible. Set it up on this computer or connect one on another, or skip this: your library, downloads and the editor work without it.</p>
-                  </div>
-                  <app-crucible-doors mode="probing" (changed)="loadAiStep()" />
-                }
+              @if (crucibleAi()?.server; as server) {
+                <div class="step-head">
+                  <h3>Cloud models and Ollama</h3>
+                  <p class="sub">AI runs through Crucible on {{ server }}. A Claude or OpenAI key, or an Ollama address, is saved on that server, not in Briefcase. Local models come from its catalog, and Crucible prepares them when you finish. All of this is optional.</p>
+                </div>
+                <app-crucible-upstreams [server]="server" />
               } @else {
-              <div class="step-head">
-                <h3>AI for video analysis</h3>
-                <p class="sub">Briefcase can analyse video with a local model through <a class="linklike" href="#" (click)="open('https://ollama.com'); $event.preventDefault()">Ollama</a> — private, offline, and free — or with Claude or OpenAI. Install Ollama and pull a model, or add a cloud API key below.</p>
-              </div>
-
-              @if (llamaModels().length) {
-                <div class="group-label">Local models — recommended</div>
-                <div class="select-list">
-                  @for (c of llamaModels(); track c.id) {
-                    <label class="select-card"
-                           [class.checked]="isChecked(c)"
-                           [class.installed]="c.installed">
-                      <input type="checkbox" [checked]="isChecked(c)" [disabled]="c.installed" (change)="toggleModel(c)">
-                      <div class="select-info">
-                        <div class="select-name">{{ c.name }}
-                          @if (isRecommended(c)) { <span class="badge badge-accent">Recommended</span> }
-                        </div>
-                        @if (c.description) { <div class="select-desc">{{ c.description }}</div> }
-                      </div>
-                      <div class="select-meta">
-                        @if (c.installed) { <span class="badge badge-ok">Installed</span> }
-                        @else { <span class="select-size">{{ fmtSize(c.sizeBytes) }}</span> }
-                      </div>
-                    </label>
-                  }
+                <div class="step-head">
+                  <h3>AI needs Crucible</h3>
+                  <p class="sub">Briefcase's AI features (transcription, chapters, flags, titles) run on Crucible. Set it up on this computer or connect one on another, or skip this: your library, downloads and the editor work without it.</p>
                 </div>
-                <p class="hint">Not sure? {{ recommendedName() }} is the best fit for this computer. The local AI engine (≈5 MB) installs automatically with your first model.</p>
-              } @else {
-                <div class="group-label">Local models</div>
-                <p class="sub">Briefcase no longer bundles its own local models. For offline analysis, install <a class="linklike" href="#" (click)="open('https://ollama.com'); $event.preventDefault()">Ollama</a> and pull a model (<code>ollama pull qwen3.8:27b</code>) — Briefcase picks it up automatically.</p>
-              }
-
-              <div class="group-label">Or use a cloud provider</div>
-              <div class="provider-list">
-                <div class="provider-row">
-                  <div class="provider-head">
-                    <span class="provider-name">Claude (Anthropic)</span>
-                    @if (claudeSaved()) { <span class="badge badge-ok">Key saved</span> }
-                    <button type="button" class="linklike" (click)="open('https://console.anthropic.com/settings/keys')">Get a key ↗</button>
-                  </div>
-                  <div class="provider-input">
-                    <input type="password" placeholder="sk-ant-…" [(ngModel)]="claudeKey" />
-                    <button class="btn btn-secondary btn-sm" [disabled]="!claudeKey || savingKey()" (click)="saveClaude()">Save</button>
-                  </div>
-                </div>
-
-                <div class="provider-row">
-                  <div class="provider-head">
-                    <span class="provider-name">ChatGPT (OpenAI)</span>
-                    @if (openaiSaved()) { <span class="badge badge-ok">Key saved</span> }
-                    <button type="button" class="linklike" (click)="open('https://platform.openai.com/api-keys')">Get a key ↗</button>
-                  </div>
-                  <div class="provider-input">
-                    <input type="password" placeholder="sk-…" [(ngModel)]="openaiKey" />
-                    <button class="btn btn-secondary btn-sm" [disabled]="!openaiKey || savingKey()" (click)="saveOpenAI()">Save</button>
-                  </div>
-                </div>
-
-                <div class="provider-row">
-                  <div class="provider-head">
-                    <span class="provider-name">Ollama</span>
-                    <span class="select-desc">Run other open models via a separate Ollama install.</span>
-                    <button type="button" class="linklike" (click)="open('https://ollama.com/download')">Install Ollama ↗</button>
-                  </div>
-                </div>
-              </div>
+                <app-crucible-doors mode="probing" (changed)="loadAiStep()" />
               }
             }
 
@@ -239,7 +136,7 @@ type Step = 'welcome' | 'tools' | 'engine' | 'models' | 'ai' | 'review' | 'finis
                   } @else {
                     <div class="done-check">✓</div>
                     <h3>You're ready to go</h3>
-                    <p class="finishing-sub">Essential tools are installed. Models keep downloading in the background — feel free to keep working.</p>
+                    <p class="finishing-sub">Essential tools are installed. The rest keeps downloading in the background, so feel free to keep working.</p>
                   }
                   <div class="finish-bar"><div class="finish-bar-fill" [style.width.%]="dl.aggregatePct()"></div></div>
                 } @else {
@@ -273,7 +170,7 @@ type Step = 'welcome' | 'tools' | 'engine' | 'models' | 'ai' | 'review' | 'finis
     </div>
 
     <!-- select card template -->
-    <ng-template #card let-c let-locked="locked" let-recommended="recommended">
+    <ng-template #card let-c let-locked="locked">
       <label class="select-card"
              [class.checked]="isChecked(c)"
              [class.installed]="c.installed">
@@ -281,7 +178,6 @@ type Step = 'welcome' | 'tools' | 'engine' | 'models' | 'ai' | 'review' | 'finis
         <div class="select-info">
           <div class="select-name">{{ c.name }}
             @if (locked) { <span class="badge badge-rec">Required</span> }
-            @else if (recommended) { <span class="badge badge-accent">Recommended</span> }
           </div>
           @if (c.description) { <div class="select-desc">{{ c.description }}</div> }
         </div>
@@ -300,75 +196,32 @@ export class SetupWizardComponent implements OnInit {
   @Output() completed = new EventEmitter<void>();
 
   private componentService = inject(ComponentService);
-  private aiSetup = inject(AiSetupService);
-  private electron = inject(ElectronService);
   private crucible = inject(CrucibleService);
   dl = inject(SetupDownloadService);
 
-  /**
-   * P5: whether the offline transcriber (whisper-cli) is what transcribes here.
-   * The `models` step (whisper model downloads) is shown only then: with a
-   * Crucible that offers asr, transcription runs there and needs no local
-   * model. Unknown until asked, so the step shows until the answer says not.
-   */
-  readonly whisperCliInUse = signal(true);
-  private readonly allSteps: Step[] = ['welcome', 'tools', 'engine', 'models', 'ai', 'review', 'finishing'];
-  readonly steps = computed<Step[]>(() =>
-    this.mode === 'setup' && !this.whisperCliInUse() ? this.allSteps.filter((s) => s !== 'models') : this.allSteps);
+  private readonly allSteps: Step[] = ['welcome', 'tools', 'engine', 'ai', 'review', 'finishing'];
+  readonly steps = computed<Step[]>(() => this.allSteps);
   /** The numbered steps (all but `finishing`). */
   readonly numbered = computed(() => this.steps().length - 1);
   readonly dotIndexes = computed(() => Array.from({ length: this.numbered() }, (_, i) => i));
 
   readonly step = signal<Step>('welcome');
   readonly all = signal<ComponentStatus[]>([]);
-  readonly system = signal<SystemInfo | null>(null);
-
-  // AI step state (cloud providers)
-  claudeKey = '';
-  openaiKey = '';
-  readonly claudeSaved = signal(false);
-  readonly openaiSaved = signal(false);
-  readonly savingKey = signal(false);
-
-
-  /**
-   * The AI step's face. 'crucible' unless the user (or BRIEFCASE_AI_VIA)
-   * chose the direct road: with nothing connected yet the default would read
-   * 'direct', but the wizard offers Crucible, the road AI takes from P3 on.
-   */
-  readonly aiVia = signal<AiViaView | null>(null);
+  /** The AI step's face: the connected server's upstreams, or the Crucible doors. */
   readonly crucibleAi = signal<AiModelsView | null>(null);
-  readonly aiRoad = computed<'crucible' | 'direct'>(() => {
-    const view = this.aiVia();
-    if (view === null || view.source === 'default') return 'crucible';
-    return view.via;
-  });
 
   readonly stepIndex = computed(() => Math.min(this.steps().indexOf(this.step()), this.numbered() - 1));
   readonly requiredTools = computed(() => this.all().filter((c) => c.kind === 'binary' && c.required && c.supported));
   readonly optionalTools = computed(() =>
-    this.all().filter((c) => c.kind === 'binary' && !c.required && c.supported && c.id !== 'llama'),
+    this.all().filter((c) => c.kind === 'binary' && !c.required && c.supported),
   );
-  /**
-   * Locally-built Python environments (the NLI flag ranker). Offered on the
-   * tools step because that is what it is — a tool — and NOT pre-selected,
-   * unlike the required binaries and the default whisper model: it needs a
-   * system Python 3.9+, and silently queueing a 1.2GB build that fails on every
-   * machine without one is worse than an unticked box with a "Recommended"
-   * badge and a line saying what skipping it costs.
-   */
-  readonly pythonEnvs = computed(() => this.all().filter((c) => c.kind === 'python-env' && c.supported));
-  readonly models = computed(() => this.all().filter((c) => c.kind === 'whisper-model' && c.supported));
-  // Chat models only: the scorer's files are llama-model components too, but
-  // offering them here would recommend an 18 GB download nothing classic uses.
-  readonly llamaModels = computed(() => this.all().filter((c) => isChatModelComponent(c) && c.supported));
   readonly reviewItems = computed(() => this.all().filter((c) => this.dl.isSelected(c.id) && !c.installed));
   readonly totalBytes = computed(() => this.reviewItems().reduce((s, c) => s + (c.sizeBytes || 0), 0));
 
   /**
    * True while an essential tool (ffmpeg/ffprobe, yt-dlp) is still queued or
-   * downloading. We block "Open Briefcase" only on these — models are allowed to
-   * keep downloading in the background once the essentials are in place.
+   * downloading. We block "Open Briefcase" only on these; anything else may keep
+   * downloading in the background once the essentials are in place.
    */
   readonly essentialPending = computed(() =>
     this.dl.order().some(
@@ -389,38 +242,15 @@ export class SetupWizardComponent implements OnInit {
     ),
   );
 
-  readonly recommendedName = computed(() => {
-    const id = this.system()?.recommendedModel;
-    // Only rendered inside the @if (llamaModels().length) branch, so the first
-    // entry is a real fallback rather than a name for a model that isn't offered.
-    return this.llamaModels().find((m) => m.id === id)?.name
-      ?? this.llamaModels()[0]?.name
-      ?? '';
-  });
-
   async ngOnInit() {
     // First run: hold Crucible's coordination until the user has chosen, so no
     // model download starts under an open wizard. Released in finish().
     if (this.mode === 'setup') this.crucible.holdFirstRun().subscribe({ error: () => undefined });
-    if (this.mode === 'setup') void this.checkTranscriber();
     this.componentService.listComponents().subscribe((components) => {
       this.all.set(components);
       // Pre-select required, not-yet-installed tools.
       const presel = components.filter((c) => c.required && c.supported && !c.installed).map((c) => c.id);
-      // Pre-select a default whisper model (base) if none installed, unless
-      // Crucible already transcribes here (P5: then no local model is needed).
-      const models = components.filter((c) => c.kind === 'whisper-model');
-      if (this.whisperCliInUse() && models.length && !models.some((m) => m.installed)) {
-        const base = models.find((m) => /base/i.test(m.id) || /base/i.test(m.name)) || models[0];
-        if (base) presel.push(base.id);
-      }
       this.dl.select(presel);
-    });
-    this.aiSetup.getSystemInfo().subscribe((s) => this.system.set(s));
-    // Reflect any already-configured cloud keys.
-    this.aiSetup.checkAIAvailability().then((a) => {
-      this.claudeSaved.set(a.hasClaudeKey);
-      this.openaiSaved.set(a.hasOpenAIKey);
     });
   }
 
@@ -433,67 +263,7 @@ export class SetupWizardComponent implements OnInit {
     this.dl.toggle(c.id);
   }
 
-  isRecommended(c: ComponentStatus): boolean {
-    return c.id === this.system()?.recommendedModel;
-  }
-
-  /** Toggle a local AI model; selecting one also queues the llama engine binary. */
-  toggleModel(c: ComponentStatus): void {
-    if (c.installed) return;
-    const willSelect = !this.dl.isSelected(c.id);
-    this.dl.toggle(c.id);
-    if (willSelect) {
-      // Ensure the llama-server binary is installed too (skipped automatically if already present).
-      const llama = this.all().find((x) => x.id === 'llama' && !x.installed);
-      if (llama) this.dl.select(['llama']);
-    }
-  }
-
-  async saveClaude(): Promise<void> {
-    if (!this.claudeKey || this.savingKey()) return;
-    this.savingKey.set(true);
-    try {
-      await this.aiSetup.saveClaudeKey(this.claudeKey).toPromise();
-      this.claudeSaved.set(true);
-      this.claudeKey = '';
-      this.aiSetup.notifyModelsChanged();
-    } catch {
-      // error surfaced to console by the service
-    } finally {
-      this.savingKey.set(false);
-    }
-  }
-
-  async saveOpenAI(): Promise<void> {
-    if (!this.openaiKey || this.savingKey()) return;
-    this.savingKey.set(true);
-    try {
-      await this.aiSetup.saveOpenAIKey(this.openaiKey).toPromise();
-      this.openaiSaved.set(true);
-      this.openaiKey = '';
-      this.aiSetup.notifyModelsChanged();
-    } catch {
-      // error surfaced to console by the service
-    } finally {
-      this.savingKey.set(false);
-    }
-  }
-
-  open(url: string): void {
-    if (this.electron.isElectron) {
-      this.electron.openExternal(url);
-    } else {
-      window.open(url, '_blank');
-    }
-  }
-
   next(): void {
-    // Leaving the engine step: a Crucible may just have been connected, and
-    // whether it transcribes decides whether the whisper models step shows.
-    if (this.step() === 'engine' && this.mode === 'setup') {
-      void this.checkTranscriber().then(() => this.advance(1));
-      return;
-    }
     this.advance(1);
   }
 
@@ -508,32 +278,8 @@ export class SetupWizardComponent implements OnInit {
     if (this.step() === 'ai') void this.loadAiStep();
   }
 
-  /**
-   * Ask the backend where a transcription would run now. When Crucible takes
-   * it, the whisper models step is skipped and its pre-selected download
-   * dropped; when it doesn't (no Crucible, or no asr on it), the step stays.
-   */
-  async checkTranscriber(): Promise<void> {
-    try {
-      const view = await firstValueFrom(this.crucible.transcription());
-      this.whisperCliInUse.set(view.whisperCliInUse);
-    } catch {
-      this.whisperCliInUse.set(true);
-    }
-    if (!this.whisperCliInUse()) {
-      const whisperModels = new Set(this.all().filter((c) => c.kind === 'whisper-model' && !c.installed).map((c) => c.id));
-      this.dl.selected.update((selected) => new Set([...selected].filter((id) => !whisperModels.has(id))));
-    }
-  }
-
-  /** Where AI runs and, through Crucible, which server the keys would go to. Read on entering the AI step. */
+  /** Which server the keys would go to. Read on entering the AI step. */
   async loadAiStep(): Promise<void> {
-    try {
-      this.aiVia.set(await firstValueFrom(this.crucible.aiVia()));
-    } catch {
-      this.aiVia.set(null);
-    }
-    if (this.aiRoad() !== 'crucible') return;
     try {
       this.crucibleAi.set(await firstValueFrom(this.crucible.aiModels()));
     } catch {

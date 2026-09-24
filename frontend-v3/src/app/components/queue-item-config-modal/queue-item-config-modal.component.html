@@ -18,20 +18,25 @@
           *ngFor="let task of getAvailableTasks()"
           class="task-item"
           [class.selected]="isTaskSelected(task.type)"
-          [class.expanded]="isTaskSelected(task.type) && (task.type === 'fix-aspect-ratio' || task.type === 'transcribe' || task.type === 'ai-analyze' || task.type === 'normalize-audio')"
+          [class.locked]="isTaskLocked(task.type)"
+          [class.expanded]="isTaskSelected(task.type) && (task.type === 'fix-aspect-ratio' || task.type === 'ai-analyze' || task.type === 'normalize-audio')"
         >
           <!-- Task Header (clickable) -->
-          <div class="task-header" (click)="toggleTask(task)">
-            <span class="task-icon">{{ task.icon }}</span>
+          <div class="task-header" (click)="toggleTask(task)" [attr.title]="isTaskLocked(task.type) ? readiness.reason() : null">
             <div class="task-info">
               <span class="task-label">{{ task.label }}</span>
-              <span class="task-description">{{ task.description }}</span>
+              <span class="task-description">{{ isTaskLocked(task.type) ? readiness.reason() : task.description }}</span>
             </div>
+            <button
+              *ngIf="isTaskLocked(task.type) && readiness.doorLabel() as door"
+              type="button"
+              class="door-btn"
+              (click)="$event.stopPropagation(); readiness.openDoor(); onClose()">{{ door }}</button>
             <span class="selection-indicator" *ngIf="isTaskSelected(task.type)">✓</span>
           </div>
 
           <!-- Task Configuration (auto-expand for configurable tasks) -->
-          <div class="task-config" *ngIf="isTaskSelected(task.type) && (task.type === 'fix-aspect-ratio' || task.type === 'transcribe' || task.type === 'ai-analyze' || task.type === 'normalize-audio')">
+          <div class="task-config" *ngIf="isTaskSelected(task.type) && (task.type === 'fix-aspect-ratio' || task.type === 'ai-analyze' || task.type === 'normalize-audio')">
 
             <!-- Fix Aspect Ratio Config -->
             <div *ngIf="task.type === 'fix-aspect-ratio'" class="config-form">
@@ -74,41 +79,6 @@
               </div>
             </div>
 
-            <!-- Transcribe Config -->
-            <div *ngIf="task.type === 'transcribe'" class="config-form">
-              <div class="form-group">
-                <label>Whisper Model</label>
-                <select
-                  [value]="getTaskConfig(task.type).model"
-                  (change)="updateTaskConfig(task.type, { model: $any($event.target).value })"
-                >
-                  <option *ngFor="let model of whisperModels()" [value]="model.id">
-                    {{ model.name }} - {{ model.description }}
-                  </option>
-                </select>
-                <span class="form-hint">Use <strong>Small</strong> for videos with background music or complex audio.</span>
-              </div>
-              <div class="form-group">
-                <label>Language (optional)</label>
-                <input
-                  type="text"
-                  placeholder="Auto-detect"
-                  [value]="getTaskConfig(task.type).language || ''"
-                  (input)="updateTaskConfig(task.type, { language: $any($event.target).value })"
-                />
-              </div>
-              <div class="form-group">
-                <label class="checkbox-label">
-                  <input
-                    type="checkbox"
-                    [checked]="getTaskConfig(task.type).translate"
-                    (change)="updateTaskConfig(task.type, { translate: $any($event.target).checked })"
-                  />
-                  <span>Translate to English</span>
-                </label>
-              </div>
-            </div>
-
             <!-- AI Analyze Config -->
             <div *ngIf="task.type === 'ai-analyze'" class="config-form">
               <div class="form-group">
@@ -122,15 +92,15 @@
                   <option *ngIf="!loadingModels() && aiModels().length === 0" value="">No models available</option>
                   <option *ngIf="!loadingModels() && aiModels().length > 0 && !selectedAIModel()" value="" disabled>-- Select a model --</option>
 
-                  <!-- Local AI (Bundled) -->
-                  <optgroup *ngIf="hasModelsForProvider('local')" [label]="localGroupLabel()">
+                  <!-- The Crucible server's own catalog -->
+                  <optgroup *ngIf="hasModelsForProvider('local')" label="Crucible models">
                     <option *ngFor="let model of getModelsByProvider('local')" [value]="model.value">
                       {{ model.label }}
                     </option>
                   </optgroup>
 
                   <!-- Ollama Models -->
-                  <optgroup *ngIf="hasModelsForProvider('ollama')" [label]="viaCrucible() ? 'Ollama (through Crucible)' : 'Ollama'">
+                  <optgroup *ngIf="hasModelsForProvider('ollama')" label="Ollama (through Crucible)">
                     <option *ngFor="let model of getModelsByProvider('ollama')" [value]="model.value">
                       {{ model.label }}
                     </option>
@@ -159,16 +129,15 @@
                   [title]="savedAsDefault() ? 'Saved!' : 'Save this model as your default for future analysis'"
                 >
                   @if (savedAsDefault()) {
-                    ✓ Saved!
+                    Saved
                   } @else {
-                    💾 Save as Default
+                    Save as Default
                   }
                 </button>
               </div>
 
               <!-- Info Box -->
               <div class="info-box">
-                <div class="info-icon">💡</div>
                 <div class="info-content">
                   <strong>Custom instructions are optional.</strong>
                   The AI uses your <strong>Categories</strong> (configured in Settings) to analyze videos.

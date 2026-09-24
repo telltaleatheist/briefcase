@@ -54,14 +54,9 @@
         <button type="button" class="close-btn" (click)="closeAdd()" title="Close">×</button>
       </div>
       <app-add-popover
-        [aiReady]="aiReady()"
-        [aiCheckFailed]="aiCheckFailed()"
         (submitAdd)="onSubmitAdd($event)"
         (importFiles)="onImportFiles()"
         (openAdvanced)="onOpenAdvanced()"
-        (setupAi)="onSetupAi()"
-        (retryAi)="onRetryAi()"
-        (openComponents)="onOpenComponents()"
         (dismissed)="closeAdd()" />
     </div>
   </div>

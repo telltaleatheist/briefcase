@@ -30,10 +30,9 @@ class FakeWebsocket {
   onQueueLanes = this.on('queue.lanes');
 }
 
-const lanes = (mode: 'crucible' | 'direct'): LanesStatus => ({
-  mode,
+const lanes = (registered: boolean): LanesStatus => ({
   timestamp: '2026-09-23T00:00:00Z',
-  lanes: mode === 'direct' ? [] : [{
+  lanes: !registered ? [] : [{
     id: 'gpu:mac', kind: 'gpu', label: 'GPU · mac', server: 'mac', state: 'ready', detail: null,
     residentModel: null, width: 1, running: [], waiting: 1,
   }],
@@ -67,7 +66,7 @@ describe('QueueService parked jobs and lanes', () => {
         parkedReason: 'Waiting for mac: bookforge is using it.', lane: 'gpu:mac',
       }],
     });
-    http.expectOne(r => r.url.endsWith('/queue/lanes')).flush({ success: true, ...lanes('crucible') });
+    http.expectOne(r => r.url.endsWith('/queue/lanes')).flush({ success: true, ...lanes(true) });
     flushMicrotasks();
   }));
 
@@ -103,14 +102,14 @@ describe('QueueService parked jobs and lanes', () => {
   });
 
   it('loads lanes, follows queue.lanes, and updates from the pause POST', () => {
-    expect(service.lanes()?.mode).toBe('crucible');
-    ws.handlers['queue.lanes'](lanes('direct'));
+    expect(service.lanes()?.lanes.length).toBe(1);
+    ws.handlers['queue.lanes'](lanes(false));
     expect(service.lanes()?.lanes.length).toBe(0);
 
     service.setServerPaused('mac mini', true).subscribe();
     const req = http.expectOne(r => r.url.endsWith('/queue/lanes/mac%20mini/paused'));
     expect(req.request.body).toEqual({ paused: true });
-    req.flush({ success: true, ...lanes('crucible') });
+    req.flush({ success: true, ...lanes(true) });
     expect(service.lanes()?.lanes[0].server).toBe('mac');
   });
 });

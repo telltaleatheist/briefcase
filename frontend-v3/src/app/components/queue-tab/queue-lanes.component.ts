@@ -27,10 +27,7 @@ export class QueueLanesComponent {
   private queueService = inject(QueueService);
   private errorSurface = inject(ErrorSurface);
 
-  readonly lanes = computed<LaneView[]>(() => {
-    const status = this.queueService.lanes();
-    return status?.mode === 'crucible' ? status.lanes : [];
-  });
+  readonly lanes = computed<LaneView[]>(() => this.queueService.lanes()?.lanes ?? []);
 
   /** The server whose switch is mid-request (ignore further clicks on it). */
   readonly switching = signal<string | null>(null);

@@ -1,7 +1,6 @@
 import { Injectable, computed, signal } from '@angular/core';
 import { ComponentService } from './component.service';
 import { WebsocketService } from './websocket.service';
-import { AiSetupService } from './ai-setup.service';
 
 export type ItemStatus = 'idle' | 'queued' | 'downloading' | 'done' | 'failed';
 
@@ -33,15 +32,6 @@ export class SetupDownloadService {
 
   private draining = false;
   private resolveCurrent: (() => void) | null = null;
-  /**
-   * Ids queued as a REPAIR rather than a fresh install. Only meaningful for
-   * locally-constructed components (the NLI Python environment), where the
-   * backend would otherwise see a directory that already looks present and
-   * no-op. Cleared as each item starts, so a later ordinary install of the same
-   * id is not silently forced too.
-   */
-  private forceIds = new Set<string>();
-
   // Stall watchdog: if the in-flight item goes silent for this long (no progress
   // events and no terminal 'component.download.*' WS event, e.g. a backend crash
   // or a lost terminal event), fail it and move on so the queue can't hang
@@ -68,7 +58,6 @@ export class SetupDownloadService {
   constructor(
     private components: ComponentService,
     private ws: WebsocketService,
-    private aiSetup: AiSetupService,
   ) {
     this.ws.onComponentDownloadProgress((e) => {
       this.progress.update((p) => ({
@@ -83,10 +72,6 @@ export class SetupDownloadService {
     this.ws.onComponentDownloadComplete((e) => {
       this.doneIds.update((s) => new Set(s).add(e.componentId));
       this.components.listComponents().subscribe();
-      // Tell model-listing surfaces (analysis config dialogs, settings) to
-      // re-fetch so a freshly downloaded whisper/AI model shows up immediately,
-      // without needing an app restart.
-      this.aiSetup.notifyModelsChanged();
       this.finishCurrent(e.componentId);
     });
     this.ws.onComponentDownloadError((e) => {
@@ -121,25 +106,9 @@ export class SetupDownloadService {
   }
 
   // ---------- queue ----------
-  /**
-   * Queue the given ids (or the current selection) and start draining.
-   * `force` marks them as repairs — see forceIds.
-   */
-  enqueue(ids?: string[], force = false): void {
+  /** Queue the given ids (or the current selection) and start draining. */
+  enqueue(ids?: string[]): void {
     const toAdd = ids ?? Array.from(this.selected());
-    if (force) {
-      toAdd.forEach((id) => this.forceIds.add(id));
-      // A repair is by definition a re-run of something that already finished
-      // (or failed) in this session. Clear its terminal state first, otherwise
-      // nextToRun() skips it and the button does nothing.
-      this.doneIds.update((d) => new Set([...d].filter((id) => !toAdd.includes(id))));
-      this.failed.update((f) => {
-        const next = { ...f };
-        toAdd.forEach((id) => delete next[id]);
-        return next;
-      });
-      this.order.update((o) => o.filter((id) => !toAdd.includes(id)));
-    }
     const existing = new Set(this.order());
     const additions = toAdd.filter((id) => !existing.has(id));
     if (additions.length > 0) {
@@ -223,8 +192,7 @@ export class SetupDownloadService {
           this.resolveCurrent = resolve;
           // Guard against a terminal WS event that never arrives.
           this.armWatchdog(id as string);
-          const force = this.forceIds.delete(id as string);
-          this.components.installComponent(id as string, force).subscribe({
+          this.components.installComponent(id as string).subscribe({
             next: (res) => {
               // HTTP 200 with success:false (unsupported platform, "already
               // downloading", backend refusal) is neither an HTTP error nor a

@@ -57,30 +57,30 @@
         <div
           class="step-card"
           [class.on]="isEnabled(def.type)"
-          [class.disabled]="def.type === 'ai-analyze' && !aiReady()">
+          [class.disabled]="aiLocked(def.type)"
+          [attr.title]="aiLocked(def.type) ? readiness.reason() : null">
           <label class="step-lead">
             <input
               type="checkbox"
               class="step-box"
               [checked]="isEnabled(def.type)"
-              [disabled]="def.type === 'ai-analyze' && !aiReady()"
+              [disabled]="aiLocked(def.type)"
               (change)="toggleStep(def.type)" />
             <span class="step-text">
               <span class="step-title">{{ def.label }}</span>
-              @if (doneHint(def.type); as hint) {
-                <span class="step-sub">{{ hint }}</span>
+              @if (aiLocked(def.type)) {
+                <span class="step-sub step-reason">{{ readiness.reason() }}</span>
+              } @else if (doneHint(def.type)) {
+                <span class="step-sub">{{ doneHint(def.type) }}</span>
               }
             </span>
           </label>
 
-          @if (def.type === 'ai-analyze' && !aiReady()) {
-            @if (aiCheckFailed()) {
-              <!-- Probe failed: readiness UNKNOWN — never tell a configured user to "set up" -->
-              <button type="button" class="link-affordance" (click)="$event.stopPropagation(); retryAi.emit()">AI check failed — retry</button>
-            } @else {
-              <button type="button" class="link-affordance" (click)="$event.stopPropagation(); setupAi.emit()">Set up AI…</button>
+          @if (aiLocked(def.type)) {
+            @if (readiness.doorLabel(); as door) {
+              <button type="button" class="link-affordance" (click)="$event.stopPropagation(); openDoor()">{{ door }}</button>
             }
-          } @else if (isEnabled(def.type)) {
+          } @else if (isEnabled(def.type) && hasOptions(def.type)) {
             <button
               type="button"
               class="step-chevron"
@@ -134,56 +134,6 @@
                     aria-label="Target loudness in LUFS" />
                   <span class="opt-hint">{{ audioLevelDescription() }}</span>
                 </div>
-              }
-              @case ('transcribe') {
-                @if (whisperModelsError()) {
-                  <div class="opt-error">
-                    Couldn't load installed models
-                    <button type="button" class="retry-link" (click)="loadWhisperModels()">Retry</button>
-                  </div>
-                } @else if (whisperModelsEmpty()) {
-                  <!-- Nothing installed: never offer a doomed "(not installed)" model -->
-                  <div class="opt-guidance">
-                    <span>No transcription models installed.</span>
-                    <button type="button" class="link-affordance" (click)="openComponents.emit()">Install in Settings → Components</button>
-                  </div>
-                } @else {
-                  <label class="opt">
-                    <span>Model</span>
-                    <select
-                      [ngModel]="config(def.type)['model']"
-                      [disabled]="whisperModelsLoading()"
-                      (ngModelChange)="setOption(def.type, 'model', $event)">
-                      @if (whisperModelsLoading()) {
-                        <option [value]="config(def.type)['model']">Loading installed models…</option>
-                      } @else {
-                        @for (model of whisperModels() ?? []; track model.id) {
-                          <option [value]="model.id">{{ model.name }}{{ model.description ? ' — ' + model.description : '' }}</option>
-                        }
-                        @if (missingModelValue(); as missing) {
-                          <option [value]="missing">{{ missing }} (not installed)</option>
-                        }
-                      }
-                    </select>
-                  </label>
-                  <label class="opt">
-                    <span>Language</span>
-                    <select [value]="config(def.type)['language']" (change)="onSelectOption(def.type, 'language', $event)">
-                      <option value="en">English</option>
-                      <option value="auto">Auto-detect</option>
-                      <option value="es">Spanish</option>
-                      <option value="fr">French</option>
-                      <option value="de">German</option>
-                    </select>
-                  </label>
-                  <label class="opt check">
-                    <input
-                      type="checkbox"
-                      [checked]="config(def.type)['translate'] === true"
-                      (change)="onCheckboxOption(def.type, 'translate', $event)" />
-                    <span>Translate to English</span>
-                  </label>
-                }
               }
               @case ('ai-analyze') {
 

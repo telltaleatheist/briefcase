@@ -47,7 +47,6 @@
           <!-- Download & Import (always selected for URL downloads) -->
           <div class="task-item selected">
             <div class="task-header">
-              <span class="task-icon">⬇️</span>
               <div class="task-info">
                 <span class="task-label">Download and Import</span>
                 <span class="task-description">Download video from URL and add to library</span>
@@ -59,7 +58,6 @@
           <!-- Fix Aspect Ratio -->
           <div class="task-item" [class.selected]="settings.fixAspectRatio">
             <div class="task-header" (click)="settings.fixAspectRatio = !settings.fixAspectRatio">
-              <span class="task-icon">📐</span>
               <div class="task-info">
                 <span class="task-label">Fix Aspect Ratio</span>
                 <span class="task-description">Correct video aspect ratio issues</span>
@@ -71,7 +69,6 @@
           <!-- Normalize Audio -->
           <div class="task-item" [class.selected]="settings.normalizeAudio">
             <div class="task-header" (click)="settings.normalizeAudio = !settings.normalizeAudio">
-              <span class="task-icon">🔊</span>
               <div class="task-info">
                 <span class="task-label">Normalize Audio</span>
                 <span class="task-description">Normalize audio levels to standard volume</span>
@@ -106,61 +103,29 @@
             </div>
           </div>
 
-          <!-- Transcribe -->
-          <div class="task-item" [class.selected]="settings.transcribe">
-            <div class="task-header" (click)="settings.transcribe = !settings.transcribe">
-              <span class="task-icon">📝</span>
+          <!-- Transcribe (needs Crucible) -->
+          <div class="task-item" [class.selected]="settings.transcribe && !aiLocked" [class.locked]="aiLocked">
+            <div class="task-header" (click)="toggleAiStep('transcribe')" [attr.title]="aiLocked ? readiness.reason() : null">
               <div class="task-info">
                 <span class="task-label">Transcribe</span>
-                <span class="task-description">Generate transcript using Whisper</span>
+                <span class="task-description">{{ aiLocked ? readiness.reason() : 'Generate a transcript on Crucible' }}</span>
               </div>
-              <span class="selection-indicator" *ngIf="settings.transcribe">✓</span>
-            </div>
-            <!-- Transcribe Config -->
-            <div class="task-config" *ngIf="settings.transcribe">
-              <div class="config-form">
-                <div class="form-group">
-                  <label>Whisper Model</label>
-                  <select [(ngModel)]="settings.whisperModel">
-                    <option *ngFor="let model of whisperModels" [value]="model.id">
-                      {{ model.name }} - {{ model.description }}
-                    </option>
-                  </select>
-                  <span class="form-hint">Use <strong>Small</strong> for videos with background music or complex audio. It's slower but more accurate.</span>
-                </div>
-                <div class="form-group">
-                  <label>Language (optional)</label>
-                  <input
-                    type="text"
-                    placeholder="Auto-detect"
-                    [(ngModel)]="settings.whisperLanguage"
-                  />
-                </div>
-                <div class="form-group">
-                  <label class="checkbox-label">
-                    <input
-                      type="checkbox"
-                      [(ngModel)]="settings.whisperTranslate"
-                    />
-                    <span>Translate to English</span>
-                  </label>
-                </div>
-              </div>
+              <button *ngIf="aiLocked && readiness.doorLabel() as door" type="button" class="door-btn" (click)="$event.stopPropagation(); openDoor()">{{ door }}</button>
+              <span class="selection-indicator" *ngIf="settings.transcribe && !aiLocked">✓</span>
             </div>
           </div>
 
-          <!-- AI Analyze -->
-          <div class="task-item" [class.selected]="settings.aiAnalysis">
-            <div class="task-header" (click)="settings.aiAnalysis = !settings.aiAnalysis">
-              <span class="task-icon">🤖</span>
+          <!-- AI Analyze (needs Crucible) -->
+          <div class="task-item" [class.selected]="settings.aiAnalysis && !aiLocked" [class.locked]="aiLocked">
+            <div class="task-header" (click)="toggleAiStep('aiAnalysis')" [attr.title]="aiLocked ? readiness.reason() : null">
               <div class="task-info">
                 <span class="task-label">AI Analyze</span>
-                <span class="task-description">Analyze content with AI</span>
+                <span class="task-description">{{ aiLocked ? readiness.reason() : 'Analyze content with AI on Crucible' }}</span>
               </div>
-              <span class="selection-indicator" *ngIf="settings.aiAnalysis">✓</span>
+              <span class="selection-indicator" *ngIf="settings.aiAnalysis && !aiLocked">✓</span>
             </div>
             <!-- AI Config -->
-            <div class="task-config" *ngIf="settings.aiAnalysis">
+            <div class="task-config" *ngIf="settings.aiAnalysis && !aiLocked">
               <div class="config-form">
                 <div class="form-group">
                   <label>AI Model</label>
@@ -168,13 +133,13 @@
                     <option *ngIf="loadingModels" value="">Loading models...</option>
                     <option *ngIf="!loadingModels && aiModels.length === 0" value="">No models available</option>
 
-                    <optgroup *ngIf="hasModelsForProvider('local')" [label]="localGroupLabel()">
+                    <optgroup *ngIf="hasModelsForProvider('local')" label="Crucible models">
                       <option *ngFor="let model of getModelsByProvider('local')" [value]="model.value">
                         {{ model.label }}
                       </option>
                     </optgroup>
 
-                    <optgroup *ngIf="hasModelsForProvider('ollama')" [label]="viaCrucible() ? 'Ollama (through Crucible)' : 'Ollama'">
+                    <optgroup *ngIf="hasModelsForProvider('ollama')" label="Ollama (through Crucible)">
                       <option *ngFor="let model of getModelsByProvider('ollama')" [value]="model.value">
                         {{ model.label }}
                       </option>
@@ -200,14 +165,13 @@
                     [disabled]="loadingModels || !settings.aiModel || savedAsDefault"
                     [title]="savedAsDefault ? 'Saved!' : 'Save this model as your default for future analysis'"
                   >
-                    <ng-container *ngIf="savedAsDefault">✓ Saved!</ng-container>
-                    <ng-container *ngIf="!savedAsDefault">💾 Save as Default</ng-container>
+                    <ng-container *ngIf="savedAsDefault">Saved</ng-container>
+                    <ng-container *ngIf="!savedAsDefault">Save as Default</ng-container>
                   </button>
                 </div>
 
                 <!-- Custom Instructions Info Box -->
                 <div class="info-box">
-                  <div class="info-icon">💡</div>
                   <div class="info-content">
                     <strong>Custom instructions are optional.</strong>
                     The AI uses your <strong>Categories</strong> (configured in Settings) to analyze videos.

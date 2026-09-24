@@ -123,13 +123,13 @@ export class TourService {
         {
           element: '.settings-content',
           title: 'Settings Overview',
-          description: 'Configure AI providers, default models, analysis categories, and custom prompts. Each section controls a different aspect of video analysis.',
+          description: 'Configure the Crucible server AI runs on, default models, analysis categories, and custom prompts. Each section controls a different aspect of video analysis.',
           side: 'top',
         },
         {
           element: '.settings-section:nth-child(1)',
-          title: 'AI Configuration',
-          description: 'Set up which AI provider to use (Local AI, Ollama, Claude, or OpenAI). The status card shows if AI is ready.',
+          title: 'AI Engine',
+          description: 'AI runs on Crucible. This card shows the connected server; Claude, OpenAI and Ollama are that server\'s upstreams.',
           side: 'right',
         },
         {
@@ -187,124 +187,6 @@ export class TourService {
           title: 'Editor Controls',
           description: 'Access quick actions like fullscreen mode, close the editor, and see the current video title.',
           side: 'bottom',
-        },
-      ],
-    });
-
-    // AI Setup Wizard - Welcome step tour
-    this.tours.set('ai-wizard', {
-      id: 'ai-wizard',
-      name: 'AI Setup Tour',
-      steps: [
-        {
-          element: '.wizard-container',
-          title: 'Welcome to AI Setup',
-          description: 'This wizard will help you configure AI for video analysis. AI powers features like automatic transcription, content analysis, and smart tagging.',
-          side: 'bottom',
-        },
-        {
-          element: '.provider-card.recommended',
-          title: 'Local AI (Recommended)',
-          description: 'Run AI directly on your computer. It\'s free, private, and works offline. Great for most users with a modern computer.',
-          side: 'right',
-        },
-        {
-          element: '.provider-cards',
-          title: 'Other Options',
-          description: 'You can also use Ollama (if installed), or cloud services like Claude or OpenAI for higher quality results.',
-          side: 'bottom',
-        },
-      ],
-    });
-
-    // AI Wizard - Local Models step tour
-    this.tours.set('ai-wizard-local', {
-      id: 'ai-wizard-local',
-      name: 'Local AI Setup Tour',
-      steps: [
-        {
-          element: '.system-info-card',
-          title: 'Your System',
-          description: 'Shows your GPU and RAM. Models run faster on GPU. The recommended model is chosen based on your available memory.',
-          side: 'bottom',
-        },
-        {
-          element: '.model-cards',
-          title: 'Choose a Model',
-          description: 'Larger models (more GB) give better results but need more memory. The "Recommended" badge shows the best choice for your system.',
-          side: 'top',
-        },
-        {
-          element: '.model-card .model-actions',
-          title: 'Download or Activate',
-          description: 'Click Download to get a model. Once downloaded, click "Use This" to make it your default. You can have multiple models.',
-          side: 'left',
-        },
-      ],
-    });
-
-    // AI Wizard - Ollama step tour
-    this.tours.set('ai-wizard-ollama', {
-      id: 'ai-wizard-ollama',
-      name: 'Ollama Setup Tour',
-      steps: [
-        {
-          element: '.instruction-card',
-          title: 'Install Ollama',
-          description: 'Follow these steps to install Ollama on your computer. Click the button to open the Ollama website.',
-          side: 'right',
-        },
-        {
-          element: '.models-section',
-          title: 'Download a Model',
-          description: 'After installing Ollama, download a model. Larger models (more B) are smarter but need more RAM. Mistral 7B is a good starting point.',
-          side: 'top',
-        },
-        {
-          element: '.status-section',
-          title: 'Check Status',
-          description: 'Click "Check Ollama Status" to verify Ollama is running and has models available. Green checkmark means you\'re ready!',
-          side: 'top',
-        },
-      ],
-    });
-
-    // AI Wizard - Claude step tour
-    this.tours.set('ai-wizard-claude', {
-      id: 'ai-wizard-claude',
-      name: 'Claude API Setup Tour',
-      steps: [
-        {
-          element: '.instruction-card',
-          title: 'Get an API Key',
-          description: 'You need an API key from Anthropic to use Claude. Click the button to open the Anthropic Console and create a key.',
-          side: 'right',
-        },
-        {
-          element: '.api-input-section',
-          title: 'Enter Your Key',
-          description: 'Paste your Claude API key here. It starts with "sk-ant-". Your key is stored locally and only sent to Anthropic\'s servers.',
-          side: 'top',
-        },
-      ],
-    });
-
-    // AI Wizard - OpenAI step tour
-    this.tours.set('ai-wizard-openai', {
-      id: 'ai-wizard-openai',
-      name: 'OpenAI API Setup Tour',
-      steps: [
-        {
-          element: '.instruction-card',
-          title: 'Get an API Key',
-          description: 'You need an API key from OpenAI to use GPT models. Click the button to open the OpenAI Platform and create a key.',
-          side: 'right',
-        },
-        {
-          element: '.api-input-section',
-          title: 'Enter Your Key',
-          description: 'Paste your OpenAI API key here. It starts with "sk-". Your key is stored locally and only sent to OpenAI\'s servers.',
-          side: 'top',
         },
       ],
     });
@@ -489,13 +371,13 @@ export class TourService {
         {
           element: '.task-item:nth-child(4)',
           title: 'Transcribe',
-          description: 'Uses Whisper AI to convert speech to text. Choose model size: Tiny (fast) or Base (more accurate).',
+          description: 'Converts speech to text on Crucible, in the language spoken. Needs a running Crucible server.',
           side: 'right',
         },
         {
           element: '.task-item:nth-child(5)',
           title: 'AI Analyze',
-          description: 'Runs AI analysis on the video to generate descriptions, identify topics, extract quotes, and suggest titles.',
+          description: 'Runs AI analysis on Crucible to generate descriptions, identify topics, extract quotes, and suggest titles.',
           side: 'right',
         },
       ],

@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, output, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, output, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { AddDownloadsPayload } from '../../../core/stores/workspace-actions.service';
 import { AddDefaultsService, DownloadQuality, QUALITY_OPTIONS } from '../../../core/stores/add-defaults.service';
@@ -43,19 +43,9 @@ function formatHms(totalSeconds: number): string {
   changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class AddPopoverComponent {
-  /** Whether an AI provider is configured (gates the embedded AI Analyze step). */
-  aiReady = input(false);
-  /** AI readiness UNKNOWN — the availability probe failed (retry, don't lie). */
-  aiCheckFailed = input(false);
-
   submitAdd = output<AddDownloadsPayload>();
   importFiles = output<void>();
   openAdvanced = output<void>();
-  setupAi = output<void>();
-  /** Re-run the AI availability probe (embedded config's "check failed — retry"). */
-  retryAi = output<void>();
-  /** No whisper models installed — take the user to Settings → Components. */
-  openComponents = output<void>();
   dismissed = output<void>();
 
   private addDefaults = inject(AddDefaultsService);
@@ -100,13 +90,11 @@ export class AddPopoverComponent {
     return parts.length ? parts.join(' · ') : 'No trim set — tap to edit';
   });
 
-  canSubmit = computed(() => {
-    if (this.urls().length === 0 || !this.trimValid()) return false;
-    // Never stage a doomed job: honor the embedded config's own gate (e.g.
-    // transcribe enabled but no installed whisper model verified).
-    const config = this.config();
-    return !config || !config.transcribeBlocked();
-  });
+  /**
+   * A download never waits on Crucible: steps that need it are left out of the
+   * composed pipeline by the embedded config while it is not ready.
+   */
+  canSubmit = computed(() => this.urls().length > 0 && this.trimValid());
   submitLabel = computed(() => {
     const count = this.urls().length;
     return count > 1 ? `Download ${count}` : 'Download';
@@ -133,7 +121,6 @@ export class AddPopoverComponent {
     const urls = this.urls();
     if (urls.length === 0 || !this.trimValid()) return;
     const config = this.config();
-    if (config?.transcribeBlocked()) return;
 
     const trimOn = this.trim();
     const startSeconds = trimOn ? this.trimStartSeconds() : 0;
@@ -148,7 +135,7 @@ export class AddPopoverComponent {
 
     // The embedded config's steps are already sticky-persisted (shared with the
     // inspector); read the composed set for THIS add and carry it whole so every
-    // option survives (translate, granularity, stripBlackBars, customInstructions).
+    // option survives (stripBlackBars, customInstructions, the AI model).
     const steps = config?.composedSteps() ?? [];
     const quality = this.quality();
 

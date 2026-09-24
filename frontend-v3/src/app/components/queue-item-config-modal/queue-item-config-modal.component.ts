@@ -1,23 +1,20 @@
-import { Component, signal, input, output, inject, OnInit, OnDestroy, effect, HostListener, computed } from '@angular/core';
-import { Subscription } from 'rxjs';
+import { Component, signal, input, output, inject, OnInit, effect, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { HttpClient } from '@angular/common/http';
 import {
   AVAILABLE_TASKS,
   Task,
   TaskType,
   DownloadImportConfig,
-  TranscribeConfig,
   AIAnalyzeConfig,
   FixAspectRatioConfig,
   NormalizeAudioConfig,
 } from '../../models/task.model';
 import { QueueItemTask } from '../../models/queue.model';
-import { AiSetupService, AIAvailability } from '../../services/ai-setup.service';
 import { LibraryService } from '../../services/library.service';
+import { CrucibleService } from '../../services/crucible.service';
+import { CrucibleReadinessService, taskNeedsCrucible } from '../../services/crucible-readiness.service';
 import { firstValueFrom } from 'rxjs';
-import { getApiBase } from '../../core/runtime-url';
 import { PipelinePresetsService } from '../../core/stores/pipeline-presets.service';
 
 interface AIModelOption {
@@ -33,16 +30,12 @@ interface AIModelOption {
   templateUrl: './queue-item-config-modal.component.html',
   styleUrls: ['./queue-item-config-modal.component.scss']
 })
-export class QueueItemConfigModalComponent implements OnInit, OnDestroy {
-  private aiSetupService = inject(AiSetupService);
-  /** True when AI runs through Crucible: the local group is the server's catalog. */
-  readonly viaCrucible = computed(() => this.aiSetupService.via() === 'crucible');
-  readonly localGroupLabel = computed(() => (this.viaCrucible() ? 'Crucible models' : 'Local AI (Bundled)'));
+export class QueueItemConfigModalComponent implements OnInit {
+  private crucible = inject(CrucibleService);
+  /** Transcribe and AI analyze need Crucible: while it is not ready they can't be turned on. */
+  readonly readiness = inject(CrucibleReadinessService);
   private libraryService = inject(LibraryService);
-  private http = inject(HttpClient);
   private presetsService = inject(PipelinePresetsService);
-  private readonly API_BASE = getApiBase();
-  private modelsChangedSub?: Subscription;
 
   // Inputs
   isOpen = input<boolean>(false);
@@ -63,7 +56,6 @@ export class QueueItemConfigModalComponent implements OnInit, OnDestroy {
 
   // AI Models
   aiModels = signal<AIModelOption[]>([]);
-  whisperModels = signal<{ id: string; name: string; description: string }[]>([]);
   loadingModels = signal(false);
   defaultAIModel = ''; // No fallback - user must have saved a default or select one
   savedAsDefault = signal(false);
@@ -76,8 +68,8 @@ export class QueueItemConfigModalComponent implements OnInit, OnDestroy {
   showInstructionsDropdown = signal(false);
 
   // True once tasks have been initialized for the current open session. Prevents
-  // a mid-edit model refresh (modelsChanged$ → loadAIModels) from re-running
-  // initializeTasks and discarding the user's in-progress edits.
+  // a mid-edit model refresh from re-running initializeTasks and discarding the
+  // user's in-progress edits.
   private initializedForOpen = false;
 
   constructor() {
@@ -104,16 +96,6 @@ export class QueueItemConfigModalComponent implements OnInit, OnDestroy {
   ngOnInit() {
     this.loadAIModels();
     this.loadInstructionsHistory();
-
-    // Subscribe to model changes from other components (e.g., AI wizard)
-    this.modelsChangedSub = this.aiSetupService.modelsChanged$.subscribe(() => {
-      console.log('Models changed event received, reloading AI models...');
-      this.loadAIModels();
-    });
-  }
-
-  ngOnDestroy() {
-    this.modelsChangedSub?.unsubscribe();
   }
 
   private async loadInstructionsHistory() {
@@ -145,8 +127,7 @@ export class QueueItemConfigModalComponent implements OnInit, OnDestroy {
   // See process-config.component.ts for the full note: the analysis now captures
   // everything and stores every verdict, the dial became a display filter in the
   // video editor, and the operator removed the run-side control outright. This
-  // modal no longer sets `analysisGranularity`; the stored `defaultGranularity`
-  // is config-file-only and read only by the discovery fallback flag path.
+  // modal no longer sets `analysisGranularity`.
 
   getAudioLevelDescription(level: number): string {
     if (level <= -22) return 'Very quiet - suitable for background music or ambient content';
@@ -184,100 +165,14 @@ export class QueueItemConfigModalComponent implements OnInit, OnDestroy {
     this.loadingModels.set(true);
 
     try {
-      // Load whisper models dynamically
+      // The connected Crucible server's catalog and its configured upstreams.
+      let models: AIModelOption[] = [];
       try {
-        const whisperResponse = await firstValueFrom(
-          this.http.get<{ success: boolean; models: any[]; default: string }>(`${this.API_BASE}/media/whisper-models`)
-        );
-        if (whisperResponse.success && whisperResponse.models.length > 0) {
-          this.whisperModels.set(whisperResponse.models);
-        }
+        models = (await firstValueFrom(this.crucible.modelOptions()))
+          .map(m => ({ value: m.value, label: m.label, provider: m.provider }));
       } catch (error) {
-        console.error('Failed to fetch whisper models:', error);
-        // Fallback to defaults if API fails
-        this.whisperModels.set([
-          { id: 'tiny', name: 'Tiny', description: 'Fastest' },
-          { id: 'base', name: 'Base', description: 'Best quality' }
-        ]);
+        console.error("Failed to list the Crucible server's models:", error);
       }
-
-      const availability = await this.aiSetupService.checkAIAvailability();
-      const models: AIModelOption[] = [];
-
-      // Through Crucible the list is the connected server's own: its catalog
-      // and its configured upstreams, in the same provider:model values.
-      let viaCrucible: AIModelOption[] | null;
-      try {
-        viaCrucible = await this.aiSetupService.modelOptionsIfCrucible();
-      } catch (error) {
-        console.error('Failed to list the Crucible server\'s models:', error);
-        viaCrucible = [];
-      }
-      if (viaCrucible !== null) {
-        viaCrucible.forEach(m => models.push({ value: m.value, label: m.label, provider: m.provider }));
-      } else {
-
-        // Always try to fetch downloaded Local AI models (don't rely on hasLocal flag which may be stale)
-        try {
-          const localModelsResult = await this.aiSetupService.getLocalModels().toPromise();
-          if (localModelsResult?.models) {
-            const downloadedModels = localModelsResult.models.filter(m => m.downloaded);
-            downloadedModels.forEach(model => {
-              models.push({
-                value: `local:${model.id}`,
-                label: `${model.name} (Local)`,
-                provider: 'local'
-              });
-            });
-          }
-        } catch (error) {
-          console.error('Failed to fetch local models:', error);
-        }
-
-        // Add Ollama models (fetched dynamically by aiSetupService)
-        if (availability.hasOllama && availability.ollamaModels.length > 0) {
-          availability.ollamaModels.forEach(model => {
-            models.push({
-              value: `ollama:${model}`,
-              label: model,
-              provider: 'ollama'
-            });
-          });
-        }
-
-        // Fetch Claude models dynamically from API
-        if (availability.hasClaudeKey) {
-          try {
-            const claudeResponse = await firstValueFrom(
-              this.http.get<{ success: boolean; models: any[] }>(`${this.API_BASE}/config/claude-models`)
-            );
-            if (claudeResponse.success && claudeResponse.models.length > 0) {
-              claudeResponse.models.forEach(m => {
-                models.push({ value: m.value, label: m.label, provider: 'claude' });
-              });
-            }
-          } catch (error) {
-            console.error('Failed to fetch Claude models:', error);
-          }
-        }
-
-        // Fetch OpenAI models dynamically from API
-        if (availability.hasOpenAIKey) {
-          try {
-            const openaiResponse = await firstValueFrom(
-              this.http.get<{ success: boolean; models: any[] }>(`${this.API_BASE}/config/openai-models`)
-            );
-            if (openaiResponse.success && openaiResponse.models.length > 0) {
-              openaiResponse.models.forEach(m => {
-                models.push({ value: m.value, label: m.label, provider: 'openai' });
-              });
-            }
-          } catch (error) {
-            console.error('Failed to fetch OpenAI models:', error);
-          }
-        }
-      }
-
       this.aiModels.set(models);
       console.log('=== QUEUE MODAL: Loading AI models ===');
       console.log('Available models:', models.map(m => m.value));
@@ -434,8 +329,18 @@ export class QueueItemConfigModalComponent implements OnInit, OnDestroy {
     return this.tasks().has(taskType);
   }
 
+  /** A task that needs Crucible can't be turned on while it is not ready (one already on can be turned off). */
+  isTaskLocked(taskType: TaskType): boolean {
+    return taskNeedsCrucible(taskType) && !this.readiness.ready() && !this.tasks().has(taskType);
+  }
+
   toggleTask(task: Task) {
     const currentTasks = new Map(this.tasks());
+
+    if (this.isTaskLocked(task.type)) {
+      this.readiness.requireReady();
+      return;
+    }
 
     if (currentTasks.has(task.type)) {
       currentTasks.delete(task.type);
@@ -485,11 +390,10 @@ export class QueueItemConfigModalComponent implements OnInit, OnDestroy {
       case 'download-import':
         return { quality: 'best', format: 'mp4' } as DownloadImportConfig;
       case 'transcribe':
-        return { model: 'base', language: 'en', translate: false } as TranscribeConfig;
+        // No options: the asr model is Settings › Transcription's (P7).
+        return {};
       case 'ai-analyze':
-        // No analysisGranularity: nothing in the UI sets it any more, and
-        // seeding one here would override the config-file `defaultGranularity`
-        // that the discovery fallback path still reads.
+        // No analysisGranularity: nothing in the UI sets it any more.
         return {
           aiModel: this.preferredSeedModel(),
         } as AIAnalyzeConfig;
@@ -544,7 +448,7 @@ export class QueueItemConfigModalComponent implements OnInit, OnDestroy {
 
     // If AI analysis is selected but there's no transcript and transcribe wasn't selected,
     // automatically add transcribe task
-    if (currentTasks.has('ai-analyze') && !currentTasks.has('transcribe') && !this.hasTranscript()) {
+    if (currentTasks.has('ai-analyze') && !currentTasks.has('transcribe') && !this.hasTranscript() && this.readiness.ready()) {
       currentTasks.set('transcribe', {
         type: 'transcribe',
         status: 'pending',

@@ -5,7 +5,6 @@ import { NavigationStore, ShellSection } from '../core/stores/navigation.store';
 import { SelectionStore } from '../core/stores/selection.store';
 import { WorkspaceActionsService, WorkspaceAction, AddDownloadsPayload } from '../core/stores/workspace-actions.service';
 import { SystemEventsService } from '../core/stores/system-events.service';
-import { AiSetupService } from '../services/ai-setup.service';
 import { LibraryService } from '../services/library.service';
 import { QueueService } from '../services/queue.service';
 import { TabsService, VideoTab } from '../services/tabs.service';
@@ -18,6 +17,7 @@ import { ToolbarActionsComponent } from './toolbar/toolbar-actions.component';
 import { InspectorPanelComponent } from './inspector/inspector-panel.component';
 import { InspectorResizeDirective } from './inspector/inspector-resize.directive';
 import { ContextMenuComponent } from '../components/context-menu/context-menu.component';
+import { CruciblePromptComponent } from '../components/crucible-readiness/crucible-prompt.component';
 import { NewTabDialogComponent } from '../components/new-tab-dialog/new-tab-dialog.component';
 import { ContextMenuAction, ContextMenuPosition } from '../models/file.model';
 
@@ -41,7 +41,7 @@ const SECTION_TITLES: Record<ShellSection, string> = {
 @Component({
   selector: 'app-shell',
   standalone: true,
-  imports: [RouterOutlet, SidebarComponent, ToolbarComponent, ToolbarActionsComponent, InspectorPanelComponent, InspectorResizeDirective, ContextMenuComponent, NewTabDialogComponent],
+  imports: [RouterOutlet, SidebarComponent, ToolbarComponent, ToolbarActionsComponent, InspectorPanelComponent, InspectorResizeDirective, ContextMenuComponent, NewTabDialogComponent, CruciblePromptComponent],
   templateUrl: './app-shell.component.html',
   styleUrls: ['./app-shell.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush
@@ -56,7 +56,6 @@ export class AppShellComponent {
   private themeService = inject(ThemeService);
   private tourService = inject(TourService);
   private loggerService = inject(LoggerService);
-  private aiSetupService = inject(AiSetupService);
   private workspaceActions = inject(WorkspaceActionsService);
 
   /** Sections hosted by the persistent workspace (LibraryPageComponent). */
@@ -89,26 +88,12 @@ export class AppShellComponent {
   isDarkTheme = computed(() => this.themeService.isDarkMode());
   sectionTitle = computed(() => SECTION_TITLES[this.nav.activeSection()]);
   hasTour = computed(() => this.tourService.hasTourForRoute(this.router.url));
-  /** Reactive: getSetupStatus() reads the availability signal internally. */
-  aiReady = computed(() => this.aiSetupService.getSetupStatus().isReady);
-  /** Readiness UNKNOWN (probe failed) — show retry, not "Set up AI…". */
-  aiCheckFailed = computed(() => this.aiSetupService.getSetupStatus().checkFailed);
 
   onWorkspace = computed(() => AppShellComponent.WORKSPACE_SECTIONS.includes(this.nav.activeSection()));
 
   /** Toolbar ⚡ Process → reveal & highlight the inspector's config section. */
   onRevealProcess(): void {
     this.workspaceActions.revealProcessConfig();
-  }
-
-  /** Add popover's embedded config asked to re-run the AI availability probe. */
-  onRetryAi(): void {
-    void this.aiSetupService.checkAIAvailability();
-  }
-
-  /** Add popover's embedded config: no whisper models → Settings → Components. */
-  onOpenComponents(): void {
-    this.router.navigate(['/settings/components']);
   }
 
   onSelectSection(section: Exclude<ShellSection, 'other'>): void {

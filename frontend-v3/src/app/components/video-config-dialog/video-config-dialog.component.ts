@@ -1,10 +1,11 @@
-import { Component, EventEmitter, Input, Output, OnInit, OnChanges, OnDestroy, SimpleChanges, inject, ChangeDetectorRef, computed } from '@angular/core';
-import { Subscription } from 'rxjs';
+import { Component, EventEmitter, Input, Output, OnInit, OnChanges, SimpleChanges, inject, ChangeDetectorRef } from '@angular/core';
+import { firstValueFrom } from 'rxjs';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { VideoJobSettings } from '../../models/video-processing.model';
-import { AiSetupService } from '../../services/ai-setup.service';
+import { CrucibleService } from '../../services/crucible.service';
+import { CrucibleReadinessService } from '../../services/crucible-readiness.service';
 import { TourService } from '../../services/tour.service';
 import { LibraryService } from '../../services/library.service';
 import { PipelinePresetsService } from '../../core/stores/pipeline-presets.service';
@@ -30,18 +31,16 @@ interface AIModelOption {
   templateUrl: './video-config-dialog.component.html',
   styleUrls: ['./video-config-dialog.component.scss']
 })
-export class VideoConfigDialogComponent implements OnInit, OnChanges, OnDestroy {
-  private aiSetupService = inject(AiSetupService);
-  /** True when AI runs through Crucible: the local group is the server's catalog. */
-  readonly viaCrucible = computed(() => this.aiSetupService.via() === 'crucible');
-  readonly localGroupLabel = computed(() => (this.viaCrucible() ? 'Crucible models' : 'Local AI (Bundled)'));
+export class VideoConfigDialogComponent implements OnInit, OnChanges {
+  private crucible = inject(CrucibleService);
+  /** Transcribe and AI analyze need Crucible: while it is not ready they are locked off. */
+  readonly readiness = inject(CrucibleReadinessService);
   private http = inject(HttpClient);
   private cdr = inject(ChangeDetectorRef);
   private tourService = inject(TourService);
   private libraryService = inject(LibraryService);
   private presetsService = inject(PipelinePresetsService);
   private readonly API_BASE = getApiBase();
-  private modelsChangedSub?: Subscription;
 
   @Input() isOpen = false;
   @Output() closeDialog = new EventEmitter<void>();
@@ -54,7 +53,6 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges, OnDestroy 
   loadingModels = false;
   savedAsDefault = false;
   aiModels: AIModelOption[] = [];
-  whisperModels: { id: string; name: string; description: string }[] = [];
 
   // Custom instructions history
   instructionsHistory: CustomInstructionHistoryItem[] = [];
@@ -65,9 +63,6 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges, OnDestroy 
     normalizeAudio: false,
     audioLevel: -16, // Default to -16 LUFS (standard web/podcast level)
     transcribe: false,
-    whisperModel: 'base',
-    whisperLanguage: '',
-    whisperTranslate: false,
     aiAnalysis: false,
     aiModel: '',
     customInstructions: '',
@@ -78,17 +73,24 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges, OnDestroy 
   ngOnInit() {
     this.loadAIModels();
     this.loadInstructionsHistory();
-
-    // Subscribe to model changes from other components (e.g., AI wizard)
-    this.modelsChangedSub = this.aiSetupService.modelsChanged$.subscribe(async () => {
-      console.log('Models changed event received, reloading AI models...');
-      await this.loadAIModels();
-      this.cdr.detectChanges();
-    });
   }
 
-  ngOnDestroy() {
-    this.modelsChangedSub?.unsubscribe();
+  /** A step that needs Crucible, while it is not ready: shown locked with the reason. */
+  get aiLocked(): boolean {
+    return !this.readiness.ready();
+  }
+
+  toggleAiStep(step: 'transcribe' | 'aiAnalysis'): void {
+    if (this.aiLocked) {
+      this.readiness.requireReady();
+      return;
+    }
+    this.settings[step] = !this.settings[step];
+  }
+
+  openDoor(): void {
+    void this.readiness.openDoor();
+    if (this.readiness.action() !== 'start') this.close();
   }
 
   private loadInstructionsHistory() {
@@ -125,8 +127,7 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges, OnDestroy 
   // See process-config.component.ts for the full note: the analysis now captures
   // everything and stores every verdict, the dial became a display filter in the
   // video editor, and the operator removed the run-side control outright. This
-  // dialog no longer sets `analysisGranularity`; the stored `defaultGranularity`
-  // is config-file-only and read only by the discovery fallback flag path.
+  // dialog no longer sets `analysisGranularity`.
 
   getAudioLevelLabel(): string {
     const level = this.settings.audioLevel || -16;
@@ -160,104 +161,14 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges, OnDestroy 
     this.loadingModels = true;
 
     try {
-      // Load whisper models dynamically
+      // The connected Crucible server's catalog and its configured upstreams.
+      let models: AIModelOption[] = [];
       try {
-        const whisperResponse = await this.http.get<{ success: boolean; models: any[]; default: string }>(
-          `${this.API_BASE}/media/whisper-models`
-        ).toPromise();
-        if (whisperResponse?.success && whisperResponse.models.length > 0) {
-          this.whisperModels = whisperResponse.models;
-          // Set default whisper model if not already set
-          if (!this.settings.whisperModel || !whisperResponse.models.find(m => m.id === this.settings.whisperModel)) {
-            this.settings.whisperModel = whisperResponse.default || whisperResponse.models[0].id;
-          }
-        }
+        models = (await firstValueFrom(this.crucible.modelOptions()))
+          .map(m => ({ value: m.value, label: m.label, provider: m.provider }));
       } catch (error) {
-        console.error('Failed to fetch whisper models:', error);
-        // Fallback to defaults if API fails
-        this.whisperModels = [
-          { id: 'tiny', name: 'Tiny', description: 'Fastest' },
-          { id: 'base', name: 'Base', description: 'Best quality' }
-        ];
+        console.error("Failed to list the Crucible server's models:", error);
       }
-
-      const availability = await this.aiSetupService.checkAIAvailability();
-      const models: AIModelOption[] = [];
-
-      // Through Crucible the list is the connected server's own: its catalog
-      // and its configured upstreams, in the same provider:model values.
-      let viaCrucible: AIModelOption[] | null;
-      try {
-        viaCrucible = await this.aiSetupService.modelOptionsIfCrucible();
-      } catch (error) {
-        console.error('Failed to list the Crucible server\'s models:', error);
-        viaCrucible = [];
-      }
-      if (viaCrucible !== null) {
-        viaCrucible.forEach(m => models.push({ value: m.value, label: m.label, provider: m.provider }));
-      } else {
-
-        // Always try to fetch downloaded Local AI models (don't rely on hasLocal flag which may be stale)
-        try {
-          const localModelsResult = await this.aiSetupService.getLocalModels().toPromise();
-          if (localModelsResult?.models) {
-            const downloadedModels = localModelsResult.models.filter(m => m.downloaded);
-            downloadedModels.forEach(model => {
-              models.push({
-                value: `local:${model.id}`,
-                label: `${model.name} (Local)`,
-                provider: 'local'
-              });
-            });
-          }
-        } catch (error) {
-          console.error('Failed to fetch local models:', error);
-        }
-
-        // Add Ollama models (fetched dynamically by aiSetupService)
-        if (availability.hasOllama && availability.ollamaModels.length > 0) {
-          availability.ollamaModels.forEach(model => {
-            models.push({
-              value: `ollama:${model}`,
-              label: model,
-              provider: 'ollama'
-            });
-          });
-        }
-
-        // Fetch Claude models dynamically from API
-        if (availability.hasClaudeKey) {
-          try {
-            const claudeResponse = await this.http.get<{ success: boolean; models: any[] }>(
-              `${this.API_BASE}/config/claude-models`
-            ).toPromise();
-            if (claudeResponse?.success && claudeResponse.models.length > 0) {
-              claudeResponse.models.forEach(m => {
-                models.push({ value: m.value, label: m.label, provider: 'claude' });
-              });
-            }
-          } catch (error) {
-            console.error('Failed to fetch Claude models:', error);
-          }
-        }
-
-        // Fetch OpenAI models dynamically from API
-        if (availability.hasOpenAIKey) {
-          try {
-            const openaiResponse = await this.http.get<{ success: boolean; models: any[] }>(
-              `${this.API_BASE}/config/openai-models`
-            ).toPromise();
-            if (openaiResponse?.success && openaiResponse.models.length > 0) {
-              openaiResponse.models.forEach(m => {
-                models.push({ value: m.value, label: m.label, provider: 'openai' });
-              });
-            }
-          } catch (error) {
-            console.error('Failed to fetch OpenAI models:', error);
-          }
-        }
-      }
-
       this.aiModels = models;
       // Force change detection to update the dropdown
       this.cdr.detectChanges();
@@ -441,10 +352,12 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges, OnDestroy 
       });
     }
 
+    // A download never waits on Crucible: its steps are left off while it is not ready.
+    const settings = this.aiLocked ? { ...this.settings, transcribe: false, aiAnalysis: false } : { ...this.settings };
     const configs = urls.map(url => ({
       url,
       name: this.extractNameFromUrl(url),
-      settings: { ...this.settings }
+      settings: { ...settings }
     }));
 
     this.submitConfig.emit(configs);
@@ -472,9 +385,6 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges, OnDestroy 
       normalizeAudio: false,
       audioLevel: -16, // Default to -16 LUFS (standard web/podcast level)
       transcribe: false,
-      whisperModel: 'base',
-      whisperLanguage: '',
-      whisperTranslate: false,
       aiAnalysis: false,
       aiModel: '', // Will be set from saved default when dialog reopens
       customInstructions: '',
