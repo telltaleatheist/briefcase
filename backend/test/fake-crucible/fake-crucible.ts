@@ -40,11 +40,21 @@
  * model, `X-Crucible-Sampling` on every answer, and a `chatDelayMs` fault a
  * cancel can land in. `chat_queue_full` + `Retry-After` is a `refuse` rule.
  *
- * Deliberately NOT here yet: uploads, asr jobs and decide. They arrive with
- * the phases that call them (P5–P6).
+ * P5 adds transcription: `POST /v1/uploads` (multipart, the `file` part, the
+ * blob kept with its filename and sha256), `asr` jobs validated the way the
+ * server does it (exactly `language`, `vad_filter`, `word_timestamps`; a model
+ * this backend's engine serves and has installed; `vad_filter: true` refused
+ * for mlx-whisper; exactly one input naming an uploaded blob), progress frames
+ * with `{stage, processed_s, total_s, cues}` (decoding first, driving no
+ * fraction), `done {artifacts: ['transcript.json']}` and the artifact itself.
+ * A running asr job can be held mid-file until it is DELETEd (cooperative
+ * cancel). `/v1/info` lists asr rows for BOTH engines, as a live mlx-darwin
+ * server does, the other engine's uninstalled with an empty revision.
+ *
+ * Deliberately NOT here yet: decide. It arrives with P6.
  */
 import * as http from 'http';
-import { randomBytes } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import type { AddressInfo } from 'net';
 
 export interface RecordedRequest {
@@ -147,7 +157,56 @@ export interface FakeJob {
   leaseId: string | null;
   events: Array<{ id: number; event: string; data: Record<string, unknown> }>;
   client: string | null;
+  /** The job's inputs as posted: name → blob id (asr). */
+  inputs?: Record<string, string>;
+  /** Artifacts a done job wrote: name → bytes (asr's `transcript.json`). */
+  artifacts?: Record<string, Buffer>;
 }
+
+/** One upload the fake received. */
+export interface FakeUpload {
+  blobId: string;
+  filename: string;
+  bytes: number;
+  sha256: string;
+}
+
+/** How an asr job runs on this fake. */
+export interface FakeAsrScript {
+  /** Milliseconds between frames. Default 5. */
+  stepMs?: number;
+  /** `stage: decoding` frames before transcription starts. Default 2. */
+  decodeFrames?: number;
+  /** `stage: transcribing` frames. Default 4. */
+  transcribeFrames?: number;
+  /** The media's length in seconds, as `total_s`. Default 3600. */
+  totalS?: number;
+  /** The transcript.json document written on done. Default: {@link defaultFakeTranscript}. */
+  transcript?: unknown;
+  /** The job fails after the decode frames with this `{code, message}`. */
+  failWith?: { code: string; message: string };
+  /** Stop after this many transcribe frames, running, until DELETEd (a cancel mid-file). */
+  holdAfterFrames?: number;
+}
+
+/** A small transcript.json in absolute time, as an mlx-whisper asr job writes it. */
+export function defaultFakeTranscript(model = 'mlx-whisper-large-v3'): Record<string, unknown> {
+  return {
+    model,
+    revision: '49e6aa286ad60c14352c404340ded53710378a11',
+    language: 'en',
+    language_requested: 'auto',
+    duration_s: 3600,
+    segments: [
+      { start: 0.0, end: 4.2, text: ' Welcome back to the show.' },
+      { start: 4.2, end: 9.8, text: ' Today we are talking about the news.' },
+      { start: 3605.5, end: 3610.25, text: ' Thanks for watching.' },
+    ],
+  };
+}
+
+/** The asr ids a live server lists for each backend (crucible/asrmodels.py). */
+const ASR_SIZES = ['base', 'distil-large-v3', 'large-v3', 'large-v3-turbo', 'medium', 'small', 'tiny'];
 
 /** One catalog row, in the SDK's camelCase; served snake_case. */
 export interface FakeCatalogRow {
@@ -212,6 +271,14 @@ export interface FakeCrucibleOptions {
   upstreamModels?: Record<string, string[]>;
   /** Canned chat replies by model string (`qwen3.5-9b`, `anthropic/claude-x`); `*` for any. */
   chatReplies?: Record<string, FakeChatReply>;
+  /**
+   * The asr models this backend's engine has INSTALLED. Default: the catalog's
+   * installed asr rows. Every other size of this backend's engine, and every
+   * size of the other engine, is listed uninstalled.
+   */
+  asrInstalled?: string[];
+  /** How asr jobs run. */
+  asr?: FakeAsrScript;
 }
 
 export interface FakeCrucible {
@@ -252,6 +319,10 @@ export interface FakeCrucible {
   leaseAsOther(model: string, client: string): void;
   /** Bodies of every chat completion posted, in order. */
   chatBodies(): Array<Record<string, unknown>>;
+  /** Every upload received, oldest first. */
+  readonly uploads: FakeUpload[];
+  /** Change how the next asr jobs run. */
+  setAsr(script: FakeAsrScript): void;
   close(): Promise<void>;
 }
 
@@ -379,6 +450,28 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
   const jobs: FakeJob[] = [];
   const jobListeners = new Map<string, Set<() => void>>();
   let nextJob = 1;
+  const uploads: FakeUpload[] = [];
+  const blobs = new Map<string, { filename: string; data: Buffer }>();
+  let asrScript: FakeAsrScript = { ...(options.asr ?? {}) };
+  const asrEngine = backend === 'cuda-linux' ? 'faster-whisper' : 'mlx-whisper';
+  const asrInstalled = (): Set<string> => new Set(options.asrInstalled
+    ?? catalog.filter((row) => row.jobType === 'asr' && row.installed).map((row) => row.id));
+  const asrRows = (): Array<Record<string, unknown>> => {
+    const installed = asrInstalled();
+    const rows: Array<Record<string, unknown>> = [];
+    for (const engine of ['faster-whisper', 'mlx-whisper']) {
+      for (const size of ASR_SIZES) {
+        if (engine === 'faster-whisper' && size === 'large-v3-turbo') continue;
+        const id = `${engine}-${size}`;
+        const served = engine === asrEngine;
+        rows.push({
+          id, revision: served ? 'f'.repeat(40) : '', source: served ? `hf:fake/${id}` : '',
+          installed: served && installed.has(id), resident: false, vram_bytes: served ? 1_000_000_000 : 0,
+        });
+      }
+    }
+    return rows;
+  };
 
   const apiVersion = (): number => (named.apiVersion2 ? 2 : 1);
 
@@ -405,7 +498,7 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
       gpu: { vendor: 'apple', name: 'Fake M1 Ultra', vram_bytes: 68719476736 },
     },
     job_types: role === 'orchestrator' ? [] : [...installedJobTypes, 'load-model', 'unload-model'],
-    capabilities: role === 'orchestrator' ? [] : installedJobTypes.map((jobType) => ({ job_type: jobType, models: [] })),
+    capabilities: role === 'orchestrator' ? [] : installedJobTypes.map((jobType) => ({ job_type: jobType, models: jobType === 'asr' ? asrRows() : [] })),
   });
 
   const activityDoc = (): unknown => {
@@ -698,7 +791,7 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
       ? { code: String((job.events.at(-1)?.data['error'] as Record<string, unknown> | undefined)?.['code'] ?? 'failed'),
           message: String((job.events.at(-1)?.data['error'] as Record<string, unknown> | undefined)?.['message'] ?? '') }
       : null,
-    artifacts: [],
+    artifacts: Object.keys(job.artifacts ?? {}),
     created: '2026-09-23T01:00:00Z',
     started: job.status === 'queued' ? null : '2026-09-23T01:00:01Z',
     finished: job.status === 'done' || job.status === 'failed' || job.status === 'cancelled' ? '2026-09-23T01:00:02Z' : null,
@@ -755,8 +848,12 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
       refusal(res, 409, 'server_busy', `the lane is busy with ${busy.client}'s ${busy.type}`, busyDetails(busy));
       return;
     }
+    if (type === 'asr') {
+      postAsr(req, res, body);
+      return;
+    }
     if (type !== 'load-model' && type !== 'unload-model') {
-      refusal(res, 400, 'unknown_job_type', `this fake runs load-model and unload-model jobs, not ${type}`);
+      refusal(res, 400, 'unknown_job_type', `this fake runs load-model, unload-model and asr jobs, not ${type}`);
       return;
     }
     const model = typeof body['model'] === 'string' ? body['model'] : null;
@@ -817,6 +914,134 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
     }, Math.max(1, (options.loadMs ?? 20) / 2)).unref?.();
   }
 
+  // ── asr (P5) ─────────────────────────────────────────────────────────
+  function postAsr(req: http.IncomingMessage, res: http.ServerResponse, body: Record<string, unknown>): void {
+    if (!installedJobTypes.includes('asr')) {
+      refusal(res, 400, 'job_type_disabled', 'asr is not installed on this server');
+      return;
+    }
+    const model = typeof body['model'] === 'string' ? body['model'] : null;
+    if (model === null) {
+      refusal(res, 400, 'model_required', 'asr names its model; there is no default');
+      return;
+    }
+    const row = asrRows().find((r) => r['id'] === model);
+    if (row === undefined || !String(model).startsWith(`${asrEngine}-`)) {
+      refusal(res, 404, 'unknown_model', `no asr model '${model}' on ${backend}`);
+      return;
+    }
+    if (row['installed'] !== true) {
+      refusal(res, 409, 'model_not_installed', `'${model}' is not installed`);
+      return;
+    }
+    const params = (body['params'] ?? {}) as Record<string, unknown>;
+    const keys = Object.keys(params).sort();
+    if (keys.join(',') !== 'language,vad_filter,word_timestamps') {
+      refusal(res, 400, 'invalid_params', `asr params are exactly language, vad_filter, word_timestamps; got ${keys.join(', ') || 'none'}`);
+      return;
+    }
+    if (typeof params['language'] !== 'string' || typeof params['vad_filter'] !== 'boolean' || typeof params['word_timestamps'] !== 'boolean') {
+      refusal(res, 400, 'invalid_params', 'asr params have the wrong types');
+      return;
+    }
+    if (asrEngine === 'mlx-whisper' && params['vad_filter'] === true) {
+      refusal(res, 400, 'vad_unsupported_by_engine', `${model} has no voice-activity filter; send vad_filter false`);
+      return;
+    }
+    const inputs = (body['inputs'] ?? {}) as Record<string, { blob_id?: string }>;
+    const names = Object.keys(inputs);
+    if (names.length !== 1 || typeof inputs[names[0]]?.blob_id !== 'string' || !blobs.has(inputs[names[0]].blob_id!)) {
+      refusal(res, 400, 'invalid_inputs', 'asr takes exactly one input naming an uploaded blob');
+      return;
+    }
+    const client = (req.headers['x-crucible-client'] as string | undefined) ?? null;
+    const job: FakeJob = {
+      jobId: `job-${nextJob++}`, type: 'asr', model, params, status: 'queued', leaseId: null, events: [], client,
+      inputs: { [names[0]]: inputs[names[0]].blob_id! },
+    };
+    jobs.push(job);
+    send(res, 202, { job_id: job.jobId });
+    pushJobEvent(job, 'queued', { position: 0 });
+    runAsr(job, { ...asrScript });
+  }
+
+  function runAsr(job: FakeJob, script: FakeAsrScript): void {
+    const stepMs = script.stepMs ?? 5;
+    const totalS = script.totalS ?? 3600;
+    const decodeFrames = script.decodeFrames ?? 2;
+    const transcribeFrames = script.transcribeFrames ?? 4;
+    const steps: Array<() => boolean | void> = [];
+    steps.push(() => {
+      job.status = 'running';
+      pushJobEvent(job, 'warming', { message: `loading ${String(job.model)} — mlx: weights mapped` });
+    });
+    for (let i = 1; i <= decodeFrames; i++) {
+      steps.push(() => pushJobEvent(job, 'progress', {
+        fraction: 0, message: 'decoding audio', stage: 'decoding', processed_s: Math.round((totalS * i) / decodeFrames), total_s: totalS, cues: 0,
+      }));
+    }
+    if (script.failWith !== undefined) {
+      steps.push(() => {
+        job.status = 'failed';
+        pushJobEvent(job, 'failed', { error: { ...script.failWith! } });
+        return true;
+      });
+    } else {
+      for (let i = 1; i <= transcribeFrames; i++) {
+        steps.push(() => {
+          pushJobEvent(job, 'progress', {
+            fraction: i / transcribeFrames, message: `transcribing window ${i}`, stage: 'transcribing',
+            processed_s: Math.round((totalS * i) / transcribeFrames), total_s: totalS, cues: i * 10,
+          });
+          // Held mid-file: nothing more until a DELETE wakes it (and it ends cancelled).
+          if (script.holdAfterFrames !== undefined && i >= script.holdAfterFrames) return 'hold' as never;
+        });
+      }
+      steps.push(() => {
+        const doc = script.transcript ?? defaultFakeTranscript(String(job.model));
+        job.artifacts = { 'transcript.json': Buffer.from(typeof doc === 'string' ? doc : JSON.stringify(doc), 'utf-8') };
+        job.status = 'done';
+        pushJobEvent(job, 'done', { artifacts: ['transcript.json'] });
+        return true;
+      });
+    }
+    let at = 0;
+    const tick = (): void => {
+      if (job.status === 'cancelled') return;
+      const step = steps[at];
+      at += 1;
+      if (step === undefined) return;
+      const outcome = step() as unknown;
+      if (outcome === true) return;
+      if (outcome === 'hold') return; // running, held mid-file, until a DELETE cancels it
+      setTimeout(tick, stepMs).unref?.();
+    };
+    setTimeout(tick, stepMs).unref?.();
+  }
+
+  /** Parse a multipart body's `file` part: its filename and its bytes. */
+  function multipartFile(req: http.IncomingMessage, raw: Buffer): { filename: string; data: Buffer } | null {
+    const type = String(req.headers['content-type'] ?? '');
+    const m = /boundary=(?:"([^"]+)"|([^;]+))/.exec(type);
+    if (!type.startsWith('multipart/form-data') || m === null) return null;
+    const boundary = Buffer.from(`--${m[1] ?? m[2]}`);
+    let at = raw.indexOf(boundary);
+    while (at >= 0) {
+      const headStart = at + boundary.length + 2;
+      const headEnd = raw.indexOf('\r\n\r\n', headStart);
+      if (headEnd < 0) return null;
+      const head = raw.subarray(headStart, headEnd).toString('utf-8');
+      const next = raw.indexOf(boundary, headEnd);
+      if (next < 0) return null;
+      if (/name="file"/.test(head)) {
+        const filename = /filename="([^"]*)"/.exec(head)?.[1] ?? '';
+        return { filename, data: raw.subarray(headEnd + 4, next - 2) };
+      }
+      at = next;
+    }
+    return null;
+  }
+
   // ── chat ─────────────────────────────────────────────────────────────
   async function chat(req: http.IncomingMessage, res: http.ServerResponse, body: Record<string, unknown>): Promise<void> {
     const model = String(body['model'] ?? '');
@@ -872,7 +1097,9 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
     requests.push(record);
 
     const raw = method === 'GET' || method === 'HEAD' ? Buffer.alloc(0) : await readBody(req);
-    if (raw.length > 0) {
+    if (raw.length > 0 && path === '/v1/uploads') {
+      record.body = { multipartBytes: raw.length };
+    } else if (raw.length > 0) {
       try {
         record.body = JSON.parse(raw.toString('utf-8'));
       } catch {
@@ -1109,7 +1336,35 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
       return;
     }
 
-    // ── jobs: load-model (P3) ────────────────────────────────────────────
+    // ── uploads (P5) ─────────────────────────────────────────────────────
+    if (path === '/v1/uploads' && method === 'POST') {
+      const file = multipartFile(req, raw);
+      if (file === null) {
+        refusal(res, 400, 'invalid_upload', 'the upload is multipart/form-data with a file part');
+        return;
+      }
+      const blobId = `blob-${uploads.length + 1}`;
+      const sha256 = createHash('sha256').update(file.data).digest('hex');
+      blobs.set(blobId, file);
+      uploads.push({ blobId, filename: file.filename, bytes: file.data.length, sha256 });
+      record.body = { filename: file.filename, bytes: file.data.length };
+      send(res, 201, { blob_id: blobId, bytes: file.data.length, sha256 });
+      return;
+    }
+    const artifact = /^\/v1\/jobs\/([^/]+)\/artifacts\/([^/]+)$/.exec(path);
+    if (artifact && method === 'GET') {
+      const job = jobs.find((j) => j.jobId === decodeURIComponent(artifact[1]));
+      const bytes = job?.artifacts?.[decodeURIComponent(artifact[2])];
+      if (bytes === undefined) {
+        refusal(res, 404, 'unknown_artifact', `no artifact ${artifact[2]} on job ${artifact[1]}`);
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
+      res.end(bytes);
+      return;
+    }
+
+    // ── jobs: load-model (P3), asr (P5) ──────────────────────────────────
     if (path === '/v1/jobs' && method === 'POST') {
       postJob(req, res, body);
       return;
@@ -1264,6 +1519,10 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
     },
     chatBodies(): Array<Record<string, unknown>> {
       return requests.filter((r) => r.path === '/v1/openai/chat/completions' && r.method === 'POST').map((r) => r.body as Record<string, unknown>);
+    },
+    uploads,
+    setAsr(script: FakeAsrScript): void {
+      asrScript = { ...script };
     },
     requestsTo(prefix: string, m?: string): RecordedRequest[] {
       return requests.filter((r) => r.path.startsWith(prefix) && (m === undefined || r.method === m));
