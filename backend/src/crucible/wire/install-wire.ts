@@ -164,7 +164,7 @@ export type CrucibleSetupFace = 'connected' | 'adopt' | 'install' | 'connect-onl
 /** GET /crucible/setup: everything the engine step draws, in one read. */
 export interface CrucibleSetupView {
   face: CrucibleSetupFace;
-  /** Registered server names, best first. */
+  /** Registered server names, in the order they were added. */
   servers: string[];
   discovered: DiscoveredCrucibleRow;
   plan: CrucibleInstallPlan;

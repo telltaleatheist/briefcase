@@ -380,34 +380,34 @@ describe('CrucibleChatService: one server', () => {
   });
 });
 
-describe('CrucibleChatService: venue by rank', () => {
+describe('CrucibleChatService: venue is the selected server', () => {
   const fakes: FakeCrucible[] = [];
   afterEach(async () => { await Promise.all(fakes.splice(0).map((f) => f.close())); });
 
-  it('skips an unreachable server and takes the next in rank', async () => {
+  it('an unreachable selected server is a no-venue error naming it; the work never moves to another server', async () => {
     const pc = await startFakeCrucible({ models: MODELS, name: 'pc' });
     fakes.push(pc);
     const h = harness();
     h.registry.add({ name: 'gone', url: await unusedLoopbackUrl(), token: 'tok-gone-000000000000' });
     h.registry.add({ name: 'pc', url: pc.url, token: pc.token });
-    const chat = chatService(h);
-    const result = await chat.chat({ model: 'qwen3.5-9b', prompt: 'x' });
-    expect(result.server).toBe('pc');
+    const failure = await chatService(h).chat({ model: 'qwen3.5-9b', prompt: 'x' }).catch((e) => e);
+    expect(failure).toBeInstanceOf(CrucibleNoVenueError);
+    expect(failure.message).toMatch(/gone/);
+    expect(pc.chatBodies()).toHaveLength(0);
   });
 
-  it('prefers a lower-ranked server that has the upstream configured over one that does not', async () => {
+  it('an upstream the selected server lacks is asked of it anyway (its refusal names the fix), never of a server that has it', async () => {
     const mac = await startFakeCrucible({ models: MODELS, name: 'mac' });
     const pc = await startFakeCrucible({ models: MODELS, name: 'pc', upstreams: { anthropic: { key: 'sk-ant-1234' } } });
     fakes.push(mac, pc);
     const h = harness();
     h.registry.add({ name: 'mac', url: mac.url, token: mac.token });
     h.registry.add({ name: 'pc', url: pc.url, token: pc.token });
-    const chat = chatService(h);
-    expect((await chat.chat({ model: 'anthropic/claude-x', prompt: 'x' })).server).toBe('pc');
-    expect(mac.chatBodies()).toHaveLength(0);
+    await chatService(h).chat({ model: 'anthropic/claude-x', prompt: 'x' }).catch(() => undefined);
+    expect(pc.chatBodies()).toHaveLength(0);
   });
 
-  it('a paused server is never chosen, and re-ranking moves the work', async () => {
+  it('work moves only when the user selects another server', async () => {
     const mac = await startFakeCrucible({ models: MODELS, name: 'mac' });
     const pc = await startFakeCrucible({ models: MODELS, name: 'pc' });
     fakes.push(mac, pc);
@@ -416,14 +416,11 @@ describe('CrucibleChatService: venue by rank', () => {
     h.registry.add({ name: 'pc', url: pc.url, token: pc.token });
     const chat = chatService(h);
     expect((await chat.chat({ model: 'qwen3.5-9b', prompt: 'x' })).server).toBe('mac');
-    h.registry.setEnabled('mac', false);
-    expect((await chat.chat({ model: 'qwen3.5-9b', prompt: 'x' })).server).toBe('pc');
-    h.registry.setEnabled('mac', true);
-    h.registry.setOrder(['pc', 'mac']);
+    h.registry.select('pc');
     expect((await chat.chat({ model: 'qwen3.5-4b', prompt: 'x' })).server).toBe('pc');
   });
 
-  it('nothing answering is a no-venue error that names each server', async () => {
+  it('nothing answering is a no-venue error that names the server', async () => {
     const h = harness();
     h.registry.add({ name: 'gone', url: await unusedLoopbackUrl(), token: 'tok-gone-000000000000' });
     const failure = await chatService(h).chat({ model: 'qwen3.5-9b', prompt: 'x' }).catch((e) => e);
@@ -441,7 +438,7 @@ describe('CrucibleChatService: venue by rank', () => {
     const chat = chatService(h);
     await chat.withRun(async () => {
       await chat.chat({ model: 'qwen3.5-9b', prompt: 'a' });
-      h.registry.setOrder(['pc', 'mac']);
+      h.registry.select('pc');
       await chat.chat({ model: 'qwen3.5-9b', prompt: 'b' });
     });
     expect(mac.chatBodies()).toHaveLength(2);

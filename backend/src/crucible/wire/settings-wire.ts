@@ -15,18 +15,19 @@ export interface CrucibleServerRow {
   added: string;
 }
 
-/** One server's place in the order. Rank is the index; there is no number. */
-export interface RankedServerRow {
+/** One registered server, and whether it is the one Briefcase uses. */
+export interface ServerChoiceRow {
   name: string;
-  /** Running (true) or Paused (false). A paused server is given no new work. */
-  enabled: boolean;
+  selected: boolean;
 }
 
 export interface RoutingView {
-  /** Every registered server, best first. */
-  ranked: RankedServerRow[];
-  /** Names the routing record mentions that no server answers to. Reported, never pruned. */
-  unknown: string[];
+  /** Every registered server, in the order they were added. */
+  servers: ServerChoiceRow[];
+  /** The one server all work goes to; null when none is (the reason is `missing`, or nothing chosen). */
+  selected: string | null;
+  /** A selected server the registry no longer has. Reported, never swapped for another. */
+  missing: string | null;
 }
 
 /** The Crucible on this computer, as an offer to add, or the named reason there is none. */
@@ -149,6 +150,6 @@ export const CRUCIBLE_SERVERS_CHANGED = 'crucible.servers-changed';
 
 export interface CrucibleServersChangedPayload {
   /** What changed, for a log line; the pane re-reads the whole view either way. */
-  reason: 'added' | 'removed' | 'order' | 'paused' | 'resumed' | 'forgotten';
+  reason: 'added' | 'removed' | 'selected';
   server: string | null;
 }

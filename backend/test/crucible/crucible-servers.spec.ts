@@ -49,13 +49,12 @@ describe('CrucibleServersService', () => {
     const h = harness();
     const servers = new CrucibleServersService(h.registry, h.factory);
     servers.add({ name: 'mac', url: fake.url, token: fake.token });
-    servers.pause('mac');
     const onDisk = JSON.parse(fs.readFileSync(path.join(h.dir, REGISTRY_FILE), 'utf8'));
     expect(Object.keys(onDisk)).toEqual(['servers']);
     expect(Object.keys(onDisk.servers[0]).sort()).toEqual(['added', 'name', 'token', 'url']);
-    expect(JSON.parse(fs.readFileSync(path.join(h.dir, 'crucible-routing.json'), 'utf8'))).toEqual({ order: [], disabled: ['mac'] });
-    expect(servers.routing().ranked).toEqual([{ name: 'mac', enabled: false }]);
-    servers.resume('mac');
-    expect(servers.ranked()).toEqual([{ name: 'mac', enabled: true }]);
+    // The first server added is the selected one, recorded beside the registry.
+    expect(JSON.parse(fs.readFileSync(path.join(h.dir, 'crucible-routing.json'), 'utf8'))).toEqual({ selected: 'mac' });
+    expect(servers.routing().servers).toEqual([{ name: 'mac', selected: true }]);
+    expect(servers.selected()).toBe('mac');
   });
 });

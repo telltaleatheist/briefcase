@@ -1114,20 +1114,6 @@ export class QueueService implements OnDestroy {
   }
 
   /**
-   * Pause or resume a Crucible server's GPU lane. A paused server is given no
-   * new work; work already on it finishes. Updates `lanes` from the response.
-   */
-  setServerPaused(server: string, paused: boolean): Observable<LanesStatus> {
-    return this.http.post<LanesStatus & { success?: boolean }>(
-      `${this.API_BASE}/queue/lanes/${encodeURIComponent(server)}/paused`,
-      { paused }
-    ).pipe(
-      map(response => ({ lanes: response.lanes ?? [], timestamp: response.timestamp })),
-      tap(status => this.lanesState.set(status))
-    );
-  }
-
-  /**
    * Patch a job's admission fields, only when something actually changed (the
    * reconcile runs often; don't churn the jobs signal / localStorage).
    */

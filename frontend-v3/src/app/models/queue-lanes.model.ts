@@ -13,7 +13,7 @@ export interface LaneTaskView {
   lane: string;
 }
 
-export type LaneState = 'ready' | 'busy' | 'unreachable' | 'paused' | 'unavailable';
+export type LaneState = 'ready' | 'busy' | 'unreachable' | 'unavailable';
 
 /** One admission lane: a Crucible GPU server, or the cloud upstream lane. */
 export interface LaneView {

@@ -78,48 +78,52 @@ describe('the setting file', () => {
     const dir = tempDir();
     expect(readTranscriptionSetting(dir)).toEqual({ setting: DEFAULT_TRANSCRIPTION_SETTING, explicit: false });
     fs.writeFileSync(path.join(dir, 'app-config.json'), JSON.stringify({ outputDir: '/x' }));
-    writeTranscriptionSetting(dir, { server: 'mac', model: 'mlx-whisper-large-v3' });
+    writeTranscriptionSetting(dir, { model: 'mlx-whisper-large-v3' });
     const config = JSON.parse(fs.readFileSync(path.join(dir, 'app-config.json'), 'utf8'));
-    expect(config).toMatchObject({ outputDir: '/x', transcription: { server: 'mac', model: 'mlx-whisper-large-v3' } });
+    expect(config).toMatchObject({ outputDir: '/x', transcription: { model: 'mlx-whisper-large-v3' } });
     expect(config.transcription.venue).toBeUndefined();
-    fs.writeFileSync(path.join(dir, 'app-config.json'), JSON.stringify({ transcription: { server: 3 } }));
-    expect(readTranscriptionSetting(dir)).toMatchObject({ setting: { server: null }, ignored: expect.stringMatching(/server=3/) });
+    expect(config.transcription.server).toBeUndefined();
+    fs.writeFileSync(path.join(dir, 'app-config.json'), JSON.stringify({ transcription: { model: 3 } }));
+    expect(readTranscriptionSetting(dir)).toMatchObject({ setting: { model: null }, ignored: expect.stringMatching(/model=3/) });
   });
 
-  it('a pre-P7 venue is not read; "whisper-cli" is reported, since that transcriber is gone', () => {
+  it('a pre-P7 venue and a server chosen before selection are not read; "whisper-cli" is reported, since that transcriber is gone', () => {
     const dir = tempDir();
     fs.writeFileSync(path.join(dir, 'app-config.json'), JSON.stringify({ transcription: { venue: 'whisper-cli', server: 'mac', model: null } }));
     const read = readTranscriptionSetting(dir);
-    expect(read.setting).toEqual({ server: 'mac', model: null });
+    expect(read.setting).toEqual({ model: null });
     expect(read.ignored).toMatch(/whisper-cli.*removed/);
     fs.writeFileSync(path.join(dir, 'app-config.json'), JSON.stringify({ transcription: { venue: 'auto', server: null, model: null } }));
     expect(readTranscriptionSetting(dir).ignored).toBeUndefined();
   });
 
   it('the pane’s input is validated strictly', () => {
-    expect(parseTranscriptionSettingInput({ server: '', model: null })).toEqual({ server: null, model: null });
-    expect(() => parseTranscriptionSettingInput({ server: 4 })).toThrow(/server is/);
-    expect(() => parseTranscriptionSettingInput('crucible')).toThrow(/\{server, model\}/);
+    expect(parseTranscriptionSettingInput({ model: '' })).toEqual({ model: null });
+    expect(() => parseTranscriptionSettingInput({ model: 4 })).toThrow(/model is/);
+    expect(() => parseTranscriptionSettingInput('crucible')).toThrow(/\{model\}/);
   });
 });
 
-/** A scripted host: servers by name with their reach and offer. */
+/** A scripted host: the selected server (or routing's refusal), with its reach and offer. */
 function host(opts: {
   setting?: Partial<TranscriptionSetting>;
-  servers?: Array<{ name: string; enabled?: boolean; reach?: ServerReach; offer?: AsrOffer | Error }>;
+  selected?: { name: string; reach?: ServerReach; offer?: AsrOffer | Error } | string;
 }): TranscriptionVenueHost & { asked: string[] } {
   const asked: string[] = [];
-  const servers = opts.servers ?? [];
+  const selected = opts.selected ?? 'No Crucible server is connected. Add one in Settings › Crucible Servers.';
   return {
     asked,
     setting: () => ({ ...DEFAULT_TRANSCRIPTION_SETTING, ...opts.setting }),
-    registered: () => servers.map((s) => ({ name: s.name, enabled: s.enabled ?? true })),
+    selected: () => {
+      if (typeof selected === 'string') throw new Error(selected);
+      return selected.name;
+    },
     reach: async (name) => {
       asked.push(name);
-      return { reach: servers.find((s) => s.name === name)?.reach ?? 'ready' };
+      return { reach: typeof selected === 'string' ? 'unreachable' : selected.reach ?? 'ready' };
     },
-    asrOffer: async (name) => {
-      const offer = servers.find((s) => s.name === name)?.offer;
+    asrOffer: async () => {
+      const offer = typeof selected === 'string' ? undefined : selected.offer;
       if (offer instanceof Error) throw offer;
       return offer ?? asrOfferOf(info('mlx-darwin', ['mlx-whisper-large-v3', 'mlx-whisper-large-v3-turbo']));
     },
@@ -131,56 +135,41 @@ const PC_OFFER = asrOfferOf(info('cuda-linux', ['faster-whisper-large-v3']));
 const NO_ASR = asrOfferOf(info('mlx-darwin', [], ['echo', 'llm']));
 
 describe('the venue rule', () => {
-  it('Crucible when a server is connected and offers asr, with its most accurate installed model', async () => {
-    expect(await decideTranscriptionRoute(host({ servers: [{ name: 'mac', offer: MAC_OFFER }] })))
+  it('Crucible on the selected server when it offers asr, with its most accurate installed model', async () => {
+    expect(await decideTranscriptionRoute(host({ selected: { name: 'mac', offer: MAC_OFFER } })))
       .toEqual({ kind: 'crucible', server: 'mac', model: 'mlx-whisper-large-v3' });
   });
 
-  it('no server at all: none, saying so and where to connect one (the task parks; nothing else transcribes)', async () => {
+  it('no server selected: none, in routing’s words (the task parks; nothing else transcribes)', async () => {
     expect(await decideTranscriptionRoute(host({}))).toEqual({
       kind: 'none',
-      reason: 'No Crucible server is connected. Transcription runs on Crucible: connect one in Settings › Crucible Servers.',
+      reason: 'No Crucible server is connected. Add one in Settings › Crucible Servers. Transcription runs on Crucible.',
     });
   });
 
-  it('the first server that answers AND offers asr, best first: an unreachable Mac goes to the PC with its own engine’s model', async () => {
-    const route = await decideTranscriptionRoute(host({ servers: [{ name: 'mac', reach: 'unreachable' }, { name: 'pc', offer: PC_OFFER }] }));
-    expect(route).toEqual({ kind: 'crucible', server: 'pc', model: 'faster-whisper-large-v3' });
+  it('the selected server not answering is none, naming it: never another server', async () => {
+    const route = await decideTranscriptionRoute(host({ selected: { name: 'mac', reach: 'unreachable' } }));
+    expect(route).toEqual({ kind: 'none', reason: "Crucible on mac isn't answering." });
   });
 
   it('a busy server is still the venue (the submit decides, and a 409 parks)', async () => {
-    expect(await decideTranscriptionRoute(host({ servers: [{ name: 'mac', reach: 'busy', offer: MAC_OFFER }] }))).toMatchObject({ kind: 'crucible', server: 'mac' });
+    expect(await decideTranscriptionRoute(host({ selected: { name: 'mac', reach: 'busy', offer: MAC_OFFER } }))).toMatchObject({ kind: 'crucible', server: 'mac' });
   });
 
-  it('nothing can take it: none, naming every reason', async () => {
-    const route = await decideTranscriptionRoute(host({ servers: [
-      { name: 'mac', reach: 'unreachable' },
-      { name: 'pc', offer: NO_ASR },
-      { name: 'nas', enabled: false },
-      { name: 'lab', offer: asrOfferOf(info('mlx-darwin', [])) },
-      { name: 'old', offer: new Error('HTTP 500') },
-    ] }));
-    expect(route.kind).toBe('none');
-    const reason = (route as { reason: string }).reason;
-    expect(reason).toMatch(/Crucible on mac isn't answering/);
-    expect(reason).toMatch(/Crucible on pc has no transcription engine/);
-    expect(reason).toMatch(/nas is paused/);
-    expect(reason).toMatch(/lab has no transcription model downloaded \(mlx-whisper-large-v3 can be pulled\)/);
-    expect(reason).toMatch(/old couldn't say what it offers \(HTTP 500\)/);
-    expect(reason).not.toMatch(/offline transcriber|whisper-cli/i);
+  it('each reason the selected server can’t take it, by name', async () => {
+    const reason = async (selected: { name: string; offer: AsrOffer | Error }) =>
+      (await decideTranscriptionRoute(host({ selected })) as { reason: string }).reason;
+    expect(await reason({ name: 'pc', offer: NO_ASR })).toBe('Crucible on pc has no transcription engine.');
+    expect(await reason({ name: 'lab', offer: asrOfferOf(info('mlx-darwin', [])) }))
+      .toBe('Crucible on lab has no transcription model downloaded (mlx-whisper-large-v3 can be pulled).');
+    expect(await reason({ name: 'old', offer: new Error('HTTP 500') })).toBe("Crucible on old couldn't say what it offers (HTTP 500).");
   });
 
-  it('a named server is the only candidate; one that is gone is none, by name', async () => {
-    const servers = [{ name: 'mac', offer: MAC_OFFER }, { name: 'pc', offer: PC_OFFER }];
-    expect(await decideTranscriptionRoute(host({ setting: { server: 'pc' }, servers }))).toMatchObject({ kind: 'crucible', server: 'pc' });
-    expect(await decideTranscriptionRoute(host({ setting: { server: 'gone' }, servers }))).toMatchObject({ kind: 'none', reason: expect.stringMatching(/"gone"/) });
-  });
-
-  it('the setting’s model is used where that server has it installed; elsewhere its own best', async () => {
+  it('the setting’s model is used where the server has it installed; otherwise its own best', async () => {
     const setting = { model: 'mlx-whisper-large-v3-turbo' };
-    expect(await decideTranscriptionRoute(host({ setting, servers: [{ name: 'mac', offer: MAC_OFFER }] })))
+    expect(await decideTranscriptionRoute(host({ setting, selected: { name: 'mac', offer: MAC_OFFER } })))
       .toMatchObject({ server: 'mac', model: 'mlx-whisper-large-v3-turbo' });
-    expect(await decideTranscriptionRoute(host({ setting, servers: [{ name: 'pc', offer: PC_OFFER }] })))
+    expect(await decideTranscriptionRoute(host({ setting, selected: { name: 'pc', offer: PC_OFFER } })))
       .toMatchObject({ server: 'pc', model: 'faster-whisper-large-v3' });
   });
 });

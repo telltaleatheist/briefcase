@@ -119,7 +119,7 @@ export interface LaneView {
   kind: 'gpu' | 'cloud';
   label: string;
   server: string | null;
-  state: 'ready' | 'busy' | 'unreachable' | 'paused' | 'unavailable';
+  state: 'ready' | 'busy' | 'unreachable' | 'unavailable';
   /** The holder's sentence while busy, or why the server is unavailable. */
   detail: string | null;
   residentModel: string | null;
@@ -264,7 +264,7 @@ export class CrucibleLanesService implements OnModuleInit, BeforeApplicationShut
   }
   private quitSweep: Promise<void> | null = null;
 
-  /** Subscribe to registry changes (add, remove, rank, pause): parked work is asked again at once. */
+  /** Subscribe to registry changes (add, remove, select): parked work is asked again at once. */
   onServersChanged(listener: () => void): () => void {
     return this.registry.onChange(() => listener());
   }
@@ -284,7 +284,7 @@ export class CrucibleLanesService implements OnModuleInit, BeforeApplicationShut
     // GPU lane as that model (ollama-map.ts), leased like any local model.
     const target = (await this.chat.effectiveTarget(chosen)).target;
     const answer: VenueAnswer = await decideVenue(target, {
-      enabled: () => this.servers.ranked(),
+      selected: () => this.servers.selected(),
       reach: async (server) => {
         const probe = await this.probes.reach(server);
         return { reach: probe.reach, message: probe.probe.outcome === 'ok' ? undefined : probe.probe.message };
@@ -397,42 +397,43 @@ export class CrucibleLanesService implements OnModuleInit, BeforeApplicationShut
   }
 
   /**
-   * Every lane as the queue tab draws it: one GPU lane per registered server
-   * (a paused one shown paused), then the cloud lane. `running` and `waiting`
-   * come from the queue.
+   * Every lane as the queue tab draws it: the selected server's GPU lane (and
+   * another server's only while work started there before a switch is still
+   * running), then the cloud lane. `running` and `waiting` come from the queue.
    */
   async lanesStatus(running: LaneTaskView[], waitingByLane: Map<string, number>): Promise<LanesStatus> {
     const lanes: LaneView[] = [];
     {
-      let rows: Array<{ name: string; enabled: boolean }> = [];
+      let view: { servers: Array<{ name: string; selected: boolean }> } = { servers: [] };
       try {
-        rows = this.servers.routing().ranked;
+        view = this.servers.routing();
       } catch {
-        rows = [];
+        view = { servers: [] };
       }
-      for (const row of rows) {
+      for (const row of view.servers) {
         const id = gpuLaneOf(row.name);
-        let state: LaneView['state'] = 'paused';
+        const onIt = running.filter((t) => t.lane === id);
+        if (!row.selected && onIt.length === 0) continue;
+        let state: LaneView['state'];
         let detail: string | null = null;
         let residentModel: string | null = null;
-        if (row.enabled) {
-          const probe = await this.probes.reach(row.name).catch(() => null);
-          const reach: ServerReach = probe?.reach ?? 'unreachable';
-          if (reach === 'ready' || reach === 'busy') {
-            const activity = await this.activity(row.name);
-            residentModel = activity?.resident?.id ?? null;
-            const ours = this.ledger?.idsOn(row.name) ?? new Set<string>();
-            const busy = activity === null ? null : busyLineFor(activity, ours, { model: '', route: 'upstream', upstream: null, bareModel: '' });
-            state = busy === null ? 'ready' : 'busy';
-            detail = busy;
-          } else {
-            state = reach === 'unreachable' ? 'unreachable' : 'unavailable';
-            detail = probe !== null && probe.probe.outcome !== 'ok' ? probe.probe.message : `Crucible on ${row.name} isn't answering.`;
-          }
+        const probe = await this.probes.reach(row.name).catch(() => null);
+        const reach: ServerReach = probe?.reach ?? 'unreachable';
+        if (reach === 'ready' || reach === 'busy') {
+          const activity = await this.activity(row.name);
+          residentModel = activity?.resident?.id ?? null;
+          const ours = this.ledger?.idsOn(row.name) ?? new Set<string>();
+          const busy = activity === null ? null : busyLineFor(activity, ours, { model: '', route: 'upstream', upstream: null, bareModel: '' });
+          state = busy === null ? 'ready' : 'busy';
+          detail = busy;
+        } else {
+          state = reach === 'unreachable' ? 'unreachable' : 'unavailable';
+          detail = probe !== null && probe.probe.outcome !== 'ok' ? probe.probe.message : `Crucible on ${row.name} isn't answering.`;
         }
+        if (!row.selected) detail = 'Finishing work started before you switched servers.';
         lanes.push({
           id, kind: 'gpu', label: `GPU · ${row.name}`, server: row.name, state, detail, residentModel,
-          width: GPU_LANE_WIDTH, running: running.filter((t) => t.lane === id), waiting: waitingByLane.get(id) ?? 0,
+          width: GPU_LANE_WIDTH, running: onIt, waiting: row.selected ? waitingByLane.get(id) ?? 0 : 0,
         });
       }
       lanes.push({
@@ -441,11 +442,5 @@ export class CrucibleLanesService implements OnModuleInit, BeforeApplicationShut
       });
     }
     return { lanes, timestamp: new Date(this.now()).toISOString() };
-  }
-
-  /** Running/Paused, the routing record's per-server switch (P1). */
-  setPaused(server: string, paused: boolean): void {
-    if (paused) this.servers.pause(server);
-    else this.servers.resume(server);
   }
 }

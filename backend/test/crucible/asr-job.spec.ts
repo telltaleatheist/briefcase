@@ -274,24 +274,22 @@ describe('the pane’s view', () => {
     await wire();
     const view = await svc.view();
     expect(view.route).toEqual({ kind: 'crucible', server: 'mac', model: 'mlx-whisper-large-v3' });
-    expect(view.servers[0]).toMatchObject({ name: 'mac', backend: 'mlx-darwin', offersAsr: true, recommended: 'mlx-whisper-large-v3', unavailable: null });
-    expect(view.servers[0].models.every((m) => m.id.startsWith('mlx-whisper-'))).toBe(true);
+    expect(view.server).toMatchObject({ name: 'mac', backend: 'mlx-darwin', offersAsr: true, recommended: 'mlx-whisper-large-v3', unavailable: null });
+    expect(view.server!.models.every((m) => m.id.startsWith('mlx-whisper-'))).toBe(true);
   });
 
   it('a server without asr: the route is none, with the reason (the task would park)', async () => {
     await wire({ installedJobTypes: ['echo', 'llm'] });
     const view = await svc.view();
     expect(view.route).toMatchObject({ kind: 'none', reason: expect.stringMatching(/no transcription engine/) });
-    expect(view.servers[0].unavailable).toMatch(/no transcription engine/);
+    expect(view.server!.unavailable).toMatch(/no transcription engine/);
   });
 
   it('saving the setting writes app-config.json and the next route reads it', async () => {
     await wire();
-    svc.saveSetting({ server: 'gone', model: null });
-    expect(await svc.route()).toMatchObject({ kind: 'none', reason: expect.stringMatching(/"gone"/) });
-    svc.saveSetting({ server: null, model: 'mlx-whisper-large-v3-turbo' });
+    svc.saveSetting({ model: 'mlx-whisper-large-v3-turbo' });
     expect(await svc.route()).toEqual({ kind: 'crucible', server: 'mac', model: 'mlx-whisper-large-v3-turbo' });
-    expect(() => svc.saveSetting({ server: 7 })).toThrow(/server is/);
+    expect(() => svc.saveSetting({ model: 7 })).toThrow(/model is/);
   });
 });
 

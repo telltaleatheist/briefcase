@@ -162,7 +162,7 @@ export class CrucibleTranscriptionService {
   saveSetting(input: unknown): TranscriptionSettingRead {
     const setting = parseTranscriptionSettingInput(input);
     const saved = writeTranscriptionSetting(this.configDir(), setting);
-    this.logger.log(`Transcription set to ${setting.server ?? 'the best-ranked server'}${setting.model ? ` with ${setting.model}` : ''}`);
+    this.logger.log(`Transcription model set to ${setting.model ?? 'the most accurate downloaded'}`);
     return saved;
   }
 
@@ -171,7 +171,7 @@ export class CrucibleTranscriptionService {
   private host(): TranscriptionVenueHost {
     return {
       setting: () => this.setting().setting,
-      registered: () => this.servers.routing().ranked,
+      selected: () => this.servers.selected(),
       reach: async (server) => {
         const answer = await this.probes.reach(server);
         return { reach: answer.reach, message: answer.probe.outcome === 'ok' ? undefined : answer.probe.message };
@@ -210,44 +210,44 @@ export class CrucibleTranscriptionService {
 
   async view(): Promise<TranscriptionView> {
     const read = this.setting();
-    let rows: Array<{ name: string; enabled: boolean }> = [];
+    let selected: string | null = null;
     try {
-      rows = this.servers.routing().ranked;
+      selected = this.servers.routing().selected;
     } catch {
-      rows = [];
+      selected = null;
     }
-    const servers: TranscriptionServerView[] = [];
-    for (const row of rows) {
+    let server: TranscriptionServerView | null = null;
+    if (selected !== null) {
       const view: TranscriptionServerView = {
-        name: row.name, enabled: row.enabled, reach: null, backend: null, offersAsr: false,
+        name: selected, reach: null, backend: null, offersAsr: false,
         models: [], recommended: null, betterNotInstalled: null, unavailable: null,
       };
       try {
-        const answer = await this.probes.reach(row.name);
+        const answer = await this.probes.reach(selected);
         view.reach = answer.reach;
         if (answer.reach !== 'ready' && answer.reach !== 'busy') {
-          view.unavailable = answer.probe.outcome === 'ok' ? `Crucible on ${row.name} isn't answering.` : answer.probe.message;
+          view.unavailable = answer.probe.outcome === 'ok' ? `Crucible on ${selected} isn't answering.` : answer.probe.message;
         } else {
-          const offer = await this.asrOffer(row.name, true);
+          const offer = await this.asrOffer(selected, true);
           view.backend = offer.backend;
           view.offersAsr = offer.offersAsr;
           view.models = offer.choice.models.map((m) => ({ id: m.id, installed: m.installed, rank: m.rank }));
           view.recommended = offer.choice.recommended;
           view.betterNotInstalled = offer.choice.betterNotInstalled;
-          if (!offer.offersAsr) view.unavailable = `Crucible on ${row.name} has no transcription engine.`;
-          else if (offer.choice.recommended === null) view.unavailable = `Crucible on ${row.name} has no transcription model downloaded yet.`;
+          if (!offer.offersAsr) view.unavailable = `Crucible on ${selected} has no transcription engine.`;
+          else if (offer.choice.recommended === null) view.unavailable = `Crucible on ${selected} has no transcription model downloaded yet.`;
         }
       } catch (err) {
-        view.unavailable = `Crucible on ${row.name} couldn't be read (${(err as Error)?.message ?? err}).`;
+        view.unavailable = `Crucible on ${selected} couldn't be read (${(err as Error)?.message ?? err}).`;
       }
-      servers.push(view);
+      server = view;
     }
     const route = await this.route();
     return {
       setting: read.setting,
       explicit: read.explicit,
       ignored: read.ignored ?? null,
-      servers,
+      server,
       route,
     };
   }

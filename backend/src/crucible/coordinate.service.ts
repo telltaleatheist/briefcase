@@ -3,8 +3,9 @@
  *
  * Ported from BookForge's electron/crucible/coordinate.ts (crucible
  * docs/INTEGRATING-AN-APP.md §4.6). There is no button: every time Briefcase
- * connects to a Crucible (at startup, when one is added or resumed, after an
- * install) it coordinates with it:
+ * connects to the SELECTED Crucible (at startup, when it is added or selected,
+ * after an install) it coordinates with it. A server that is not selected is
+ * asked for nothing:
  *
  *   1. READ `GET /v1/info`, `GET /v1/catalog` and `GET /v1/capability`.
  *   2. Compare Briefcase's module, filtered to that server's backend, against them.
@@ -30,7 +31,7 @@
  *
  * THE FIRST-RUN HOLD. While the setup wizard is open (`FirstRunGate`),
  * coordination is recorded as `deferred` and nothing is read or posted. The
- * wizard's finish releases it and coordinates every enabled server. The wizard
+ * wizard's finish releases it and coordinates the selected server. The wizard
  * does NOT wait for models: they download in the background.
  */
 import { Inject, Injectable, Logger, OnApplicationBootstrap, OnApplicationShutdown, Optional } from '@nestjs/common';
@@ -219,13 +220,14 @@ export class CrucibleCoordinationService implements OnApplicationBootstrap, OnAp
 
   /**
    * Coordinate on every connect: a server added (auto-connect, pairing, a
-   * connect code, an install) or resumed. And once at startup, for every
-   * enabled server, after auto-connect has had its first go. Never awaited.
+   * connect code, an install) that is the selected one, or a server the user
+   * selects. And once at startup, for the selected server, after auto-connect
+   * has had its first go. Never awaited.
    */
   onApplicationBootstrap(): void {
     this.offRegistry = this.registry.onChange((change) => {
-      if ((change.reason === 'added' || change.reason === 'resumed') && change.server !== null) {
-        void this.request(change.server, change.reason === 'added' ? 'it was added' : 'it was resumed');
+      if ((change.reason === 'added' || change.reason === 'selected') && change.server !== null && this.isSelected(change.server)) {
+        void this.request(change.server, change.reason === 'added' ? 'it was added' : 'it was selected');
       }
     });
     this.startupTimer = setTimeout(() => {
@@ -269,11 +271,11 @@ export class CrucibleCoordinationService implements OnApplicationBootstrap, OnAp
 
   /**
    * The setup wizard finished or was skipped: release the hold and coordinate
-   * every enabled server. Not awaited: models download while the user works.
+   * the selected server. Not awaited: models download while the user works.
    */
   finishFirstRun(): { released: boolean; coordinating: string[] } {
     const released = this.gate.release();
-    const names = this.enabledNames();
+    const names = this.selectedNames();
     void this.coordinateAll('setup finished');
     return { released, coordinating: names };
   }
@@ -289,9 +291,9 @@ export class CrucibleCoordinationService implements OnApplicationBootstrap, OnAp
     return this.coordinate(server);
   }
 
-  /** Every enabled server, the same way. Resolves when every run has settled. */
+  /** The selected server, the same way (none when nothing is selected). Resolves when the run has settled. */
   async coordinateAll(why: string): Promise<CrucibleCoordinationState[]> {
-    return Promise.all(this.enabledNames().map((name) => this.request(name, why)));
+    return Promise.all(this.selectedNames().map((name) => this.request(name, why)));
   }
 
   /** Idempotent and concurrent-safe: a second call while one runs joins it. Ignores the hold. */
@@ -305,19 +307,18 @@ export class CrucibleCoordinationService implements OnApplicationBootstrap, OnAp
     return run;
   }
 
-  private enabledNames(): string[] {
-    const known = new Set(this.registry.names());
-    return this.registry.routingView().ranked.filter((row) => row.enabled && known.has(row.name)).map((row) => row.name);
+  private selectedNames(): string[] {
+    const { selected } = this.registry.routingView();
+    return selected === null ? [] : [selected];
   }
 
-  private isEnabled(server: string): boolean {
-    const row = this.registry.routingView().ranked.find((entry) => entry.name === server);
-    return row === undefined ? true : row.enabled;
+  private isSelected(server: string): boolean {
+    return this.registry.routingView().selected === server;
   }
 
   private async run(server: string): Promise<CrucibleCoordinationState> {
-    if (!this.isEnabled(server)) {
-      return this.report({ server, phase: 'unreachable', message: `"${server}" is paused in Settings › Crucible Servers, so Briefcase asks it for nothing.` });
+    if (!this.isSelected(server)) {
+      return this.report({ server, phase: 'unreachable', message: `"${server}" is not the selected server in Settings › Crucible Servers, so Briefcase asks it for nothing.` });
     }
     const remembered = this.requestRefusals.get(server);
     this.report({ server, phase: 'checking' });

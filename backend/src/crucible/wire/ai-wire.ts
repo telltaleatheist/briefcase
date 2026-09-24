@@ -68,8 +68,7 @@ export interface AiUpstreamsView {
 
 /**
  * `GET /crucible/ai/models[?values=a,b]`: THE one source of analysis-model
- * options, from the connected Crucible (the best-ranked running server that
- * answers). Every AI model picker in the renderer draws this.
+ * options, from the selected Crucible server. Every AI model picker in the renderer draws this.
  */
 export interface AiModelsView {
   /** The server these came from; null when none answers (see `unavailable`). */

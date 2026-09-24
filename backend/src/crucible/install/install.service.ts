@@ -141,7 +141,7 @@ export class CrucibleInstallService implements OnApplicationBootstrap, OnApplica
   /** Everything the wizard's engine step draws, in one read. */
   setup(): CrucibleSetupView {
     const plan = this.plan();
-    const servers = this.registry.routingView().ranked.map((row) => row.name).filter((name) => this.registry.names().includes(name));
+    const servers = this.registry.names();
     return {
       face: setupFace(servers.length, plan.host.discovered, plan.hostable),
       servers,

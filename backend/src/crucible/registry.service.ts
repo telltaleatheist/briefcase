@@ -13,12 +13,7 @@ import { WebSocketService } from '../common/websocket.service';
 import { CRUCIBLE_STATE_DIR } from './crucible.constants';
 import { REGISTRY_FILE, ServerRegistry, type ResolvedServer } from './registry';
 import { ROUTING_FILE, Routing } from './routing';
-import type {
-  CrucibleServerRow,
-  CrucibleServersChangedPayload,
-  RankedServerRow,
-  RoutingView,
-} from './wire/settings-wire';
+import type { CrucibleServerRow, CrucibleServersChangedPayload, RoutingView } from './wire/settings-wire';
 
 export type RegistryListener = (change: CrucibleServersChangedPayload) => void;
 
@@ -60,14 +55,16 @@ export class CrucibleRegistryService {
 
   add(server: { name: string; url: string; token: string }): CrucibleServerRow {
     const row = this.registry.add(server);
+    this.routing.added(row.name, this.names());
     this.logger.log(`Added Crucible server "${row.name}" at ${row.url}`);
     this.announce({ reason: 'added', server: row.name });
     return row;
   }
 
-  /** Forget a server. Its rank is kept, reported as unknown, in case it comes back. */
+  /** Forget a server. When it was the selected one, nothing is selected until the user picks. */
   remove(name: string): CrucibleServerRow {
     const row = this.registry.remove(name);
+    this.routing.removed(row.name);
     this.logger.log(`Removed Crucible server "${row.name}"`);
     this.announce({ reason: 'removed', server: row.name });
     return row;
@@ -77,26 +74,16 @@ export class CrucibleRegistryService {
     return this.routing.view(this.names());
   }
 
-  /** Enabled servers, best first. Throws `no_enabled_server` by name when there are none. */
-  rankedEnabled(): RankedServerRow[] {
-    return this.routing.ranked(this.names());
+  /** The server all work goes to. Throws `no_selected_server` by name when there is none. */
+  selected(): string {
+    return this.routing.selectedServer(this.names());
   }
 
-  setOrder(order: readonly string[]): RoutingView {
-    const view = this.routing.setOrder(order, this.names());
-    this.announce({ reason: 'order', server: null });
-    return view;
-  }
-
-  setEnabled(name: string, enabled: boolean): RoutingView {
-    const view = this.routing.setEnabled(name, enabled, this.names());
-    this.announce({ reason: enabled ? 'resumed' : 'paused', server: name });
-    return view;
-  }
-
-  forgetRoutingName(name: string): RoutingView {
-    const view = this.routing.forget(name, this.names());
-    this.announce({ reason: 'forgotten', server: name });
+  /** The user switches servers. Work waiting to start goes to this one from now on. */
+  select(name: string): RoutingView {
+    const view = this.routing.select(name, this.names());
+    this.logger.log(`Selected Crucible server "${name}"`);
+    this.announce({ reason: 'selected', server: name });
     return view;
   }
 

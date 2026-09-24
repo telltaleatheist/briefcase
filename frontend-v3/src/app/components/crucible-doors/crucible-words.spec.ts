@@ -100,7 +100,6 @@ describe('lane words', () => {
     expect(laneStateLine({ state: 'ready', detail: null })).toBe('Ready');
     expect(laneStateLine({ state: 'busy', detail: 'bookforge, tts 62% done' })).toBe('Busy: bookforge, tts 62% done');
     expect(laneStateLine({ state: 'unreachable', detail: 'connection refused' })).toBe('Not answering');
-    expect(laneStateLine({ state: 'paused', detail: null })).toBe('Paused');
     expect(laneStateLine({ state: 'unavailable', detail: 'no GPU' })).toBe('Unavailable: no GPU');
   });
 
@@ -108,7 +107,6 @@ describe('lane words', () => {
     expect(laneIsProblem({ state: 'unreachable' })).toBe(true);
     expect(laneIsProblem({ state: 'unavailable' })).toBe(true);
     expect(laneIsProblem({ state: 'busy' })).toBe(false);
-    expect(laneIsProblem({ state: 'paused' })).toBe(false);
   });
 
   it('counts occupancy and waiting', () => {

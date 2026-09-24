@@ -223,8 +223,9 @@ describe('cancel against the fake', () => {
 });
 
 describe('the lane strip', () => {
-  it('draws one GPU lane per server and the cloud lane; the switch pauses a server and paused work re-decides', async () => {
+  it('draws the selected server\'s GPU lane and the cloud lane; a busy server keeps its work waiting there, and only selecting another server moves it', async () => {
     await wire();
+    h.registry.add({ name: 'pc', url: 'http://127.0.0.1:9', token: 'tok-pc-0000000000000000' });
     fake.inject({ serverBusy: BUSY });
     const rig = makeRig(lanes);
     rig.qm.onModuleInit();
@@ -237,12 +238,15 @@ describe('the lane strip', () => {
 
     const id = rig.qm.addJob(analyzeJob('v1', 'local:qwen3.5-9b'));
     await until(() => rig.qm.getJob(id)?.parkedReason !== undefined);
-    rig.qm.setServerPaused('mac', true);
+    // Busy: it waits for mac. pc is registered, answers nothing, and is never tried.
+    expect(rig.qm.getJob(id)?.venue).toBe('mac');
     status = await rig.qm.getLanesStatus();
-    expect(status.lanes[0]).toMatchObject({ state: 'paused', waiting: 1 });
-    await until(() => /paused/.test(rig.qm.getJob(id)?.parkedReason ?? ''));
-    rig.qm.setServerPaused('mac', false);
-    expect((await rig.qm.getLanesStatus()).lanes[0].state).not.toBe('paused');
+    expect(status.lanes[0]).toMatchObject({ id: 'gpu:mac', waiting: 1 });
+
+    h.registry.select('pc');
+    await until(() => /Crucible on pc isn't answering/.test(rig.qm.getJob(id)?.parkedReason ?? ''));
+    status = await rig.qm.getLanesStatus();
+    expect(status.lanes.map((l) => l.id)).toEqual(['gpu:pc', 'cloud']);
     rig.qm.onModuleDestroy();
   });
 

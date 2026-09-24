@@ -88,8 +88,8 @@ describe('QueueService parked jobs and lanes', () => {
     ws.handlers['task.unparked']({ jobId: 'b1', timestamp: 'now' });
     expect(job().parkedReason).toBeUndefined();
 
-    ws.handlers['task.parked']({ jobId: 'b1', reason: 'mac is paused.', server: 'mac', timestamp: 'now' });
-    expect(job().parkedReason).toBe('mac is paused.');
+    ws.handlers['task.parked']({ jobId: 'b1', reason: 'Crucible on mac isn\'t answering.', server: 'mac', timestamp: 'now' });
+    expect(job().parkedReason).toBe('Crucible on mac isn\'t answering.');
     expect(job().state).toBe('pending');
     expect(job().errorMessage).toBeUndefined();
   });
@@ -101,15 +101,11 @@ describe('QueueService parked jobs and lanes', () => {
     expect(job().state).toBe('processing');
   });
 
-  it('loads lanes, follows queue.lanes, and updates from the pause POST', () => {
+  it('loads lanes and follows queue.lanes', () => {
     expect(service.lanes()?.lanes.length).toBe(1);
     ws.handlers['queue.lanes'](lanes(false));
     expect(service.lanes()?.lanes.length).toBe(0);
-
-    service.setServerPaused('mac mini', true).subscribe();
-    const req = http.expectOne(r => r.url.endsWith('/queue/lanes/mac%20mini/paused'));
-    expect(req.request.body).toEqual({ paused: true });
-    req.flush({ success: true, ...lanes(true) });
+    ws.handlers['queue.lanes'](lanes(true));
     expect(service.lanes()?.lanes[0].server).toBe('mac');
   });
 });

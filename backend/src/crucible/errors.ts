@@ -26,10 +26,7 @@ export class CrucibleRegistryError extends Error {
 export type CrucibleRoutingErrorCode =
   | 'corrupt_routing'
   | 'unknown_server'
-  | 'incomplete_order'
-  | 'duplicate_in_order'
-  | 'server_is_known'
-  | 'no_enabled_server';
+  | 'no_selected_server';
 
 /** A refusal from the routing record (`crucible-routing.json`). */
 export class CrucibleRoutingError extends Error {

@@ -72,25 +72,21 @@ export class CrucibleAiService {
     @Inject(CRUCIBLE_PAIRING_HOST) private readonly pairingHost: PairingFileHost,
   ) {}
 
-  /** The best-ranked running server that answers, or the sentence saying why there is none. */
+  /** The selected server when it answers, or the sentence saying why there is none. */
   async connectedServer(explicit?: string): Promise<{ server: string | null; reach: AiModelsView['reach']; unavailable: string | null }> {
     if (explicit) {
       const answer = await this.probes.reach(explicit);
       return { server: explicit, reach: answer.reach, unavailable: null };
     }
-    let ranked: string[];
+    let selected: string;
     try {
-      ranked = this.servers.ranked().map((row) => row.name);
+      selected = this.servers.selected();
     } catch (err) {
       return { server: null, reach: null, unavailable: (err as Error).message };
     }
-    const down: string[] = [];
-    for (const name of ranked) {
-      const answer = await this.probes.reach(name);
-      if (answer.reach === 'ready' || answer.reach === 'busy') return { server: name, reach: answer.reach, unavailable: null };
-      down.push(`${name}: ${answer.reach}`);
-    }
-    return { server: null, reach: null, unavailable: `No Crucible server is answering (${down.join('; ')}).` };
+    const answer = await this.probes.reach(selected);
+    if (answer.reach === 'ready' || answer.reach === 'busy') return { server: selected, reach: answer.reach, unavailable: null };
+    return { server: null, reach: null, unavailable: `Crucible on ${selected} isn't answering (${answer.reach.replace(/_/g, ' ')}).` };
   }
 
   /**

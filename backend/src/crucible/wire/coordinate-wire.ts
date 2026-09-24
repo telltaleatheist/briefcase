@@ -104,7 +104,7 @@ export type CrucibleCoordinationState =
     }
   /** A refusal about the REQUEST (`invalid_module`, `unknown_subject`). Once, by name, remembered. */
   | { readonly server: string; readonly phase: 'refused'; readonly code: string; readonly message: string }
-  /** Nothing answered, it answered something else, or it is paused. Nothing was posted. */
+  /** Nothing answered, it answered something else, or it is not the selected server. Nothing was posted. */
   | { readonly server: string; readonly phase: 'unreachable'; readonly message: string };
 
 export type CrucibleCoordinationMap = Readonly<Record<string, CrucibleCoordinationState>>;

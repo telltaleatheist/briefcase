@@ -103,77 +103,82 @@ describe('ServerRegistry', () => {
   });
 });
 
-describe('Routing (rank and Running/Paused)', () => {
+describe('Routing (the one selected server)', () => {
   let file: string;
   beforeEach(() => {
     file = path.join(tempDir(), ROUTING_FILE);
   });
 
-  it('with no record, ranks servers in registry order, all Running; a new server lands at the bottom', () => {
+  it('with no record: the only server is selected; with several, none is, and selectedServer() refuses by name', () => {
     const routing = new Routing(file);
-    expect(routing.view(['mac', 'pc']).ranked).toEqual([{ name: 'mac', enabled: true }, { name: 'pc', enabled: true }]);
-    routing.setOrder(['pc', 'mac'], ['mac', 'pc']);
-    expect(routing.view(['mac', 'pc', 'droplet']).ranked.map((r) => r.name)).toEqual(['pc', 'mac', 'droplet']);
+    expect(routing.view(['mac'])).toEqual({ servers: [{ name: 'mac', selected: true }], selected: 'mac', missing: null });
+    expect(routing.selectedServer(['mac'])).toBe('mac');
+    expect(routing.view(['mac', 'pc']).selected).toBeNull();
+    expect(() => routing.selectedServer(['mac', 'pc'])).toThrow(/No Crucible server is selected/);
+    expect(() => routing.selectedServer([])).toThrow(expect.objectContaining({ code: 'no_selected_server' }));
   });
 
-  it('refuses an order that drops, repeats or invents a server', () => {
+  it('selects one server, refusing a name it does not know', () => {
     const routing = new Routing(file);
-    const known = ['mac', 'pc'];
-    expect(() => routing.setOrder(['mac'], known)).toThrow(expect.objectContaining({ code: 'incomplete_order' }));
-    expect(() => routing.setOrder(['mac', 'mac', 'pc'], known)).toThrow(expect.objectContaining({ code: 'duplicate_in_order' }));
-    expect(() => routing.setOrder(['mac', 'pc', 'ghost'], known)).toThrow(expect.objectContaining({ code: 'unknown_server' }));
+    const view = routing.select('pc', ['mac', 'pc']);
+    expect(view.servers).toEqual([{ name: 'mac', selected: false }, { name: 'pc', selected: true }]);
+    expect(routing.selectedServer(['mac', 'pc'])).toBe('pc');
+    expect(() => routing.select('ghost', ['mac', 'pc'])).toThrow(expect.objectContaining({ code: 'unknown_server' }));
   });
 
-  it('pauses and resumes, and ranked() refuses by name when nothing is Running', () => {
+  it('the first server added is selected; a later one is not, even when the first was only implied', () => {
     const routing = new Routing(file);
-    const known = ['mac', 'pc'];
-    routing.setEnabled('mac', false, known);
-    expect(routing.view(known).ranked).toEqual([{ name: 'mac', enabled: false }, { name: 'pc', enabled: true }]);
-    expect(routing.ranked(known).map((r) => r.name)).toEqual(['pc']);
-    routing.setEnabled('pc', false, known);
-    expect(() => routing.ranked(known)).toThrow(/Every Crucible server is paused/);
-    expect(() => routing.ranked([])).toThrow(expect.objectContaining({ code: 'no_enabled_server' }));
-    routing.setEnabled('mac', true, known);
-    expect(routing.ranked(known).map((r) => r.name)).toEqual(['mac']);
+    routing.added('mac', ['mac']);
+    expect(routing.read()).toEqual({ selected: 'mac', recorded: true });
+    routing.added('pc', ['mac', 'pc']);
+    expect(routing.selectedServer(['mac', 'pc'])).toBe('mac');
+
+    const implied = new Routing(path.join(tempDir(), ROUTING_FILE));
+    expect(implied.view(['mac']).selected).toBe('mac');
+    implied.added('pc', ['mac', 'pc']);
+    expect(implied.selectedServer(['mac', 'pc'])).toBe('mac');
   });
 
-  it('reports a removed server as unknown instead of pruning it, and forgets it only on request', () => {
+  it('never picks another server on its own: removing the selected one leaves none selected, and a vanished one is reported', () => {
     const routing = new Routing(file);
-    routing.setOrder(['pc', 'mac'], ['mac', 'pc']);
-    routing.setEnabled('pc', false, ['mac', 'pc']);
-    const view = routing.view(['mac']);
-    expect(view.ranked).toEqual([{ name: 'mac', enabled: true }]);
-    expect(view.unknown).toEqual(['pc']);
-    // Re-added under the same name: its rank and its pause come back.
-    expect(routing.view(['mac', 'pc']).ranked).toEqual([{ name: 'pc', enabled: false }, { name: 'mac', enabled: true }]);
-    expect(() => routing.forget('mac', ['mac'])).toThrow(expect.objectContaining({ code: 'server_is_known' }));
-    expect(routing.forget('pc', ['mac']).unknown).toEqual([]);
+    routing.select('pc', ['mac', 'pc']);
+    routing.removed('pc');
+    expect(routing.view(['mac'])).toEqual({ servers: [{ name: 'mac', selected: false }], selected: null, missing: null });
+    expect(() => routing.selectedServer(['mac'])).toThrow(/No Crucible server is selected/);
+
+    routing.select('mac', ['mac']);
+    expect(routing.view(['pc'])).toEqual({ servers: [{ name: 'pc', selected: false }], selected: null, missing: 'mac' });
+    expect(() => routing.selectedServer(['pc'])).toThrow(/"mac" isn't connected any more/);
   });
 
-  it('refuses a corrupt record and reads BookForge\'s extra key without complaint', () => {
+  it('reads the older ranked record as its first running server, and refuses a corrupt one', () => {
+    fs.writeFileSync(file, JSON.stringify({ order: ['mac', 'pc'], disabled: ['mac'], newJobsWaitFor: 'any' }));
+    expect(new Routing(file).read()).toEqual({ selected: 'pc', recorded: false });
+    expect(new Routing(file).selectedServer(['mac', 'pc'])).toBe('pc');
     fs.writeFileSync(file, JSON.stringify({ order: 'mac', disabled: [] }));
     expect(() => new Routing(file).read()).toThrow(CrucibleRoutingError);
-    fs.writeFileSync(file, JSON.stringify({ order: ['mac'], disabled: [], newJobsWaitFor: 'any' }));
-    expect(new Routing(file).read()).toEqual({ order: ['mac'], disabled: [] });
+    fs.writeFileSync(file, JSON.stringify({ selected: 7 }));
+    expect(() => new Routing(file).read()).toThrow(expect.objectContaining({ code: 'corrupt_routing' }));
   });
 });
 
 describe('CrucibleRegistryService', () => {
-  it('survives a restart: pause, rank and removal are read back by a new instance over the same dir', () => {
+  it('survives a restart: the selection and removals are read back by a new instance over the same dir', () => {
     const dir = tempDir();
     const first = new CrucibleRegistryService(dir);
     first.add({ name: 'mac', url: 'http://127.0.0.1:7100', token: TOKEN_A });
     first.add({ name: 'pc', url: 'http://10.0.0.2:7100', token: TOKEN_B });
     first.add({ name: 'droplet', url: 'https://droplet.example:7100', token: TOKEN_B });
-    first.setOrder(['pc', 'droplet', 'mac']);
-    first.setEnabled('droplet', false);
+    expect(first.selected()).toBe('mac');
+    first.select('pc');
     first.remove('mac');
 
     const second = new CrucibleRegistryService(dir);
     expect(second.list().map((r) => r.name)).toEqual(['pc', 'droplet']);
-    expect(second.routingView().ranked).toEqual([{ name: 'pc', enabled: true }, { name: 'droplet', enabled: false }]);
-    expect(second.routingView().unknown).toEqual(['mac']);
-    expect(second.rankedEnabled().map((r) => r.name)).toEqual(['pc']);
+    expect(second.routingView()).toEqual({
+      servers: [{ name: 'pc', selected: true }, { name: 'droplet', selected: false }], selected: 'pc', missing: null,
+    });
+    expect(second.selected()).toBe('pc');
   });
 
   it('announces every write on crucible.servers-changed and to in-process listeners', () => {
@@ -182,12 +187,10 @@ describe('CrucibleRegistryService', () => {
     const service = new CrucibleRegistryService(tempDir(), { emitCrucibleServersChanged: (p: unknown) => emitted.push(p) } as never);
     service.onChange((c) => heard.push(c));
     service.add({ name: 'mac', url: 'http://127.0.0.1:7100', token: TOKEN_A });
-    service.setEnabled('mac', false);
-    service.setEnabled('mac', true);
-    service.setOrder(['mac']);
+    service.add({ name: 'pc', url: 'http://10.0.0.2:7100', token: TOKEN_B });
+    service.select('pc');
     service.remove('mac');
-    service.forgetRoutingName('mac');
-    expect(emitted.map((p) => (p as { reason: string }).reason)).toEqual(['added', 'paused', 'resumed', 'order', 'removed', 'forgotten']);
+    expect(emitted.map((p) => (p as { reason: string }).reason)).toEqual(['added', 'added', 'selected', 'removed']);
     expect(heard).toEqual(emitted);
     expect(JSON.stringify(emitted)).not.toContain(TOKEN_A);
   });

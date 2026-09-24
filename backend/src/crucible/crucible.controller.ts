@@ -57,10 +57,7 @@ const STATUS_BY_CODE: Record<string, HttpStatus> = {
   empty_token: HttpStatus.BAD_REQUEST,
   corrupt_registry: HttpStatus.INTERNAL_SERVER_ERROR,
   corrupt_routing: HttpStatus.INTERNAL_SERVER_ERROR,
-  incomplete_order: HttpStatus.BAD_REQUEST,
-  duplicate_in_order: HttpStatus.BAD_REQUEST,
-  server_is_known: HttpStatus.CONFLICT,
-  no_enabled_server: HttpStatus.CONFLICT,
+  no_selected_server: HttpStatus.CONFLICT,
   invalid_pairing: HttpStatus.BAD_REQUEST,
   pairing_not_active: HttpStatus.GONE,
   probe_failed: HttpStatus.BAD_GATEWAY,
@@ -156,47 +153,10 @@ export class CrucibleController {
     return this.guard(() => this.probes.test(name, true));
   }
 
-  @Post('servers/:name/pause')
-  pause(@Param('name') name: string): Promise<RoutingView> {
-    return this.guard(() => this.registry.setEnabled(name, false));
-  }
-
-  @Post('servers/:name/resume')
-  resume(@Param('name') name: string): Promise<RoutingView> {
-    return this.guard(() => this.registry.setEnabled(name, true));
-  }
-
-  /** Re-rank, and/or set the whole paused set. */
-  @Put('routing')
-  setRouting(@Body() body: { order?: unknown; disabled?: unknown }): Promise<RoutingView> {
-    return this.guard(() => {
-      const isNames = (value: unknown): value is string[] => Array.isArray(value) && value.every((v) => typeof v === 'string');
-      if (body?.order === undefined && body?.disabled === undefined) throw badRequest('Send {order} and/or {disabled}.');
-      if (body.order !== undefined && !isNames(body.order)) throw badRequest('"order" is a list of server names.');
-      if (body.disabled !== undefined && !isNames(body.disabled)) throw badRequest('"disabled" is a list of server names.');
-      let view = this.registry.routingView();
-      if (body.order !== undefined) view = this.registry.setOrder(body.order as string[]);
-      if (body.disabled !== undefined) {
-        const paused = new Set(body.disabled as string[]);
-        for (const name of paused) {
-          if (!this.registry.names().includes(name)) throw refusal('unknown_server', `"${name}" is not one of this machine's Crucible servers.`);
-        }
-        for (const row of this.registry.routingView().ranked) {
-          const enabled = !paused.has(row.name);
-          if (row.enabled !== enabled) view = this.registry.setEnabled(row.name, enabled);
-        }
-      }
-      return view;
-    });
-  }
-
-  /** Drop a rank the record keeps for a server that is no longer registered. */
-  @Post('routing/forget')
-  forget(@Body() body: { name?: unknown }): Promise<RoutingView> {
-    return this.guard(() => {
-      if (typeof body?.name !== 'string') throw badRequest('Send {name}.');
-      return this.registry.forgetRoutingName(body.name);
-    });
+  /** The user switches servers: every job not yet started goes to this one. */
+  @Post('servers/:name/select')
+  select(@Param('name') name: string): Promise<RoutingView> {
+    return this.guard(() => this.registry.select(name));
   }
 
   // ── device-code pairing ────────────────────────────────────────────────

@@ -85,7 +85,6 @@ describe('a server that states no informational field', () => {
     expect(view.unavailable).toBeNull();
     expect(view.groups.find((g) => g.kind === 'server')?.options[0]).toEqual({
       value: 'local:qwen3.5-9b', label: 'qwen3.5-9b', group: 'server', sizeB: null, resident: false, serverChoice: true,
-      detail: "size unknown, Crucible's pick for analysis",
     });
     expect(view.upstreams?.anthropic).toEqual({ configured: true, keyHint: '…1234' });
   });

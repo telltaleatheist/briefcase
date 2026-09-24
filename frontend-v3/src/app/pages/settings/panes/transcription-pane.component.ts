@@ -17,9 +17,10 @@ import type {
  * Settings → Transcription.
  *
  * Transcription is Crucible's `asr` job and nothing else (P7): mlx-whisper on
- * a Mac server, faster-whisper on a PC one, in the language spoken. The pane
- * picks the server and the asr model, and says where a transcription queued
- * now would run, or why it would wait.
+ * a Mac server, faster-whisper on a PC one, in the language spoken. It runs
+ * on the selected Crucible server (Settings › Crucible Servers), like all AI
+ * work. The pane picks the asr model on that server, and says where a
+ * transcription queued now would run, or why it would wait.
  */
 @Component({
   selector: 'app-transcription-pane',
@@ -35,8 +36,8 @@ import type {
   template: `
     <h2 class="pane-title">Transcription</h2>
     <p class="pane-lede">
-      Speech-to-text for your videos, in the language spoken. It runs on a
-      Crucible server that offers transcription.
+      Speech-to-text for your videos, in the language spoken. It runs on the Crucible server selected in
+      <a [routerLink]="['/settings/crucible']">Settings › Crucible Servers</a>.
     </p>
 
     <div class="pane-section">
@@ -52,42 +53,27 @@ import type {
           }
         </div>
       }
-      @if (servers().length > 0) {
-        <label class="field-label" for="transcribe-server">Server</label>
+      @if (modelServer(); as target) {
+        <label class="field-label" for="transcribe-model">Model on {{ target.name }}</label>
         <select
-          id="transcribe-server"
+          id="transcribe-model"
           class="select"
-          [ngModel]="serverChoice()"
-          [disabled]="saving()"
-          (ngModelChange)="onServerChange($event)">
-          <option value="">Best available server</option>
-          @for (s of servers(); track s.name) {
-            <option [value]="s.name">{{ s.name }}{{ serverNote(s) }}</option>
+          [ngModel]="modelChoice()"
+          [disabled]="saving() || target.models.length === 0"
+          (ngModelChange)="onModelChange($event)">
+          <option value="">{{ target.recommended ? 'Most accurate downloaded (' + target.recommended + ')' : 'Most accurate downloaded' }}</option>
+          @for (m of target.models; track m.id) {
+            <option [value]="m.id" [disabled]="!m.installed">{{ m.id }}{{ m.installed ? '' : ' (not downloaded)' }}</option>
+          }
+          @if (missingModel(); as missing) {
+            <option [value]="missing">{{ missing }} (unavailable)</option>
           }
         </select>
-
-        @if (modelServer(); as target) {
-          <label class="field-label field-gap" for="transcribe-model">Model on {{ target.name }}</label>
-          <select
-            id="transcribe-model"
-            class="select"
-            [ngModel]="modelChoice()"
-            [disabled]="saving() || target.models.length === 0"
-            (ngModelChange)="onModelChange($event)">
-            <option value="">{{ target.recommended ? 'Most accurate downloaded (' + target.recommended + ')' : 'Most accurate downloaded' }}</option>
-            @for (m of target.models; track m.id) {
-              <option [value]="m.id" [disabled]="!m.installed">{{ m.id }}{{ m.installed ? '' : ' (not downloaded)' }}</option>
-            }
-            @if (missingModel(); as missing) {
-              <option [value]="missing">{{ missing }} (unavailable)</option>
-            }
-          </select>
-          @if (missingModel(); as missing) {
-            <p class="hint">{{ target.name }} does not offer {{ missing }}, so its most accurate downloaded model is used instead. Pick one it offers to change that.</p>
-          }
-          @if (target.betterNotInstalled; as better) {
-            <p class="hint">{{ better }} is more accurate and can be downloaded on {{ target.name }} from Crucible's catalog.</p>
-          }
+        @if (missingModel(); as missing) {
+          <p class="hint">{{ target.name }} does not offer {{ missing }}, so its most accurate downloaded model is used instead. Pick one it offers to change that.</p>
+        }
+        @if (target.betterNotInstalled; as better) {
+          <p class="hint">{{ better }} is more accurate and can be downloaded on {{ target.name }} from Crucible's catalog.</p>
         }
         @if (savedFlash()) {
           <span class="save-flash">Saved</span>
@@ -144,20 +130,10 @@ export class TranscriptionPaneComponent {
   readonly saving = signal(false);
   readonly savedFlash = signal(false);
 
-  readonly serverChoice = computed(() => this.view()?.setting.server ?? '');
   readonly modelChoice = computed(() => this.view()?.setting.model ?? '');
-  readonly servers = computed<TranscriptionServerView[]>(() => this.view()?.servers ?? []);
 
-  /** The server whose models the model picker lists: the chosen one, else the one transcribing, else the first offering asr. */
-  readonly modelServer = computed<TranscriptionServerView | null>(() => {
-    const v = this.view();
-    if (!v) return null;
-    const named = v.setting.server ? v.servers.find((s) => s.name === v.setting.server) : undefined;
-    if (named) return named;
-    const route = v.route;
-    if (route.kind === 'crucible') return v.servers.find((s) => s.name === route.server) ?? null;
-    return v.servers.find((s) => s.offersAsr) ?? null;
-  });
+  /** The selected server, whose models the model picker lists. */
+  readonly modelServer = computed<TranscriptionServerView | null>(() => this.view()?.server ?? null);
 
   readonly routeServer = computed(() => { const r = this.view()?.route; return r?.kind === 'crucible' ? r.server : ''; });
   readonly routeModel = computed(() => { const r = this.view()?.route; return r?.kind === 'crucible' ? r.model : ''; });
@@ -197,24 +173,8 @@ export class TranscriptionPaneComponent {
       });
   }
 
-  serverNote(s: TranscriptionServerView): string {
-    if (!s.enabled) return ' (paused)';
-    if (s.unavailable) return s.offersAsr ? ' (not available now)' : ' (no transcription)';
-    return '';
-  }
-
-  onServerChange(server: string): void {
-    // A model id is per engine (mlx-whisper on a Mac, faster-whisper on a PC): a new server starts on its own best.
-    this.save({ server: server || null, model: null });
-  }
-
   onModelChange(model: string): void {
-    this.save({ ...this.current(), model: model || null });
-  }
-
-  private current(): TranscriptionSettingWire {
-    const setting = this.view()?.setting;
-    return { server: setting?.server ?? null, model: setting?.model ?? null };
+    this.save({ model: model || null });
   }
 
   private save(setting: TranscriptionSettingWire): void {

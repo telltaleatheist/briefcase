@@ -117,32 +117,12 @@ export class QueueController {
   }
 
   /**
-   * The Crucible lanes (P4): one GPU lane per registered server, then the
-   * cloud lane, each with its state, holder sentence, resident model and the
-   * tasks on it. `mode: 'direct'` and no lanes when AI runs direct.
+   * The Crucible lanes: the selected server's GPU lane, then the cloud lane,
+   * each with its state, holder sentence, resident model and the tasks on it.
    * GET /queue/lanes
    */
   @Get('lanes')
   async getLanes() {
-    return { success: true, ...(await this.queueManager.getLanesStatus()) };
-  }
-
-  /**
-   * The per-server Running/Paused switch, as the lane strip shows it. Writes
-   * the routing record's `disabled` (the same switch as Settings › Crucible
-   * Servers); a paused server takes no new work, and parked work re-decides.
-   * POST /queue/lanes/:server/paused  { paused: boolean }
-   */
-  @Post('lanes/:server/paused')
-  async setServerPaused(@Param('server') server: string, @Body() body: { paused?: unknown }) {
-    if (typeof body?.paused !== 'boolean') {
-      throw new HttpException('paused must be true or false', HttpStatus.BAD_REQUEST);
-    }
-    try {
-      this.queueManager.setServerPaused(server, body.paused);
-    } catch (error) {
-      throw new HttpException(error instanceof Error ? error.message : String(error), HttpStatus.BAD_REQUEST);
-    }
     return { success: true, ...(await this.queueManager.getLanesStatus()) };
   }
 

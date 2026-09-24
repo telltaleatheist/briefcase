@@ -85,7 +85,7 @@ describe('CrucibleController', () => {
     await app.get(CrucibleAutoConnectService).whenIdle();
     const view = (await http().get('/crucible/servers')).body;
     expect(view.servers[0]).toMatchObject({ name: 'crucible@owens-mac-studio', url: fake.url, tokenMasked: `****${fake.token.slice(-4)}` });
-    expect(view.routing).toEqual({ ranked: [{ name: 'crucible@owens-mac-studio', enabled: true }], unknown: [] });
+    expect(view.routing).toEqual({ servers: [{ name: 'crucible@owens-mac-studio', selected: true }], selected: 'crucible@owens-mac-studio', missing: null });
     expect(view.discovered).toMatchObject({ present: true, registeredAs: 'crucible@owens-mac-studio' });
     expect(emitted).toContainEqual({ reason: 'added', server: 'crucible@owens-mac-studio' });
   }, 2 * PROBE_TIMEOUT_MS);
@@ -114,19 +114,16 @@ describe('CrucibleController', () => {
     expect(bad.body.code).toBe('invalid_pairing');
   });
 
-  it('re-ranks, pauses and resumes, and refuses an incomplete order', async () => {
-    const reordered = await http().put('/crucible/routing', { order: ['PC', 'crucible@owens-mac-studio'] });
-    expect(reordered.body.ranked.map((r: { name: string }) => r.name)).toEqual(['PC', 'crucible@owens-mac-studio']);
-    const paused = await http().post('/crucible/servers/PC/pause');
-    expect(paused.body.ranked[0]).toEqual({ name: 'PC', enabled: false });
-    const resumed = await http().post('/crucible/servers/PC/resume');
-    expect(resumed.body.ranked[0]).toEqual({ name: 'PC', enabled: true });
-    const viaDisabled = await http().put('/crucible/routing', { disabled: ['crucible@owens-mac-studio'] });
-    expect(viaDisabled.body.ranked).toEqual([{ name: 'PC', enabled: true }, { name: 'crucible@owens-mac-studio', enabled: false }]);
-    const incomplete = await http().put('/crucible/routing', { order: ['PC'] });
-    expect(incomplete.status).toBe(400);
-    expect(incomplete.body.code).toBe('incomplete_order');
-    expect(emitted).toContainEqual({ reason: 'paused', server: 'PC' });
+  it('a server added beside the selected one is not selected; selecting switches, and announces it', async () => {
+    const before = (await http().get('/crucible/servers')).body.routing;
+    expect(before.selected).toBe('crucible@owens-mac-studio');
+    const switched = await http().post('/crucible/servers/PC/select');
+    expect(switched.body).toEqual({
+      servers: [{ name: 'crucible@owens-mac-studio', selected: false }, { name: 'PC', selected: true }], selected: 'PC', missing: null,
+    });
+    expect(emitted).toContainEqual({ reason: 'selected', server: 'PC' });
+    const back = await http().post(`/crucible/servers/${encodeURIComponent('crucible@owens-mac-studio')}/select`);
+    expect(back.body.selected).toBe('crucible@owens-mac-studio');
   });
 
   it('pairs by address: start, poll, and the server is registered', async () => {
@@ -172,7 +169,7 @@ describe('CrucibleController', () => {
 
   it('shapes failures: unknown server 404, unreachable server a named probe outcome', async () => {
     expect((await http().del('/crucible/servers/ghost')).status).toBe(404);
-    expect((await http().post('/crucible/servers/ghost/pause')).body.code).toBe('unknown_server');
+    expect((await http().post('/crucible/servers/ghost/select')).body.code).toBe('unknown_server');
     await other.close();
     const test = await http().post('/crucible/servers/PC/test');
     expect(test.body).toMatchObject({ reach: 'unreachable', probe: { outcome: 'unreachable' } });

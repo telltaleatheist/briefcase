@@ -12,7 +12,7 @@ import type {
   CrucibleProbeAnswer,
   CrucibleServerRow,
   CrucibleServersView,
-  RankedServerRow,
+  ServerChoiceRow,
   ServerFacts,
   ServerReach,
 } from '@crucible-wire/settings-wire';
@@ -39,10 +39,10 @@ const CAPABILITY_WORDS: Record<CapabilityFact['capability'], string> = {
  * Settings › Crucible Servers.
  *
  * Modelled on BookForge's crucible-servers-panel: ONE list, one kind of row,
- * whether the Crucible runs on this computer or across the network. The list's
- * order is the rank (drag to change it), and each row is a Running/Paused card
- * toggle: the whole card toggles, with an orange border while it is Running.
- * A paused server is given no new work.
+ * whether the Crucible runs on this computer or across the network. Briefcase
+ * uses ONE of them, the selected one: the whole card selects it, with an
+ * orange border on the selected card. All AI work goes there, and waits for it
+ * when it is busy; work moves to another server only when the user selects it.
  *
  * A server is added by pairing with its address (the server shows a short code,
  * and with open pairing approves at once) or by pasting a connect code. The
@@ -72,20 +72,19 @@ export class CruciblePaneComponent {
   readonly confirmRemove = signal<string | null>(null);
   readonly switching = signal<string | null>(null);
 
-  /** The rank the list shows: the server's, or the one a drag in progress is proposing. */
-  private readonly dragOrder = signal<string[] | null>(null);
-  readonly dragName = signal<string | null>(null);
-
-  readonly rows = computed<Array<RankedServerRow & { server: CrucibleServerRow | undefined }>>(() => {
+  readonly rows = computed<Array<ServerChoiceRow & { server: CrucibleServerRow | undefined }>>(() => {
     const view = this.view();
     if (view === null) return [];
     const byName = new Map(view.servers.map((s) => [s.name, s]));
-    const ranked = view.routing.ranked;
-    const order = this.dragOrder();
-    const rows = order === null ? ranked : order.flatMap((name) => ranked.filter((r) => r.name === name));
-    return rows.map((row) => ({ ...row, server: byName.get(row.name) }));
+    return view.routing.servers.map((row) => ({ ...row, server: byName.get(row.name) }));
   });
-  readonly unknown = computed(() => this.view()?.routing.unknown ?? []);
+  /** A selected server that is no longer connected: said, never replaced by another. */
+  readonly missing = computed(() => this.view()?.routing.missing ?? null);
+  /** Servers exist but none is selected. */
+  readonly noneSelected = computed(() => {
+    const routing = this.view()?.routing;
+    return routing !== undefined && routing.servers.length > 0 && routing.selected === null;
+  });
   readonly offer = computed(() => {
     const discovered = this.view()?.discovered;
     return discovered?.present === true && discovered.registeredAs === null ? discovered : null;
@@ -172,10 +171,10 @@ export class CruciblePaneComponent {
     });
   }
 
-  toggleRunning(row: RankedServerRow): void {
-    if (this.switching() !== null || this.dragName() !== null) return;
+  select(row: ServerChoiceRow): void {
+    if (row.selected || this.switching() !== null) return;
     this.switching.set(row.name);
-    this.crucible.setRunning(row.name, !row.enabled).subscribe({
+    this.crucible.select(row.name).subscribe({
       next: (routing) => {
         this.view.update((view) => (view === null ? view : { ...view, routing }));
         this.switching.set(null);
@@ -228,13 +227,6 @@ export class CruciblePaneComponent {
     });
   }
 
-  forgetRank(name: string): void {
-    this.crucible.forgetRank(name).subscribe({
-      next: (routing) => this.view.update((view) => (view === null ? view : { ...view, routing })),
-      error: (refusal: CrucibleRefusal) => this.flash(refusal.message),
-    });
-  }
-
   addThisComputer(): void {
     this.crucible.addDiscovered().subscribe({
       next: (added) => {
@@ -243,55 +235,6 @@ export class CruciblePaneComponent {
       },
       error: (refusal: CrucibleRefusal) => this.flash(refusal.message),
     });
-  }
-
-  // ── drag to rank ─────────────────────────────────────────────────────
-
-  onDragStart(name: string, event: DragEvent): void {
-    this.dragName.set(name);
-    this.dragOrder.set(this.rows().map((row) => row.name));
-    event.dataTransfer?.setData('text/plain', name);
-    if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
-  }
-
-  onDragOver(event: DragEvent, over: string): void {
-    const dragging = this.dragName();
-    const order = this.dragOrder();
-    if (dragging === null || order === null) return;
-    event.preventDefault();
-    if (dragging === over) return;
-    const next = order.filter((name) => name !== dragging);
-    next.splice(next.indexOf(over) + (order.indexOf(dragging) < order.indexOf(over) ? 1 : 0), 0, dragging);
-    this.dragOrder.set(next);
-  }
-
-  onDrop(event: DragEvent): void {
-    event.preventDefault();
-    const order = this.dragOrder();
-    const before = this.view()?.routing.ranked.map((row) => row.name) ?? [];
-    this.dragName.set(null);
-    if (order === null || order.join('\n') === before.join('\n')) {
-      this.dragOrder.set(null);
-      return;
-    }
-    this.crucible.setOrder(order).subscribe({
-      next: (routing) => {
-        this.view.update((view) => (view === null ? view : { ...view, routing }));
-        this.dragOrder.set(null);
-      },
-      error: (refusal: CrucibleRefusal) => {
-        this.dragOrder.set(null);
-        this.flash(refusal.message);
-      },
-    });
-  }
-
-  onDragEnd(): void {
-    // A drop already cleared these; a drag abandoned outside the list restores the rank.
-    if (this.dragName() !== null) {
-      this.dragName.set(null);
-      this.dragOrder.set(null);
-    }
   }
 
   // ── add: pairing by address ───────────────────────────────────────────

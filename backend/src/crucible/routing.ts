@@ -1,62 +1,66 @@
 /**
- * WHICH CRUCIBLE SERVERS THE QUEUE MAY USE, AND IN WHAT ORDER.
+ * WHICH CRUCIBLE SERVER BRIEFCASE USES: exactly one, the one the user selected.
  *
- * Ported from BookForge's electron/crucible/routing.ts. The registry owns
- * which servers exist; this owns preference, as a second file, so re-ranking
- * never rewrites a token and removing a server never loses a rank it might get
- * back:
+ * The registry owns which servers exist; this owns the choice, as a second
+ * file, so switching never rewrites a token:
  *
  *   <Briefcase config dir>/crucible-routing.json
- *   { "order": ["3090 Ti", "mac"], "disabled": ["mac"] }
+ *   { "selected": "crucible@owens-mac-studio" }
  *
- * `disabled` is the per-server Running/Paused switch. BookForge's third key,
- * `newJobsWaitFor`, is not carried: Briefcase's queue (P4) always takes the
- * first enabled, reachable server in rank order. A record that carries it is
- * read without complaint and written back without it.
+ * Every GPU and cloud job goes to the selected server. There is no ranking and
+ * no hand-off: a busy server makes work wait for it, and an unreachable one
+ * makes work wait with its reason. Work moves to another server only when the
+ * user selects that server.
  *
- * The rules, each from crucible docs/PHASE7-LANES.md §4.2.2:
- *  - rank is the list's order; there is no rank number;
- *  - a newly added server lands at the BOTTOM (a server the order does not
- *    name yet ranks after every server it does);
- *  - an order that names a server the registry no longer has is REPORTED
- *    (`unknown`), never silently pruned;
+ * The rules:
+ *  - the first server added is selected when it is added; later ones are not;
+ *  - no choice ever recorded (no file) and exactly one server registered:
+ *    that one. Removing the selected server records "none", so the user
+ *    chooses again: the remaining server is never picked for them;
+ *  - a record written before selection existed (`{order, disabled}`, the
+ *    ranked list) reads as its first running server; it is rewritten only
+ *    when the user next selects;
+ *  - a selected server the registry no longer has is REPORTED (`missing`),
+ *    never swapped for another;
  *  - a corrupt record is refused, never replaced.
  */
 import * as fs from 'fs';
 import * as path from 'path';
 import { CrucibleRoutingError } from './errors';
-import type { RankedServerRow, RoutingView } from './wire/settings-wire';
+import type { RoutingView } from './wire/settings-wire';
 
 export const ROUTING_FILE = 'crucible-routing.json';
 
 export interface RoutingRecord {
-  order: string[];
-  disabled: string[];
+  selected: string | null;
 }
 
 export class Routing {
   constructor(readonly file: string) {}
 
-  read(): RoutingRecord {
-    if (!fs.existsSync(this.file)) return { order: [], disabled: [] };
+  /** The recorded choice; `recorded` is false when no choice was ever written. */
+  read(): RoutingRecord & { recorded: boolean } {
+    if (!fs.existsSync(this.file)) return { selected: null, recorded: false };
     let parsed: unknown;
     try {
       parsed = JSON.parse(fs.readFileSync(this.file, 'utf-8'));
     } catch (err) {
-      throw new CrucibleRoutingError(
-        'corrupt_routing',
-        `${this.file} is not valid JSON (${(err as Error).message}). It records which Crucible servers `
-          + 'the queue may use and in what order, so nothing here will replace it. Repair or delete it by hand.',
-      );
+      throw this.corrupt(`is not valid JSON (${(err as Error).message})`);
     }
-    const record = parsed as Partial<RoutingRecord> | null;
-    for (const key of ['order', 'disabled'] as const) {
-      const value = record?.[key];
-      if (!Array.isArray(value) || value.some((name) => typeof name !== 'string' || name === '')) {
-        throw new CrucibleRoutingError('corrupt_routing', `${this.file}: "${key}" must be an array of server names. Repair or delete it by hand.`);
-      }
+    const record = parsed as Record<string, unknown> | null;
+    if (record === null || typeof record !== 'object' || Array.isArray(record)) throw this.corrupt('is not an object');
+    if ('selected' in record) {
+      const selected = record.selected;
+      if (selected !== null && (typeof selected !== 'string' || selected === '')) throw this.corrupt('has a "selected" that is neither a server name nor null');
+      return { selected: selected as string | null, recorded: true };
     }
-    return { order: [...(record!.order as string[])], disabled: [...(record!.disabled as string[])] };
+    // The ranked record from before selection: its first running server.
+    const order = record.order;
+    const disabled = record.disabled ?? [];
+    const isNames = (value: unknown): value is string[] => Array.isArray(value) && value.every((name) => typeof name === 'string' && name !== '');
+    if (!isNames(order) || !isNames(disabled)) throw this.corrupt('is neither {selected} nor the older {order, disabled}');
+    const paused = new Set(disabled);
+    return { selected: order.find((name) => !paused.has(name)) ?? null, recorded: false };
   }
 
   private write(record: RoutingRecord): void {
@@ -66,94 +70,62 @@ export class Routing {
     fs.renameSync(temp, this.file);
   }
 
-  /** The record resolved against the servers that exist, best first. */
+  /** The choice resolved against the servers that exist. */
   view(known: readonly string[]): RoutingView {
     const record = this.read();
-    const knownSet = new Set(known);
-    const disabled = new Set(record.disabled);
-    const ranked: RankedServerRow[] = [];
-    const seen = new Set<string>();
-    for (const name of [...record.order, ...known]) {
-      if (!knownSet.has(name) || seen.has(name)) continue;
-      seen.add(name);
-      ranked.push({ name, enabled: !disabled.has(name) });
+    let selected: string | null = null;
+    let missing: string | null = null;
+    if (record.selected !== null) {
+      if (known.includes(record.selected)) selected = record.selected;
+      else missing = record.selected;
+    } else if (!record.recorded && known.length === 1) {
+      selected = known[0]!;
     }
-    const mentioned = new Set([...record.order, ...record.disabled]);
-    return { ranked, unknown: [...mentioned].filter((name) => !knownSet.has(name)) };
+    return { servers: known.map((name) => ({ name, selected: name === selected })), selected, missing };
   }
 
-  /**
-   * Re-rank. `next` is the whole visible list, best first. A drag reorders a
-   * list; it does not add or drop a row, so an order that omits a known server
-   * or names an unknown one is refused. Names kept for removed servers stay at
-   * the end.
-   */
-  setOrder(next: readonly string[], known: readonly string[]): RoutingView {
-    const seen = new Set<string>();
-    for (const name of next) {
-      if (seen.has(name)) throw new CrucibleRoutingError('duplicate_in_order', `"${name}" appears twice in the new order.`);
-      seen.add(name);
-      if (!known.includes(name)) throw this.unknown(name, known);
-    }
-    const missing = known.filter((name) => !seen.has(name));
-    if (missing.length > 0) {
+  /** The user's choice. Refuses a name that is not registered. */
+  select(name: string, known: readonly string[]): RoutingView {
+    if (!known.includes(name)) {
       throw new CrucibleRoutingError(
-        'incomplete_order',
-        `The new order does not name ${missing.join(', ')}. A re-rank carries the whole list.`,
+        'unknown_server',
+        `"${name}" is not one of this machine's Crucible servers (${known.length === 0 ? 'there are none' : `known: ${known.join(', ')}`}).`,
       );
     }
-    const record = this.read();
-    const kept = record.order.filter((name) => !known.includes(name) && !seen.has(name));
-    this.write({ ...record, order: [...next, ...kept] });
+    this.write({ selected: name });
     return this.view(known);
   }
 
-  /** Running (true) or Paused (false). */
-  setEnabled(name: string, enabled: boolean, known: readonly string[]): RoutingView {
-    if (!known.includes(name)) throw this.unknown(name, known);
-    const record = this.read();
-    const disabled = record.disabled.filter((entry) => entry !== name);
-    if (!enabled) disabled.push(name);
-    this.write({ ...record, disabled });
-    return this.view(known);
+  /** A server was just added (`known` includes it): it is selected only when nothing was. */
+  added(name: string, known: readonly string[]): void {
+    const before = this.view(known.filter((entry) => entry !== name));
+    if (before.selected === null && before.missing === null) this.write({ selected: name });
+    else if (before.selected !== null && this.read().selected === null) this.write({ selected: before.selected });
   }
 
-  /** Drop a name the record mentions that no server answers to. Refuses a known name. */
-  forget(name: string, known: readonly string[]): RoutingView {
-    if (known.includes(name)) {
-      throw new CrucibleRoutingError(
-        'server_is_known',
-        `"${name}" is one of this machine's Crucible servers. Pause it, or remove it from the list.`,
-      );
-    }
-    const record = this.read();
-    this.write({
-      order: record.order.filter((entry) => entry !== name),
-      disabled: record.disabled.filter((entry) => entry !== name),
-    });
-    return this.view(known);
+  /** A server was just removed: when it was the selection, nothing is selected (never another server). */
+  removed(name: string): void {
+    if (this.read().selected === name) this.write({ selected: null });
   }
 
-  /** The servers the queue may use, best first. Refuses by name when there are none. */
-  ranked(known: readonly string[]): RankedServerRow[] {
-    const { ranked } = this.view(known);
-    const enabled = ranked.filter((row) => row.enabled);
-    if (enabled.length === 0) {
-      throw new CrucibleRoutingError(
-        'no_enabled_server',
-        ranked.length === 0
-          ? 'No Crucible server is connected. Add one in Settings › Crucible Servers.'
-          : `Every Crucible server is paused (${ranked.map((row) => row.name).join(', ')}). `
-            + 'Set one to Running in Settings › Crucible Servers.',
-      );
-    }
-    return enabled;
+  /** The server all work goes to. Refuses by name when there is none. */
+  selectedServer(known: readonly string[]): string {
+    const view = this.view(known);
+    if (view.selected !== null) return view.selected;
+    throw new CrucibleRoutingError(
+      'no_selected_server',
+      known.length === 0
+        ? 'No Crucible server is connected. Add one in Settings › Crucible Servers.'
+        : view.missing !== null
+          ? `The selected Crucible server "${view.missing}" isn't connected any more. Select a server in Settings › Crucible Servers.`
+          : 'No Crucible server is selected. Select one in Settings › Crucible Servers.',
+    );
   }
 
-  private unknown(name: string, known: readonly string[]): CrucibleRoutingError {
+  private corrupt(what: string): CrucibleRoutingError {
     return new CrucibleRoutingError(
-      'unknown_server',
-      `"${name}" is not one of this machine's Crucible servers (${known.length === 0 ? 'there are none' : `known: ${known.join(', ')}`}).`,
+      'corrupt_routing',
+      `${this.file} ${what}. It records which Crucible server Briefcase uses, so nothing here will replace it. Repair or delete it by hand.`,
     );
   }
 }

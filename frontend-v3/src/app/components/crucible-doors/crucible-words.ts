@@ -132,7 +132,6 @@ export function laneStateLine(lane: Pick<LaneView, 'state' | 'detail'>): string 
     case 'ready': return 'Ready';
     case 'busy': return lane.detail ? `Busy: ${lane.detail}` : 'Busy';
     case 'unreachable': return 'Not answering';
-    case 'paused': return 'Paused';
     case 'unavailable': return lane.detail ? `Unavailable: ${lane.detail}` : 'Unavailable';
   }
 }
@@ -151,7 +150,3 @@ export function laneWaiting(waiting: number): string | null {
   return waiting > 0 ? `${waiting} waiting` : null;
 }
 
-/** The GPU server switch's word: Running, or Paused. */
-export function laneSwitchWord(paused: boolean): string {
-  return paused ? 'Paused' : 'Running';
-}

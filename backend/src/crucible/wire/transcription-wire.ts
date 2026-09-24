@@ -10,8 +10,6 @@ import type { ServerReach } from './settings-wire';
  * offline whisper-cli transcriber and the `translate` option).
  */
 export interface TranscriptionSettingWire {
-  /** A registered server name, or null for the best-ranked running one that offers asr. */
-  server: string | null;
   /** A Crucible asr model id, or null for the most accurate one installed. */
   model: string | null;
 }
@@ -25,7 +23,6 @@ export interface TranscriptionModelRow {
 
 export interface TranscriptionServerView {
   name: string;
-  enabled: boolean;
   reach: ServerReach | null;
   /** `mlx-darwin`, `cuda-linux`, or null when the server could not be read. */
   backend: string | null;
@@ -50,7 +47,8 @@ export interface TranscriptionView {
   /** False when nobody has saved a transcription setting yet. */
   explicit: boolean;
   ignored: string | null;
-  servers: TranscriptionServerView[];
+  /** The selected Crucible server, as transcription sees it; null when none is selected. */
+  server: TranscriptionServerView | null;
   /** Where a transcription queued now would run. */
   route: TranscriptionRouteWire;
 }

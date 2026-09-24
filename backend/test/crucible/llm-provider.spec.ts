@@ -325,7 +325,7 @@ describe('a whole analysis through Crucible', () => {
     expect(windows.every((w) => typeof w === 'number' && w >= 4096 && w <= 12288 && (w as number) % 4096 === 0)).toBe(true);
     // The server's X-Crucible-Context is logged once for the model.
     expect(logged.filter((m) => /ollama\/qwen3\.8:27b runs with .*"source":"request"/.test(m))).toHaveLength(1);
-    expect(logged.filter((m) => /no Crucible server has that model of its own/.test(m))).toHaveLength(1);
+    expect(logged.filter((m) => /the selected Crucible server has no model of its own for it/.test(m))).toHaveLength(1);
   });
 
   it('zero successful chapters throws, never completes empty, and still releases the lease', async () => {

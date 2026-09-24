@@ -6,11 +6,10 @@
  *   withRun(fn)                                 the same, with the model(s) taken lazily per call
  *
  * VENUE. An explicit `server`, else the server a surrounding run already holds
- * the model on, else the first ENABLED server in rank order that answers and
- * can serve it (a local model it has installed; an upstream it has
- * configured). A paused server is never chosen. When no server qualifies but
- * one answers, that one is asked anyway, so the refusal the user sees is the
- * server's own sentence ("anthropic has no key") rather than a guess.
+ * the model on, else the SELECTED server (Settings › Crucible Servers) when it
+ * answers. It is asked even when it can't serve the target, so the refusal the
+ * user sees is the server's own sentence ("anthropic has no key") rather than
+ * a guess. Work never moves to another server on its own.
  *
  * LOCAL MODELS are made resident with a `load-model` job (its events followed
  * to the end) and, inside a run, held with a lease heartbeaten every 40 s
@@ -242,7 +241,7 @@ interface RunScope {
   options: RunOptions;
   /** Set when a call inside the run chose to park: the queue reads it after the task returns. */
   parked: { server: string | null; reason: string } | null;
-  /** The server each model was placed on in this run, so a run never re-ranks mid-way. */
+  /** The server each model was placed on in this run, so a run never moves mid-way (not even when the user switches servers). */
   placed: Map<string, string>;
   /** What each `ollama/` choice was decided to run as in this run, so it never flips mid-way. */
   mapped: Map<string, EffectiveTarget>;
@@ -681,10 +680,10 @@ export class CrucibleChatService {
 
   /**
    * What `target` runs as. Anything but `ollama/<tag>` is itself. An Ollama
-   * tag is looked up on `server` (when the caller pinned one), else on each
-   * enabled server in rank order that answers; the first with a matching local
-   * model (ollama-map.ts) serves it as that model. No match anywhere: the
-   * `ollama/` upstream, as chosen. Inside a run the answer is kept, so a run
+   * tag is looked up on `server` (when the caller pinned one), else on the
+   * selected server when it answers; a matching local model there
+   * (ollama-map.ts) serves it as that model. No match: the `ollama/` upstream,
+   * as chosen. Inside a run the answer is kept, so a run
    * never switches models between calls.
    */
   async effectiveTarget(target: CrucibleTarget, server?: string): Promise<EffectiveTarget> {
@@ -700,10 +699,9 @@ export class CrucibleChatService {
     } else {
       candidates = [];
       try {
-        for (const row of this.servers.ranked()) {
-          const answer = await this.probes.reach(row.name);
-          if (answer.reach === 'ready' || answer.reach === 'busy') candidates.push(row.name);
-        }
+        const selected = this.servers.selected();
+        const answer = await this.probes.reach(selected);
+        if (answer.reach === 'ready' || answer.reach === 'busy') candidates.push(selected);
       } catch {
         candidates = [];
       }
@@ -733,7 +731,7 @@ export class CrucibleChatService {
         this.logger.log(`[${chosen.server}] ${target.model} runs as ${chosen.target.model}, this server's own copy of that model`
           + (chosen.loadContext === undefined ? '' : `, loaded at ${chosen.loadContext} tokens`));
       }
-      else this.logger.log(`${target.model}: no Crucible server has that model of its own, so it goes to Ollama through Crucible`);
+      else this.logger.log(`${target.model}: the selected Crucible server has no model of its own for it, so it goes to Ollama through Crucible`);
     }
     scope?.mapped.set(key, chosen);
     return chosen;
@@ -781,30 +779,20 @@ export class CrucibleChatService {
   // ── venue ──────────────────────────────────────────────────────────────
 
   /**
-   * The first enabled, reachable server (rank order) that can serve `target`;
-   * failing that, the first reachable one (so its refusal names the fix).
+   * The selected server, when it answers. It is returned even when it can't
+   * serve `target`, so its own refusal names the fix. Never another server.
    */
-  async venueFor(target: CrucibleTarget): Promise<string> {
-    let ranked: string[];
+  async venueFor(_target: CrucibleTarget): Promise<string> {
+    let selected: string;
     try {
-      ranked = this.servers.ranked().map((row) => row.name);
+      selected = this.servers.selected();
     } catch (err) {
       throw new CrucibleNoVenueError((err as Error).message);
     }
-    const reachable: string[] = [];
-    const unreachable: string[] = [];
-    for (const name of ranked) {
-      const answer = await this.probes.reach(name);
-      if (answer.reach !== 'ready' && answer.reach !== 'busy') {
-        unreachable.push(`${name} (${answer.reach})`);
-        continue;
-      }
-      reachable.push(name);
-      if (await this.canServe(name, target)) return name;
-    }
-    if (reachable.length > 0) return reachable[0];
+    const answer = await this.probes.reach(selected);
+    if (answer.reach === 'ready' || answer.reach === 'busy') return selected;
     throw new CrucibleNoVenueError(
-      `No Crucible server is answering (${unreachable.join(', ')}). Check it is running, or connect another in Settings › Crucible Servers.`,
+      `Crucible on ${selected} isn't answering (${answer.reach.replace(/_/g, ' ')}). Check it is running, or select another server in Settings › Crucible Servers.`,
     );
   }
 

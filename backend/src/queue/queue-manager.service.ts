@@ -133,7 +133,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
     this.startWatchdog();
 
     {
-      // A server added, removed, re-ranked, paused or resumed: parked work is
+      // A server added, removed or selected: parked work is
       // asked again at once (§7.2 step 4), and the lane strip redrawn.
       this.unsubscribeServers = this.lanes.onServersChanged(() => {
         for (const job of this.jobQueue.values()) {
@@ -1343,11 +1343,6 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
     this.logger.error(`[${job.id}] ${task.type} cannot run: ${reason}`);
     this.emitTaskFailed({ taskId: job.id, jobId: job.id, videoId: job.videoId, type: task.type, message: reason });
     setTimeout(() => this.jobQueue.delete(job.id), 5000);
-  }
-
-  /** Running (false) or Paused (true) for one server: the routing record's switch (P1). */
-  setServerPaused(server: string, paused: boolean): void {
-    this.lanes.setPaused(server, paused);
   }
 
   /** The lane strip, as the queue tab draws it. */

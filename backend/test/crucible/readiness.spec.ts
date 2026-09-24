@@ -140,11 +140,12 @@ describe('the states, and the one door each offers', () => {
     expect(view.reason).toMatch(/Intel processor.*Connect to a Crucible on another computer/);
   });
 
-  it('not configured: every registered server is paused', async () => {
+  it('not configured: servers are registered but none is selected (the selected one was removed)', async () => {
     fake = await startFakeCrucible();
     h.registry.add({ name: 'mac', url: fake.url, token: fake.token });
-    new CrucibleServersService(h.registry, h.factory).pause('mac');
-    expect(await readiness.refresh()).toMatchObject({ state: 'not-configured', action: 'connect', reason: expect.stringMatching(/paused/) });
+    h.registry.add({ name: 'pc', url: 'http://127.0.0.1:9', token: 'tok-pc' });
+    h.registry.remove('mac');
+    expect(await readiness.refresh()).toMatchObject({ state: 'not-configured', action: 'connect', reason: expect.stringMatching(/No Crucible server is selected/) });
   });
 
   it('starting while an install runs, with its latest step', async () => {

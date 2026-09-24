@@ -1,5 +1,4 @@
-// Queue lanes header strip. GPU cards follow the house card-toggle pattern
-// (add-popover's .trim-row): the whole card toggles, orange border when on.
+// Queue lanes header strip: one reporting card per lane.
 :host {
   display: block;
   flex-shrink: 0;
@@ -27,52 +26,12 @@
   font-size: 12px;
   color: var(--text-secondary);
   outline: none;
-
-  &.toggle {
-    cursor: pointer;
-    transition: border-color 120ms ease, opacity 120ms ease;
-
-    &:hover {
-      border-color: var(--primary-orange);
-    }
-
-    &:focus-visible {
-      box-shadow: 0 0 0 2px var(--primary-orange);
-    }
-
-    &.on {
-      border-color: rgba(255, 107, 53, 0.5);
-    }
-
-    &:not(.on) {
-      opacity: 0.75;
-    }
-
-    &.switching {
-      cursor: progress;
-    }
-  }
 }
 
 .lane-label {
   font-weight: 600;
   color: var(--text-primary);
   white-space: nowrap;
-}
-
-.lane-switch {
-  padding: 1px 8px;
-  border-radius: 10px;
-  font-size: 11px;
-  font-weight: 600;
-  background: rgba(255, 107, 53, 0.15);
-  color: var(--primary-orange);
-  white-space: nowrap;
-
-  &.off {
-    background: var(--bg-card);
-    color: var(--text-secondary);
-  }
 }
 
 .lane-state {

@@ -1,8 +1,8 @@
 <h2 class="pane-title">Crucible Servers</h2>
 <p class="pane-lede">
   Crucible is the AI engine Briefcase uses: it runs the models on a computer's GPU and holds your
-  connections to Claude, OpenAI and Ollama via Crucible. Briefcase uses the one on this computer and any you connect
-  below, over the network, the same way either way.
+  connections to Claude, OpenAI and Ollama via Crucible. Briefcase can use the one on this computer or one you connect
+  below over the network, the same way either way.
 </p>
 
 @if (loadError(); as err) {
@@ -21,46 +21,44 @@
 
 <div class="pane-section">
   <div class="cru-head">
-    <p class="section-label">Servers Briefcase may use</p>
+    <p class="section-label">Server Briefcase uses</p>
     <ui-button variant="ghost" size="sm" (pressed)="reload()">Re-check</ui-button>
   </div>
   <p class="hint cru-sub">
-    Drag to set the order: the first one that is free gets the work. Click a server to switch it
-    between Running and Paused. A paused server is given no new work, while work already on it finishes.
+    Click a server to use it. All transcription and AI work goes to the selected server, and waits for it
+    while it is busy. Work never moves to another server unless you select that one. Work already running
+    finishes where it started.
   </p>
+
+  @if (missing(); as name) {
+    <p class="cru-refusal">The selected server "{{ name }}" isn't connected any more. Select a server to run AI work.</p>
+  } @else if (noneSelected()) {
+    <p class="cru-refusal">No server is selected. Select one to run AI work.</p>
+  }
 
   @if (view() !== null && rows().length === 0) {
     <p class="cru-empty">No Crucible server yet. Add one below.</p>
   }
 
-  <div class="cru-list" (dragover)="$event.preventDefault()" (drop)="onDrop($event)">
+  <div class="cru-list" role="radiogroup" aria-label="Crucible server Briefcase uses">
     @for (row of rows(); track row.name) {
       <div
         class="cru-card"
-        [class.on]="row.enabled"
-        [class.dragging]="dragName() === row.name"
+        [class.on]="row.selected"
         [class.busy-switch]="switching() === row.name"
-        role="switch"
+        role="radio"
         tabindex="0"
-        [attr.aria-checked]="row.enabled"
-        [attr.aria-label]="row.name + (row.enabled ? ', running' : ', paused')"
-        draggable="true"
-        (click)="toggleRunning(row)"
-        (keydown.enter)="toggleRunning(row)"
-        (keydown.space)="$event.preventDefault(); toggleRunning(row)"
-        (dragstart)="onDragStart(row.name, $event)"
-        (dragover)="onDragOver($event, row.name)"
-        (dragend)="onDragEnd()">
-        <span class="cru-grip" title="Drag to re-order" aria-hidden="true">
-          <span></span><span></span><span></span>
-        </span>
-
+        [attr.aria-checked]="row.selected"
+        [attr.aria-label]="row.name + (row.selected ? ', selected' : '')"
+        (click)="select(row)"
+        (keydown.enter)="select(row)"
+        (keydown.space)="$event.preventDefault(); select(row)">
         <div class="cru-main">
           <div class="cru-title">
             <span class="cru-name">{{ row.name }}</span>
-            <span class="pill" [class.ok]="row.enabled" [class.off]="!row.enabled">
-              {{ row.enabled ? 'Running' : 'Paused' }}
-            </span>
+            @if (row.selected) {
+              <span class="pill ok">Selected</span>
+            }
             @if (probes()[row.name]; as answer) {
               <span class="cru-reach" [attr.data-reach]="answer.reach">{{ reachWord(answer.reach) }}</span>
             } @else {
@@ -123,18 +121,6 @@
       </div>
     }
   </div>
-
-  @for (name of unknown(); track name) {
-    <div class="row-card cru-stale">
-      <div class="row-main">
-        <div class="row-name">{{ name }}</div>
-        <div class="row-desc">Ranked here, but no longer connected. Its place is kept in case it comes back.</div>
-      </div>
-      <div class="row-actions">
-        <ui-button variant="ghost" size="sm" (pressed)="forgetRank(name)">Forget it</ui-button>
-      </div>
-    </div>
-  }
 
   @if (note(); as message) {
     <p class="hint cru-note">{{ message }}</p>

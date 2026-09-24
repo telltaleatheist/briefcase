@@ -11,8 +11,8 @@
  *
  * Behind it: `<userData>/crucible-servers.json` (`{servers: [{name, url, token,
  * added}]}`, BookForge's shape) and `<userData>/crucible-routing.json`
- * (`{order, disabled}`), where `<userData>` is `getBriefcaseConfigDir()`,
- * owned by the NestJS backend. The extra methods (rank, pause, add, remove)
+ * (`{selected}`), where `<userData>` is `getBriefcaseConfigDir()`,
+ * owned by the NestJS backend. The extra methods (select, add, remove)
  * are the same records the Settings pane writes; the pane itself goes through
  * CrucibleController.
  */
@@ -20,7 +20,7 @@ import { Injectable } from '@nestjs/common';
 import type { CrucibleClient } from '@crucible/client';
 import { CrucibleClientFactory } from './client-factory';
 import { CrucibleRegistryService } from './registry.service';
-import type { RankedServerRow, RoutingView } from './wire/settings-wire';
+import type { RoutingView } from './wire/settings-wire';
 
 export interface CrucibleServerListing {
   name: string;
@@ -59,9 +59,9 @@ export class CrucibleServersService {
 
   // ── extras: the same records the Settings pane writes ────────────────
 
-  /** Running servers, best first. Throws `no_enabled_server` by name when there are none. */
-  ranked(): RankedServerRow[] {
-    return this.registry.rankedEnabled();
+  /** The server all work goes to. Throws `no_selected_server` by name when there is none. */
+  selected(): string {
+    return this.registry.selected();
   }
 
   routing(): RoutingView {
@@ -78,15 +78,7 @@ export class CrucibleServersService {
     return { name, url, added };
   }
 
-  setOrder(order: readonly string[]): RoutingView {
-    return this.registry.setOrder(order);
-  }
-
-  pause(name: string): RoutingView {
-    return this.registry.setEnabled(name, false);
-  }
-
-  resume(name: string): RoutingView {
-    return this.registry.setEnabled(name, true);
+  select(name: string): RoutingView {
+    return this.registry.select(name);
   }
 }

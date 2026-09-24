@@ -11,7 +11,7 @@
  */
 
 /**
- *   ready           an enabled server answers: AI actions run.
+ *   ready           the selected server answers: AI actions run.
  *   starting        Briefcase is starting (or installing) the Crucible on this
  *                   computer; AI actions wait for it.
  *   unreachable     a server is registered (or installed here) and none answers.

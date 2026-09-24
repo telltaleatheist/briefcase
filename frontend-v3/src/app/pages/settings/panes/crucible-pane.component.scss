@@ -82,15 +82,21 @@
   }
 
   &.on {
-    border-color: rgba(255, 107, 53, 0.5);
+    border-color: var(--primary-orange);
+    cursor: default;
   }
 
   &:not(.on) .cru-main {
     opacity: 0.7;
   }
 
-  &.dragging {
-    opacity: 0.5;
+  &.busy-switch {
+    cursor: progress;
+  }
+}
+
+.cru-main {
+    opacity: 0.7;
   }
 
   &.busy-switch {
@@ -215,11 +221,6 @@
   margin-right: 4px;
 }
 
-.cru-stale {
-  margin-top: 8px;
-  border-style: dashed;
-}
-
 .cru-note {
   margin-top: 10px;
 }
@@ -247,7 +248,8 @@
   }
 
   &.on {
-    border-color: rgba(255, 107, 53, 0.5);
+    border-color: var(--primary-orange);
+    cursor: default;
   }
 
   input {

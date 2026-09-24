@@ -9,13 +9,13 @@
  * derived from the P1 registry and probe and the P2 local presence, and
  * pushed on Socket.IO `crucible.readiness` whenever the answer changes.
  *
- *   ready           an enabled server answers (a busy card is still ready: the
+ *   ready           the selected server answers (a busy card is still ready: the
  *                   work queues and parks until the holder is done).
  *   starting        Briefcase is starting (or installing) the local Crucible.
- *   unreachable     a server is registered, or installed here, and none answers.
+ *   unreachable     the selected server, or the one installed here, doesn't answer.
  *   not-installed   nothing registered or installed, and this computer can host one.
  *   not-configured  nothing registered and this computer cannot host one, or
- *                   every registered server is paused.
+ *                   no registered server is selected.
  *
  * BRINGING IT UP. When AI work is waiting on it (queued tasks parked because
  * Crucible is not there) and the Crucible on this computer is installed but
@@ -47,7 +47,7 @@ import {
   type CrucibleReadinessView,
   type CrucibleRequiredRefusal,
 } from './wire/readiness-wire';
-import type { RankedServerRow } from './wire/settings-wire';
+import type { RoutingView } from './wire/settings-wire';
 
 /** How often the answer is derived again on its own: often while AI can't run, rarely while it can. */
 export const READINESS_REFRESH_MS = { notReady: 10_000, ready: 30_000 } as const;
@@ -241,7 +241,7 @@ export class CrucibleReadinessService implements OnApplicationBootstrap, OnAppli
           this.logger.log(`Crucible started on this computer${outcome.connectedAs ? `, connected as "${outcome.connectedAs}"` : ''}`);
         }
         this.presenceCache = null;
-        for (const row of this.rows()) this.probes.test(row.name).catch(() => undefined);
+        for (const row of this.routing().servers) this.probes.test(row.name).catch(() => undefined);
       } catch (err) {
         this.startFailure = `Crucible could not be started on this computer (${(err as Error)?.message ?? err}).`;
         this.logger.warn(this.startFailure);
@@ -255,11 +255,11 @@ export class CrucibleReadinessService implements OnApplicationBootstrap, OnAppli
 
   // ── derivation ─────────────────────────────────────────────────────────
 
-  private rows(): RankedServerRow[] {
+  private routing(): RoutingView {
     try {
-      return this.servers.routing().ranked;
+      return this.servers.routing();
     } catch {
-      return [];
+      return { servers: [], selected: null, missing: null };
     }
   }
 
@@ -284,8 +284,8 @@ export class CrucibleReadinessService implements OnApplicationBootstrap, OnAppli
 
   /** Before the first derivation: the registry alone, no network. */
   private provisional(): CrucibleReadinessView {
-    const rows = this.rows();
-    if (rows.length > 0) return this.answer('unreachable', `Checking Crucible on ${rows[0].name}...`, null);
+    const { selected } = this.routing();
+    if (selected !== null) return this.answer('unreachable', `Checking Crucible on ${selected}...`, null);
     return this.answer('not-configured', 'Checking for Crucible...', null);
   }
 
@@ -318,36 +318,39 @@ export class CrucibleReadinessService implements OnApplicationBootstrap, OnAppli
     if (this.startingLine !== null || this.install.status().running) {
       return this.answer('starting', this.startingLine !== null ? 'Crucible is starting on this computer.' : 'Crucible is being installed on this computer.', null);
     }
-    const rows = this.rows();
-    const enabled = rows.filter((row) => row.enabled);
-    const silent: string[] = [];
-    for (const row of enabled) {
-      const answer = await this.probes.reach(row.name);
+    const routing = this.routing();
+    const selected = routing.selected;
+    let silent: string | null = null;
+    if (selected !== null) {
+      const answer = await this.probes.reach(selected);
       if (answer.reach === 'ready' || answer.reach === 'busy') {
         this.autoStartTried = false;
         this.startFailure = null;
         const busy = answer.reach === 'busy' && answer.probe.outcome === 'ok' ? answer.probe.facts.busyLine : null;
-        return this.answer('ready', `Crucible on ${row.name} is ready${busy ? ` (${busy}; AI work waits its turn)` : ''}.`, null, { server: row.name, busy });
+        return this.answer('ready', `Crucible on ${selected} is ready${busy ? ` (${busy}; AI work waits its turn)` : ''}.`, null, { server: selected, busy });
       }
-      silent.push(answer.probe.outcome === 'ok' ? `Crucible on ${row.name} isn't answering` : answer.probe.message.replace(/[.\s]+$/, ''));
+      silent = answer.probe.outcome === 'ok' ? `Crucible on ${selected} isn't answering` : answer.probe.message.replace(/[.\s]+$/, '');
     }
 
     const plan = this.plan();
     const here = plan.host.discovered;
     const failed = this.startFailure !== null ? ` ${this.startFailure}` : '';
 
-    if (rows.length > 0) {
-      if (enabled.length === 0) {
-        return this.answer('not-configured', 'Every Crucible server is paused. Resume one in Settings › Crucible Servers.', 'connect');
+    if (routing.servers.length > 0) {
+      if (selected === null) {
+        const why = routing.missing !== null
+          ? `The selected Crucible server "${routing.missing}" isn't connected any more.`
+          : 'No Crucible server is selected.';
+        return this.answer('not-configured', `${why} Select one in Settings › Crucible Servers.`, 'connect');
       }
       const localName = here.present ? here.registeredAs : null;
-      if (localName !== null && enabled.some((row) => row.name === localName)) {
+      if (localName !== null && selected === localName) {
         const presence = await this.presence();
         if (presence?.offerStart) {
           return this.answer('unreachable', `${presence.message ?? 'Crucible is stopped on this computer.'}${failed}`, 'start');
         }
       }
-      return this.answer('unreachable', `${silent.join('; ')}.${failed}`, 'connect');
+      return this.answer('unreachable', `${silent}.${failed}`, 'connect');
     }
 
     if (here.present) {

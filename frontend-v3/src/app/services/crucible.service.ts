@@ -84,16 +84,9 @@ export class CrucibleService {
     return this.refusal(this.http.delete<{ removed: CrucibleServerRow }>(this.server(name)));
   }
 
-  setRunning(name: string, running: boolean): Observable<RoutingView> {
-    return this.refusal(this.http.post<RoutingView>(`${this.server(name)}/${running ? 'resume' : 'pause'}`, {}));
-  }
-
-  setOrder(order: string[]): Observable<RoutingView> {
-    return this.refusal(this.http.put<RoutingView>(`${this.base}/routing`, { order }));
-  }
-
-  forgetRank(name: string): Observable<RoutingView> {
-    return this.refusal(this.http.post<RoutingView>(`${this.base}/routing/forget`, { name }));
+  /** Switch servers: all work not yet started goes to this one. */
+  select(name: string): Observable<RoutingView> {
+    return this.refusal(this.http.post<RoutingView>(`${this.server(name)}/select`, {}));
   }
 
   addByConnectCode(connectCode: string, name?: string): Observable<{ server: CrucibleServerRow }> {

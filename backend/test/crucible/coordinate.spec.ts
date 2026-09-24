@@ -153,11 +153,13 @@ describe('coordination', () => {
     });
   });
 
-  it('a paused server is asked nothing', async () => {
+  it('a server that is not the selected one is asked nothing', async () => {
     const { fake, h, service } = await rig();
-    h.registry.setEnabled('here', false);
+    h.registry.add({ name: 'elsewhere', url: 'http://127.0.0.1:9', token: 'tok-elsewhere' });
+    h.registry.select('elsewhere');
+    h.registry.remove('elsewhere');
     const before = fake.requests.length;
-    expect(await service.request('here', 'spec')).toMatchObject({ phase: 'unreachable', message: expect.stringContaining('paused') });
+    expect(await service.request('here', 'spec')).toMatchObject({ phase: 'unreachable', message: expect.stringContaining('not the selected server') });
     expect(fake.requests.length).toBe(before);
     // ...and coordinateAll skips it.
     expect(await service.coordinateAll('startup')).toEqual([]);
@@ -207,13 +209,17 @@ describe('the first-run hold', () => {
     expect(service.finishFirstRun().released).toBe(false);
   });
 
-  it('a server added while not held is coordinated on the registry\'s own announcement', async () => {
+  it('a server added beside the selected one is asked nothing; selecting it coordinates it, on the registry\'s own announcement', async () => {
     const { fake, h, service } = await rig(stockedForBriefcase());
     service.onApplicationBootstrap();
     try {
       const other = await startFakeCrucible({ name: 'crucible@pc', backend: 'cuda-linux' });
       open.push(other);
       h.registry.add({ name: 'pc', url: other.url, token: other.token });
+      await new Promise((r) => setTimeout(r, 100));
+      expect(service.all()['pc']).toBeUndefined();
+      expect(other.requests).toHaveLength(0);
+      h.registry.select('pc');
       const deadline = Date.now() + 5_000;
       while (service.all()['pc'] === undefined || service.all()['pc'].phase === 'checking') {
         if (Date.now() > deadline) throw new Error('not coordinated');
