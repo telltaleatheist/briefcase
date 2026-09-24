@@ -94,7 +94,9 @@ export class AddPopoverComponent {
    * A download never waits on Crucible: steps that need it are left out of the
    * composed pipeline by the embedded config while it is not ready.
    */
-  canSubmit = computed(() => this.urls().length > 0 && this.trimValid());
+  canSubmit = computed(() => this.urls().length > 0 && this.trimValid() && this.aiModelProblem() === null);
+  /** The embedded config's AI Analyze model is missing or can't run on the connected Crucible: why. */
+  aiModelProblem = computed(() => this.config()?.aiModelProblem() ?? null);
   submitLabel = computed(() => {
     const count = this.urls().length;
     return count > 1 ? `Download ${count}` : 'Download';
@@ -119,7 +121,7 @@ export class AddPopoverComponent {
 
   onSubmit(): void {
     const urls = this.urls();
-    if (urls.length === 0 || !this.trimValid()) return;
+    if (!this.canSubmit()) return;
     const config = this.config();
 
     const trimOn = this.trim();

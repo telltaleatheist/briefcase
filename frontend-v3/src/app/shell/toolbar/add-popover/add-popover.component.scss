@@ -243,6 +243,10 @@ textarea {
   margin: 10px 0 0;
   font-size: 11px;
   color: var(--text-tertiary);
+
+  &.warn {
+    color: var(--warning);
+  }
 }
 
 // THE primary action of the popover: full-width, the largest, final control.

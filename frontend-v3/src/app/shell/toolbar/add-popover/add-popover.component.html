@@ -101,6 +101,9 @@
       [showFooter]="false"
       (doorOpened)="$event !== 'start' && dismissed.emit()" />
 
+    @if (aiModelProblem(); as problem) {
+      <p class="hint warn">{{ problem }}</p>
+    }
     <p class="hint">Quality, trim, and steps are remembered — change anytime.</p>
   </div>
 

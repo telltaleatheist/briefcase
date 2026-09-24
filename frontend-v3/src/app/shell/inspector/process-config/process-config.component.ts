@@ -418,12 +418,17 @@ export class ProcessConfigComponent {
     if (external) return external;
     if (this.selectionCount() === 0) return 'Select at least one video';
     if (this.steps().length === 0) return 'Pick at least one step';
-    if (this.isEnabled('ai-analyze') && this.readiness.ready()) {
-      if (!this.aiModelValue()) return 'Pick an AI model for AI Analyze';
-      const unavailable = this.aiModelUnavailable();
-      if (unavailable) return unavailable;
-    }
-    return null;
+    return this.aiModelProblem();
+  });
+
+  /**
+   * AI Analyze is on and its model is missing or can't run on the connected
+   * server: why. Hosts with their own submit (the Add popover) read it too.
+   */
+  readonly aiModelProblem = computed<string | null>(() => {
+    if (!this.isEnabled('ai-analyze') || !this.readiness.ready()) return null;
+    if (!this.aiModelValue()) return 'Pick an AI model for AI Analyze';
+    return this.aiModelUnavailable();
   });
 
   canSubmit = computed(() => this.blockReason() === null);
