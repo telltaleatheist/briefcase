@@ -14,10 +14,6 @@ export class BatchConfigDto {
 
   @IsOptional()
   @IsBoolean()
-  transcribeVideo?: boolean = false;
-
-  @IsOptional()
-  @IsBoolean()
   useRmsNormalization?: boolean = false;
 
   @IsOptional()
@@ -70,10 +66,6 @@ export class DownloadVideoDto {
   @IsOptional()
   @IsBoolean()
   convertToMp4?: boolean = true;
-
-  @IsOptional()
-  @IsBoolean()
-  transcribeVideo?: boolean = false;
 
   @IsOptional()
   @IsBoolean()
