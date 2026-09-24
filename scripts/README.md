@@ -10,7 +10,6 @@ Briefcase bundles native binaries - no Python required!
 
 | Binary | Purpose | Source |
 |--------|---------|--------|
-| **whisper.cpp** | Audio transcription | Native C++ (Metal GPU on Mac) |
 | **yt-dlp** | Video downloading | Standalone executable |
 | **ffmpeg** | Media processing | @ffmpeg-installer package |
 | **ffprobe** | Media analysis | @ffprobe-installer package |
@@ -22,9 +21,9 @@ Briefcase bundles native binaries - no Python required!
 npm run download:binaries
 ```
 
-This runs `download-all-binaries.js` which downloads:
-1. yt-dlp for all platforms
-2. whisper.cpp with models
+This runs `download-all-binaries.js` which downloads yt-dlp for all platforms.
+AI (transcription, analysis) is not bundled: it runs on Crucible, which
+installs its own engines and models.
 
 **The download is automatically run before each packaging command:**
 ```bash
@@ -38,15 +37,13 @@ npm run package:linux       # Downloads binaries, then packages
 
 - `download-all-binaries.js` - Master script that downloads all binaries
 - `download-ytdlp.js` - Downloads yt-dlp for all platforms
-- `download-whisper-cpp.js` - Downloads whisper.cpp and models
 - `package-backend-prod.js` - Packages backend for production
 - `dev-test-bundled.js` - Development testing with bundled binaries
 
 ### Architecture
 
 Briefcase uses native binaries exclusively:
-- **Transcription**: whisper.cpp (C++ with Metal GPU acceleration on Mac)
-- **AI Analysis**: HTTP calls to Ollama/OpenAI/Claude (no local ML)
+- **Transcription and AI Analysis**: Crucible (a separate local or LAN server), over its HTTP API
 - **Video Processing**: ffmpeg/ffprobe
 - **Downloading**: yt-dlp standalone binary
 

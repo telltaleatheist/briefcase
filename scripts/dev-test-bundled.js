@@ -25,7 +25,6 @@ const binaries = {
   'yt-dlp': path.join(PROJECT_ROOT, 'utilities', 'bin', 'yt-dlp.exe'),
   'ffmpeg': path.join(PROJECT_ROOT, 'node_modules', '@ffmpeg-installer', 'win32-x64', 'ffmpeg.exe'),
   'ffprobe': path.join(PROJECT_ROOT, 'node_modules', '@ffprobe-installer', 'win32-x64', 'ffprobe.exe'),
-  'whisper': path.join(PROJECT_ROOT, 'utilities', 'bin', 'whisper-cli.exe'),
 };
 
 let allBinariesExist = true;
@@ -68,7 +67,6 @@ console.log('\n📋 Binary paths that will be used:');
 console.log(`   FFmpeg:  ${binaries['ffmpeg']}`);
 console.log(`   FFprobe: ${binaries['ffprobe']}`);
 console.log(`   yt-dlp:  ${binaries['yt-dlp']}`);
-console.log(`   Whisper: ${binaries['whisper']}`);
 
 // Step 4: Run Electron with environment variables pointing to bundled binaries
 console.log('\n🚀 Step 3: Starting Electron with bundled binaries...\n');
@@ -84,7 +82,6 @@ const env = {
   FFMPEG_PATH: binaries['ffmpeg'],
   FFPROBE_PATH: binaries['ffprobe'],
   YT_DLP_PATH: binaries['yt-dlp'],
-  WHISPER_PATH: binaries['whisper'],
   // Don't set NODE_ENV to production - we want dev tools
 };
 

@@ -19,17 +19,15 @@ export class ComponentManagerController {
   }
 
   @Post('install-component')
-  async installComponent(@Body() body: { id: string; force?: boolean }) {
+  async installComponent(@Body() body: { id: string }) {
     // Fire-and-forget; the frontend tracks progress via WebSocket events.
-    // `force` is the repair path — only locally-constructed components
-    // (python-env) can be rebuilt in place, everything else ignores it.
-    this.components.install(body.id, body.force === true).catch((err) => {
+    this.components.install(body.id).catch((err) => {
       // Errors are also surfaced via the 'component.download.error' event.
       console.error(`Component install failed: ${err.message}`);
     });
     return {
       success: true,
-      message: `${body.force ? 'Repair' : 'Install'} started for ${body.id}`,
+      message: `Install started for ${body.id}`,
     };
   }
 

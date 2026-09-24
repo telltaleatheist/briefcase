@@ -9,13 +9,12 @@
  * Sources:
  *   - ffmpeg/ffprobe (mac): node_modules/@ffmpeg-installer + @ffprobe-installer
  *   - ffmpeg/ffprobe (win): fetched via `npm pack @ffmpeg-installer/win32-x64`
- *   - whisper (mac):  utilities/bin/whisper-cli-<arch> + co-located dylibs (already rpath-patched)
- *   - whisper (win):  fetched from ggml-org/whisper.cpp release (whisper-bin-x64.zip)
- *   - llama  (mac):   utilities/bin/llama-server-<arch> + llama-* dylibs   [arm64 only locally]
  *   - yt-dlp:         utilities/bin/yt-dlp_<plat>_dir  (onedir; fast startup)
  *
- * Models (whisper ggml-*, llama gguf) are NOT packaged here — they download from
- * Hugging Face mirrors at runtime.
+ * No AI binaries or models: transcription and every AI stage run on Crucible
+ * (P7), which installs its own. The binaries-v1 release still carries the
+ * whisper and llama archives older builds download; this build never lists
+ * them (ComponentManagerService.BRIEFCASE_COMPONENTS).
  *
  * Usage: node scripts/package-binaries.js
  */
@@ -33,8 +32,6 @@ const NM = path.join(ROOT, 'node_modules');
 const RELEASE_TAG = 'binaries-v1';
 const REPO = 'telltaleatheist/briefcase';
 const BASE_URL = `https://github.com/${REPO}/releases/download/${RELEASE_TAG}`;
-const WHISPER_CPP_VERSION = '1.8.2';
-const WHISPER_WIN_URL = `https://github.com/ggml-org/whisper.cpp/releases/download/v${WHISPER_CPP_VERSION}/whisper-bin-x64.zip`;
 
 const OUT = path.join(os.homedir(), 'Downloads', 'briefcase-binaries', RELEASE_TAG);
 const STAGE = path.join(OUT, '.stage');
@@ -123,59 +120,6 @@ async function buildFfmpegWin() {
   if (ok) archive('ffmpeg-tools', 'FFmpeg & FFprobe', 'binary', true, 'win32', 'x64', s, 'ffmpeg.exe', 'zip');
 }
 
-const WHISPER_DYLIBS = {
-  arm64: ['libwhisper.1-arm64.dylib', 'libggml-arm64.dylib', 'libggml-base-arm64.dylib', 'libggml-cpu-arm64.dylib', 'libggml-blas-arm64.dylib', 'libggml-metal-arm64.dylib'],
-  x64: ['libwhisper.1-x64.dylib', 'libggml-x64.dylib', 'libggml-base-x64.dylib', 'libggml-cpu-x64.dylib', 'libggml-blas-x64.dylib'],
-};
-function buildWhisperMac(arch) {
-  const binName = `whisper-cli-${arch}`;
-  const bin = path.join(BIN, binName);
-  if (!exists(bin)) { console.log(`  ⚠ ${binName} missing — skipped`); return; }
-  const s = path.join(STAGE, `whisper-darwin-${arch}`); fresh(s);
-  copy(bin, path.join(s, binName)); fs.chmodSync(path.join(s, binName), 0o755);
-  for (const d of WHISPER_DYLIBS[arch]) {
-    const src = path.join(BIN, d);
-    if (exists(src)) copy(src, path.join(s, d));
-    else console.log(`    ⚠ dylib ${d} missing`);
-  }
-  archive('whisper', 'Whisper (speech-to-text)', 'binary', true, 'darwin', arch, s, binName, 'tar');
-}
-
-async function buildWhisperWin() {
-  const s = path.join(STAGE, 'whisper-win32-x64'); fresh(s);
-  const zip = path.join(FETCH, 'whisper-win.zip');
-  const ex = path.join(FETCH, 'whisper-win'); fresh(ex);
-  try {
-    console.log(`  ↓ fetching whisper.cpp v${WHISPER_CPP_VERSION} (Windows)…`);
-    await download(WHISPER_WIN_URL, zip);
-    sh(`unzip -qo "${zip}" -d "${ex}"`);
-    const cli = sh(`find "${ex}" -iname "whisper-cli.exe"`).toString().trim().split('\n')[0]
-             || sh(`find "${ex}" -iname "main.exe"`).toString().trim().split('\n')[0];
-    if (!cli) { console.log('  ⚠ whisper-cli.exe not found in release zip — skipped'); return; }
-    copy(cli, path.join(s, 'whisper-cli.exe'));
-    const dir = path.dirname(cli);
-    for (const f of fs.readdirSync(dir)) {
-      if (f.toLowerCase().endsWith('.dll')) copy(path.join(dir, f), path.join(s, f));
-    }
-    archive('whisper', 'Whisper (speech-to-text)', 'binary', true, 'win32', 'x64', s, 'whisper-cli.exe', 'zip');
-    console.log('    note: MSVC redistributable DLLs (MSVCP140/VCRUNTIME140) are NOT in the upstream zip;');
-    console.log('          add them on a Windows box if target machines lack the VC++ runtime.');
-  } catch (e) { console.log(`  ⚠ whisper Windows fetch failed: ${e.message}`); }
-}
-
-const LLAMA_DYLIBS_ARM64 = ['libllama-arm64.dylib', 'libmtmd-arm64.dylib', 'llama-libggml-arm64.dylib', 'llama-libggml-base-arm64.dylib', 'llama-libggml-cpu-arm64.dylib', 'llama-libggml-blas-arm64.dylib', 'llama-libggml-metal-arm64.dylib', 'llama-libggml-rpc-arm64.dylib'];
-function buildLlamaMacArm64() {
-  const bin = path.join(BIN, 'llama-server-arm64');
-  if (!exists(bin)) { console.log('  ⚠ llama-server-arm64 missing — skipped'); return; }
-  const s = path.join(STAGE, 'llama-darwin-arm64'); fresh(s);
-  copy(bin, path.join(s, 'llama-server-arm64')); fs.chmodSync(path.join(s, 'llama-server-arm64'), 0o755);
-  for (const d of LLAMA_DYLIBS_ARM64) {
-    const src = path.join(BIN, d);
-    if (exists(src)) copy(src, path.join(s, d)); else console.log(`    ⚠ dylib ${d} missing`);
-  }
-  archive('llama', 'Llama (local AI inference)', 'binary', false, 'darwin', 'arm64', s, 'llama-server-arm64', 'tar');
-}
-
 function buildYtDlpOnedir(srcDirName, platform, arch, fmt) {
   const src = path.join(BIN, srcDirName);
   if (!exists(src)) { console.log(`  ⚠ ${srcDirName} missing — skipped`); return; }
@@ -198,14 +142,6 @@ function buildYtDlpOnedir(srcDirName, platform, arch, fmt) {
   buildFfmpegMac('x64');
   await buildFfmpegWin();
 
-  console.log('Whisper:');
-  buildWhisperMac('arm64');
-  buildWhisperMac('x64');
-  await buildWhisperWin();
-
-  console.log('Llama (optional, local AI):');
-  buildLlamaMacArm64();
-
   console.log('yt-dlp (onedir):');
   buildYtDlpOnedir('yt-dlp_macos_dir', 'darwin', 'universal', 'tar');
   buildYtDlpOnedir('yt-dlp_win_dir', 'win32', 'x64', 'zip');
@@ -215,7 +151,7 @@ function buildYtDlpOnedir(srcDirName, platform, arch, fmt) {
     releaseTag: RELEASE_TAG,
     repo: REPO,
     baseUrl: BASE_URL,
-    note: 'AI/whisper models are NOT here — they download from Hugging Face at runtime.',
+    note: 'No AI binaries or models: Briefcase runs AI on Crucible, which installs its own.',
     components,
   };
   const manifestPath = path.join(OUT, 'manifest.json');

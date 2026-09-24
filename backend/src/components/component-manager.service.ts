@@ -1,11 +1,14 @@
 /**
  * Component Manager Service
  *
- * Download-on-demand for binaries (ffmpeg, whisper, yt-dlp, llama) and whisper
- * models. Modeled on ModelManagerService — same resumable/retrying/abortable
- * axios-stream download core — but driven by the published manifest.json catalog
- * and storing into <configDir>/components/<id>/ (binaries) and
- * <configDir>/models/whisper/ (whisper models).
+ * Download-on-demand for the binaries Briefcase runs itself: ffmpeg/ffprobe and
+ * yt-dlp. A resumable, retrying, abortable axios-stream download driven by the
+ * published manifest.json catalog, storing into <configDir>/components/<id>/.
+ *
+ * AI is not here (P7): transcription, the LLM stages and the analysis engine
+ * all run on Crucible, which installs its own models. The published
+ * binaries-v1 manifest still carries whisper and llama entries for older
+ * builds; Briefcase lists only {@link BRIEFCASE_COMPONENTS}.
  *
  * Progress is emitted via EventEmitter2 ('component.download.*') and relayed to
  * the frontend by AppGateway → WebsocketService.
@@ -27,24 +30,12 @@ import {
   InstalledManifest,
   InstalledRecord,
 } from './component.types';
-import {
-  whisperModelComponents,
-  llamaModelComponents,
-  scorerModelComponents,
-  nliEnvComponents,
-  isScorerModelId,
-} from '../config/model-catalog';
-import {
-  NLI_COMPONENT_ID,
-  NLI_STAGES,
-  checkNliEnv,
-  provisionNliEnv,
-  removeNliEnv,
-  resolveNliDir,
-} from '../common/nli-env';
 
 const MANIFEST_URL =
   'https://github.com/telltaleatheist/briefcase/releases/download/binaries-v1/manifest.json';
+
+/** The manifest components this build uses. Everything else in the manifest is another build's. */
+export const BRIEFCASE_COMPONENTS: ReadonlySet<string> = new Set(['ffmpeg-tools', 'yt-dlp']);
 
 @Injectable()
 export class ComponentManagerService implements OnModuleInit {
@@ -52,8 +43,6 @@ export class ComponentManagerService implements OnModuleInit {
 
   private readonly configDir: string;
   private readonly componentsDir: string;
-  private readonly whisperModelsDir: string;
-  private readonly llamaModelsDir: string;
   private readonly installedPath: string;
   private readonly manifestCachePath: string;
   private readonly tmpDir: string;
@@ -69,17 +58,13 @@ export class ComponentManagerService implements OnModuleInit {
 
     this.configDir = path.join(userDataPath, 'briefcase');
     this.componentsDir = path.join(this.configDir, 'components');
-    this.whisperModelsDir = path.join(this.configDir, 'models', 'whisper');
-    // Local AI (GGUF) models live flat in <configDir>/models — the same dir
-    // ModelManagerService and LlamaManager read from, so all three agree.
-    this.llamaModelsDir = path.join(this.configDir, 'models');
     this.installedPath = path.join(this.componentsDir, 'installed.json');
     this.manifestCachePath = path.join(this.componentsDir, 'manifest-cache.json');
     this.tmpDir = path.join(this.componentsDir, '.tmp');
   }
 
   onModuleInit() {
-    for (const dir of [this.componentsDir, this.whisperModelsDir, this.llamaModelsDir, this.tmpDir]) {
+    for (const dir of [this.componentsDir, this.tmpDir]) {
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     }
     this.logger.log(`Components directory: ${this.componentsDir}`);
@@ -89,26 +74,10 @@ export class ComponentManagerService implements OnModuleInit {
     return this.componentsDir;
   }
 
-  getWhisperModelsDir(): string {
-    return this.whisperModelsDir;
-  }
-
-  /**
-   * Full component catalog: binaries from the published manifest, plus the
-   * self-contained whisper + local-AI model catalogs (downloaded directly from
-   * Hugging Face). Models are intentionally NOT sourced from the manifest so new
-   * sizes can be added without republishing a release asset.
-   */
+  /** The catalog: the binaries this build uses, from the published manifest. */
   private async getAllComponents(): Promise<ManifestComponent[]> {
     const manifest = await this.getManifest();
-    const binaries = manifest.components.filter((c) => c.kind === 'binary');
-    return [
-      ...binaries,
-      ...whisperModelComponents(),
-      ...llamaModelComponents(),
-      ...scorerModelComponents(),
-      ...nliEnvComponents(),
-    ];
+    return manifest.components.filter((c) => c.kind === 'binary' && BRIEFCASE_COMPONENTS.has(c.id));
   }
 
   // ---------- manifest ----------
@@ -163,19 +132,16 @@ export class ComponentManagerService implements OnModuleInit {
     return out;
   }
 
-  /** Merge manifest.models into manifest.components and tag kinds. */
+  /** The manifest's components (an older manifest's `models` list is not this build's). */
   private normalize(raw: any): Manifest {
     const components: ManifestComponent[] = Array.isArray(raw?.components) ? raw.components : [];
-    const models: ManifestComponent[] = Array.isArray(raw?.models)
-      ? raw.models.map((m: ManifestComponent) => ({ ...m, kind: 'whisper-model' as const }))
-      : [];
     return {
       schemaVersion: raw?.schemaVersion ?? 1,
       releaseTag: raw?.releaseTag,
       repo: raw?.repo,
       baseUrl: raw?.baseUrl,
       note: raw?.note,
-      components: [...components, ...models],
+      components,
     };
   }
 
@@ -201,9 +167,8 @@ export class ComponentManagerService implements OnModuleInit {
       return JSON.parse(raw);
     } catch (error) {
       // Corrupt manifest. Returning {} here would report every installed
-      // component (gigabytes of models) as uninstalled and let the next
-      // recordInstalled() overwrite the recoverable file. Preserve it and
-      // fail loudly (same pattern as api-keys.service).
+      // component as uninstalled and let the next recordInstalled() overwrite
+      // the recoverable file. Preserve it and fail loudly.
       const corruptPath = `${this.installedPath}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}`;
       try {
         fs.renameSync(this.installedPath, corruptPath);
@@ -229,13 +194,6 @@ export class ComponentManagerService implements OnModuleInit {
   }
 
   isInstalled(id: string): boolean {
-    // The Python environment is not a file we downloaded, so "the entry exists"
-    // is not a strong enough claim for it: worker.py can be sitting next to a
-    // venv with no torch in it. Its own check is the authority, and it is the
-    // SAME function the ranker uses to decide whether to run — see nli-env.ts.
-    if (id === NLI_COMPONENT_ID) {
-      return checkNliEnv(resolveNliDir((m) => this.logger.warn(`[NLI] ${m}`))).installed;
-    }
     const installed = this.loadInstalled();
     const rec = installed.components[id];
     if (!rec) return false;
@@ -258,23 +216,13 @@ export class ComponentManagerService implements OnModuleInit {
         supported: art !== null,
         installed: this.isInstalled(c.id),
         sizeBytes: art?.bytes ?? 0,
-        // A hand-built NLI environment has no install record, so fall back to
-        // the date its own verification marker records.
-        installedAt:
-          this.loadInstalled().components[c.id]?.installedAt ??
-          (c.id === NLI_COMPONENT_ID
-            ? (checkNliEnv(resolveNliDir()).recorded?.verifiedAt as string | undefined)
-            : undefined),
+        installedAt: this.loadInstalled().components[c.id]?.installedAt,
       };
     });
   }
 
-  /**
-   * Install a component. `force` is the repair path: it is only meaningful for
-   * locally-constructed components (python-env), where "already installed" is a
-   * judgement about a directory rather than a file we can re-download.
-   */
-  async install(id: string, force = false): Promise<void> {
+  /** Install a component (download, verify, extract). */
+  async install(id: string): Promise<void> {
     const components = await this.getAllComponents();
     const component = components.find((c) => c.id === id);
     if (!component) throw new Error(`Unknown component: ${id}`);
@@ -284,32 +232,17 @@ export class ComponentManagerService implements OnModuleInit {
 
     // Reject if ANY download is active, including the same id — a double-click
     // would otherwise open a second concurrent stream to the same file and
-    // corrupt it. A python-env build is held to the same rule: two pips writing
-    // one venv is the same corruption with a different filename.
+    // corrupt it.
     if (this.activeDownload) {
       throw new Error(`Download already in progress: ${this.activeDownload.componentId}`);
     }
 
     const controller = new AbortController();
     this.activeDownload = { componentId: id, controller };
-    // A python-env has no bytes arriving over a socket, so it opens on the
-    // 'install' phase at stage 0 rather than claiming a download of 1.2GB.
-    if (component.kind === 'python-env') {
-      this.emitProgress(id, 'install', 0, NLI_STAGES.length);
-    } else {
-      this.emitProgress(id, 'download', 0, artifact.bytes);
-    }
+    this.emitProgress(id, 'download', 0, artifact.bytes);
 
     try {
-      if (component.kind === 'python-env') {
-        await this.installPythonEnv(id, artifact, controller.signal, force);
-      } else if (component.kind === 'whisper-model') {
-        await this.installModel(id, artifact, controller.signal);
-      } else if (component.kind === 'llama-model') {
-        await this.installLlamaModel(id, artifact, controller.signal);
-      } else {
-        await this.installBinary(id, artifact, controller.signal);
-      }
+      await this.installBinary(id, artifact, controller.signal);
 
       this.logger.log(`Component installed: ${id}`);
       this.eventEmitter.emit('component.download.complete', { componentId: id });
@@ -347,29 +280,13 @@ export class ComponentManagerService implements OnModuleInit {
 
   async remove(id: string): Promise<void> {
     const installed = this.loadInstalled();
-
-    // The Python environment can exist without an install record (built by hand,
-    // or by a build that crashed before recording), so removal is driven by the
-    // resolved directory rather than the record — otherwise "Remove" would look
-    // like it worked and leave 1.2GB behind.
-    if (id === NLI_COMPONENT_ID) {
-      const dir = resolveNliDir((m) => this.logger.warn(`[NLI] ${m}`));
-      const deleted = removeNliEnv(dir);
-      this.logger.log(deleted ? `Removed NLI environment at ${dir}` : `No NLI environment at ${dir} to remove`);
-      if (installed.components[id]) {
-        delete installed.components[id];
-        this.saveInstalled(installed);
-      }
-      return;
-    }
-
     const rec = installed.components[id];
     if (!rec) return;
 
     if (rec.kind === 'binary') {
       if (fs.existsSync(rec.dir)) fs.rmSync(rec.dir, { recursive: true, force: true });
     } else {
-      // Model kinds (whisper-model, llama-model) are single files in a shared dir.
+      // A single-file record (older builds recorded models this way).
       const file = path.join(rec.dir, rec.entry);
       if (fs.existsSync(file)) fs.rmSync(file, { force: true });
     }
@@ -427,135 +344,6 @@ export class ComponentManagerService implements OnModuleInit {
     });
   }
 
-  /**
-   * Build the NLI flag-ranking Python environment.
-   *
-   * PROGRESS IS BY STAGE, NOT BY BYTE, ON PURPOSE. pip and the Hugging Face hub
-   * client do not report a total this process can see, and a bar synthesised
-   * from nothing is worse than no bar: it would sit at a fake 40% through a
-   * ten-minute torch download. So the five stages in NLI_STAGES are the unit,
-   * `done` is the number completed, and a heartbeat re-emits the current stage
-   * every 15s while a child process is working — silence is what the download
-   * dock's watchdog treats as a hang, and this work is legitimately silent for
-   * minutes at a time.
-   *
-   * The install record is written for consistency with the other kinds, but it
-   * is NOT what isInstalled() reads for this component: see isInstalled.
-   */
-  private async installPythonEnv(
-    id: string,
-    artifact: ComponentArtifact,
-    signal: AbortSignal,
-    force: boolean,
-  ): Promise<void> {
-    const dir = resolveNliDir((m) => this.logger.warn(`[NLI] ${m}`));
-    const total = NLI_STAGES.length;
-
-    await provisionNliEnv({
-      dir,
-      signal,
-      force,
-      onStage: (done, stages, label) => {
-        this.logger.log(`[${id}] stage ${done}/${stages}: ${label}`);
-        this.emitProgress(id, 'install', done, stages);
-      },
-      onHeartbeat: (done, stages) => this.emitProgress(id, 'install', done, stages),
-      log: (message) => this.logger.log(`[${id}] ${message}`),
-    });
-
-    this.recordInstalled({
-      id,
-      kind: 'python-env',
-      dir,
-      entry: 'worker.py',
-      sha256: '',
-      bytes: artifact.bytes,
-      installedAt: new Date().toISOString(),
-    });
-    this.logger.log(`[${id}] NLI flag-ranking environment ready at ${dir} (${total} stages complete)`);
-  }
-
-  private async installModel(id: string, artifact: ComponentArtifact, signal: AbortSignal): Promise<void> {
-    if (!fs.existsSync(this.whisperModelsDir)) fs.mkdirSync(this.whisperModelsDir, { recursive: true });
-    const fileName = artifact.entry || artifact.file || `${id}.bin`;
-    const destPath = path.join(this.whisperModelsDir, fileName);
-    const tempPath = `${destPath}.download`;
-
-    await this.downloadToFile(artifact.url, tempPath, id, signal);
-
-    if (artifact.sha256) {
-      this.emitProgress(id, 'verify', artifact.bytes, artifact.bytes);
-      await this.verifySha256(tempPath, artifact.sha256);
-    }
-
-    fs.renameSync(tempPath, destPath);
-    this.recordInstalled({
-      id,
-      kind: 'whisper-model',
-      dir: this.whisperModelsDir,
-      entry: fileName,
-      sha256: artifact.sha256,
-      bytes: artifact.bytes,
-      installedAt: new Date().toISOString(),
-    });
-  }
-
-  /**
-   * Download a local AI (GGUF) model into <configDir>/models — the same flat dir
-   * ModelManagerService and LlamaManager read from. After a successful install we
-   * adopt it as the default local model if none is set yet, so it's usable
-   * without an app restart — unless it is a scorer model (the logit decision
-   * engine's weights or projector), which is not a chat model and must never
-   * become defaultLocalModel.
-   */
-  private async installLlamaModel(id: string, artifact: ComponentArtifact, signal: AbortSignal): Promise<void> {
-    if (!fs.existsSync(this.llamaModelsDir)) fs.mkdirSync(this.llamaModelsDir, { recursive: true });
-    const fileName = artifact.entry || artifact.file || `${id}.gguf`;
-    const destPath = path.join(this.llamaModelsDir, fileName);
-    const tempPath = `${destPath}.download`;
-
-    await this.downloadToFile(artifact.url, tempPath, id, signal);
-
-    if (artifact.sha256) {
-      this.emitProgress(id, 'verify', artifact.bytes, artifact.bytes);
-      await this.verifySha256(tempPath, artifact.sha256);
-    }
-
-    fs.renameSync(tempPath, destPath);
-    this.recordInstalled({
-      id,
-      kind: 'llama-model',
-      dir: this.llamaModelsDir,
-      entry: fileName,
-      sha256: artifact.sha256,
-      bytes: artifact.bytes,
-      installedAt: new Date().toISOString(),
-    });
-    if (!isScorerModelId(id)) {
-      this.setDefaultLocalModelIfUnset(id);
-    }
-  }
-
-  /** Write defaultLocalModel to app-config.json when one isn't already chosen. */
-  private setDefaultLocalModelIfUnset(modelId: string): void {
-    if (isScorerModelId(modelId)) return; // belt and braces: scorer models are never chat defaults
-    try {
-      const configPath = path.join(this.configDir, 'app-config.json');
-      let config: any = {};
-      if (fs.existsSync(configPath)) {
-        config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-      }
-      if (!config.defaultLocalModel) {
-        config.defaultLocalModel = modelId;
-        config.lastUpdated = new Date().toISOString();
-        fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
-        this.logger.log(`Set default local model to ${modelId}`);
-      }
-    } catch (err: any) {
-      this.logger.warn(`Could not set default local model: ${err.message}`);
-    }
-  }
-
   private chmodRecursive(dir: string): void {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
@@ -587,9 +375,8 @@ export class ComponentManagerService implements OnModuleInit {
   }
 
   /**
-   * Resumable, retrying, abortable streamed download. Adapted from
-   * ModelManagerService.downloadModel — emits 'component.download.progress'
-   * (phase 'download') as bytes arrive.
+   * Resumable, retrying, abortable streamed download. Emits
+   * 'component.download.progress' (phase 'download') as bytes arrive.
    */
   private async downloadToFile(
     url: string,

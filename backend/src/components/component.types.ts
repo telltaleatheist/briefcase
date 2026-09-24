@@ -2,19 +2,14 @@
  * Types for the download-on-demand component system.
  *
  * The manifest is the catalog published alongside the GitHub binaries release
- * (manifest.json). It lists binary components (ffmpeg, whisper, yt-dlp, llama)
- * and, optionally, whisper models (single-file downloads from a Hugging Face
- * mirror). Each component has per-(platform, arch) artifacts.
+ * (manifest.json). Each component has per-(platform, arch) artifacts. This
+ * build uses its ffmpeg-tools and yt-dlp binaries (AI runs on Crucible).
  */
 
 /**
- * 'python-env' is the odd one out and deliberately so: it is not downloaded
- * from anywhere. It is a Python virtualenv plus a pre-seeded Hugging Face model
- * that the app CONSTRUCTS locally from an interpreter the user already has,
- * because a virtualenv is not portable between machines and there is no
- * artifact to publish. It travels through the same component surface (list,
- * install, progress, remove) so the user meets it in the same place as
- * everything else. See backend/src/common/nli-env.ts.
+ * 'binary' is every component this build installs. The other kinds are read
+ * only: install records older builds wrote (whisper and llama models, the NLI
+ * environment) keep their kind in installed.json.
  */
 export type ComponentKind = 'binary' | 'whisper-model' | 'llama-model' | 'python-env';
 
@@ -45,8 +40,6 @@ export interface Manifest {
   baseUrl?: string;
   note?: string;
   components: ManifestComponent[];
-  /** Optional model entries (whisper ggml-*). Normalized into components at load. */
-  models?: ManifestComponent[];
 }
 
 /** A record written to components/installed.json after a successful install. */

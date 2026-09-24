@@ -76,7 +76,7 @@ function main() {
       '--repo', REPO,
       '--prerelease',
       '--title', `Binaries (${RELEASE_TAG})`,
-      '--notes', 'Download-on-demand binaries (ffmpeg, yt-dlp, whisper, llama) + manifest. Consumed by the app at runtime.',
+      '--notes', 'Download-on-demand binaries (ffmpeg, yt-dlp) + manifest. Consumed by the app at runtime. (AI runs on Crucible.)',
     ], { stdio: 'inherit' });
   }
 
