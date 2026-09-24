@@ -4,9 +4,10 @@
  *
  * Salvaged from the reference branch's `crucible-job.ts` (bbb7ef6, itself cut
  * down from BookForge's electron/crucible/job.ts). Kept: uploads streamed from
- * disk (`fs.openAsBlob`, never read whole); a submit retried ONLY when no
- * connection was ever made (a lost answer may have been admitted, and a second
- * submit would be a second job on the card); cancel is a `DELETE`, not a
+ * disk (`fs.openAsBlob`, never read whole); a submit whose answer never came
+ * (CrucibleUnreachable: refused before connecting, OR admitted and the answer
+ * lost) is looked up by its `client_ref` before it is sent again, so a lost
+ * answer never becomes a second job on the card; cancel is a `DELETE`, not a
  * hang-up (abandoning the stream leaves the job running and holding the
  * lane); a dropped event stream is re-opened above the last event seen
  * (`Last-Event-ID`) on a stated budget, and past it the job is DELETEd (this
@@ -153,6 +154,11 @@ export interface RunAsrJobOptions {
   readonly file: string;
   /** Its name on the server. The extension is load-bearing: ffmpeg reads the container off it. */
   readonly filename: string;
+  /**
+   * Names this submission on the server. Make it unique per call: a submit
+   * whose answer was lost is found again by it (`GET /v1/activity`, then each
+   * candidate's `client_ref`), and so is our own job named by a refusal.
+   */
   readonly clientRef?: string;
   readonly signal?: AbortSignal;
   readonly onProgress?: (progress: AsrJobProgress) => void;
@@ -181,6 +187,42 @@ function numOrNull(value: unknown): number | null {
 export function warmingHeadline(message: string): string {
   const cut = message.indexOf(' — ');
   return cut < 0 ? message : message.slice(0, cut);
+}
+
+/** The job a submit refusal names: the lane's holder (`server_busy`), or the job that took our blob (`blob_consumed`). */
+function jobNamedBy(err: unknown): string | null {
+  if (err instanceof CrucibleBusy) return err.jobId;
+  if (err instanceof CrucibleRefused && err.code === 'blob_consumed') {
+    const details = err.details as { job_id?: unknown } | null;
+    return typeof details?.job_id === 'string' ? details.job_id : null;
+  }
+  return null;
+}
+
+async function isOurs(client: CrucibleClient, jobId: string, clientRef: string): Promise<boolean> {
+  try {
+    return (await client.job(jobId)).clientRef === clientRef;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * An admitted asr job carrying `clientRef`, or null. Crucible has no lookup by
+ * client_ref, so the lane's running and queued jobs are read from
+ * `/v1/activity` and each asr one's own record is asked. Any failure is "not
+ * found": the resend's refusal gets a second look (jobNamedBy).
+ */
+export async function findByClientRef(client: CrucibleClient, clientRef: string): Promise<string | null> {
+  try {
+    const activity = await client.activity();
+    for (const job of [...activity.running, ...activity.queued]) {
+      if (job.type === 'asr' && await isOurs(client, job.jobId, clientRef)) return job.jobId;
+    }
+  } catch {
+    // Not found is the safe reading: the resend is still checked.
+  }
+  return null;
 }
 
 export async function runAsrJob(options: RunAsrJobOptions): Promise<AsrJobOutcome> {
@@ -227,7 +269,14 @@ export async function runAsrJob(options: RunAsrJobOptions): Promise<AsrJobOutcom
   }
   if (signal?.aborted) throw cancelledBeforeSubmit();
 
-  // ── Submit: THE RESERVATION. Retried only when no connection was ever made. ──
+  // ── Submit: THE RESERVATION. ──
+  // A submit that got no answer may still have been admitted (the answer, not
+  // the request, was lost). Before it is sent again the job is looked for by
+  // its client_ref, and a refusal on the resend that names a job (the lane
+  // busy with it, or our blob consumed by it) is checked the same way: finding
+  // our own job means adopting it, never a second job on the card.
+  const clientRef = options.clientRef;
+  let unanswered = false;
   let jobId: string | undefined;
   for (let attempt = 0; jobId === undefined; attempt++) {
     try {
@@ -236,15 +285,34 @@ export async function runAsrJob(options: RunAsrJobOptions): Promise<AsrJobOutcom
         model: options.model,
         params: { ...options.params },
         inputs: { [options.filename]: { blobId } },
-        ...(options.clientRef === undefined ? {} : { clientRef: options.clientRef }),
+        ...(clientRef === undefined ? {} : { clientRef }),
       });
     } catch (err) {
       if (signal?.aborted) throw cancelledBeforeSubmit();
-      if (err instanceof CrucibleUnreachable && attempt < doorDelays.length) {
-        log(`${server} did not answer the asr submit (${err.message}); asking again in ${doorDelays[attempt]! / 1000}s`);
-        await sleep(doorDelays[attempt]!, signal);
-        if (signal?.aborted) throw cancelledBeforeSubmit();
-        continue;
+      if (unanswered && clientRef !== undefined) {
+        const named = jobNamedBy(err);
+        if (named !== null && await isOurs(client, named, clientRef)) {
+          log(`${server} named asr job ${named} as ours (${clientRef}); the earlier unanswered submit was admitted`);
+          jobId = named;
+          break;
+        }
+      }
+      if (err instanceof CrucibleUnreachable) {
+        unanswered = true;
+        if (clientRef !== undefined) {
+          const found = await findByClientRef(client, clientRef);
+          if (found !== null) {
+            log(`${server} had admitted the unanswered asr submit as job ${found} (${clientRef}); following it`);
+            jobId = found;
+            break;
+          }
+        }
+        if (attempt < doorDelays.length) {
+          log(`${server} did not answer the asr submit (${err.message}); asking again in ${doorDelays[attempt]! / 1000}s`);
+          await sleep(doorDelays[attempt]!, signal);
+          if (signal?.aborted) throw cancelledBeforeSubmit();
+          continue;
+        }
       }
       throw classifyAsrRefusal(err, server, 'the asr job');
     }

@@ -159,6 +159,8 @@ export interface FakeJob {
   client: string | null;
   /** The job's inputs as posted: name → blob id (asr). */
   inputs?: Record<string, string>;
+  /** The submit's `client_ref`, as the server keeps it. */
+  clientRef?: string | null;
   /** Artifacts a done job wrote: name → bytes (asr's `transcript.json`). */
   artifacts?: Record<string, Buffer>;
 }
@@ -321,6 +323,10 @@ export interface FakeCrucible {
   chatBodies(): Array<Record<string, unknown>>;
   /** Every upload received, oldest first. */
   readonly uploads: FakeUpload[];
+  /** Blobs still in `uploads/` (not yet consumed by a job). */
+  heldBlobs(): string[];
+  /** Drop every unconsumed blob, as a server restart that cleaned `uploads/` would. */
+  forgetBlobs(): void;
   /** Change how the next asr jobs run. */
   setAsr(script: FakeAsrScript): void;
   close(): Promise<void>;
@@ -452,6 +458,7 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
   let nextJob = 1;
   const uploads: FakeUpload[] = [];
   const blobs = new Map<string, { filename: string; data: Buffer }>();
+  const consumedBlobs = new Map<string, string>();
   let asrScript: FakeAsrScript = { ...(options.asr ?? {}) };
   const asrEngine = backend === 'cuda-linux' ? 'faster-whisper' : 'mlx-whisper';
   const asrInstalled = (): Set<string> => new Set(options.asrInstalled
@@ -796,7 +803,7 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
     started: job.status === 'queued' ? null : '2026-09-23T01:00:01Z',
     finished: job.status === 'done' || job.status === 'failed' || job.status === 'cancelled' ? '2026-09-23T01:00:02Z' : null,
     lease_id: job.leaseId,
-    client_ref: null,
+    client_ref: job.clientRef ?? null,
     interrupted_at: null,
     chunks_done: [],
     chunks_total: null,
@@ -877,7 +884,10 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
     }
     const params = (body['params'] ?? {}) as Record<string, unknown>;
     const client = (req.headers['x-crucible-client'] as string | undefined) ?? null;
-    const job: FakeJob = { jobId: `job-${nextJob++}`, type, model, params, status: 'queued', leaseId: null, events: [], client };
+    const job: FakeJob = {
+      jobId: `job-${nextJob++}`, type, model, params, status: 'queued', leaseId: null, events: [], client,
+      clientRef: typeof body['client_ref'] === 'string' ? body['client_ref'] : null,
+    };
     jobs.push(job);
     send(res, 202, { job_id: job.jobId });
     pushJobEvent(job, 'queued', { position: 0 });
@@ -950,15 +960,31 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
     }
     const inputs = (body['inputs'] ?? {}) as Record<string, { blob_id?: string }>;
     const names = Object.keys(inputs);
-    if (names.length !== 1 || typeof inputs[names[0]]?.blob_id !== 'string' || !blobs.has(inputs[names[0]].blob_id!)) {
+    if (names.length !== 1 || typeof inputs[names[0]]?.blob_id !== 'string') {
       refusal(res, 400, 'invalid_inputs', 'asr takes exactly one input naming an uploaded blob');
+      return;
+    }
+    // As the real server: an upload is MOVED into the job that names it, so a
+    // blob is consumed once (409 blob_consumed naming the job), and one this
+    // server never had (or lost) is 400 unknown_blob.
+    const blobId = inputs[names[0]].blob_id!;
+    const takenBy = consumedBlobs.get(blobId);
+    if (takenBy !== undefined) {
+      refusal(res, 409, 'blob_consumed', `blob '${blobId}' was consumed by job ${takenBy}. Upload them again for this job`, { blob_id: blobId, job_id: takenBy });
+      return;
+    }
+    if (!blobs.has(blobId)) {
+      refusal(res, 400, 'unknown_blob', `input '${names[0]}' names blob '${blobId}', which this server does not hold`);
       return;
     }
     const client = (req.headers['x-crucible-client'] as string | undefined) ?? null;
     const job: FakeJob = {
       jobId: `job-${nextJob++}`, type: 'asr', model, params, status: 'queued', leaseId: null, events: [], client,
-      inputs: { [names[0]]: inputs[names[0]].blob_id! },
+      inputs: { [names[0]]: blobId },
+      clientRef: typeof body['client_ref'] === 'string' ? body['client_ref'] : null,
     };
+    blobs.delete(blobId);
+    consumedBlobs.set(blobId, job.jobId);
     jobs.push(job);
     send(res, 202, { job_id: job.jobId });
     pushJobEvent(job, 'queued', { position: 0 });
@@ -1521,6 +1547,10 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
       return requests.filter((r) => r.path === '/v1/openai/chat/completions' && r.method === 'POST').map((r) => r.body as Record<string, unknown>);
     },
     uploads,
+    heldBlobs: () => [...blobs.keys()],
+    forgetBlobs(): void {
+      blobs.clear();
+    },
     setAsr(script: FakeAsrScript): void {
       asrScript = { ...script };
     },

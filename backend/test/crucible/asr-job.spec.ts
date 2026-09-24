@@ -73,7 +73,8 @@ describe('the job flow', () => {
     expect(job).toMatchObject({ type: 'asr', model: 'mlx-whisper-large-v3', client: 'briefcase', status: 'done' });
     expect(job.params).toEqual({ language: 'auto', vad_filter: false, word_timestamps: false });
     expect(job.inputs).toEqual({ 'My_Video_1080p_.mp4': fake.uploads[0].blobId });
-    expect((fake.requestsTo('/v1/jobs', 'POST')[0].body as Record<string, unknown>)['client_ref']).toBe('briefcase:transcribe:job-1');
+    // Unique per submission, so a lost answer can be found by it (and only this submission matches).
+    expect((fake.requestsTo('/v1/jobs', 'POST')[0].body as Record<string, unknown>)['client_ref']).toMatch(/^briefcase:transcribe:job-1:[0-9a-f]{8}$/);
 
     // The SRT, where whisper.cpp would have put it, in its shape.
     expect(outcome).toMatchObject({ srtFile: path.join(outDir, 'job-1_audio.srt'), cues: 3, model: 'mlx-whisper-large-v3', language: 'en', jobId: job.jobId });
@@ -156,6 +157,33 @@ describe('the job flow', () => {
     expect(fake.requestsTo(`/v1/jobs/${fake.jobs[0].jobId}`, 'DELETE')).toHaveLength(1);
     expect(fake.jobs[0].status).toBe('cancelled');
     expect(fs.existsSync(path.join(outDir, 'job-1_audio.srt'))).toBe(false);
+  });
+
+  it('REGRESSION: a submit admitted but whose answer was lost is found by its client_ref, never submitted twice', async () => {
+    await wire({ asr: { stepMs: 15 } });
+    fake.faults.resetAfterBytes = [{ match: { method: 'POST', path: '/v1/jobs' }, afterBytes: 1, times: 1 }];
+    const recorded: string[] = [];
+    const record = ledger.record.bind(ledger);
+    ledger.record = (row) => { recorded.push(row.id); return record(row); };
+    const outcome = await svc.transcribe(request());
+    expect(fake.jobs).toHaveLength(1);
+    expect(fake.requestsTo('/v1/jobs', 'POST')).toHaveLength(1);
+    expect(outcome.jobId).toBe(fake.jobs[0].jobId);
+    expect(outcome.cues).toBe(3);
+    // Written down once found, and settled at the end.
+    expect(recorded).toEqual([fake.jobs[0].jobId]);
+    expect(ledger.read()).toEqual([]);
+  });
+
+  it('REGRESSION: the lost answer found on the resubmit instead (the lookup failed): the refusal names our own job', async () => {
+    await wire({ asr: { stepMs: 15 } });
+    fake.faults.resetAfterBytes = [{ match: { method: 'POST', path: '/v1/jobs' }, afterBytes: 1, times: 1 }];
+    fake.faults.refuse = [{ match: { method: 'GET', path: '/v1/activity' }, status: 503, code: 'engine_unavailable', times: 1 }];
+    const outcome = await svc.transcribe(request());
+    expect(fake.jobs).toHaveLength(1);
+    expect(fake.requestsTo('/v1/jobs', 'POST')).toHaveLength(2);
+    expect(outcome.jobId).toBe(fake.jobs[0].jobId);
+    expect(ledger.read()).toEqual([]);
   });
 
   it('a job the server ran and failed fails with the server’s own message (no fallback)', async () => {

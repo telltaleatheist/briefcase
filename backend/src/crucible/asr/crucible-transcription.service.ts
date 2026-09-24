@@ -20,6 +20,7 @@
  * P4's in-flight ledger, and the settings/view door the pane reads.
  */
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { randomBytes } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getBriefcaseConfigDir } from '../../bridges/runtime-paths';
@@ -53,7 +54,7 @@ export interface CrucibleTranscriptionRequest {
   readonly outputDir: string;
   /** The SRT's base name (no extension), as whisper.cpp would name it. */
   readonly baseName: string;
-  /** Briefcase's queue job id: the ledger's `localId`, the log prefix and the clientRef. */
+  /** Briefcase's queue job id: the ledger's `localId`, the log prefix and the clientRef's stem. */
   readonly localId: string;
   readonly language?: string | null;
   readonly signal?: AbortSignal;
@@ -257,7 +258,8 @@ export class CrucibleTranscriptionService {
       params: { language, vad_filter: vad, word_timestamps: false },
       file: request.videoFile,
       filename: safeUploadName(request.videoFile),
-      clientRef: `briefcase:transcribe:${localId}`,
+      // Unique per submission: a lost submit answer is found again by it.
+      clientRef: `briefcase:transcribe:${localId}:${randomBytes(4).toString('hex')}`,
       ...(request.signal === undefined ? {} : { signal: request.signal }),
       onLog: log,
       onProgress: (p) => {
