@@ -8,6 +8,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { CrucibleTranscriptionService } from '../crucible/asr/crucible-transcription.service';
 import { isAsrUnavailable } from '../crucible/asr/crucible-asr-job';
+import { buildAsrContext, titleFromFilename } from '../crucible/asr/asr-context';
 import { isParked } from '../crucible/llm/errors';
 
 /**
@@ -89,7 +90,11 @@ export class WhisperService {
    * now when there is no route (a caller with no queue). Throws on failure,
    * with the reason; {@link TranscriptionUnavailableError} when no server can.
    */
-  async transcribe(videoFile: string, options: { jobId?: string; route?: WhisperRoute } = {}): Promise<TranscriptionOutcome> {
+  async transcribe(
+    videoFile: string,
+    /** `context`: what is known about the video (asr-context.ts). Absent: its file name is all that is. */
+    options: { jobId?: string; route?: WhisperRoute; context?: string | null } = {},
+  ): Promise<TranscriptionOutcome> {
     const { jobId } = options;
     let route = options.route;
     if (route === undefined) {
@@ -97,11 +102,12 @@ export class WhisperService {
       if (decided.kind === 'none') throw new TranscriptionUnavailableError(decided.reason);
       route = { kind: 'crucible', server: decided.server, model: decided.model };
     }
-    return this.transcribeOnCrucible(videoFile, jobId, route);
+    const context = options.context !== undefined ? options.context : buildAsrContext({ title: titleFromFilename(path.basename(videoFile)) });
+    return this.transcribeOnCrucible(videoFile, jobId, route, context);
   }
 
   /** Crucible's asr job on the video itself: SRT and TXT land in the temp dir, as standalone files. */
-  private async transcribeOnCrucible(videoFile: string, jobId: string | undefined, route: WhisperRoute): Promise<TranscriptionOutcome> {
+  private async transcribeOnCrucible(videoFile: string, jobId: string | undefined, route: WhisperRoute, context: string | null): Promise<TranscriptionOutcome> {
     if (!fs.existsSync(videoFile)) {
       throw new Error(`Video file not found: ${videoFile}`);
     }
@@ -127,6 +133,7 @@ export class WhisperService {
         outputDir,
         baseName: `${key}_audio`,
         localId: key,
+        context,
         signal: controller.signal,
         onProgress: (percent, message) => {
           const elapsedMs = Date.now() - started;

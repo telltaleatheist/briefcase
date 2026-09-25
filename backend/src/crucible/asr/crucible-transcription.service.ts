@@ -51,6 +51,8 @@ export interface CrucibleTranscriptionRequest {
   /** Briefcase's queue job id: the ledger's `localId`, the log prefix and the clientRef's stem. */
   readonly localId: string;
   readonly language?: string | null;
+  /** What is known about the video, for Qwen's spelling of names (asr-context.ts). */
+  readonly context?: string | null;
   readonly signal?: AbortSignal;
   readonly onProgress?: (percent: number, message: string) => void;
 }
@@ -230,7 +232,7 @@ export class CrucibleTranscriptionService {
   async transcribe(request: CrucibleTranscriptionRequest): Promise<CrucibleTranscriptionOutcome> {
     const { server, model, localId } = request;
     const log = (line: string): void => this.logger.log(`[${localId}] ${line}`);
-    const params = qwenAsrParams(request.language);
+    const params = qwenAsrParams(request.language, request.context);
     let client;
     try {
       client = await this.factory.clientFor(server);
@@ -239,7 +241,7 @@ export class CrucibleTranscriptionService {
       throw classifyAsrRefusal(err, server, 'the transcription');
     }
     let last = 0;
-    log(`transcribing ${path.basename(request.videoFile)} on ${server} with ${model} (language ${params.language}, vad_filter ${params.vad_filter}, word_timestamps ${params.word_timestamps})`);
+    log(`transcribing ${path.basename(request.videoFile)} on ${server} with ${model} (language ${params.language}, vad_filter ${params.vad_filter}, word_timestamps ${params.word_timestamps}, ${params.context ? `context of ${params.context.length} characters` : 'no context'})`);
 
     const outcome = await runAsrJob({
       client,

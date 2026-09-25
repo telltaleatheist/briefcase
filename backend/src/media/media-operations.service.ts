@@ -7,7 +7,8 @@ import { MediaProcessingService } from './media-processing.service';
 import { WhisperService, isTranscriptionRetryable, type WhisperRoute } from './whisper.service';
 import { DownloaderService } from '../downloader/downloader.service';
 import { FileScannerService } from '../database/file-scanner.service';
-import { DatabaseService } from '../database/database.service';
+import { DatabaseService, type VideoRecord } from '../database/database.service';
+import { buildAsrContext, titleFromFilename } from '../crucible/asr/asr-context';
 import { AIAnalysisService } from '../analysis/ai-analysis.service';
 import { parseProviderModel } from '../analysis/model-utils';
 import { isCancellation } from '../analysis/cancellation';
@@ -252,6 +253,8 @@ export class MediaOperationsService {
       // UUIDs follow pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
       let videoPath: string;
       let videoId: string | undefined;
+      // What is known about the video, for Qwen's spelling of names. A bare path: its file name (WhisperService).
+      let context: string | null | undefined;
 
       const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       const isUUID = uuidPattern.test(videoIdOrPath);
@@ -264,6 +267,7 @@ export class MediaOperationsService {
         }
         videoPath = video.current_path as string;
         videoId = videoIdOrPath;
+        context = this.asrContextFor(video);
       } else {
         // It's a file path
         videoPath = videoIdOrPath;
@@ -340,6 +344,8 @@ export class MediaOperationsService {
       // UUIDs follow pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
       let videoPath: string;
       let videoId: string | undefined;
+      // What is known about the video, for Qwen's spelling of names. A bare path: its file name (WhisperService).
+      let context: string | null | undefined;
 
       const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       const isUUID = uuidPattern.test(videoIdOrPath);
@@ -352,6 +358,7 @@ export class MediaOperationsService {
         }
         videoPath = video.current_path as string;
         videoId = videoIdOrPath;
+        context = this.asrContextFor(video);
       } else {
         // It's a file path
         videoPath = videoIdOrPath;
@@ -409,6 +416,8 @@ export class MediaOperationsService {
       // UUIDs follow pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
       let videoPath: string;
       let videoId: string | undefined;
+      // What is known about the video, for Qwen's spelling of names. A bare path: its file name (WhisperService).
+      let context: string | null | undefined;
 
       const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       const isUUID = uuidPattern.test(videoIdOrPath);
@@ -421,6 +430,7 @@ export class MediaOperationsService {
         }
         videoPath = video.current_path as string;
         videoId = videoIdOrPath;
+        context = this.asrContextFor(video);
       } else {
         // It's a file path
         videoPath = videoIdOrPath;
@@ -518,6 +528,36 @@ export class MediaOperationsService {
   }
 
   /**
+   * Everything the library knows about a video that could spell a name in it:
+   * the title (the file name until analysis gives it another), the suggested
+   * title, source URL, upload date, the video it was cut from, its tags and
+   * its description. A field that cannot be read is left out, never a reason
+   * to transcribe without the rest.
+   */
+  private asrContextFor(video: VideoRecord): string | null {
+    let parentTitle: string | null = null;
+    if (video.parent_id) {
+      const parent = this.databaseService.getVideoById(video.parent_id);
+      if (parent) parentTitle = titleFromFilename(parent.filename);
+    }
+    let tags: string[] = [];
+    try {
+      tags = this.databaseService.getTags(video.id).map((tag) => tag.tag_name);
+    } catch (err) {
+      this.logger.warn(`Could not read the tags of ${video.id} for transcription: ${(err as Error).message}`);
+    }
+    return buildAsrContext({
+      title: titleFromFilename(video.filename),
+      suggestedTitle: video.suggested_title ?? null,
+      sourceUrl: video.source_url,
+      uploadDate: video.upload_date,
+      parentTitle,
+      tags,
+      description: video.ai_description,
+    });
+  }
+
+  /**
    * Transcribe a video on Crucible (the asr job the queue placed it on).
    */
   async transcribeVideo(
@@ -533,6 +573,8 @@ export class MediaOperationsService {
       // UUIDs follow pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
       let videoPath: string;
       let videoId: string | undefined;
+      // What is known about the video, for Qwen's spelling of names. A bare path: its file name (WhisperService).
+      let context: string | null | undefined;
 
       const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       const isUUID = uuidPattern.test(videoIdOrPath);
@@ -545,6 +587,7 @@ export class MediaOperationsService {
         }
         videoPath = video.current_path as string;
         videoId = videoIdOrPath;
+        context = this.asrContextFor(video);
       } else {
         // It's a file path
         videoPath = videoIdOrPath;
@@ -552,7 +595,7 @@ export class MediaOperationsService {
 
       this.eventService.emitTaskProgress(jobId || '', 'transcribe', 0, 'Starting transcription...');
 
-      const outcome = await this.whisperService.transcribe(videoPath, { jobId, route });
+      const outcome = await this.whisperService.transcribe(videoPath, { jobId, route, ...(context === undefined ? {} : { context }) });
       const transcriptFile = outcome.srtPath;
       const transcriptTxtFile = outcome.txtPath;
 

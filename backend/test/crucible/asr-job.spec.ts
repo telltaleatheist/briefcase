@@ -22,6 +22,7 @@ import { TranscriptionUnavailableError, WhisperService, isTranscriptionRetryable
 import { startFakeCrucible, stockedForBriefcase, unusedLoopbackUrl, type FakeCrucible } from '../fake-crucible/fake-crucible';
 import { harness, type Harness } from './harness';
 import { tempDir } from './helpers';
+import { buildAsrContext } from '../../src/crucible/asr/asr-context';
 
 let fake: FakeCrucible;
 let h: Harness;
@@ -119,6 +120,15 @@ describe('the job flow', () => {
     expect(await svc.route()).toEqual({ kind: 'crucible', server: 'mac', model: 'qwen3-asr-0.6b' });
     await svc.transcribe(request({ model: 'qwen3-asr-0.6b' }));
     expect(fake.jobs[0]).toMatchObject({ model: 'qwen3-asr-0.6b', params: { language: 'en', vad_filter: false, word_timestamps: true } });
+  });
+
+  it('what is known about the video goes to Qwen as its context; none known sends none', async () => {
+    await wire();
+    const context = buildAsrContext({ title: 'Amanda Grace on Prophecy 911', sourceUrl: 'https://example.com/amanda-grace-prophecy' })!;
+    await svc.transcribe(request({ context }));
+    expect(fake.jobs[0].params).toEqual({ language: 'en', vad_filter: false, word_timestamps: true, context });
+    await svc.transcribe(request({ context: null, localId: 'job-2' }));
+    expect(fake.jobs[1].params).toEqual({ language: 'en', vad_filter: false, word_timestamps: true });
   });
 
   it('a language Qwen does not take is refused by name before anything is uploaded', async () => {

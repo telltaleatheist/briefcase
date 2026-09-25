@@ -24,6 +24,8 @@
  *   word_timestamps   true: a Qwen segment is one piece of up to 180 s, and
  *                     the aligner's words are what cut it into cues
  *                     (crucible-transcript.ts).
+ *   context           optional: what is known about the video, for the
+ *                     spelling of names (asr-context.ts). Absent when nothing is.
  */
 import type { ServerInfo } from '@crucible/client';
 
@@ -57,6 +59,7 @@ export interface AsrParams {
   readonly language: string;
   readonly vad_filter: boolean;
   readonly word_timestamps: boolean;
+  readonly context?: string;
 }
 
 /**
@@ -64,7 +67,7 @@ export interface AsrParams {
  * meaning "not stated"). Refused by name, before anything is sent, for a
  * language Qwen does not take.
  */
-export function qwenAsrParams(requested: string | undefined | null): AsrParams {
+export function qwenAsrParams(requested: string | undefined | null, context?: string | null): AsrParams {
   const raw = (requested ?? '').trim().toLowerCase();
   const unstated = raw === '' || raw === 'auto' || raw === 'und' || raw === 'undetermined' || raw === 'unknown' || raw === 'mul';
   const language = unstated ? QWEN_DEFAULT_LANGUAGE : raw;
@@ -74,7 +77,7 @@ export function qwenAsrParams(requested: string | undefined | null): AsrParams {
       `Qwen3-ASR transcribes ${[...QWEN_ASR_LANGUAGES].join(', ')}; "${language}" is not one of them.`,
     );
   }
-  return { language, vad_filter: false, word_timestamps: true };
+  return { language, vad_filter: false, word_timestamps: true, ...(context ? { context } : {}) };
 }
 
 /** One model row of `/v1/info`, as much as the venue rule needs. */

@@ -1212,10 +1212,22 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
       return;
     }
     const params = (body['params'] ?? {}) as Record<string, unknown>;
-    const keys = Object.keys(params).sort();
+    const keys = Object.keys(params).filter((key) => key !== 'context').sort();
     if (keys.join(',') !== 'language,vad_filter,word_timestamps') {
-      refusal(res, 400, 'invalid_params', `asr params are exactly language, vad_filter, word_timestamps; got ${keys.join(', ') || 'none'}`);
+      refusal(res, 400, 'invalid_params', `asr params are language, vad_filter, word_timestamps and an optional context; got ${Object.keys(params).sort().join(', ') || 'none'}`);
       return;
+    }
+    // 1.0.32+: Qwen's optional `context`, refused on whisper, blank, over 8192 characters or with the chat template's control tokens.
+    if ('context' in params && params['context'] !== null) {
+      const context = params['context'];
+      if (!qwen) {
+        refusal(res, 400, 'context_unsupported_by_engine', `${model} is whisper, which has no context`);
+        return;
+      }
+      if (typeof context !== 'string' || context.trim() === '' || context.length > 8192 || /<\|[^|]*\|>|<asr_text>/.test(context)) {
+        refusal(res, 400, 'invalid_params', 'context must be plain, non-blank text of at most 8192 characters');
+        return;
+      }
     }
     if (typeof params['language'] !== 'string' || typeof params['vad_filter'] !== 'boolean' || typeof params['word_timestamps'] !== 'boolean') {
       refusal(res, 400, 'invalid_params', 'asr params have the wrong types');
