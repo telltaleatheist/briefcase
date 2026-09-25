@@ -52,7 +52,7 @@ export interface FixAspectRatioConfig {
 }
 
 export interface NormalizeAudioConfig {
-  targetLevel?: number; // dB, typically -16 to -23
+  targetLevel?: number; // LUFS, -24 (quiet) to -9 (loud), default -14
   peakLevel?: number;
 }
 

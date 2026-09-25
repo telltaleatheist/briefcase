@@ -13,10 +13,11 @@ export interface ProcessingOptions {
   qualityPreset?: 'low' | 'medium' | 'high';
   customOptions?: Record<string, any>;
   normalizeAudio?: boolean;
-  audioNormalizationMethod?: 'rms' | 'peak';
 
-  useRmsNormalization?: boolean;
-  rmsNormalizationLevel?: number;
+  /** Normalize integrated loudness (EBU R128) to `loudnessTarget`. */
+  normalizeLoudness?: boolean;
+  /** Target integrated loudness in LUFS, e.g. -14. Not a gain. */
+  loudnessTarget?: number;
   useCompression?: boolean;
   compressionLevel?: number;
 }
@@ -28,8 +29,8 @@ export interface ProcessingResult {
   thumbnailFile?: string;
   audioFile?: string;
   audioProcessingDetails?: {
-    rmsNormalization?: boolean;
-    rmsNormalizationLevel?: number;
+    loudnessNormalization?: boolean;
+    loudnessTarget?: number;
     compression?: boolean;
     compressionLevel?: number;
   };
@@ -56,7 +57,8 @@ export class MediaProcessingService {
     this.logger.log('Received processing options:', JSON.stringify({
       fixAspectRatio: options.fixAspectRatio,
       normalizeAudio: options.normalizeAudio,
-      audioNormalizationMethod: options.audioNormalizationMethod,
+      normalizeLoudness: options.normalizeLoudness,
+      loudnessTarget: options.loudnessTarget,
     }, null, 2));
 
     try {
@@ -72,13 +74,12 @@ export class MediaProcessingService {
       };
 
       if (options.fixAspectRatio || options.normalizeAudio ||
-          options.useRmsNormalization || options.useCompression) {
+          options.normalizeLoudness || options.useCompression) {
         const outputFile = await this.ffmpegService.reencodeVideo(inputFile, jobId, {
           fixAspectRatio: options.fixAspectRatio,
           normalizeAudio: options.normalizeAudio,
-          audioNormalizationMethod: options.audioNormalizationMethod,
-          useRmsNormalization: options.useRmsNormalization,
-          rmsNormalizationLevel: options.rmsNormalizationLevel,
+          normalizeLoudness: options.normalizeLoudness,
+          loudnessTarget: options.loudnessTarget,
           useCompression: options.useCompression,
           compressionLevel: options.compressionLevel
         }, taskType);  // Pass taskType to ffmpeg

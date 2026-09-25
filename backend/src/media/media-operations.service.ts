@@ -12,7 +12,7 @@ import { AIAnalysisService } from '../analysis/ai-analysis.service';
 import { parseProviderModel } from '../analysis/model-utils';
 import { isCancellation } from '../analysis/cancellation';
 import { SharedConfigService } from '../config/shared-config.service';
-import { FfmpegService } from '../ffmpeg/ffmpeg.service';
+import { FfmpegService, DEFAULT_LOUDNESS_TARGET } from '../ffmpeg/ffmpeg.service';
 import { ThumbnailService } from '../database/thumbnail.service';
 import { WebArchiveService } from '../web-archive/web-archive.service';
 import {
@@ -272,6 +272,22 @@ export class MediaOperationsService {
       this.logger.log(`[${jobId || 'standalone'}] Fix aspect ratio using path: ${videoPath}`);
       this.eventService.emitTaskProgress(jobId || '', 'fix-aspect-ratio', 5, 'Analyzing video dimensions...');
 
+      // Already 16:9: nothing to correct, so don't spend an x264 pass proving
+      // it. A null answer means the probe failed, and then we do the work
+      // rather than skip on a guess.
+      const probed = await this.ffmpegService.needsAspectRatioFix(videoPath);
+      if (probed === false) {
+        this.logger.log(`[${jobId || 'standalone'}] Already 16:9, nothing to fix: ${videoPath}`);
+        this.eventService.emitTaskProgress(jobId || '', 'fix-aspect-ratio', 100, 'Already 16:9 — no change needed');
+        return {
+          success: true,
+          data: {
+            outputPath: videoPath,
+            wasProcessed: false,
+          },
+        };
+      }
+
       const result = await this.mediaProcessingService.processMedia(
         videoPath,
         { fixAspectRatio: true },
@@ -345,7 +361,7 @@ export class MediaOperationsService {
 
       // Use loudnorm filter for proper audio normalization (EBU R128 standard)
       // This normalizes to target integrated loudness (LUFS) so all videos have consistent perceived volume
-      const targetLoudness = options.level || -16;  // Default to -16 LUFS (standard web/podcast level)
+      const targetLoudness = options.level ?? DEFAULT_LOUDNESS_TARGET;
       const normalizedPath = await this.ffmpegService.normalizeAudio(videoPath, targetLoudness, jobId);
 
       if (!normalizedPath) {
@@ -412,13 +428,64 @@ export class MediaOperationsService {
 
       this.eventService.emitTaskProgress(jobId || '', 'process-video', 5, 'Analyzing video...');
 
+      const wantsAspectFix = options.fixAspectRatio || false;
+      const wantsNormalize = options.normalizeAudio || false;
+      const loudnessTarget = options.level ?? DEFAULT_LOUDNESS_TARGET;
+
+      // Only re-encode the video when its geometry is actually wrong. A file
+      // that is already 16:9 gets no x264 pass at all, and a null answer (the
+      // probe failed) means do the work rather than skip on a guess.
+      let needsAspectFix = wantsAspectFix;
+      if (wantsAspectFix) {
+        const probed = await this.ffmpegService.needsAspectRatioFix(videoPath);
+        if (probed === false) {
+          this.logger.log(`[${jobId || 'standalone'}] Already 16:9, skipping aspect-ratio fix: ${videoPath}`);
+          needsAspectFix = false;
+        }
+      }
+
+      // Nothing to do at all. Say so instead of burning a re-encode.
+      if (!needsAspectFix && !wantsNormalize) {
+        this.eventService.emitTaskProgress(jobId || '', 'process-video', 100, 'Already 16:9 — no changes needed');
+        return {
+          success: true,
+          data: {
+            outputPath: videoPath,
+            aspectRatioFixed: false,
+            audioNormalized: false,
+            skipped: true,
+          },
+        };
+      }
+
+      // Audio only. normalizeAudio copies the video stream instead of
+      // re-encoding it, and no-ops entirely when the file is already on target.
+      if (!needsAspectFix && wantsNormalize) {
+        const normalizedPath = await this.ffmpegService.normalizeAudio(videoPath, loudnessTarget, jobId);
+        if (!normalizedPath) {
+          throw new Error('Audio normalization failed');
+        }
+        this.eventService.emitTaskProgress(jobId || '', 'process-video', 100, 'Audio normalized');
+        return {
+          success: true,
+          data: {
+            outputPath: normalizedPath,
+            aspectRatioFixed: false,
+            audioNormalized: true,
+          },
+        };
+      }
+
       // Single re-encode with both aspect ratio and audio normalization
       const result = await this.mediaProcessingService.processMedia(
         videoPath,
         {
-          fixAspectRatio: options.fixAspectRatio || false,
-          useRmsNormalization: options.normalizeAudio && (options.method === 'rms' || !options.method),
-          rmsNormalizationLevel: options.level || -16,
+          fixAspectRatio: needsAspectFix,
+          // One implementation, EBU R128 loudnorm, whatever `method` says. The
+          // old gate ran a crude gain for 'rms'/unset and silently skipped
+          // normalization entirely for 'ebu-r128'.
+          normalizeLoudness: wantsNormalize,
+          loudnessTarget,
         },
         jobId,
         'process-video'  // Pass task type for progress relay
@@ -434,8 +501,8 @@ export class MediaOperationsService {
         success: true,
         data: {
           outputPath: result.outputFile || videoPath,
-          aspectRatioFixed: options.fixAspectRatio || false,
-          audioNormalized: options.normalizeAudio || false,
+          aspectRatioFixed: needsAspectFix,
+          audioNormalized: wantsNormalize,
         },
       };
     } catch (error) {

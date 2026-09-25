@@ -1,10 +1,20 @@
 import { TranscriptionSegment } from './video-info.model';
 
+/**
+ * Volume the viewer opens at, on the player's 0-10 scale (1 = 100% native,
+ * anything above that is amplified through a Web Audio gain node). Unity is
+ * the right default now that library audio is normalized to -14 LUFS on the
+ * way in: the old boosted default existed to compensate for quiet source
+ * media, and it clipped. At exactly 1 the gain node never engages, so the
+ * viewer hears the file as it is.
+ */
+export const DEFAULT_PLAYER_VOLUME = 1;
+
 export interface VideoEditorState {
   currentTime: number; // seconds
   duration: number; // seconds
   isPlaying: boolean;
-  volume: number; // 0-1
+  volume: number; // 0-10 (1 = 100%; above that is gain amplification)
   playbackRate: number; // 0.5, 1, 1.5, 2, etc.
   zoomState: ZoomState; // timeline zoom level and offset
   selectedClip?: VideoClip;
@@ -226,7 +236,7 @@ export function createEditorTab(
       currentTime: 0,
       duration: 120,
       isPlaying: false,
-      volume: 1,
+      volume: DEFAULT_PLAYER_VOLUME,
       playbackRate: 1,
       zoomState: { level: 1, offset: 0 }
     },

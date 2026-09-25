@@ -58,23 +58,23 @@
               <div class="form-group granularity-group">
                 <div class="label-row">
                   <label>Target Loudness</label>
-                  <span class="granularity-value">{{ getTaskConfig(task.type).targetLevel || -16 }} LUFS</span>
+                  <span class="granularity-value">{{ getTaskConfig(task.type).targetLevel || -14 }} LUFS</span>
                 </div>
                 <div class="slider-container">
                   <span class="slider-label-left">Quiet</span>
                   <input
                     type="range"
                     min="-24"
-                    max="-14"
+                    max="-9"
                     step="1"
-                    [value]="getTaskConfig(task.type).targetLevel || -16"
+                    [value]="getTaskConfig(task.type).targetLevel || -14"
                     (input)="updateTaskConfig(task.type, { targetLevel: +$any($event.target).value })"
                     class="granularity-slider"
                   />
                   <span class="slider-label-right">Loud</span>
                 </div>
                 <div class="granularity-description">
-                  {{ getAudioLevelDescription(getTaskConfig(task.type).targetLevel || -16) }}
+                  {{ getAudioLevelDescription(getTaskConfig(task.type).targetLevel || -14) }}
                 </div>
               </div>
             </div>

@@ -27,6 +27,26 @@ export interface FfmpegProcessInfo {
   aborted: boolean;
 }
 
+/** Raised when a measurement pass was killed by abort()/abortAll(). */
+export class FfmpegAbortedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'FfmpegAbortedError';
+  }
+}
+
+/**
+ * loudnorm's analysis-pass measurements, fed back into the encode pass so it
+ * can apply one constant gain that lands on the target.
+ */
+export interface LoudnessMeasurement {
+  inputI: number;
+  inputTP: number;
+  inputLRA: number;
+  inputThresh: number;
+  targetOffset: number;
+}
+
 export interface FfmpegResult {
   processId: string;
   success: boolean;
@@ -345,6 +365,105 @@ export class FfmpegBridge extends EventEmitter {
         }
 
         resolve({ mean: parseFloat(meanMatch[1]), max: parseFloat(maxMatch[1]) });
+      });
+
+      proc.on('error', (err) => {
+        this.activeProcesses.delete(processId);
+        reject(err);
+      });
+    });
+  }
+
+  /**
+   * Measure a file's loudness with loudnorm's analysis pass.
+   *
+   * This is pass 1 of two-pass loudnorm. Handing the measurements back to
+   * loudnorm on the encode pass lets it apply a single constant gain that
+   * lands exactly on the target, instead of the one-pass dynamic mode that
+   * guesses as it goes and squashes the dynamics of speech.
+   *
+   * Returns null when ffmpeg produced no parsable measurement — the caller is
+   * expected to fall back to a one-pass normalization rather than give up.
+   */
+  async measureLoudness(
+    inputPath: string,
+    target: number,
+    truePeak: number,
+    loudnessRange: number,
+    callerProcessId?: string
+  ): Promise<LoudnessMeasurement | null> {
+    const processId = callerProcessId ?? `loudnorm-measure-${crypto.randomBytes(6).toString('hex')}`;
+    const args = [
+      '-nostats',
+      '-i', inputPath,
+      '-vn',
+      '-af', `loudnorm=I=${target}:TP=${truePeak}:LRA=${loudnessRange}:print_format=json`,
+      '-f', 'null',
+      '-',
+    ];
+
+    return new Promise((resolve, reject) => {
+      this.logger.log(`[${processId}] Measuring loudness: ffmpeg ${args.join(' ')}`);
+      const proc = spawn(this.binaryPath, args);
+
+      // Register so abort()/abortAll() can reach the measurement pass; a
+      // cancelled job must not leave it running against the source file.
+      const processInfo: FfmpegProcessInfo = {
+        id: processId,
+        process: proc,
+        args,
+        startTime: Date.now(),
+        aborted: false,
+      };
+      this.activeProcesses.set(processId, processInfo);
+
+      let stderrBuffer = '';
+
+      proc.stderr?.on('data', (data: Buffer) => {
+        stderrBuffer += data.toString();
+      });
+
+      proc.on('close', (code) => {
+        this.activeProcesses.delete(processId);
+
+        if (processInfo.aborted) {
+          reject(new FfmpegAbortedError('Loudness measurement was aborted'));
+          return;
+        }
+
+        // loudnorm prints its JSON block last, after the usual ffmpeg banter.
+        const jsonMatch = stderrBuffer.match(/\{[^{}]*"input_i"[\s\S]*?\}/);
+        if (!jsonMatch) {
+          this.logger.warn(`[${processId}] No loudnorm JSON in output (exit ${code}): ${stderrBuffer.slice(-300)}`);
+          resolve(null);
+          return;
+        }
+
+        try {
+          const parsed = JSON.parse(jsonMatch[0]);
+          const measurement: LoudnessMeasurement = {
+            inputI: Number(parsed.input_i),
+            inputTP: Number(parsed.input_tp),
+            inputLRA: Number(parsed.input_lra),
+            inputThresh: Number(parsed.input_thresh),
+            targetOffset: Number(parsed.target_offset),
+          };
+
+          // loudnorm reports -inf/-70 for silence; a NaN or an infinity fed
+          // back into the encode pass makes ffmpeg reject the filter outright.
+          const values = Object.values(measurement);
+          if (values.some((v) => !Number.isFinite(v))) {
+            this.logger.warn(`[${processId}] Loudness measurement not usable: ${jsonMatch[0]}`);
+            resolve(null);
+            return;
+          }
+
+          this.logger.log(`[${processId}] Measured ${measurement.inputI} LUFS, ${measurement.inputTP} dBTP, LRA ${measurement.inputLRA}`);
+          resolve(measurement);
+        } catch (err: any) {
+          this.logger.warn(`[${processId}] Could not parse loudnorm JSON: ${err.message}`);
+          resolve(null);
+        }
       });
 
       proc.on('error', (err) => {

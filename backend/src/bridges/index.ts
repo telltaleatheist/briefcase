@@ -31,6 +31,8 @@ export {
   type FfmpegProgress,
   type FfmpegProcessInfo,
   type FfmpegResult,
+  type LoudnessMeasurement,
+  FfmpegAbortedError,
 } from './ffmpeg-bridge';
 
 // FFprobe bridge

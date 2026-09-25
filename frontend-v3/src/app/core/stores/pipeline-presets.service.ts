@@ -45,7 +45,7 @@ export const PIPELINE_STEPS: {
     type: 'normalize-audio',
     label: 'Normalize Loudness',
     description: 'Even out audio levels',
-    defaultConfig: { targetLevel: -16 },
+    defaultConfig: { targetLevel: -14 },
   },
   {
     type: 'transcribe',
@@ -85,7 +85,7 @@ const STARTER_PRESETS: PipelinePreset[] = [
     name: 'Fix + Normalize',
     steps: [
       { type: 'fix-aspect-ratio', config: { targetRatio: '16:9', stripBlackBars: false } },
-      { type: 'normalize-audio', config: { targetLevel: -16 } },
+      { type: 'normalize-audio', config: { targetLevel: -14 } },
     ],
   },
 ];

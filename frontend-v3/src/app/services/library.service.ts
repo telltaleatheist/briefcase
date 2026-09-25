@@ -576,7 +576,7 @@ export class LibraryService {
         return [{
           type: 'normalize-audio',
           options: {
-            level: config?.targetLevel || -16,
+            level: config?.targetLevel || -14,
             method: config?.method || 'ebu-r128'
           }
         }];

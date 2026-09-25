@@ -12,7 +12,9 @@ import {
   FfprobeBridge,
   getRuntimePaths,
   verifyBinary,
+  FfmpegAbortedError,
   type FfmpegProgress,
+  type LoudnessMeasurement,
   type ProbeResult,
 } from '../bridges';
 import {
@@ -21,6 +23,71 @@ import {
   cleanupTempFiles,
   isFileAccessible,
 } from '../common/utils/temp-file.util';
+
+/**
+ * Default integrated-loudness target, in LUFS. -14 is the level streaming
+ * platforms normalize to, so clips land where the rest of the world sits
+ * instead of a broadcast-quiet -16 or lower.
+ */
+export const DEFAULT_LOUDNESS_TARGET = -14;
+
+/** True-peak ceiling in dBTP. -1.0 is the streaming-platform spec. */
+const LOUDNESS_TRUE_PEAK = -1.0;
+
+/** Target loudness range in LU. */
+const LOUDNESS_RANGE = 11;
+
+/**
+ * How far from the target a file may already sit and still count as normalized,
+ * in LU. Loudnorm itself only lands within a few tenths of a LU, and nobody
+ * hears half a LU, so re-encoding for less than this is pure wear on the file.
+ */
+export const LOUDNESS_TOLERANCE_LU = 1.0;
+
+/**
+ * Is this file already at the target, so normalizing it would change nothing
+ * worth hearing?
+ *
+ * Integrated loudness decides this on its own. True peak deliberately does not
+ * get a vote: loudnorm limits peaks before the AAC encoder, and AAC overshoots
+ * by up to about a dB on the way back out, so a freshly normalized file
+ * measures above the ceiling every time. Testing it would mean re-encoding the
+ * same file on every run and never converging, which is the opposite of the
+ * point. The cost is that a file already at target loudness but clipping is
+ * left alone.
+ */
+export function isAlreadyNormalized(
+  measurement: LoudnessMeasurement,
+  target: number
+): boolean {
+  return Math.abs(measurement.inputI - target) <= LOUDNESS_TOLERANCE_LU;
+}
+
+/**
+ * Build the loudnorm filter string.
+ *
+ * With a measurement from the analysis pass, loudnorm works out one constant
+ * gain that lands on the target and keeps the source's dynamics. Without one
+ * it falls back to the one-pass dynamic mode, which is a guess that also
+ * flattens speech.
+ */
+export function buildLoudnormFilter(
+  target: number,
+  measurement?: LoudnessMeasurement | null
+): string {
+  const base = `loudnorm=I=${target}:TP=${LOUDNESS_TRUE_PEAK}:LRA=${LOUDNESS_RANGE}`;
+  if (!measurement) return base;
+
+  return (
+    `${base}` +
+    `:measured_I=${measurement.inputI}` +
+    `:measured_TP=${measurement.inputTP}` +
+    `:measured_LRA=${measurement.inputLRA}` +
+    `:measured_thresh=${measurement.inputThresh}` +
+    `:offset=${measurement.targetOffset}` +
+    `:linear=true`
+  );
+}
 
 @Injectable()
 export class FfmpegService {
@@ -162,9 +229,8 @@ export class FfmpegService {
     options?: {
       fixAspectRatio?: boolean,
       normalizeAudio?: boolean,
-      audioNormalizationMethod?: 'rms' | 'peak',
-      useRmsNormalization?: boolean,
-      rmsNormalizationLevel?: number,
+      normalizeLoudness?: boolean,
+      loudnessTarget?: number,
       useCompression?: boolean,
       compressionLevel?: number
     },
@@ -173,7 +239,8 @@ export class FfmpegService {
     this.logger.log('Received reencoding options:', JSON.stringify({
       fixAspectRatio: options?.fixAspectRatio,
       normalizeAudio: options?.normalizeAudio,
-      audioNormalizationMethod: options?.audioNormalizationMethod
+      normalizeLoudness: options?.normalizeLoudness,
+      loudnessTarget: options?.loudnessTarget
     }, null, 2));
 
     const fileName = path.basename(videoFile);
@@ -240,8 +307,65 @@ export class FfmpegService {
 
       this.logger.log(`ASPECT RATIO FIX: requested=${options?.fixAspectRatio}, videoNeeds=${needsAspectRatioFix}, will apply=${options?.fixAspectRatio}`);
 
+      // Measure loudness first when normalizing, so the encode applies one
+      // constant gain onto the target instead of one-pass loudnorm's guess.
+      let loudnessMeasurement: LoudnessMeasurement | null = null;
+      let normalizeLoudness = options?.normalizeLoudness ?? false;
+      if (normalizeLoudness && hasAudio) {
+        if (taskType && jobId) {
+          this.eventService.emitTaskProgress(jobId, taskType, 4, 'Measuring loudness...');
+        }
+        const measureProcessId = `${processId}-measure`;
+        if (jobId) {
+          this.activeJobProcesses.set(jobId, measureProcessId);
+        }
+        try {
+          loudnessMeasurement = await this.ffmpeg.measureLoudness(
+            tempInputFile,
+            options?.loudnessTarget ?? DEFAULT_LOUDNESS_TARGET,
+            LOUDNESS_TRUE_PEAK,
+            LOUDNESS_RANGE,
+            measureProcessId
+          );
+        } catch (measureError: any) {
+          if (measureError instanceof FfmpegAbortedError) {
+            // The job was cancelled mid-measurement. Starting the encode now
+            // would burn minutes of CPU on work nobody is waiting for.
+            this.logger.log(`Re-encode cancelled during loudness measurement: ${fileName}`);
+            this.safeDeleteFile(tempInputFile);
+            if (taskType && jobId) {
+              this.eventService.emitTaskProgress(jobId, taskType, -1, 'Processing cancelled');
+            }
+            return null;
+          }
+          this.logger.warn(`Loudness measurement failed, falling back to one-pass: ${measureError.message}`);
+        } finally {
+          if (jobId) {
+            this.activeJobProcesses.delete(jobId);
+          }
+        }
+
+        // The video still has to be re-encoded for the aspect fix, but audio
+        // that is already on target should pass through untouched by loudnorm.
+        if (
+          loudnessMeasurement &&
+          isAlreadyNormalized(loudnessMeasurement, options?.loudnessTarget ?? DEFAULT_LOUDNESS_TARGET)
+        ) {
+          this.logger.log(`Audio already at ${loudnessMeasurement.inputI} LUFS — re-encoding video only (${fileName})`);
+          normalizeLoudness = false;
+          loudnessMeasurement = null;
+        }
+      }
+
       // Build args using temp files
-      const args = this.buildFfmpegArgs(tempInputFile, tempOutputFile, needsAspectRatioFix, selectedEncoder, options, hasAudio);
+      const args = this.buildFfmpegArgs(
+        tempInputFile,
+        tempOutputFile,
+        needsAspectRatioFix,
+        selectedEncoder,
+        { ...options, normalizeLoudness, loudnessMeasurement },
+        hasAudio
+      );
 
       if (taskType && jobId) {
         this.eventService.emitTaskProgress(jobId, taskType, 5, 'Starting video re-encoding...');
@@ -371,6 +495,26 @@ export class FfmpegService {
     }
   }
 
+  /**
+   * Does this file actually need an aspect-ratio fix?
+   *
+   * Decided by geometry, the same way the queue's skip check decides it, and
+   * rotation-aware. Returns null when the file can't be probed: the caller
+   * should then do the work rather than skip on a guess.
+   */
+  async needsAspectRatioFix(filePath: string): Promise<boolean | null> {
+    try {
+      this.ensureFfmpegReady();
+      const metadata = await this.ffprobe.probe(filePath);
+      const analysis = this.analyzeVideoMetadata(metadata);
+      if (!analysis.isValid) return null;
+      return analysis.needsAspectRatioFix ?? null;
+    } catch (error: any) {
+      this.logger.warn(`Could not probe ${path.basename(filePath)} for aspect ratio: ${error.message}`);
+      return null;
+    }
+  }
+
   private analyzeVideoMetadata(metadata: ProbeResult): {
     isValid: boolean,
     dimensions?: { width: number, height: number },
@@ -424,8 +568,9 @@ export class FfmpegService {
     encoder: string,
     options?: {
       fixAspectRatio?: boolean,
-      useRmsNormalization?: boolean,
-      rmsNormalizationLevel?: number,
+      normalizeLoudness?: boolean,
+      loudnessTarget?: number,
+      loudnessMeasurement?: LoudnessMeasurement | null,
       useCompression?: boolean,
       compressionLevel?: number
     },
@@ -448,12 +593,15 @@ export class FfmpegService {
     // stream — referencing [0:a] on a video with no audio aborts ffmpeg at
     // filtergraph configuration. With no audio we fall through to the optional
     // `-map 0:a?` below, which is a no-op when absent.
-    if ((options?.useRmsNormalization || options?.useCompression) && hasAudio) {
+    if ((options?.normalizeLoudness || options?.useCompression) && hasAudio) {
       let audioFilter = '';
 
-      if (options?.useRmsNormalization) {
-        const level = options.rmsNormalizationLevel ?? 0;
-        audioFilter = `[0:a]volume=${level}dB`;
+      if (options?.normalizeLoudness) {
+        // Loudness normalization is a target to hit, not a gain to apply. This
+        // used to be `volume=<target>dB`, which read the -14 LUFS target as a
+        // 14 dB cut and buried the audio.
+        const target = options.loudnessTarget ?? DEFAULT_LOUDNESS_TARGET;
+        audioFilter = `[0:a]${buildLoudnormFilter(target, options.loudnessMeasurement)}`;
         audioFilter += options?.useCompression ? '[a1];[a1]' : '[aout]';
       } else {
         audioFilter = '[0:a]';
@@ -702,7 +850,7 @@ export class FfmpegService {
     return b === 0 ? a : this.calculateGCD(b, a % b);
   }
 
-  async normalizeAudio(filePath: string, targetVolume: number = -14, jobId?: string): Promise<string | null> {
+  async normalizeAudio(filePath: string, targetVolume: number = DEFAULT_LOUDNESS_TARGET, jobId?: string): Promise<string | null> {
     if (!fs.existsSync(filePath)) {
       this.logger.error(`File doesn't exist: ${filePath}`);
       if (jobId) {
@@ -720,9 +868,93 @@ export class FfmpegService {
       this.ensureFfmpegReady();
       const processId = `normalize-${Date.now()}`;
 
-      // STEP 1: Copy source file to temp directory to avoid file locks (Syncthing, etc.)
+      // A file with no audio stream has nothing to normalize. ffmpeg tolerates
+      // it (the filter simply finds no audio), but it would still cost a copy
+      // to temp, an encode and a verify to produce an identical file.
+      try {
+        const probe = await this.ffprobe.probe(filePath);
+        const hasAudio = !!probe.streams?.some((stream) => stream.codec_type === 'audio');
+        if (!hasAudio) {
+          this.logger.log(`Skipping normalization — ${fileName} has no audio stream`);
+          if (jobId) {
+            this.eventService.emitTaskProgress(jobId, 'normalize-audio', 100, 'No audio track — nothing to normalize');
+          }
+          return filePath;
+        }
+      } catch (probeError: any) {
+        // Can't tell: carry on and let the encode decide.
+        this.logger.warn(`Could not probe ${fileName} for audio streams: ${probeError.message}`);
+      }
+
+      // STEP 1: Measure the source before touching it. This decides two things
+      // at once: whether the file needs normalizing at all, and (if it does)
+      // the constant gain the encode pass should apply. Measuring the original
+      // rather than a temp copy means an already-normalized file costs one
+      // read and no copy.
       if (jobId) {
-        this.eventService.emitTaskProgress(jobId, 'normalize-audio', 2, 'Preparing file for processing...');
+        this.eventService.emitTaskProgress(jobId, 'normalize-audio', 2, 'Measuring loudness...');
+      }
+
+      let measurement: LoudnessMeasurement | null = null;
+      const measureProcessId = `${processId}-measure`;
+      // Register the measurement pass too, so cancelling the job kills it
+      // rather than leaving it chewing through the file.
+      if (jobId) {
+        this.activeJobProcesses.set(jobId, measureProcessId);
+      }
+      try {
+        measurement = await this.ffmpeg.measureLoudness(
+          filePath,
+          targetVolume,
+          LOUDNESS_TRUE_PEAK,
+          LOUDNESS_RANGE,
+          measureProcessId
+        );
+      } catch (measureError: any) {
+        if (measureError instanceof FfmpegAbortedError) {
+          // The job was cancelled mid-measurement. Starting the encode now
+          // would burn minutes of CPU on work nobody is waiting for.
+          this.logger.log(`Normalization cancelled during loudness measurement: ${fileName}`);
+          if (jobId) {
+            this.eventService.emitTaskProgress(jobId, 'normalize-audio', -1, 'Normalization cancelled');
+          }
+          return null;
+        }
+        // Anything else is survivable: fall through to the one-pass filter.
+        this.logger.warn(`Loudness measurement failed, falling back to one-pass: ${measureError.message}`);
+      } finally {
+        if (jobId) {
+          this.activeJobProcesses.delete(jobId);
+        }
+      }
+
+      // Already on target: hand back the untouched file. Re-encoding it would
+      // cost an AAC generation for no audible gain.
+      if (measurement && isAlreadyNormalized(measurement, targetVolume)) {
+        this.logger.log(
+          `Skipping normalization — ${fileName} is already ${measurement.inputI} LUFS ` +
+          `(target ${targetVolume}, peak ${measurement.inputTP} dBTP)`
+        );
+        if (jobId) {
+          this.eventService.emitTaskProgress(
+            jobId,
+            'normalize-audio',
+            100,
+            `Already at ${measurement.inputI} LUFS — no change needed`
+          );
+        }
+        return filePath;
+      }
+
+      if (!measurement) {
+        this.logger.warn(`No loudness measurement for ${fileName} — using one-pass normalization`);
+      } else {
+        this.logger.log(`Normalizing ${measurement.inputI} LUFS -> ${targetVolume} LUFS (${fileName})`);
+      }
+
+      // STEP 2: Copy source file to temp directory to avoid file locks (Syncthing, etc.)
+      if (jobId) {
+        this.eventService.emitTaskProgress(jobId, 'normalize-audio', 3, 'Preparing file for processing...');
       }
 
       const copyResult = await copyToTemp(filePath, {
@@ -731,7 +963,7 @@ export class FfmpegService {
         onProgress: (msg) => {
           this.logger.log(`[CopyToTemp] ${msg}`);
           if (jobId) {
-            this.eventService.emitTaskProgress(jobId, 'normalize-audio', 3, msg);
+            this.eventService.emitTaskProgress(jobId, 'normalize-audio', 4, msg);
           }
         }
       });
@@ -747,7 +979,7 @@ export class FfmpegService {
       tempInputFile = copyResult.tempPath;
       this.logger.log(`Copied source to temp: ${tempInputFile}`);
 
-      // STEP 2: Get duration for progress tracking
+      // STEP 3: Get duration for progress tracking
       const metadata = await this.getVideoMetadata(tempInputFile);
       const duration = metadata?.duration || 0;
       if (duration <= 0) {
@@ -760,7 +992,7 @@ export class FfmpegService {
       const args = [
         '-y',
         '-i', tempInputFile,
-        '-af', `loudnorm=I=${targetVolume}:TP=-1.5:LRA=11`,
+        '-af', buildLoudnormFilter(targetVolume, measurement),
         '-c:v', 'copy',  // Copy video stream without re-encoding
         '-c:a', 'aac',
         '-b:a', '192k',
@@ -821,7 +1053,7 @@ export class FfmpegService {
 
       this.logger.log(`FFmpeg completed, verifying output: ${tempOutputFile}`);
 
-      // STEP 3: Verify the output file
+      // STEP 4: Verify the output file
       if (jobId) {
         this.eventService.emitTaskProgress(jobId, 'normalize-audio', 88, 'Verifying normalized audio...');
       }
@@ -838,7 +1070,7 @@ export class FfmpegService {
 
       this.logger.log(`Verification passed, copying back to original location`);
 
-      // STEP 4: Copy processed file back to original location with retry logic
+      // STEP 5: Copy processed file back to original location with retry logic
       if (jobId) {
         this.eventService.emitTaskProgress(jobId, 'normalize-audio', 92, 'Saving normalized audio...');
       }

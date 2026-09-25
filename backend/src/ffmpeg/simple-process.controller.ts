@@ -7,7 +7,7 @@ import {
   Logger,
   OnModuleInit,
 } from '@nestjs/common';
-import { FfmpegService } from './ffmpeg.service';
+import { FfmpegService, DEFAULT_LOUDNESS_TARGET } from './ffmpeg.service';
 import { MediaEventService } from '../media/media-event.service';
 import { DatabaseService } from '../database/database.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -214,7 +214,7 @@ export class SimpleProcessController implements OnModuleInit {
       this.logger.log(`Starting audio normalization for ${videoId}`);
       this.mediaEventService.emitProcessingProgress(5, 'Starting audio normalization...', jobId);
 
-      const outputFile = await this.ffmpegService.normalizeAudio(filePath, -14, jobId);
+      const outputFile = await this.ffmpegService.normalizeAudio(filePath, DEFAULT_LOUDNESS_TARGET, jobId);
 
       if (!outputFile) {
         throw new Error('Normalization failed - no output file');

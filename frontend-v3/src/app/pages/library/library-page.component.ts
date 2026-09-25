@@ -2844,7 +2844,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       steps.push({ type: 'fix-aspect-ratio', config: { targetRatio: settings.aspectRatio || '16:9' } });
     }
     if (settings.normalizeAudio) {
-      steps.push({ type: 'normalize-audio', config: { targetLevel: settings.audioLevel || -16 } });
+      steps.push({ type: 'normalize-audio', config: { targetLevel: settings.audioLevel || -14 } });
     }
     if (settings.transcribe) {
       steps.push({ type: 'transcribe', config: {} });

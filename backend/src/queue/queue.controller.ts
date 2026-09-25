@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { QueueManagerService } from './queue-manager.service';
 import { Task } from '../common/interfaces/task.interface';
+import { DEFAULT_LOUDNESS_TARGET } from '../ffmpeg/ffmpeg.service';
 
 @Controller('queue')
 export class QueueController {
@@ -301,7 +302,7 @@ export class QueueController {
       // Post-processing options (run after import)
       fixAspectRatio?: boolean;
       normalizeAudio?: boolean;
-      audioLevel?: number; // Target audio level in LUFS (default -16, range -24 to -14)
+      audioLevel?: number; // Target audio level in LUFS (default -14, range -24 to -9)
       includeTranscript?: boolean;
       includeAnalysis?: boolean;
       aiModel?: string;
@@ -329,7 +330,7 @@ export class QueueController {
         options: {
           fixAspectRatio: true,
           normalizeAudio: true,
-          level: body.audioLevel || -16,
+          level: body.audioLevel ?? DEFAULT_LOUDNESS_TARGET,
         },
       });
     } else if (body.fixAspectRatio) {
@@ -337,7 +338,7 @@ export class QueueController {
     } else if (body.normalizeAudio) {
       tasks.push({
         type: 'normalize-audio',
-        options: { level: body.audioLevel || -16 },
+        options: { level: body.audioLevel ?? DEFAULT_LOUDNESS_TARGET },
       });
     }
 

@@ -138,8 +138,10 @@ export class QueueItemConfigModalComponent implements OnInit {
     if (level <= -22) return 'Very quiet - suitable for background music or ambient content';
     if (level <= -19) return 'Quiet - similar to traditional broadcast standards (EBU R128)';
     if (level <= -17) return 'Moderate - good for podcasts and general web content';
-    if (level <= -15) return 'Standard - typical for YouTube and streaming platforms';
-    return 'Loud - maximizes perceived volume, may reduce dynamic range';
+    if (level <= -15) return 'Standard - typical for streaming platforms';
+    if (level <= -13) return 'Loud - matches YouTube reference level';
+    if (level <= -11) return 'Very loud - louder than most YouTube uploads';
+    return 'Maximum - heavily limited, reduces dynamic range';
   }
 
   /**
@@ -328,7 +330,7 @@ export class QueueItemConfigModalComponent implements OnInit {
       case 'fix-aspect-ratio':
         return { targetRatio: '16:9', cropMode: 'smart' } as FixAspectRatioConfig;
       case 'normalize-audio':
-        return { targetLevel: -16, peakLevel: -1 } as NormalizeAudioConfig;
+        return { targetLevel: -14, peakLevel: -1 } as NormalizeAudioConfig;
       default:
         return {};
     }

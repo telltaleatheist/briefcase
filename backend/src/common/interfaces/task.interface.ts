@@ -185,6 +185,8 @@ export interface ProcessVideoResult extends TaskResult {
     outputPath: string;
     aspectRatioFixed: boolean;
     audioNormalized: boolean;
+    /** True when the file already met every requested target and was left alone. */
+    skipped?: boolean;
   };
 }
 

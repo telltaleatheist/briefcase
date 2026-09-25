@@ -71,7 +71,7 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges {
   settings: VideoJobSettings = {
     fixAspectRatio: false,
     normalizeAudio: false,
-    audioLevel: -16, // Default to -16 LUFS (standard web/podcast level)
+    audioLevel: -14, // Default to -14 LUFS (YouTube/streaming reference level)
     transcribe: false,
     aiAnalysis: false,
     aiModel: '',
@@ -140,17 +140,19 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges {
   // dialog no longer sets `analysisGranularity`.
 
   getAudioLevelLabel(): string {
-    const level = this.settings.audioLevel || -16;
+    const level = this.settings.audioLevel || -14;
     return `${level} LUFS`;
   }
 
   getAudioLevelDescription(): string {
-    const level = this.settings.audioLevel || -16;
+    const level = this.settings.audioLevel || -14;
     if (level <= -22) return 'Very quiet - suitable for background music or ambient content';
     if (level <= -19) return 'Quiet - similar to traditional broadcast standards (EBU R128)';
     if (level <= -17) return 'Moderate - good for podcasts and general web content';
-    if (level <= -15) return 'Standard - typical for YouTube and streaming platforms';
-    return 'Loud - maximizes perceived volume, may reduce dynamic range';
+    if (level <= -15) return 'Standard - typical for streaming platforms';
+    if (level <= -13) return 'Loud - matches YouTube reference level';
+    if (level <= -11) return 'Very loud - louder than most YouTube uploads';
+    return 'Maximum - heavily limited, reduces dynamic range';
   }
 
 
@@ -311,7 +313,7 @@ export class VideoConfigDialogComponent implements OnInit, OnChanges {
     this.settings = {
       fixAspectRatio: false,
       normalizeAudio: false,
-      audioLevel: -16, // Default to -16 LUFS (standard web/podcast level)
+      audioLevel: -14, // Default to -14 LUFS (YouTube/streaming reference level)
       transcribe: false,
       aiAnalysis: false,
       aiModel: '', // Will be set from saved default when dialog reopens

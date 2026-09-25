@@ -48,6 +48,7 @@ export class MediaDisplayComponent implements OnChanges, AfterViewInit, OnDestro
   private gainNode?: GainNode;
   private sourceNode?: MediaElementAudioSourceNode;
   private audioInitialized: boolean = false;
+  private audioContextPending: boolean = false;
 
   ngAfterViewInit(): void {
     this.setupVideoListeners();
@@ -128,6 +129,12 @@ export class MediaDisplayComponent implements OnChanges, AfterViewInit, OnDestro
 
     video.addEventListener('play', () => {
       this.playStateChange.emit(true);
+      // Pressing play is a user gesture, which is the first moment the
+      // amplification context is allowed to start. Picks up the default
+      // above-100% volume without the user having to touch the slider.
+      if (this.volume > 1) {
+        this.ensureAudioContext();
+      }
     });
 
     video.addEventListener('pause', () => {
@@ -180,27 +187,39 @@ export class MediaDisplayComponent implements OnChanges, AfterViewInit, OnDestro
    * Must be called after user interaction due to browser autoplay policies
    */
   private async initAudioContext(): Promise<void> {
-    if (this.audioInitialized || !this.videoRef?.nativeElement) return;
+    if (this.audioInitialized || this.audioContextPending || !this.videoRef?.nativeElement) return;
 
+    this.audioContextPending = true;
     try {
       // Create audio context
-      this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
 
       // Resume if suspended (required after user interaction)
-      if (this.audioContext.state === 'suspended') {
-        await this.audioContext.resume();
-        console.log('Audio context resumed from suspended state');
+      if (ctx.state === 'suspended') {
+        await ctx.resume().catch(() => {});
       }
 
+      // The viewer opens above 100%, so this can run before the user has
+      // touched anything. Routing the element into a context that never
+      // resumed would silence the video outright, so bail out and stay on
+      // native volume — the next play/volume gesture retries.
+      if (ctx.state !== 'running') {
+        await ctx.close().catch(() => {});
+        console.log('Audio context not running yet; staying on native volume');
+        return;
+      }
+
+      this.audioContext = ctx;
+
       // Create gain node for volume control
-      this.gainNode = this.audioContext.createGain();
+      this.gainNode = ctx.createGain();
 
       // Create source from video element
-      this.sourceNode = this.audioContext.createMediaElementSource(this.videoRef.nativeElement);
+      this.sourceNode = ctx.createMediaElementSource(this.videoRef.nativeElement);
 
       // Connect: video -> gain -> output
       this.sourceNode.connect(this.gainNode);
-      this.gainNode.connect(this.audioContext.destination);
+      this.gainNode.connect(ctx.destination);
 
       this.audioInitialized = true;
       console.log('Audio context initialized for volume amplification, gain ready');
@@ -209,6 +228,8 @@ export class MediaDisplayComponent implements OnChanges, AfterViewInit, OnDestro
       this.applyVolume();
     } catch (err) {
       console.error('Failed to initialize audio context:', err);
+    } finally {
+      this.audioContextPending = false;
     }
   }
 
@@ -219,7 +240,8 @@ export class MediaDisplayComponent implements OnChanges, AfterViewInit, OnDestro
     if (!this.audioInitialized) {
       await this.initAudioContext();
     } else if (this.audioContext?.state === 'suspended') {
-      await this.audioContext.resume();
+      await this.audioContext.resume().catch(() => {});
+      this.applyVolume();
     }
   }
 

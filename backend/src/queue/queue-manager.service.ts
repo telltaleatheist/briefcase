@@ -1562,15 +1562,14 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
             error: 'No video ID or path available for normalize-audio task',
           };
         }
-        // Skip if already normalized (duplicate detection)
-        if (job.videoId) {
-          const videoForAN = this.databaseService.findVideoById(job.videoId);
-          if (videoForAN && videoForAN.audio_normalized) {
-            this.logger.log(`[${taskId}] Skipping normalize-audio - already normalized (id: ${job.videoId})`);
-            result = { success: true, data: { skipped: true } };
-            break;
-          }
-        }
+        // NO FLAG-BASED SKIP HERE, on purpose. The audio_normalized flag alone
+        // is not trustworthy: a long-standing bug normalized to a gain instead
+        // of a target, so videos sit flagged=1 while measuring 20+ LU below
+        // where they belong, and trusting the flag made the task "instantly
+        // finish, no change" with no way to repair them. Same lesson as the
+        // aspect-ratio flag above. normalizeAudio measures the file and returns
+        // it untouched when it is genuinely on target, so the skip decision is
+        // made on what the audio actually is, not on what a past run recorded.
         result = await this.mediaOps.normalizeAudio(
           job.videoId || job.videoPath!,
           task.options,

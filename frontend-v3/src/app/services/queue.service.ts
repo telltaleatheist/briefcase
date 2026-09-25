@@ -1479,7 +1479,7 @@ export class QueueService implements OnDestroy {
         options: {
           fixAspectRatio: true,
           normalizeAudio: true,
-          level: audioTask?.options?.['targetLevel'] || -16
+          level: audioTask?.options?.['targetLevel'] || -14
         }
       });
     } else if (hasAspectRatio) {
@@ -1495,7 +1495,7 @@ export class QueueService implements OnDestroy {
       backendTasks.push({
         type: 'normalize-audio',
         options: {
-          level: task?.options?.['targetLevel'] || -16
+          level: task?.options?.['targetLevel'] || -14
         }
       });
     }

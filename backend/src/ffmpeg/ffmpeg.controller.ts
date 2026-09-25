@@ -12,7 +12,7 @@ import {
 import { Response } from 'express';
 import { Multer } from 'multer';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { FfmpegService } from './ffmpeg.service';
+import { FfmpegService, DEFAULT_LOUDNESS_TARGET } from './ffmpeg.service';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -146,10 +146,10 @@ export class FfmpegController {
         };
       }
 
-      // Normalize audio with target volume (default -20dB)
+      // Normalize to a target integrated loudness in LUFS (not a gain)
       const outputFile = await this.ffmpegService.normalizeAudio(
         filePath,
-        targetVolume || -20
+        targetVolume ?? DEFAULT_LOUDNESS_TARGET
       );
 
       if (!outputFile) {

@@ -23,7 +23,8 @@ import {
   CustomMarker,
   MuteSection,
   EditorTab,
-  createEditorTab
+  createEditorTab,
+  DEFAULT_PLAYER_VOLUME
 } from '../../models/video-editor.model';
 import {
   FlagFilter,
@@ -479,7 +480,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
     currentTime: 0,
     duration: 120,
     isPlaying: false,
-    volume: 1,
+    volume: DEFAULT_PLAYER_VOLUME,
     playbackRate: 1,
     zoomState: { level: 1, offset: 0 }
   });
