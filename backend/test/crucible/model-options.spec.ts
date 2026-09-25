@@ -232,6 +232,43 @@ describe('CrucibleAiService.models, end to end against the fake', () => {
     ]);
   });
 
+  it('adding a Claude key in Settings: Claude is listed, a saved Claude choice becomes available, and a chat on it goes to Claude through the server', async () => {
+    fake = await startFakeCrucible({
+      name: 'crucible@mac',
+      models: [{ id: 'qwen3.5-9b', paramsB: 9 }],
+      upstreamModels: { anthropic: ['claude-sonnet-5'] },
+    });
+    const host = pairingHost(pairingLineFor('crucible@mac', fake.url, fake.token));
+    const h = harness(host);
+    h.registry.add({ name: 'mac', url: fake.url, token: fake.token });
+    const servers = new CrucibleServersService(h.registry, h.factory);
+    const chat = new CrucibleChatService(servers, h.factory, h.probes);
+    const ai = new CrucibleAiService(servers, h.probes, h.settings, chat, { keysForCopy: () => ({}) } as never, host);
+
+    const before = await ai.models(undefined, ['claude:claude-sonnet-5']);
+    expect(before.groups.map((g) => g.label)).toEqual(['On this Crucible']);
+    expect(before.resolved[0].unavailable).not.toBeNull();
+
+    // What Settings › AI Analysis does with the key: written to the serving Crucible, never kept here.
+    await h.settings.put('mac', { upstreams: { anthropic: { key: 'sk-ant-new-4321' } } });
+
+    const after = await ai.models(undefined, ['claude:claude-sonnet-5']);
+    expect(after.groups.map((g) => [g.label, g.options.map((o) => o.value)])).toEqual([
+      ['On this Crucible', ['local:qwen3.5-9b']],
+      ['Claude via Crucible', ['claude:claude-sonnet-5']],
+    ]);
+    expect(after.resolved[0]).toMatchObject({ value: 'claude:claude-sonnet-5', option: 'claude:claude-sonnet-5', unavailable: null });
+
+    const result = await chat.chat({ model: 'claude:claude-sonnet-5', prompt: 'hello', temperature: 0.2 });
+    expect(result).toMatchObject({ server: 'mac', model: 'anthropic/claude-sonnet-5' });
+    const [body] = fake.chatBodies();
+    expect(body).toMatchObject({ model: 'anthropic/claude-sonnet-5' });
+    expect(body).not.toHaveProperty('temperature');
+    // No local model was loaded or leased for it.
+    expect(fake.jobs).toHaveLength(0);
+    expect(fake.leases.taken).toHaveLength(0);
+  });
+
   it('every upstream configured, on a server that is not this computer\'s: every group, named for it; no key crosses', async () => {
     const ai = await service({
       models: [{ id: 'qwen3.5-9b', paramsB: 9 }],
