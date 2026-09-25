@@ -53,6 +53,7 @@ import {
   FlagGroup,
   RATING_MAP_VERSION,
   SnapFlagWindow,
+  hotness,
   rankFromRatingMap,
 } from './flag-spans';
 import { ChunkOptions, FlagChunk, FlagUnit, UnitOptions, buildFlagUnits, planFlagChunks } from './flag-units';
@@ -114,6 +115,7 @@ export interface SnapFlagRankStats {
   units: number;
   chunks: number;
   groupQuestions: number;
+  /** Units at least halfway above the video's baseline for some category (flag-spans.ts evidence). */
   hotUnits: number;
   spans: number;
   passages: number;
@@ -208,7 +210,7 @@ export class SnapFlagRanker {
       units: units.length,
       chunks: chunks.length,
       groupQuestions: counters.groups,
-      hotUnits: map.p1.filter((row) => 1 - row[plan.length] >= params.shareGate).length,
+      hotUnits: hotness(map, params).filter((h) => h >= 0.5).length,
       spans: ranked.spans.length,
       passages: ranked.passages.length,
       windows: ranked.windows.length,

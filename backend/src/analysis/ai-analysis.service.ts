@@ -26,6 +26,7 @@ import { DatabaseService } from '../database/database.service';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
+import { getBriefcaseConfigDir } from '../bridges/runtime-paths';
 import {
   buildChapterAnalysisPrompt,
   buildFlagVerificationPrompt,
@@ -282,6 +283,9 @@ const FLAG_VERIFICATION_SCHEMA: Record<string, unknown> = {
  * (budget, verdict cache, ghosted rejections, unverified overflow).
  */
 const VERIFY_FLAGS_WITH_LLM = false;
+
+/** Flag rating maps kept for offline tuning (saveFlagMap), newest first. */
+const FLAG_MAPS_KEPT = 30;
 
 /** Where the analysis engine's share of the progress bar ends (it starts at 3). */
 const ENGINE_BAND_END = 70;
@@ -865,6 +869,7 @@ export class AIAnalysisService {
       const snapChapters = snapTree ? leafChapters(snapTree.flat) : snap.chapters?.chapters ?? [];
       const flagRanking = snap.flags;
       if (!flagRanking) throw new Error('the analysis engine returned no flag ranking');
+      this.saveFlagMap(flagRanking, segments, videoTitle, jobId);
 
       // The chapters: the scorer's outline + Viterbi path, the outline labels as titles.
       const boundaries = snapChapters.map((c) => c.startSeconds);
@@ -1510,17 +1515,19 @@ export class AIAnalysisService {
       sentences.slice(window.contextFrom, window.contextTo + 1).map((s) => s.text);
 
     if (!this.verifyFlagsWithLlm) {
-      // Decide only: every window the map produced is a flag, as ranked. A long
-      // span split into <= 40 s sub-passages is stored as one section again.
+      // Decide only: every window the map produced is a flag section of its own.
+      // A long span was cut at its quietest points into sections of about a
+      // minute (flag-spans.ts splitSpan), and they stay apart: the user would
+      // "rather have 10 1-minute sections than one 30-minute section".
       const all: FlagWindow[] = [...snapRanking.windows, ...snapRanking.overflow];
-      const verified = mergeSpanSubPassages(all, new Map(all.map((w) => [w, w.categories])));
-      const sections = this.buildWindowSections(verified, sentences, ranker).sort(
+      const sections = this.buildWindowSections(all.map((window) => ({ window, categories: window.categories })), sentences, ranker).sort(
         (a, b) => this.parseDisplayTime(a.start_time) - this.parseDisplayTime(b.start_time),
       );
       this.logger.log(
         `[Pass 2b] Decide only (no LLM check): ${sentences.length} sentences (${snapRanking.stats.units} units, ` +
-        `${snapRanking.stats.groupQuestions} group questions) -> ${snapRanking.stats.spans} spans -> ` +
-        `${sections.length} flag sections`,
+        `${snapRanking.stats.groupQuestions} group questions, ${snapRanking.stats.hotUnits} hot units) -> ` +
+        `${snapRanking.stats.spans} spans -> ${sections.length} flag sections ` +
+        `(${sections.map((x) => `${x.start_time}-${x.end_time}`).join(', ')})`,
       );
       return sections;
     }
@@ -1793,6 +1800,32 @@ export class AIAnalysisService {
       (candidateSections.length ? `; ${candidateSections.length} unverified candidates stored` : ''),
     );
     return sections;
+  }
+
+  /**
+   * Keep this run's flag rating map, in the shape `flag-eval --from-maps` reads,
+   * so the span thresholds can be tuned offline on real videos without the GPU:
+   * `<config dir>/flag-maps/<job>.json`, the newest FLAG_MAPS_KEPT kept. A map
+   * that can't be written is a warning, never a failed analysis.
+   */
+  private saveFlagMap(ranking: SnapFlagRankResult, segments: Segment[], videoTitle: string, jobId: string | undefined): void {
+    try {
+      const dir = path.join(getBriefcaseConfigDir(), 'flag-maps');
+      fs.mkdirSync(dir, { recursive: true });
+      const id = (jobId ?? `run-${Date.now()}`).replace(/[^A-Za-z0-9._-]+/g, '_');
+      const saved = {
+        videoId: id, title: videoTitle, db: '', rows: [],
+        sentences: assembleSentences(segments), plan: ranking.plan, ratingMap: ranking.ratingMap, stats: ranking.stats,
+      };
+      fs.writeFileSync(path.join(dir, `${id}.json`), JSON.stringify(saved));
+      const files = fs.readdirSync(dir).filter((f) => f.endsWith('.json'))
+        .map((f) => ({ f, t: fs.statSync(path.join(dir, f)).mtimeMs }))
+        .sort((x, y) => y.t - x.t);
+      for (const { f } of files.slice(FLAG_MAPS_KEPT)) fs.rmSync(path.join(dir, f), { force: true });
+      this.logger.log(`[Pass 2b] Flag rating map saved: ${path.join(dir, `${id}.json`)}`);
+    } catch (err) {
+      this.logger.warn(`[Pass 2b] The flag rating map could not be saved (${(err as Error).message}).`);
+    }
   }
 
   /**

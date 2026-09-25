@@ -73,22 +73,27 @@ function mapOf(
   };
 }
 
-describe('hotness and per-unit evidence', () => {
-  it('hot = 1 - P(none)', () => {
-    const { map } = mapOf([0.1, 0.5, 0.97]);
-    expect(hotness(map).map((h) => +h.toFixed(6))).toEqual([0.1, 0.5, 0.97]);
+describe('hotness and per-unit evidence: the rise above the video\'s own level', () => {
+  it('a unit\'s evidence is how far P(c) rises above c\'s median in this video, as a share of the headroom', () => {
+    const { map } = mapOf([0.1, 0.5, 0.5, 0.5, 0.9]);
+    // Median of hate = 0.5: at or below it is 0; 0.9 is (0.9 - 0.5) / 0.5 = 0.8.
+    expect(hotness(map).map((h) => +h.toFixed(6))).toEqual([0, 0, 0, 0, 0.8]);
   });
 
-  it('per-unit category evidence: its share of the hot mass above the gate; else raw P', () => {
-    const { map } = mapOf([0.1, 0.6, 0.6], { row: (i) => (i === 1 ? [0.3, 0.3, 0, 0.4] : null) });
-    const hot = hotness(map);
-    // cold unit: raw P (0.1), never P/hot (which would be 1.0)
-    expect(unitCategoryScore(map, hot, 0, 0, DEFAULT_SPAN_PARAMS)).toBeCloseTo(0.1);
-    // hot, split between two categories: each gets half
-    expect(unitCategoryScore(map, hot, 1, 0, DEFAULT_SPAN_PARAMS)).toBeCloseTo(0.5);
-    expect(unitCategoryScore(map, hot, 1, 1, DEFAULT_SPAN_PARAMS)).toBeCloseTo(0.5);
-    // hot, all on one: P/hot
-    expect(unitCategoryScore(map, hot, 2, 0, DEFAULT_SPAN_PARAMS)).toBeCloseTo(1);
+  it('a category the model leans on all video long reads as zero; only its peaks are hot', () => {
+    // Every unit "does" hate a little (0.45): the old 1 - P(none) called all of them hot.
+    const hot = Array.from({ length: 40 }, (_, i) => (i >= 20 && i < 24 ? 0.9 : 0.45));
+    const { map } = mapOf(hot);
+    const h = hotness(map);
+    expect(h.filter((x) => x > 0.1).length).toBe(4);
+    expect(buildSpans(map).map((sp) => [sp.unitFrom, sp.unitTo])).toEqual([[20, 23]]);
+  });
+
+  it('per-unit category evidence is per category: two that both rise both carry it', () => {
+    const { map } = mapOf([0.01, 0.01, 0.6, 0.01, 0.01], { row: (i) => (i === 2 ? [0.3, 0.3, 0, 0.4] : null) });
+    expect(unitCategoryScore(map, 0, 0)).toBe(0);
+    expect(unitCategoryScore(map, 2, 0)).toBeCloseTo((0.3 - 0.01) / 0.99, 6);
+    expect(unitCategoryScore(map, 2, 1)).toBeCloseTo(0.3, 6);
   });
 });
 
@@ -174,10 +179,12 @@ describe('ranking and the co-fire boost', () => {
     for (let i = 1; i < windows.length; i++) expect(windows[i].score).toBeLessThanOrEqual(windows[i - 1].score + 1e-12);
   });
 
-  it('keeps categories with s_c >= the floor (a third) and always the top one', () => {
-    const { map } = mapOf([0.01, 0.3, 0.01], { row: (i) => (i === 1 ? [0.2, 0.1, 0, 0.7] : null) });
+  it('keeps categories with at least a third of the top one\'s evidence, and always the top one', () => {
+    const { map } = mapOf([0.01, 0.35, 0.01], { row: (i) => (i === 1 ? [0.3, 0.05, 0, 0.65] : null) });
     const spans = buildSpans(map, { ...DEFAULT_SPAN_PARAMS, tau: -3 });
     expect(spans[0].categories.map((c) => c.category)).toEqual(['hate']);
+    const both = mapOf([0.01, 0.4, 0.01], { row: (i) => (i === 1 ? [0.3, 0.12, 0, 0.58] : null) }).map;
+    expect(buildSpans(both, { ...DEFAULT_SPAN_PARAMS, tau: -3 })[0].categories.map((c) => c.category)).toEqual(['hate', 'conspiracy']);
   });
 });
 
@@ -193,14 +200,57 @@ describe('windows, long spans and the verify budget', () => {
     expect(w.categories[0].text).toBe(sentences[3].text);
   });
 
-  it('splits a span over 40 s into sub-passages that share the span id', () => {
+  it('a span up to 90 s is one section', () => {
     const hot = [0.01, ...Array(20).fill(0.9), 0.01]; // 20 hot units x 4 s = 80 s
     const { map, sentences } = mapOf(hot);
     const res = rankFromRatingMap(map, sentences, PLAN);
     expect(res.spans).toHaveLength(1);
-    expect(res.passages.length).toBeGreaterThanOrEqual(2);
-    for (const p of res.passages) expect(p.end - p.start).toBeLessThanOrEqual(40);
-    expect(new Set(res.passages.map((p) => p.id)).size).toBe(1);
+    expect(res.passages).toHaveLength(1);
+  });
+
+  it('a 5-minute flagged stretch becomes sections of about a minute, cut at its quietest points', () => {
+    // 75 hot units x 4 s = 300 s, with dips (still hot, never cold enough to break the span) every ~15 units.
+    const hot = [0.01, 0.01, ...Array.from({ length: 75 }, (_, i) => (i % 15 === 14 ? 0.35 : 0.9)), 0.01, 0.01, 0.01, 0.01, 0.01];
+    const { map, sentences } = mapOf(hot);
+    const res = rankFromRatingMap(map, sentences, PLAN);
+    expect(res.spans).toHaveLength(1);
+    expect(res.passages.length).toBeGreaterThanOrEqual(4);
+    for (const p of res.passages) {
+      expect(p.end - p.start).toBeLessThanOrEqual(90);
+      expect(p.end - p.start).toBeGreaterThanOrEqual(20);
+    }
+    // Each cut sits at a dip: the unit just before or after a boundary is one of the quiet ones.
+    const sorted = [...res.passages].sort((a, b) => a.unitFrom - b.unitFrom);
+    for (let k = 1; k < sorted.length; k++) {
+      const cut = sorted[k].unitFrom;
+      expect(Math.min(hot[cut - 1], hot[cut])).toBeCloseTo(0.35);
+    }
+  });
+
+  it('a video that really is hate all the way through is flagged all the way through, as sections of about a minute', () => {
+    // 150 units x 4 s = 10 min at 0.9 with small dips: the baseline cap (0.5) keeps it evidence.
+    const hot = Array.from({ length: 150 }, (_, i) => (i % 15 === 14 ? 0.6 : 0.9));
+    const { map, sentences } = mapOf(hot);
+    const res = rankFromRatingMap(map, sentences, PLAN);
+    expect(res.passages.length).toBeGreaterThanOrEqual(7);
+    for (const p of res.passages) expect(p.end - p.start).toBeLessThanOrEqual(90);
+    expect(res.passages.reduce((n, p) => n + (p.end - p.start), 0)).toBeGreaterThan(0.9 * 600);
+  });
+
+  it('a real-run shape: one category warm all video long, a few true peaks → a few short sections, not a half-hour block', () => {
+    // 360 units x 4 s = 24 min. Every unit leans 0.45 to one category (the run that gave three 8-minute
+    // sections had 351 of 360 units over the old 1 - P(none) gate); six real peaks of 8-15 units.
+    let seed = 11;
+    const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31);
+    const peaks: Array<[number, number]> = [[20, 28], [60, 74], [130, 138], [200, 211], [260, 268], [330, 342]];
+    const hot = Array.from({ length: 360 }, (_, i) => (peaks.some(([a, b]) => i >= a && i <= b) ? 0.85 + rnd() * 0.1 : 0.4 + rnd() * 0.1));
+    const { map, sentences } = mapOf(hot);
+    const res = rankFromRatingMap(map, sentences, PLAN);
+    expect(res.passages.length).toBeGreaterThanOrEqual(6);
+    expect(res.passages.length).toBeLessThanOrEqual(12);
+    for (const p of res.passages) expect(p.end - p.start).toBeLessThanOrEqual(90);
+    const covered = res.passages.reduce((n, p) => n + (p.end - p.start), 0);
+    expect(covered).toBeLessThan(0.4 * 360 * 4);
   });
 
   it('budget: max(20, 60/h); whole windows in strength order, the rest is overflow', () => {

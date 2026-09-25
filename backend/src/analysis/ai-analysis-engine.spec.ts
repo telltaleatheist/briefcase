@@ -136,13 +136,14 @@ describe('AIAnalysisService: snap is the analysis engine', () => {
     process.env = savedEnv;
   });
 
-  it('decide only (the default): every window of the map is a flag section, sub-passages merged, no LLM check', async () => {
+  it('decide only (the default): every window of the map is a flag section of its own (pieces of a long span stay apart), no LLM check', async () => {
     const h = new Harness();
     const res = await h.service().analyzeTranscript(options());
     expect(h.generated.filter((g) => g.task === 'flags')).toHaveLength(0);
     const flags = res.sections.filter((s) => s.verdict === 'flag');
     expect(flags.map((s) => [s.start_time, s.end_time, s.category, s.ranker])).toEqual([
-      ['00:00:20', '00:00:50', 'political-demonization', 'snap-v1'],
+      ['00:00:20', '00:00:40', 'political-demonization', 'snap-v1'],
+      ['00:00:40', '00:00:50', 'political-demonization', 'snap-v1'],
       ['00:01:10', '00:01:20', 'conspiracy', 'snap-v1'],
     ]);
     expect(flags[0].description).toContain('[also: dehumanization]');

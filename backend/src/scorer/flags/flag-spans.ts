@@ -1,7 +1,8 @@
 /**
  * From the rating map to ranked verification windows. Pure: no scorer, no I/O.
  *
- *   rating map  (group vectors, averaged per unit)        -> hotness per unit
+ *   rating map  (group vectors, averaged per unit)        -> each category's
+ *               rise above ITS OWN level in this video    -> evidence, hotness per unit
  *   hotness     -> 2-state Viterbi (plan §5.3)            -> on/off runs
  *   runs        -> category-blind merge                   -> paragraph spans
  *   spans       -> per-category span scores s_c           -> co-fire strength
@@ -35,52 +36,63 @@ export interface FlagSpanParams {
    */
   tau: number;
   /**
-   * A unit at least this hot reads its category evidence as its share of the
-   * hot mass, P_i(c) / hot_i (the categories compete in one softmax); a colder
-   * one reads the raw P_i(c). See unitCategoryScore.
+   * Where a category's baseline sits in this video's own distribution of it (0.5
+   * = the median). Evidence is the rise above the baseline, so a category the
+   * model leans toward all video long (a group of three sentences almost always
+   * "does" something a little) reads as zero, and only its peaks read as hot.
    */
-  shareGate: number;
+  baselineQuantile: number;
+  /**
+   * ...never above this. A category the model gives better than even odds all
+   * video long IS there (a half-hour rant is flagged, as sections of about a
+   * minute); one that only hums below it (0.45 everywhere) reads as its peaks.
+   */
+  baselineMax: number;
   /** Category-blind post-merge: spans separated by <= this many units... */
   mergeGapUnits: number;
   /** ...or <= this many seconds join (nli-ranker WINDOW_MERGE_GAP_*). */
   mergeGapSeconds: number;
   /**
-   * A span keeps categories with s_c >= this, and always its top one. A third,
-   * not a half: a group holding two things splits its mass between them (one
-   * softmax), so each carries ~0.5 of it, just under a half-floor.
+   * A span keeps the categories whose evidence reaches this share of its top
+   * category's, and always its top one. A third: a group holding two things
+   * splits its mass between them (one softmax), so the second is often well
+   * under the first.
    */
   categoryFloor: number;
-  /** Spans longer than this are verified as sub-passages (WINDOW_MAX_MERGED_SECONDS). */
-  maxPassageSeconds: number;
+  /**
+   * A span longer than this is cut into sections at its quietest points (the
+   * user: "id rather have 10 1-minute sections than one 30-minute section")...
+   */
+  maxSectionSeconds: number;
+  /** ...never into a piece shorter than this. */
+  minSectionSeconds: number;
   /** Verify budget: max(minVerifyCalls, verifyCallsPerHour x hours). Cache hits are the caller's concern. */
   minVerifyCalls: number;
   verifyCallsPerHour: number;
 }
 
 /**
- * DEVIATION from the plan's starting values (λ = 3, τ = 0; §5.3). An isolated
- * hot unit between cold ones pays the switch cost TWICE (on, then off), so it
- * opens a span only when logit(hot) - τ > 2λ. At λ = 3, τ = 0 that is
- * hot > 0.9975: the plan's "one unit at hot ≈ 0.95 can open a span" does not
- * hold (logit 0.95 = 2.94 < 6), and single-sentence flags, the common case,
- * would be lost before the verifier ever saw them.
- *
- * These defaults are solved from the behaviour the plan asks for instead:
- *   - an isolated unit opens a span at hot > 0.5:    logit(h) > 2λ + τ = 0
+ * An isolated hot unit between cold ones pays the switch cost TWICE (on, then
+ * off), so it opens a span only when logit(hot) - τ > 2λ. The defaults, on
+ * hotness = the rise above the video's own baseline (0..1 of the headroom):
+ *   - an isolated unit opens a span at hot > 0.5:     logit(h) > 2λ + τ = 0
  *   - a span edge extends to a neighbour at h > 0.27: logit(h) > τ = -1
  *   - one cold unit breaks a run only at h < 0.12:    logit(h) < τ - 2λ = -2
- * and the category-blind post-merge (<= 1 unit or <= 5 s) coalesces what the
- * chain leaves apart, so the output is paragraph spans, never a picket fence.
- * Both are parameters; §6.1 tunes them offline from the saved rating map.
+ * The category-blind post-merge (<= 1 unit or <= 5 s) coalesces what the chain
+ * leaves apart, and a span over maxSectionSeconds is cut at its quietest points
+ * into sections of about a minute: paragraphs, not a picket fence and not one
+ * half-hour block. All are parameters, tuned offline from saved rating maps.
  */
 export const DEFAULT_SPAN_PARAMS: FlagSpanParams = {
   switchCost: 0.5,
   tau: -1,
-  shareGate: 0.2,
+  baselineQuantile: 0.5,
+  baselineMax: 0.5,
   mergeGapUnits: 1,
   mergeGapSeconds: 5,
   categoryFloor: 0.34,
-  maxPassageSeconds: 40,
+  maxSectionSeconds: 90,
+  minSectionSeconds: 20,
   minVerifyCalls: 20,
   verifyCallsPerHour: 60,
 };
@@ -129,30 +141,58 @@ export function noneIndex(map: Pick<FlagRatingMap, 'categories'>): number {
   return map.categories.length;
 }
 
-/** hot_i = 1 - P_i(none). */
-export function hotness(map: Pick<FlagRatingMap, 'categories' | 'p1'>): number[] {
-  const k = noneIndex(map);
-  return map.p1.map((row) => clamp01(1 - row[k]));
+/** The value at quantile q of `values` (linear between order statistics). */
+function quantile(values: number[], q: number): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const at = Math.min(Math.max(q, 0), 1) * (sorted.length - 1);
+  const lo = Math.floor(at);
+  const hi = Math.ceil(at);
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (at - lo);
 }
 
+const evidenceCache = new WeakMap<number[][], { key: string; e: number[][] }>();
+
 /**
- * Per-unit evidence for category c:
- *   - on a unit that cleared the share gate, P_i(c)/hot_i: its share of the hot
- *     mass (categories compete in one softmax, so two that both apply split it);
- *   - on a cold unit, the raw P_i(c). (On a cold unit, hot 0.1 and P(c) 0.09,
- *     the ratio is 0.9, which would let a lukewarm context sentence outrank the
- *     sentence that fired.)
+ * e_i(c): how far unit i's P(c) rises above category c's baseline in this video
+ * (its `baselineQuantile`, capped at `baselineMax`), as a share of the headroom
+ * left above it:
+ * max(0, P_i(c) - b_c) / (1 - b_c). 0 = at or below the video's usual level for
+ * c; 1 = certain. Cached per map.
  */
+export function evidence(
+  map: Pick<FlagRatingMap, 'categories' | 'p1'>,
+  params: Pick<FlagSpanParams, 'baselineQuantile' | 'baselineMax'> = DEFAULT_SPAN_PARAMS,
+): number[][] {
+  const key = `${params.baselineQuantile}/${params.baselineMax}`;
+  const cached = evidenceCache.get(map.p1);
+  if (cached && cached.key === key) return cached.e;
+  const k = map.categories.length;
+  const baseline = Array.from({ length: k }, (_, j) =>
+    Math.min(params.baselineMax, quantile(map.p1.map((row) => row[j]), params.baselineQuantile)));
+  const e = map.p1.map((row) =>
+    baseline.map((b, j) => clamp01(Math.max(0, row[j] - b) / Math.max(1 - b, 1e-6))),
+  );
+  evidenceCache.set(map.p1, { key, e });
+  return e;
+}
+
+/** hot_i: the unit's strongest category evidence (its rise above the video's baseline). */
+export function hotness(
+  map: Pick<FlagRatingMap, 'categories' | 'p1'>,
+  params: Pick<FlagSpanParams, 'baselineQuantile' | 'baselineMax'> = DEFAULT_SPAN_PARAMS,
+): number[] {
+  return evidence(map, params).map((row) => row.reduce((m, x) => Math.max(m, x), 0));
+}
+
+/** Per-unit evidence for category c: its rise above the video's baseline for c (see evidence). */
 export function unitCategoryScore(
   map: Pick<FlagRatingMap, 'categories' | 'p1'>,
-  hot: number[],
   unit: number,
   catIndex: number,
-  params: Pick<FlagSpanParams, 'shareGate'>,
+  params: Pick<FlagSpanParams, 'baselineQuantile' | 'baselineMax'> = DEFAULT_SPAN_PARAMS,
 ): number {
-  const p = map.p1[unit][catIndex];
-  if (hot[unit] >= params.shareGate && hot[unit] > 0) return clamp01(p / hot[unit]);
-  return p;
+  return evidence(map, params)[unit][catIndex];
 }
 
 // --------------------------------------------------------------------------- spans
@@ -223,17 +263,16 @@ export function mergedRuns(
 /** s_c for every category over units [from, to], strongest first. */
 export function scoreRange(
   map: Pick<FlagRatingMap, 'categories' | 'p1'>,
-  hot: number[],
   from: number,
   to: number,
-  params: Pick<FlagSpanParams, 'shareGate'>,
+  params: Pick<FlagSpanParams, 'baselineQuantile' | 'baselineMax'> = DEFAULT_SPAN_PARAMS,
 ): SpanCategory[] {
   const out: SpanCategory[] = [];
   for (let j = 0; j < map.categories.length; j++) {
     let best = -1;
     let bestUnit = from;
     for (let i = from; i <= to; i++) {
-      const s = unitCategoryScore(map, hot, i, j, params);
+      const s = unitCategoryScore(map, i, j, params);
       if (s > best) {
         best = s;
         bestUnit = i;
@@ -259,8 +298,10 @@ export function compareSpans(a: FlagSpan, b: FlagSpan): number {
   return a.strength - b.strength || b.heat - a.heat || a.start - b.start;
 }
 
+/** The categories reaching `floor` x the top one's evidence; always the top one (all is strongest first). */
 function keepCategories(all: SpanCategory[], floor: number): SpanCategory[] {
-  const kept = all.filter((c) => c.score >= floor);
+  const top = all[0]?.score ?? 0;
+  const kept = all.filter((c) => c.score > 0 && c.score >= floor * top);
   return kept.length ? kept : all.slice(0, 1);
 }
 
@@ -296,21 +337,56 @@ function makeSpan(
 /** Viterbi -> merge -> per-span categories -> strength order. */
 export function buildSpans(map: FlagRatingMap, params: FlagSpanParams = DEFAULT_SPAN_PARAMS): FlagSpan[] {
   if (map.units.length === 0 || map.categories.length === 0) return [];
-  const hot = hotness(map);
+  const hot = hotness(map, params);
   const path = onOffPath(hot, params);
   const ranges = mergedRuns(path, map.units, params);
   const spans = ranges.map(([a, b], id) =>
-    makeSpan(id, a, b, keepCategories(scoreRange(map, hot, a, b, params), params.categoryFloor), map.units, hot),
+    makeSpan(id, a, b, keepCategories(scoreRange(map, a, b, params), params.categoryFloor), map.units, hot),
   );
   return spans.sort(compareSpans);
 }
 
 /**
- * Split a span longer than maxPassageSeconds into consecutive sub-passages of
- * at most that length (plan §5.5 "Long spans"), cutting only between units
- * that do not share a sentence. A sub-passage keeps each of the span's
- * categories it carries evidence for (s ≥ min(floor, span s_c)); one with none
- * is context only and is dropped. Sub-passages keep the parent's `id`.
+ * Where to cut [from, to] into pieces of at most `maxSectionSeconds`, each at
+ * least `minSectionSeconds`: at the quietest boundary (the lowest hotness on
+ * either side of it), nearest the middle on a tie, then each half again.
+ * A boundary is only between units that do not share a sentence. A stretch no
+ * boundary can split (one very long unit) is left whole.
+ */
+export function valleyCuts(
+  from: number,
+  to: number,
+  units: FlagUnit[],
+  hot: number[],
+  params: Pick<FlagSpanParams, 'maxSectionSeconds' | 'minSectionSeconds'>,
+): Array<[number, number]> {
+  if (units[to].end - units[from].start <= params.maxSectionSeconds) return [[from, to]];
+  const mid = (units[from].start + units[to].end) / 2;
+  let best = -1;
+  let bestQuiet = Infinity;
+  let bestOff = Infinity;
+  for (let k = from + 1; k <= to; k++) {
+    if (units[k].sentenceFrom <= units[k - 1].sentenceTo) continue;
+    if (units[k - 1].end - units[from].start < params.minSectionSeconds) continue;
+    if (units[to].end - units[k].start < params.minSectionSeconds) continue;
+    const quiet = hot[k - 1] + hot[k];
+    const off = Math.abs(units[k].start - mid);
+    if (quiet < bestQuiet - 1e-9 || (Math.abs(quiet - bestQuiet) <= 1e-9 && off < bestOff)) {
+      best = k;
+      bestQuiet = quiet;
+      bestOff = off;
+    }
+  }
+  if (best < 0) return [[from, to]];
+  return [...valleyCuts(from, best - 1, units, hot, params), ...valleyCuts(best, to, units, hot, params)];
+}
+
+/**
+ * A span longer than maxSectionSeconds becomes sections of about a minute,
+ * cut at its quietest points (valleyCuts). A piece keeps each of the span's
+ * categories it carries evidence for (at least `categoryFloor` of what the
+ * span had for it); a piece with none (a lull inside a long span) is dropped.
+ * Pieces keep the parent's `id`.
  */
 export function splitSpan(
   span: FlagSpan,
@@ -318,27 +394,15 @@ export function splitSpan(
   hot: number[],
   params: FlagSpanParams = DEFAULT_SPAN_PARAMS,
 ): FlagSpan[] {
-  if (span.end - span.start <= params.maxPassageSeconds) return [span];
-  const units = map.units;
-  const pieces: Array<[number, number]> = [];
-  let from = span.unitFrom;
-  for (let i = span.unitFrom + 1; i <= span.unitTo; i++) {
-    const cuttable = units[i].sentenceFrom > units[i - 1].sentenceTo;
-    if (cuttable && units[i].end - units[from].start > params.maxPassageSeconds) {
-      pieces.push([from, i - 1]);
-      from = i;
-    }
-  }
-  pieces.push([from, span.unitTo]);
+  const pieces = valleyCuts(span.unitFrom, span.unitTo, map.units, hot, params);
   if (pieces.length === 1) return [span];
-
-  const wanted = new Map(span.categories.map((c) => [c.category, Math.min(params.categoryFloor, c.score)]));
+  const wanted = new Map(span.categories.map((c) => [c.category, params.categoryFloor * c.score]));
   const out: FlagSpan[] = [];
   for (const [a, b] of pieces) {
-    const cats = scoreRange(map, hot, a, b, params).filter(
-      (c) => wanted.has(c.category) && c.score >= (wanted.get(c.category) as number),
+    const cats = scoreRange(map, a, b, params).filter(
+      (c) => wanted.has(c.category) && c.score > 0 && c.score >= (wanted.get(c.category) as number),
     );
-    if (cats.length) out.push(makeSpan(span.id, a, b, cats, units, hot));
+    if (cats.length) out.push(makeSpan(span.id, a, b, cats, map.units, hot));
   }
   return out.length ? out : [span];
 }
@@ -475,7 +539,7 @@ export function rankFromRatingMap(
   params: FlagSpanParams = DEFAULT_SPAN_PARAMS,
 ): RankFromMapResult {
   const spans = buildSpans(map, params);
-  const hot = hotness(map);
+  const hot = hotness(map, params);
   const passages = spans.flatMap((sp) => splitSpan(sp, map, hot, params)).sort(compareSpans);
   const all = spansToWindows(passages, sentences, map.units, plan);
   const duration = sentences.length ? sentences[sentences.length - 1].end : 0;
