@@ -39,21 +39,23 @@ describe('briefcase.module.json', () => {
     expect(text).not.toContain('\r');
   });
 
-  it('asks for llm, asr and align, the analysis class, and Qwen3-ASR with its aligner on both backends', () => {
+  it('asks for llm, asr and align, the analysis class, and Qwen3-ASR 0.6B (and its Mac port) with the aligner', () => {
     expect(BRIEFCASE_MODULE.job_types.map((j) => j.type)).toEqual(['llm', 'asr', 'align']);
     expect(BRIEFCASE_MODULE.needs).toEqual([{ class: 'analysis' }]);
-    expect(BRIEFCASE_MODULE.subjects.map((s) => s.id)).toEqual(['qwen3-asr-1.7b', 'qwen3-aligner']);
+    expect(BRIEFCASE_MODULE.subjects.map((s) => s.id)).toEqual(['qwen3-asr-0.6b', 'qwen3-asr-0.6b-mlx', 'qwen3-aligner']);
   });
 
   it('is filtered to one backend and stripped of `backends` before posting', () => {
     const mac = moduleForBackend('mlx-darwin');
-    expect(mac.subjects).toEqual([{ kind: 'model', id: 'qwen3-asr-1.7b' }, { kind: 'model', id: 'qwen3-aligner' }]);
+    expect(mac.subjects).toEqual([
+      { kind: 'model', id: 'qwen3-asr-0.6b' }, { kind: 'model', id: 'qwen3-asr-0.6b-mlx' }, { kind: 'model', id: 'qwen3-aligner' },
+    ]);
     expect(mac.job_types).toEqual([{ type: 'llm' }, { type: 'asr' }, { type: 'align' }]);
     expect(JSON.stringify(mac)).not.toContain('backends');
 
-    // One id on every backend since Crucible 1.0.29.
+    // The MLX port is Mac only.
     const pc = moduleForBackend('cuda-linux');
-    expect(pc.subjects).toEqual(mac.subjects);
+    expect(pc.subjects).toEqual([{ kind: 'model', id: 'qwen3-asr-0.6b' }, { kind: 'model', id: 'qwen3-aligner' }]);
 
     // Native Windows has no asr engine: the module asks it for text only.
     const windows = moduleForBackend('llama-windows');

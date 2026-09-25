@@ -5,7 +5,7 @@
  * parks on it: there is no other model and no offline transcriber.
  */
 import type { ServerInfo } from '@crucible/client';
-import { QWEN_ASR_MODEL, asrOfferOf, qwenAsrParams, qwenUnavailable, type AsrOffer } from '../../src/crucible/asr/asr-models';
+import { asrOfferOf, qwenAsrModelFor, qwenAsrParams, qwenUnavailable, type AsrOffer } from '../../src/crucible/asr/asr-models';
 import { decideTranscriptionRoute, type TranscriptionVenueHost } from '../../src/crucible/asr/transcription-venue';
 import type { ServerReach } from '../../src/crucible/wire/settings-wire';
 
@@ -15,7 +15,7 @@ function info(opts: { installed?: string[]; jobTypes?: string[]; asrIds?: string
   const jobTypes = opts.jobTypes ?? ['asr', 'align'];
   const row = (id: string) => ({ id, revision: '', source: '', installed: installed.includes(id), resident: false, vramBytes: 0 });
   const capabilities = [
-    ...(jobTypes.includes('asr') ? [{ jobType: 'asr', models: (opts.asrIds ?? ['qwen3-asr-1.7b', 'whisper-large-v3-turbo', 'whisper-tiny']).map(row) }] : []),
+    ...(jobTypes.includes('asr') ? [{ jobType: 'asr', models: (opts.asrIds ?? ['qwen3-asr-1.7b', 'qwen3-asr-0.6b', 'qwen3-asr-0.6b-mlx', 'whisper-large-v3-turbo', 'whisper-tiny']).map(row) }] : []),
     ...(jobTypes.includes('align') ? [{ jobType: 'align', models: [row('qwen3-aligner')] }] : []),
   ];
   return {
@@ -26,12 +26,18 @@ function info(opts: { installed?: string[]; jobTypes?: string[]; asrIds?: string
   } as unknown as ServerInfo;
 }
 
-const READY = ['qwen3-asr-1.7b', 'qwen3-aligner'];
+const READY = ['qwen3-asr-0.6b-mlx', 'qwen3-aligner'];
 
 describe('the transcriber: Qwen3-ASR-1.7B, and nothing else', () => {
-  it('reads Qwen and its aligner off /v1/info', () => {
+  it('the fastest 0.6B on each machine: the MLX port on a Mac, the one id elsewhere', () => {
+    expect(qwenAsrModelFor('mlx-darwin')).toBe('qwen3-asr-0.6b-mlx');
+    expect(qwenAsrModelFor('cuda-linux')).toBe('qwen3-asr-0.6b');
+    expect(qwenAsrModelFor(null)).toBe('qwen3-asr-0.6b');
+  });
+
+  it('reads that model and its aligner off /v1/info', () => {
     expect(asrOfferOf(info({ installed: READY }))).toEqual({
-      backend: 'mlx-darwin', offersAsr: true,
+      backend: 'mlx-darwin', offersAsr: true, model: 'qwen3-asr-0.6b-mlx',
       qwen: { offered: true, installed: true }, aligner: { offered: true, installed: true },
     });
   });
@@ -42,12 +48,12 @@ describe('the transcriber: Qwen3-ASR-1.7B, and nothing else', () => {
     expect(why(asrOfferOf(info({ jobTypes: ['echo'] })))).toBe('Crucible on mac has no transcription engine.');
     // A pre-1.0.29 server lists backend-prefixed whisper ids and no Qwen.
     expect(why(asrOfferOf(info({ asrIds: ['mlx-whisper-large-v3'], installed: ['mlx-whisper-large-v3'] }))))
-      .toBe('Crucible on mac does not offer qwen3-asr-1.7b. Update it to Crucible 1.0.29 or later.');
-    expect(why(asrOfferOf(info({ installed: ['whisper-large-v3-turbo', 'qwen3-aligner'] }))))
-      .toBe('Crucible on mac has not downloaded qwen3-asr-1.7b yet.');
-    expect(why(asrOfferOf(info({ jobTypes: ['asr'], installed: ['qwen3-asr-1.7b'] }))))
+      .toBe('Crucible on mac does not offer qwen3-asr-0.6b-mlx. Update it to Crucible 1.0.32 or later.');
+    expect(why(asrOfferOf(info({ installed: ['qwen3-asr-1.7b', 'whisper-large-v3-turbo', 'qwen3-aligner'] }))))
+      .toBe('Crucible on mac has not downloaded qwen3-asr-0.6b-mlx yet.');
+    expect(why(asrOfferOf(info({ jobTypes: ['asr'], installed: ['qwen3-asr-0.6b-mlx'] }))))
       .toBe("Crucible on mac does not offer qwen3-aligner, which Qwen's word timings need.");
-    expect(why(asrOfferOf(info({ installed: ['qwen3-asr-1.7b'] }))))
+    expect(why(asrOfferOf(info({ installed: ['qwen3-asr-0.6b-mlx'] }))))
       .toBe("Crucible on mac has not downloaded qwen3-aligner (Qwen's word timings) yet.");
   });
 
@@ -87,7 +93,7 @@ function host(opts: {
 describe('the venue rule', () => {
   it('Qwen on the selected server when it has Qwen and the aligner', async () => {
     expect(await decideTranscriptionRoute(host({ selected: { name: 'mac' } })))
-      .toEqual({ kind: 'crucible', server: 'mac', model: QWEN_ASR_MODEL });
+      .toEqual({ kind: 'crucible', server: 'mac', model: 'qwen3-asr-0.6b-mlx' });
   });
 
   it('no server selected: none, in routing’s words (the task parks; nothing else transcribes)', async () => {
@@ -107,9 +113,9 @@ describe('the venue rule', () => {
   });
 
   it('Qwen not downloaded is none with that reason, even with a whisper installed: never another model', async () => {
-    const offer = asrOfferOf(info({ installed: ['whisper-large-v3-turbo', 'qwen3-aligner'] }));
+    const offer = asrOfferOf(info({ installed: ['qwen3-asr-1.7b', 'whisper-large-v3-turbo', 'qwen3-aligner'] }));
     expect(await decideTranscriptionRoute(host({ selected: { name: 'mac', offer } })))
-      .toEqual({ kind: 'none', reason: 'Crucible on mac has not downloaded qwen3-asr-1.7b yet.' });
+      .toEqual({ kind: 'none', reason: 'Crucible on mac has not downloaded qwen3-asr-0.6b-mlx yet.' });
   });
 
   it('a server that can\'t say what it offers is none, with why', async () => {

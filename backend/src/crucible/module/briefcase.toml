@@ -14,8 +14,8 @@
 #      this directory, byte for byte. Never edit the JSON by hand: its `version`
 #      is a hash of its own content, and test/crucible/module-file.spec.ts checks it.
 #
-# The copy here was produced by the crucible repo's OWN generator at v1.0.29
-# (6ef113b), run against this file in a scratch directory
+# The copy here was produced by the crucible repo's OWN generator at v1.0.32,
+# run against this file in a scratch directory
 # (`gen-modules.py --directory <scratch>`), so it is what step 2 will write.
 
 [module]
@@ -40,16 +40,22 @@ type = "align"
 [[needs]]
 class = "analysis"
 
-# The transcriber: Qwen3-ASR-1.7B, ONE id on both backends (Briefcase,
-# 2026-09-24: "wire qwen asr in as the model we use for transcription"), and
-# the forced aligner it runs for word timestamps. Briefcase always asks Qwen
-# for words: a Qwen segment is one piece of up to 180 s, and the aligner's
-# words are what cut it into cues (crucible-transcript.ts). Before the asr
-# lineup ruling (Crucible 1.0.29) this named large-v3 twice, once per
-# backend-prefixed id; those ids are retired.
+# The transcriber: Qwen3-ASR-0.6B, the fastest on each machine (Briefcase,
+# 2026-09-24: "we dont need exact text with ums and uhs here, we just need it
+# fast"): `qwen3-asr-0.6b-mlx` on the Mac, `qwen3-asr-0.6b` elsewhere
+# (asr-models.ts qwenAsrModelFor), and the forced aligner it runs for word
+# timestamps. Briefcase always asks Qwen for words: a Qwen segment is one piece
+# of up to 180 s, and the aligner's words are what cut it into cues
+# (crucible-transcript.ts). The generator scopes each subject to the backends
+# that declare it, so the Mac-only build is asked of the Mac alone; the plain
+# id is declared on both, so the Mac lists it too.
 [[subjects]]
 kind = "model"
-id = "qwen3-asr-1.7b"
+id = "qwen3-asr-0.6b"
+
+[[subjects]]
+kind = "model"
+id = "qwen3-asr-0.6b-mlx"
 
 [[subjects]]
 kind = "model"

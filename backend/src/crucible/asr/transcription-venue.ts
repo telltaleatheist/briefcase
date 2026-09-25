@@ -11,13 +11,14 @@
  *             it. It is never transcribed some other way.
  *
  * The rule: the SELECTED Crucible server (Settings › Crucible Servers), and
- * only it, with Qwen3-ASR (asr-models.ts), and only Qwen. When it answers
+ * only it, with Qwen3-ASR-0.6B (asr-models.ts: the MLX build on a Mac), and
+ * only Qwen. When it answers
  * (ready or busy: busy is the door's question, and parks) and has Qwen and its
  * aligner downloaded → crucible. Otherwise none, with its reason: never
  * another server, never another model.
  */
 import type { ServerReach } from '../wire/settings-wire';
-import { QWEN_ASR_MODEL, qwenUnavailable, type AsrOffer } from './asr-models';
+import { qwenUnavailable, type AsrOffer } from './asr-models';
 
 export type TranscriptionRoute =
   | { kind: 'crucible'; server: string; model: string }
@@ -54,5 +55,5 @@ export async function decideTranscriptionRoute(host: TranscriptionVenueHost): Pr
     return { kind: 'none', reason: `Crucible on ${server} couldn't say what it offers (${(err as Error)?.message ?? err}).` };
   }
   const why = qwenUnavailable(server, offer);
-  return why === null ? { kind: 'crucible', server, model: QWEN_ASR_MODEL } : { kind: 'none', reason: why };
+  return why === null ? { kind: 'crucible', server, model: offer.model } : { kind: 'none', reason: why };
 }

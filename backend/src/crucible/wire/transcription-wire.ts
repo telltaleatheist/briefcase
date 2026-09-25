@@ -13,7 +13,7 @@ export interface TranscriptionModelState {
 
 /**
  * The selected server, as transcription sees it. Transcription is Crucible's
- * `asr` job with Qwen3-ASR-1.7B and nothing else.
+ * `asr` job with Qwen3-ASR-0.6B (the MLX build on a Mac) and nothing else.
  */
 export interface TranscriptionServerView {
   name: string;

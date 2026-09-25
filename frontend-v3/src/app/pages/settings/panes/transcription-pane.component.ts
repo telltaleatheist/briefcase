@@ -10,7 +10,8 @@ import type { TranscriptionModelState, TranscriptionView } from '@crucible-wire/
 /**
  * Settings → Transcription.
  *
- * Transcription is Crucible's `asr` job with Qwen3-ASR-1.7B and nothing else,
+ * Transcription is Crucible's `asr` job with Qwen3-ASR-0.6B (the MLX build on a
+ * Mac) and nothing else,
  * on the selected Crucible server (Settings › Crucible Servers), like all AI
  * work. There is nothing to choose here: the pane says whether that server has
  * Qwen and its aligner downloaded, and where a transcription queued now would

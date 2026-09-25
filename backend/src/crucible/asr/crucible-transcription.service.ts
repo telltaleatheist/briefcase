@@ -194,6 +194,7 @@ export class CrucibleTranscriptionService {
       selected = null;
     }
     let server: TranscriptionServerView | null = null;
+    let model = QWEN_ASR_MODEL;
     if (selected !== null) {
       const view: TranscriptionServerView = {
         name: selected, reach: null, backend: null, qwen: null, aligner: null, unavailable: null,
@@ -206,6 +207,7 @@ export class CrucibleTranscriptionService {
         } else {
           const offer = await this.asrOffer(selected, true);
           view.backend = offer.backend;
+          model = offer.model;
           view.qwen = offer.qwen;
           view.aligner = offer.aligner;
           view.unavailable = qwenUnavailable(selected, offer);
@@ -215,7 +217,7 @@ export class CrucibleTranscriptionService {
       }
       server = view;
     }
-    return { model: QWEN_ASR_MODEL, aligner: QWEN_ALIGNER_MODEL, server, route: await this.route() };
+    return { model, aligner: QWEN_ALIGNER_MODEL, server, route: await this.route() };
   }
 
   // ── the job ────────────────────────────────────────────────────────────

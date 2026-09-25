@@ -1,6 +1,6 @@
 {
   "name": "briefcase",
-  "version": "1.0.29+541fca66df7d",
+  "version": "1.0.32+7449b5295584",
   "job_types": [
     {
       "type": "llm",
@@ -33,9 +33,16 @@
   "subjects": [
     {
       "kind": "model",
-      "id": "qwen3-asr-1.7b",
+      "id": "qwen3-asr-0.6b",
       "backends": [
         "cuda-linux",
+        "mlx-darwin"
+      ]
+    },
+    {
+      "kind": "model",
+      "id": "qwen3-asr-0.6b-mlx",
+      "backends": [
         "mlx-darwin"
       ]
     },

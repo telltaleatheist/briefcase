@@ -213,7 +213,7 @@ describe('Qwen3-ASR: a 180 s piece cut into cues by its aligner words', () => {
 
   it('a Qwen transcript becomes sentence cues at the aligner\'s times, not one 180 s cue', () => {
     const parsed = {
-      model: 'qwen3-asr-1.7b', revision: '7278e1e7', language: 'en', language_requested: 'en', duration_s: 180,
+      model: 'qwen3-asr-0.6b-mlx', revision: '7278e1e7', language: 'en', language_requested: 'en', duration_s: 180,
       segments: [{
         start: 0, end: 180,
         text: 'Welcome back everybody. Today we are talking about pasta. Let us begin.',

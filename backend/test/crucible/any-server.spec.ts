@@ -133,7 +133,7 @@ describe('a server that states no informational field', () => {
     const outDir = tempDir('any-server-out-');
     const seen: Array<{ percent: number; message: string }> = [];
     const outcome = await svc.transcribe({
-      server: 'mac', model: 'qwen3-asr-1.7b', videoFile: video, outputDir: outDir, baseName: 'a', localId: 'a',
+      server: 'mac', model: 'qwen3-asr-0.6b-mlx', videoFile: video, outputDir: outDir, baseName: 'a', localId: 'a',
       onProgress: (percent, message) => seen.push({ percent, message }),
     });
     expect(outcome.cues).toBe(3);

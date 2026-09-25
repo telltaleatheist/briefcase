@@ -225,7 +225,7 @@ function alignedWords(start: number, end: number, text: string): Array<Record<st
  * timestamps writes it: pieces (a piece may hold several sentences), words
  * from the aligner with no punctuation.
  */
-export function defaultFakeTranscript(model = 'qwen3-asr-1.7b'): Record<string, unknown> {
+export function defaultFakeTranscript(model = 'qwen3-asr-0.6b-mlx'): Record<string, unknown> {
   const piece = (start: number, end: number, text: string) => ({ start, end, text, words: alignedWords(start, end, text) });
   return {
     model,
@@ -240,8 +240,9 @@ export function defaultFakeTranscript(model = 'qwen3-asr-1.7b'): Record<string, 
   };
 }
 
-/** The asr ids a 1.0.29+ server lists, on every backend (crucible/asr/*.toml). */
-const ASR_IDS = ['qwen3-asr-1.7b', 'whisper-large-v3-turbo', 'whisper-tiny'];
+/** The asr ids a 1.0.32 server lists (crucible/asr/*.toml); the `-mlx` ports on mlx-darwin only. */
+const ASR_IDS = ['qwen3-asr-1.7b', 'qwen3-asr-0.6b', 'whisper-large-v3-turbo', 'whisper-tiny'];
+const ASR_IDS_MLX_ONLY = ['qwen3-asr-1.7b-mlx', 'qwen3-asr-0.6b-mlx'];
 const QWEN_LANGUAGES = new Set(['en', 'de', 'fr', 'es', 'it', 'pt', 'ru', 'ja', 'ko', 'zh', 'yue']);
 
 /** One catalog row, in the SDK's camelCase; served snake_case. */
@@ -395,7 +396,7 @@ export interface FakeCrucibleOptions {
    * Default `['echo']`, a bare service as `install({jobTypes: ['echo']})` leaves it.
    */
   installedJobTypes?: string[];
-  /** This backend's catalog. Default: the analysis model, Qwen3-ASR, whisper turbo and the aligner, none installed. */
+  /** This backend's catalog. Default: the analysis model, Qwen3-ASR 0.6B (and its Mac port), whisper turbo and the aligner, none installed. */
   catalog?: FakeCatalogRow[];
   /** A class the capability record switches off, with the engine's reason. */
   disabledClasses?: Record<string, string>;
@@ -512,7 +513,8 @@ export interface FakeCrucible {
 export function defaultFakeCatalog(): FakeCatalogRow[] {
   return [
     { kind: 'model', id: 'qwen3.5-9b', name: 'Qwen3.5 9B', jobType: 'llm', installed: false, expectedBytes: null },
-    { kind: 'model', id: 'qwen3-asr-1.7b', name: 'Qwen3-ASR 1.7B', jobType: 'asr', installed: false, expectedBytes: null },
+    { kind: 'model', id: 'qwen3-asr-0.6b', name: 'Qwen3-ASR 0.6B', jobType: 'asr', installed: false, expectedBytes: null },
+    { kind: 'model', id: 'qwen3-asr-0.6b-mlx', name: 'Qwen3-ASR 0.6B (MLX)', jobType: 'asr', installed: false, expectedBytes: null },
     { kind: 'model', id: 'whisper-large-v3-turbo', name: 'Whisper large-v3 turbo', jobType: 'asr', installed: false, expectedBytes: null },
     { kind: 'model', id: 'qwen3-aligner', name: 'Qwen3 forced aligner', jobType: 'align', installed: false, expectedBytes: null },
   ];
@@ -671,7 +673,7 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
     ?? catalog.filter((row) => row.jobType === 'asr' && row.installed).map((row) => row.id));
   const asrRows = (): Array<Record<string, unknown>> => {
     const installed = asrInstalled();
-    return ASR_IDS.map((id) => ({
+    return [...ASR_IDS, ...(backend === 'mlx-darwin' ? ASR_IDS_MLX_ONLY : [])].map((id) => ({
       id, revision: 'f'.repeat(40), source: `hf:fake/${id}`, installed: installed.has(id), resident: false, vram_bytes: 1_000_000_000,
     }));
   };
@@ -1201,7 +1203,7 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
     }
     const row = asrRows().find((r) => r['id'] === model);
     if (row === undefined) {
-      refusal(res, 400, 'unknown_model', `no asr model '${model}'`, { model, offered: ASR_IDS });
+      refusal(res, 400, 'unknown_model', `no asr model '${model}'`, { model, offered: asrRows().map((r) => r['id']) });
       return;
     }
     const qwen = String(model).startsWith('qwen3-asr-');

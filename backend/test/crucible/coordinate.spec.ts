@@ -61,17 +61,17 @@ describe('coordination', () => {
     expect(state.phase).toBe('preparing');
     if (state.phase !== 'preparing') throw new Error('unreachable');
     expect(state.progress.state).toBe('done');
-    expect(state.missing.map((m) => (m.what === 'job-type' ? m.jobType : m.id))).toEqual(['llm', 'asr', 'align', 'qwen3.5-9b', 'qwen3-asr-1.7b', 'qwen3-aligner']);
+    expect(state.missing.map((m) => (m.what === 'job-type' ? m.jobType : m.id))).toEqual(['llm', 'asr', 'align', 'qwen3.5-9b', 'qwen3-asr-0.6b', 'qwen3-asr-0.6b-mlx', 'qwen3-aligner']);
 
     expect(posts(fake)).toHaveLength(1);
     const body = posts(fake)[0].body as { type: string; module: Record<string, unknown> };
     expect(body.type).toBe('module');
     expect(body.module).toEqual({
       name: 'briefcase',
-      version: expect.stringMatching(/^1\.0\.29\+/),
+      version: expect.stringMatching(/^1\.0\.32\+/),
       job_types: [{ type: 'llm' }, { type: 'asr' }, { type: 'align' }],
       needs: [{ class: 'analysis' }],
-      subjects: [{ kind: 'model', id: 'qwen3-asr-1.7b' }, { kind: 'model', id: 'qwen3-aligner' }],
+      subjects: [{ kind: 'model', id: 'qwen3-asr-0.6b' }, { kind: 'model', id: 'qwen3-asr-0.6b-mlx' }, { kind: 'model', id: 'qwen3-aligner' }],
     });
     // Progress was pushed along the way.
     expect(states.some((s) => s.phase === 'preparing' && s.progress.bytes !== null)).toBe(true);
@@ -81,19 +81,19 @@ describe('coordination', () => {
     expect(posts(fake)).toHaveLength(1);
   });
 
-  it('on a cuda-linux server it asks for the same Qwen ids (one id on every backend since 1.0.29)', async () => {
+  it('on a cuda-linux server it asks for qwen3-asr-0.6b and the aligner (the MLX port is Mac only)', async () => {
     const { fake, service } = await rig({
       backend: 'cuda-linux',
       catalog: [
         { kind: 'model', id: 'qwen3.5-9b', jobType: 'llm', installed: true },
-        { kind: 'model', id: 'qwen3-asr-1.7b', jobType: 'asr', installed: false },
+        { kind: 'model', id: 'qwen3-asr-0.6b', jobType: 'asr', installed: false },
         { kind: 'model', id: 'qwen3-aligner', jobType: 'align', installed: false },
       ],
       installedJobTypes: ['echo', 'llm', 'asr', 'align'],
     });
     await service.request('here', 'spec');
     expect((posts(fake)[0].body as { module: { subjects: unknown } }).module.subjects)
-      .toEqual([{ kind: 'model', id: 'qwen3-asr-1.7b' }, { kind: 'model', id: 'qwen3-aligner' }]);
+      .toEqual([{ kind: 'model', id: 'qwen3-asr-0.6b' }, { kind: 'model', id: 'qwen3-aligner' }]);
   });
 
   it('two calls at once make ONE run and one post', async () => {
@@ -247,7 +247,7 @@ describe('missingForBriefcase', () => {
   it('a class routed upstream needs no weights', () => {
     const { missing } = missingForBriefcase(
       ['llm', 'asr', 'align'],
-      [row('qwen3-asr-1.7b', true, 'model', 'asr'), row('qwen3-aligner', true, 'model', 'align')],
+      [row('qwen3-asr-0.6b', true, 'model', 'asr'), row('qwen3-asr-0.6b-mlx', true, 'model', 'asr'), row('qwen3-aligner', true, 'model', 'align')],
       capability('upstream', 'anthropic/claude-sonnet-5'),
     );
     expect(missing).toEqual([]);

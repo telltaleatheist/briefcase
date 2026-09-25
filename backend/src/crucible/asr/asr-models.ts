@@ -1,14 +1,20 @@
 /**
- * THE TRANSCRIBER: Qwen3-ASR-1.7B, and how to ask for it.
+ * THE TRANSCRIBER: Qwen3-ASR-0.6B, and how to ask for it.
  *
- * Briefcase transcribes with `qwen3-asr-1.7b` and nothing else (the user,
- * 2026-09-24: "switch fully over to the qwen asr model crucible makes
- * available"). It is one id on every backend since Crucible 1.0.29 (vLLM on
- * cuda-linux, mlx-audio on mlx-darwin, docs/PHASE25-QWEN-ASR.md), and runs
- * its forced aligner, `qwen3-aligner`, for word timestamps. There is no model
- * choice and no whisper: a server that does not offer Qwen, or has not
- * downloaded it or its aligner, is a transcription that WAITS with the reason
- * (the venue rule), never one made with another model.
+ * Briefcase transcribes with Qwen3-ASR and nothing else (the user, 2026-09-24:
+ * "switch fully over to the qwen asr model"), at 0.6B, the fastest on each
+ * machine ("we dont need exact text with ums and uhs here, we just need it
+ * fast"; Crucible 1.0.32):
+ *
+ *   mlx-darwin   qwen3-asr-0.6b-mlx  the mlx-audio port, Mac only: ~21 s per
+ *                                    10 min against ~98 s for the official
+ *                                    package, a few fillers fewer.
+ *   otherwise    qwen3-asr-0.6b      vLLM on cuda-linux (one id on every backend).
+ *
+ * Both run the forced aligner, `qwen3-aligner`, for word timestamps. There is
+ * no model choice and no whisper: a server that does not offer the model, or
+ * has not downloaded it or its aligner, is a transcription that WAITS with the
+ * reason (the venue rule), never one made with another model.
  *
  * THE PARAMS (the server defaults none of them):
  *   language          REQUIRED, one of the aligner's eleven; "auto" is refused
@@ -21,8 +27,14 @@
  */
 import type { ServerInfo } from '@crucible/client';
 
-/** The one asr model Briefcase uses. */
-export const QWEN_ASR_MODEL = 'qwen3-asr-1.7b';
+/** The asr model Briefcase uses, and the Mac's faster build of it. */
+export const QWEN_ASR_MODEL = 'qwen3-asr-0.6b';
+export const QWEN_ASR_MODEL_MAC = 'qwen3-asr-0.6b-mlx';
+
+/** The model for a host's backend: the MLX build on a Mac, the one id everywhere else. */
+export function qwenAsrModelFor(backend: string | null): string {
+  return backend === 'mlx-darwin' ? QWEN_ASR_MODEL_MAC : QWEN_ASR_MODEL;
+}
 /** Its forced aligner (an `align` model), which word timestamps need installed. */
 export const QWEN_ALIGNER_MODEL = 'qwen3-aligner';
 
@@ -59,7 +71,7 @@ export function qwenAsrParams(requested: string | undefined | null): AsrParams {
   if (!QWEN_ASR_LANGUAGES.has(language)) {
     throw new CrucibleAsrRefused(
       'crucible_asr_language_unsupported',
-      `${QWEN_ASR_MODEL} transcribes ${[...QWEN_ASR_LANGUAGES].join(', ')}; "${language}" is not one of them.`,
+      `Qwen3-ASR transcribes ${[...QWEN_ASR_LANGUAGES].join(', ')}; "${language}" is not one of them.`,
     );
   }
   return { language, vad_filter: false, word_timestamps: true };
@@ -78,6 +90,8 @@ export interface AsrOffer {
   readonly backend: string | null;
   /** `asr` is an installed job type on it. */
   readonly offersAsr: boolean;
+  /** The model Briefcase uses on this host (qwenAsrModelFor), and its standing. */
+  readonly model: string;
   readonly qwen: AsrModelState;
   /** The aligner, from the `align` capability's rows. */
   readonly aligner: AsrModelState;
@@ -92,10 +106,12 @@ function modelState(info: ServerInfo, jobType: string, id: string): AsrModelStat
 
 /** Read `/v1/info` for Qwen transcription: the asr job type, the model, and its aligner. */
 export function asrOfferOf(info: ServerInfo): AsrOffer {
+  const model = qwenAsrModelFor(info.host.backend);
   return {
     backend: info.host.backend,
     offersAsr: info.jobTypes.includes('asr'),
-    qwen: modelState(info, 'asr', QWEN_ASR_MODEL),
+    model,
+    qwen: modelState(info, 'asr', model),
     aligner: modelState(info, 'align', QWEN_ALIGNER_MODEL),
   };
 }
@@ -107,8 +123,8 @@ export function asrOfferOf(info: ServerInfo): AsrOffer {
 export function qwenUnavailable(server: string, offer: AsrOffer): string | null {
   const at = `Crucible on ${server}`;
   if (!offer.offersAsr) return `${at} has no transcription engine.`;
-  if (!offer.qwen.offered) return `${at} does not offer ${QWEN_ASR_MODEL}. Update it to Crucible 1.0.29 or later.`;
-  if (!offer.qwen.installed) return `${at} has not downloaded ${QWEN_ASR_MODEL} yet.`;
+  if (!offer.qwen.offered) return `${at} does not offer ${offer.model}. Update it to Crucible 1.0.32 or later.`;
+  if (!offer.qwen.installed) return `${at} has not downloaded ${offer.model} yet.`;
   if (!offer.aligner.offered) return `${at} does not offer ${QWEN_ALIGNER_MODEL}, which Qwen's word timings need.`;
   if (!offer.aligner.installed) return `${at} has not downloaded ${QWEN_ALIGNER_MODEL} (Qwen's word timings) yet.`;
   return null;

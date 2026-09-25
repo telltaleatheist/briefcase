@@ -161,7 +161,7 @@ export class StubLanes {
    * default: mac's large-v3), or `{wait: reason}` when no server can take it
    * (the task parks: there is no other transcriber).
    */
-  transcribeTo: { server: string; model: string } | { wait: string } = { server: 'mac', model: 'qwen3-asr-1.7b' };
+  transcribeTo: { server: string; model: string } | { wait: string } = { server: 'mac', model: 'qwen3-asr-0.6b-mlx' };
   placeTranscribeCalls = 0;
   /** server → holder sentence at the asr (job-lane) preflight. */
   jobBusy = new Map<string, string>();

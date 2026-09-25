@@ -19,7 +19,7 @@ import { startFakeCrucible, stockedForBriefcase, unusedLoopbackUrl } from '../fa
 import { harness } from '../crucible/harness';
 import { analyzeJob, downloadJob, gate, makeRig, StubLanes, tick, transcribeJob, until, type Gate, type Rig } from './queue-rig';
 
-const ASR = 'qwen3-asr-1.7b';
+const ASR = 'qwen3-asr-0.6b-mlx';
 const OK: TaskResult = { success: true, data: { transcriptPath: '/tmp/t.srt' } };
 
 afterEach(() => jest.useRealTimers());

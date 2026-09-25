@@ -51,7 +51,7 @@ afterEach(async () => {
 });
 
 function request(extra: Partial<Parameters<CrucibleTranscriptionService['transcribe']>[0]> = {}) {
-  return { server: 'mac', model: 'qwen3-asr-1.7b', videoFile: video, outputDir: outDir, baseName: 'job-1_audio', localId: 'job-1', ...extra };
+  return { server: 'mac', model: 'qwen3-asr-0.6b-mlx', videoFile: video, outputDir: outDir, baseName: 'job-1_audio', localId: 'job-1', ...extra };
 }
 
 describe('the job flow', () => {
@@ -69,7 +69,7 @@ describe('the job flow', () => {
     });
     // The submit: model named, exactly {language, vad_filter, word_timestamps}, vad false on mlx.
     const job = fake.jobs[0];
-    expect(job).toMatchObject({ type: 'asr', model: 'qwen3-asr-1.7b', client: 'briefcase', status: 'done' });
+    expect(job).toMatchObject({ type: 'asr', model: 'qwen3-asr-0.6b-mlx', client: 'briefcase', status: 'done' });
     // Qwen: a stated language (it cannot detect), no VAD, and words (they cut its pieces into cues).
     expect(job.params).toEqual({ language: 'en', vad_filter: false, word_timestamps: true });
     expect(job.inputs).toEqual({ 'My_Video_1080p_.mp4': fake.uploads[0].blobId });
@@ -77,7 +77,7 @@ describe('the job flow', () => {
     expect((fake.requestsTo('/v1/jobs', 'POST')[0].body as Record<string, unknown>)['client_ref']).toMatch(/^briefcase:transcribe:job-1:[0-9a-f]{8}$/);
 
     // The SRT, where whisper.cpp would have put it, in its shape: the first piece cut into its two sentences at the aligner's times.
-    expect(outcome).toMatchObject({ srtFile: path.join(outDir, 'job-1_audio.srt'), cues: 3, model: 'qwen3-asr-1.7b', language: 'en', jobId: job.jobId });
+    expect(outcome).toMatchObject({ srtFile: path.join(outDir, 'job-1_audio.srt'), cues: 3, model: 'qwen3-asr-0.6b-mlx', language: 'en', jobId: job.jobId });
     expect(fs.readFileSync(outcome.srtFile, 'utf8')).toBe(
       '1\n00:00:00,000 --> 00:00:04,083\nWelcome back to the show.\n\n'
       + '2\n00:00:04,083 --> 00:00:09,800\nToday we are talking about the news.\n\n'
@@ -91,7 +91,7 @@ describe('the job flow', () => {
     expect(percents).toEqual([...percents].sort((a, b) => a - b));
     expect(seen[0]).toEqual({ percent: 3, message: 'Uploading the video to Crucible on mac...' });
     expect(seen).toContainEqual({ percent: 7, message: 'Queued on Crucible on mac...' });
-    expect(seen).toContainEqual({ percent: 9, message: 'Crucible on mac: loading qwen3-asr-1.7b' });
+    expect(seen).toContainEqual({ percent: 9, message: 'Crucible on mac: loading qwen3-asr-0.6b-mlx' });
     expect(seen).toContainEqual({ percent: 12, message: 'Reading the audio on mac... 00:30:00 of 01:00:00' });
     expect(seen).toContainEqual({ percent: 14, message: 'Reading the audio on mac... 01:00:00 of 01:00:00' });
     expect(seen).toContainEqual({ percent: 35, message: 'Transcribing on mac... 00:15:00 of 01:00:00' });
@@ -114,11 +114,11 @@ describe('the job flow', () => {
     expect(uploading.every((s) => s.percent >= 3 && s.percent <= 6)).toBe(true);
   });
 
-  it('on cuda-linux it is the same id and the same params: one id on every backend', async () => {
+  it('on cuda-linux it is qwen3-asr-0.6b (the MLX build is Mac only), with the same params', async () => {
     await wire({ backend: 'cuda-linux', platform: 'linux', arch: 'x64' });
-    expect(await svc.route()).toEqual({ kind: 'crucible', server: 'mac', model: 'qwen3-asr-1.7b' });
-    await svc.transcribe(request());
-    expect(fake.jobs[0]).toMatchObject({ model: 'qwen3-asr-1.7b', params: { language: 'en', vad_filter: false, word_timestamps: true } });
+    expect(await svc.route()).toEqual({ kind: 'crucible', server: 'mac', model: 'qwen3-asr-0.6b' });
+    await svc.transcribe(request({ model: 'qwen3-asr-0.6b' }));
+    expect(fake.jobs[0]).toMatchObject({ model: 'qwen3-asr-0.6b', params: { language: 'en', vad_filter: false, word_timestamps: true } });
   });
 
   it('a language Qwen does not take is refused by name before anything is uploaded', async () => {
@@ -133,7 +133,7 @@ describe('the job flow', () => {
     const controller = new AbortController();
     const running = svc.transcribe(request({ signal: controller.signal }));
     await until(() => fake.jobs[0]?.events.some((e) => e.event === 'progress' && e.data['stage'] === 'transcribing'));
-    expect(ledger.read()).toEqual([expect.objectContaining({ server: 'mac', kind: 'job', id: fake.jobs[0].jobId, jobType: 'asr', model: 'qwen3-asr-1.7b', localId: 'job-1' })]);
+    expect(ledger.read()).toEqual([expect.objectContaining({ server: 'mac', kind: 'job', id: fake.jobs[0].jobId, jobType: 'asr', model: 'qwen3-asr-0.6b-mlx', localId: 'job-1' })]);
     controller.abort();
     await expect(running).rejects.toBeInstanceOf(CrucibleAsrCancelled);
     expect(ledger.read()).toEqual([]);
@@ -281,9 +281,9 @@ describe('the pane’s view', () => {
   it('Qwen3-ASR and its aligner on the selected server, and where a transcription would run', async () => {
     await wire();
     const view = await svc.view();
-    expect(view.model).toBe('qwen3-asr-1.7b');
+    expect(view.model).toBe('qwen3-asr-0.6b-mlx');
     expect(view.aligner).toBe('qwen3-aligner');
-    expect(view.route).toEqual({ kind: 'crucible', server: 'mac', model: 'qwen3-asr-1.7b' });
+    expect(view.route).toEqual({ kind: 'crucible', server: 'mac', model: 'qwen3-asr-0.6b-mlx' });
     expect(view.server).toEqual({
       name: 'mac', reach: 'ready', backend: 'mlx-darwin',
       qwen: { offered: true, installed: true }, aligner: { offered: true, installed: true }, unavailable: null,
@@ -298,8 +298,8 @@ describe('the pane’s view', () => {
   });
 
   it('Qwen or its aligner not downloaded: none, naming which (never another model)', async () => {
-    await wire({ catalog: stockedForBriefcase().catalog.map((r) => (r.id === 'qwen3-asr-1.7b' ? { ...r, installed: false } : r)) });
-    expect(await svc.route()).toEqual({ kind: 'none', reason: 'Crucible on mac has not downloaded qwen3-asr-1.7b yet.' });
+    await wire({ catalog: stockedForBriefcase().catalog.map((r) => (r.id === 'qwen3-asr-0.6b-mlx' ? { ...r, installed: false } : r)) });
+    expect(await svc.route()).toEqual({ kind: 'none', reason: 'Crucible on mac has not downloaded qwen3-asr-0.6b-mlx yet.' });
   });
 });
 
@@ -323,14 +323,14 @@ function whisper(crucible: CrucibleTranscriptionService) {
   return { service: new WhisperService(ev as never, crucible), ev };
 }
 
-const MAC_ROUTE = { kind: 'crucible' as const, server: 'mac', model: 'qwen3-asr-1.7b' };
+const MAC_ROUTE = { kind: 'crucible' as const, server: 'mac', model: 'qwen3-asr-0.6b-mlx' };
 
 describe('WhisperService: Crucible transcribes, and nothing else does', () => {
   it('the SRT and its plain text are relocated to standalone temp files; the job dir is gone', async () => {
     await wire();
     const { service, ev } = whisper(svc);
     const outcome = await service.transcribe(video, { jobId: 'job-1', route: MAC_ROUTE });
-    expect(outcome).toMatchObject({ model: 'qwen3-asr-1.7b', language: 'en' });
+    expect(outcome).toMatchObject({ model: 'qwen3-asr-0.6b-mlx', language: 'en' });
     expect(path.dirname(outcome.srtPath)).toBe(os.tmpdir());
     expect(path.basename(outcome.srtPath)).toMatch(/^transcribe-[0-9a-f]{16}\.srt$/);
     expect(outcome.txtPath).toBe(outcome.srtPath.replace(/\.srt$/, '.txt'));
