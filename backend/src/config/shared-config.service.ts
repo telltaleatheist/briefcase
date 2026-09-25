@@ -61,14 +61,6 @@ export class SharedConfigService {
     return getRuntimePaths().ytdlp;
   }
 
-  getWhisperPath(): string {
-    return getRuntimePaths().whisperCpp;
-  }
-
-  getWhisperModelPath(): string {
-    return getRuntimePaths().whisperModel;
-  }
-
   getOutputDir(): string | undefined {
     // Output directory is now handled by the library's clips folder
     return undefined;
@@ -79,10 +71,7 @@ export class SharedConfigService {
       ffmpegPath: this.getFfmpegPath(),
       ffprobePath: this.getFfprobePath(),
       ytDlpPath: this.getYtDlpPath(),
-      whisperPath: this.getWhisperPath(),
-      whisperModelPath: this.getWhisperModelPath(),
       aiModel: process.env.AI_MODEL || '', // No fallback - user must configure
-      ollamaEndpoint: process.env.OLLAMA_ENDPOINT || 'http://localhost:11434',
     };
   }
 

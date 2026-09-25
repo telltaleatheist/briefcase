@@ -68,22 +68,6 @@ function downloadedEntry(
   return fs.existsSync(full) ? full : null;
 }
 
-/** A downloaded whisper model file, preferring base > tiny > small > any. */
-function getDownloadedWhisperModel(): string | null {
-  const dir = path.join(getBriefcaseConfigDir(), 'models', 'whisper');
-  try {
-    if (!fs.existsSync(dir)) return null;
-    const ggml = fs.readdirSync(dir).filter((f) => /^ggml-.*\.bin$/.test(f));
-    if (ggml.length === 0) return null;
-    for (const pref of ['ggml-base.bin', 'ggml-tiny.bin', 'ggml-small.bin']) {
-      if (ggml.includes(pref)) return path.join(dir, pref);
-    }
-    return path.join(dir, ggml[0]);
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Check if we're running in a packaged app
  */
@@ -179,24 +163,6 @@ function getYtDlpRelativePath(): string {
 }
 
 /**
- * Get whisper.cpp binary name for current platform/architecture
- */
-function getWhisperBinaryName(): string {
-  const platform = process.platform;
-  const arch = process.arch;
-
-  if (platform === 'win32') {
-    return 'whisper-cli.exe';
-  } else if (platform === 'darwin') {
-    // macOS: architecture-specific binaries
-    return arch === 'arm64' ? 'whisper-cli-arm64' : 'whisper-cli-x64';
-  } else {
-    // Linux
-    return 'whisper-cli';
-  }
-}
-
-/**
  * Get the Python directory path
  * In dev: dist-python/python-x64 (or python-arm64)
  * In prod: resources/python
@@ -239,16 +205,6 @@ export function getRuntimePaths() {
     ytdlp:
       downloadedEntry(comps, 'yt-dlp') ||
       path.join(resourcesPath, 'utilities', 'bin', getYtDlpRelativePath()),
-
-    // whisper.cpp standalone binary — downloaded component, else bundled
-    whisperCpp:
-      downloadedEntry(comps, 'whisper') ||
-      path.join(resourcesPath, 'utilities', 'bin', getWhisperBinaryName()),
-
-    // Whisper model file — downloaded model, else bundled tiny
-    whisperModel:
-      getDownloadedWhisperModel() ||
-      path.join(resourcesPath, 'utilities', 'models', 'ggml-tiny.bin'),
 
     // Python from bundled runtime - ALWAYS bundled
     // Windows: python.exe in root of python dir (embedded package)
