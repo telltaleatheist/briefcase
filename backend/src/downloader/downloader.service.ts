@@ -111,6 +111,23 @@ export class DownloaderService implements OnModuleInit {
   }
 
   /**
+   * Format selector for sites without a bespoke branch above.
+   *
+   * `best` on its own only ever matches a single pre-muxed format. Sites that
+   * serve split HLS renditions (video-only + audio-only) — Fox News and the
+   * other Akamai/Brightcove news players — publish no muxed format at all, so
+   * `best` failed outright with "Requested format is not available". Select
+   * video+audio and merge, falling back to a muxed format for the sites that
+   * only offer one. An explicit cap is honoured on both sides of that fallback.
+   */
+  private buildGenericFormatSelector(quality?: string): string {
+    const cap = this.parseQualityCap(quality);
+    return cap === null
+      ? 'bestvideo+bestaudio/best'
+      : `bestvideo[height<=${cap}]+bestaudio/best[height<=${cap}]`;
+  }
+
+  /**
    * Configure YouTube download with multiple fallback client methods
    * Tries: android -> ios -> mweb -> web -> default
    */
@@ -845,14 +862,9 @@ export class DownloaderService implements OnModuleInit {
           this.logger.log(`Using cookies from ${browser} for Vimeo authentication`);
         }
       } else {
-        // For other sites, use standard format selection. Previously this
-        // built `best[height<=undefined]` when no quality was set — it only
-        // worked because yt-dlp ignores the malformed clause.
-        const genericCap = this.parseQualityCap(options.quality);
-        ytDlpManager.addOption(
-          '--format',
-          genericCap === null ? 'best' : `best[height<=${genericCap}]`,
-        );
+        // For other sites, use standard format selection (see the helper for
+        // why this is not a bare `best`).
+        ytDlpManager.addOption('--format', this.buildGenericFormatSelector(options.quality));
         ytDlpManager.addOption('--merge-output-format', 'mp4');
         // Note: Cookies only used for YouTube - other sites work better without them
       }
