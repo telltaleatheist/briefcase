@@ -1026,7 +1026,14 @@ export class CrucibleChatService {
     }
     this.modelsCache.delete(server);
     if (!lease) {
-      throwIfAborted(signal);
+      // A cancel that lands as an unleased load finishes leaves the model on the
+      // card with nothing holding it: no lease to release, and no chat whose
+      // end would settle it. Crucible never clears a load's own result, so this
+      // side asks for the unload it would otherwise never get.
+      if (signal?.aborted) {
+        await this.unloadOrphanLoad(client, server, model);
+        throw new CrucibleChatCancelled();
+      }
       return null;
     }
     // A cancel that lands as the load finishes must still give back the lease
@@ -1104,6 +1111,17 @@ export class CrucibleChatService {
       await this.releaseLeaseQuietly(client, server, status.leaseId);
     } catch (err) {
       this.logger.warn(`[${server}] could not look up the lease of cancelled load ${loadId}: ${(err as Error).message} (it expires on its own)`);
+    }
+  }
+
+  /** Unload what a cancelled, unleased load put on the card. Refused (someone else leased or is using it): theirs now, left alone. */
+  private async unloadOrphanLoad(client: CrucibleClient, server: string, model: string): Promise<void> {
+    try {
+      const jobId = await client.unloadModel(model);
+      this.modelsCache.delete(server);
+      this.logger.log(`[${server}] the load of ${model} was cancelled as it finished; asked Crucible to unload it (job ${jobId})`);
+    } catch (err) {
+      this.logger.warn(`[${server}] unloading ${model} after a cancelled load was refused: ${(err as Error).message}`);
     }
   }
 

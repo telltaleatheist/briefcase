@@ -281,6 +281,20 @@ describe('CrucibleChatService: one server', () => {
     expect(fake.chatBodies()).toHaveLength(0);
   });
 
+  it('REGRESSION: a cancel landing as an unleased load finishes unloads the model it put on the card', async () => {
+    await start({ loadMs: 100 });
+    const controller = new AbortController();
+    const touch = (chat as unknown as { touch: () => void }).touch.bind(chat);
+    (chat as unknown as { touch: () => void }).touch = () => {
+      if (fake.jobs[0]?.status === 'done') controller.abort();
+      touch();
+    };
+    await expect(chat.chat({ model: 'qwen3.5-9b', prompt: 'x', signal: controller.signal })).rejects.toBeInstanceOf(CrucibleChatCancelled);
+    expect(fake.jobs.map((j) => j.type)).toEqual(['load-model', 'unload-model']);
+    expect(fake.leases.taken).toHaveLength(0);
+    expect(fake.chatBodies()).toHaveLength(0);
+  });
+
   it('REGRESSION: a load whose event stream drops is followed again after the last event seen (Last-Event-ID)', async () => {
     await start({ loadMs: 200 });
     chat.loadStreamRetry = { firstMs: 10, maxMs: 20, budgetMs: 2_000 };
