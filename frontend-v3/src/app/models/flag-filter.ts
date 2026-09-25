@@ -39,23 +39,19 @@
  * verdict — and uses the score only where it discriminates: ordering the
  * REJECTED candidates, where it spreads across the full range.
  *
- * THE THREE POSITIONS:
+ * THE TWO POSITIONS (the user, 2026-09-24: "we can probably drop that down to
+ * 'all' and 'confirmed'. all contains the ones the big model rejects"):
  *
- *   CONFIRMED  Every passage the verifier accepted. No score floor: if the
- *              verifier said the speaker is asserting it, it is a finding, and
- *              no position hides it. This is the default.
- *   REVIEW     Confirmed, plus the rejected candidates the ranker was most
- *              certain about topically (score >= NEAR_MISS_SCORE). These are
- *              exactly the passages where the verifier is most worth
- *              second-guessing: the topic match was unambiguous and the call
- *              turned on stance alone. Rejections render ghosted and labelled.
- *   ALL        Everything captured, down to the widest rescue floor.
+ *   CONFIRMED  Every passage the verifier accepted, each with its written
+ *              reason. No score floor: if the verifier said the speaker is
+ *              asserting it, it is a finding. This is the default.
+ *   ALL        Confirmed, plus what the verifier rejected (ghosted, with its
+ *              reason). Every section is checked now, so ALL is the whole run.
  *
- * Measured tier sizes on four real analyses (confirmed / review / all):
- *   13 / 79 / 184 · 16 / 37 / 129 · 2 / 32 / 109 · 6 / 20 / 45
- * Each position is a superset of the one before it, and each adds a
- * meaningfully different KIND of row rather than a few more of the same kind.
- * The control shows live counts so the size of a position is never a surprise.
+ * (REVIEW, the rejections the ranker was most sure about, is gone: with every
+ * section checked and justified there are few rejections, and each carries
+ * the verifier's reason, so ALL shows them all. A saved 'review' reads as
+ * CONFIRMED.)
  *
  * LEGACY AND DISCOVERY ROWS ALWAYS PASS. A row written before verdicts were
  * stored, or by the discovery fallback path (which has no per-candidate score
@@ -65,30 +61,18 @@
  * behind a new control they have never touched would be the one unacceptable
  * outcome here.
  */
-export type FlagFilter = 'confirmed' | 'review' | 'all';
+export type FlagFilter = 'confirmed' | 'all';
 
-export const FLAG_FILTERS: FlagFilter[] = ['confirmed', 'review', 'all'];
-
-/**
- * The score at or above which a REJECTED candidate is shown at REVIEW.
- *
- * 0.9 is where the ranker's bimodal distribution puts its high mode, so this
- * selects rejections whose topical match was not in doubt — the ones whose fate
- * was decided purely by the asserting-vs-reporting test, which is the judgment
- * a human is best placed to check. It is NEVER applied to accepted flags.
- */
-export const NEAR_MISS_SCORE = 0.9;
+export const FLAG_FILTERS: FlagFilter[] = ['confirmed', 'all'];
 
 export const FLAG_FILTER_LABEL: Record<FlagFilter, string> = {
   confirmed: 'Confirmed',
-  review: 'Review',
   all: 'All',
 };
 
 export const FLAG_FILTER_DESCRIPTION: Record<FlagFilter, string> = {
-  confirmed: 'Everything the verifier confirmed as asserted by the speaker.',
-  review: 'Confirmed, plus rejected passages the ranker was most sure about — the verifier’s closest calls.',
-  all: 'Every passage the analysis captured, including everything the verifier rejected.',
+  confirmed: 'Everything the verifier confirmed as asserted by the speaker, with its reason.',
+  all: 'Every passage the analysis flagged, including what the verifier rejected.',
 };
 
 /**
@@ -105,8 +89,8 @@ export const FLAG_FILTER_DESCRIPTION: Record<FlagFilter, string> = {
 export const VERIFIER_REJECTION_LABEL = 'verifier: reported/opposed, not asserted';
 
 /**
- * The caption on a 'candidate' row (snap engine only): a passage the ranker
- * captured but the verify budget did not reach. It was never judged, so it must
+ * The caption on a 'candidate' row: a passage an earlier snap engine stored
+ * past its verify budget (none is written now). It was never judged, so it must
  * not borrow the rejection caption — "not verified" is the whole truth.
  */
 export const UNVERIFIED_CANDIDATE_LABEL = 'not verified (beyond the verification budget)';
@@ -131,24 +115,9 @@ export function passesFlagFilter(section: FlagFilterable, filter: FlagFilter): b
   // ALL shows everything, rejections included — that is the whole point of it.
   if (filter === 'all') return true;
 
-  // Null verdict = legacy/discovery. Treated as an accepted flag.
-  const verdict = section.verdict ?? 'flag';
-
-  // An accepted flag is a finding at EVERY position. The score never overrules
-  // the verifier — see the note at the top of this file.
-  if (verdict === 'flag') return true;
-
-  // Never verified: not a finding and not a near miss, so ALL only.
-  if (verdict === 'candidate') return false;
-
-  // Rejected: shown only at REVIEW, and only when the ranker was highly certain
-  // the passage was on-topic, so the rejection turned on stance alone.
-  if (filter !== 'review') return false;
-
-  const score = section.nliScore;
-  if (score === null || score === undefined || !Number.isFinite(score)) return false;
-
-  return score >= NEAR_MISS_SCORE;
+  // CONFIRMED: an accepted flag, or a legacy/discovery row (null verdict reads as
+  // one). The score never overrules the verifier — see the note at the top.
+  return (section.verdict ?? 'flag') === 'flag';
 }
 
 /** True when this section should be rendered as a verifier rejection. */
@@ -190,6 +159,7 @@ const LEGACY_FILTER_ALIASES: Record<string, FlagFilter> = {
   strict: 'confirmed',
   moderate: 'confirmed',
   loose: 'all',
+  review: 'confirmed',
 };
 
 export function loadFlagFilter(): FlagFilter {

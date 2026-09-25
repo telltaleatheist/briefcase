@@ -80,14 +80,14 @@ function snapResult(over: Partial<SnapStageResult> = {}): SnapStageResult {
 }
 
 class Harness {
-  /** The LLM check on flag sections (off in the app for now; the verified-path tests turn it on). */
-  verify = false;
   generated: Array<{ prompt: string; task: string }> = [];
   snapRuns: SnapStageRequest[] = [];
   snapRun: (req: SnapStageRequest) => Promise<SnapStageResult> = async () => snapResult();
   /** Replaceable: every LLM call's answer. */
-  answer: (prompt: string, task: string) => Promise<{ text: string; inputTokens: number; outputTokens: number }> = async () => ({
-    text: '{"title":"LLM title","summary":"A summary of it.","verdict":"flag","people":[],"topics":["cooking"],"hook":"A hook.","body":"A body."}',
+  answer: (prompt: string, task: string) => Promise<{ text: string; inputTokens: number; outputTokens: number }> = async (_prompt, task) => ({
+    text: task === 'flags'
+      ? '{"verdict":"flag","reason":"The speaker calls them communists and vermin as their own view."}'
+      : '{"title":"LLM title","summary":"A summary of it.","people":[],"topics":["cooking"],"hook":"A hook.","body":"A body."}',
     inputTokens: 1, outputTokens: 1,
   });
 
@@ -108,9 +108,7 @@ class Harness {
         return this.snapRun(req);
       },
     };
-    const service = new AIAnalysisService(provider as any, snap as any, undefined);
-    service.verifyFlagsWithLlm = this.verify;
-    return service;
+    return new AIAnalysisService(provider as any, snap as any, undefined);
   }
 }
 
@@ -136,23 +134,8 @@ describe('AIAnalysisService: snap is the analysis engine', () => {
     process.env = savedEnv;
   });
 
-  it('decide only (the default): every window of the map is a flag section of its own (pieces of a long span stay apart), no LLM check', async () => {
+  it('every section is checked (past the old budget too), each keeps its own row, and the reason is its description', async () => {
     const h = new Harness();
-    const res = await h.service().analyzeTranscript(options());
-    expect(h.generated.filter((g) => g.task === 'flags')).toHaveLength(0);
-    const flags = res.sections.filter((s) => s.verdict === 'flag');
-    expect(flags.map((s) => [s.start_time, s.end_time, s.category, s.ranker])).toEqual([
-      ['00:00:20', '00:00:40', 'political-demonization', 'snap-v1'],
-      ['00:00:40', '00:00:50', 'political-demonization', 'snap-v1'],
-      ['00:01:10', '00:01:20', 'conspiracy', 'snap-v1'],
-    ]);
-    expect(flags[0].description).toContain('[also: dehumanization]');
-    expect(res.sections.every((s) => s.verdict === 'flag')).toBe(true);
-  });
-
-  it('with the LLM check on: snap windows verified, sub-passages merged, candidates stored', async () => {
-    const h = new Harness();
-    h.verify = true;
     const res = await h.service().analyzeTranscript(options());
     expect(h.snapRuns).toHaveLength(1);
     expect(h.snapRuns[0]).toMatchObject({ chapters: true, flags: true });
@@ -164,40 +147,46 @@ describe('AIAnalysisService: snap is the analysis engine', () => {
       ['00:01:00', 'Summer travel', 'A summary of it.'],
     ]);
 
-    // Flags: both sub-passages of span 0 were accepted -> ONE section 00:00:20-00:00:50.
+    // One check per (section, category): 2 + 1 + 1, the overflow window included.
+    expect(h.generated.filter((g) => g.task === 'flags')).toHaveLength(4);
     const flags = res.sections.filter((s) => s.verdict === 'flag');
-    expect(flags).toHaveLength(1);
-    expect([flags[0].start_time, flags[0].end_time, flags[0].category, flags[0].ranker]).toEqual([
-      '00:00:20', '00:00:50', 'political-demonization', 'snap-v1',
+    expect(flags.map((s) => [s.start_time, s.end_time, s.category, s.ranker])).toEqual([
+      ['00:00:20', '00:00:40', 'political-demonization', 'snap-v1'],
+      ['00:00:40', '00:00:50', 'political-demonization', 'snap-v1'],
+      ['00:01:10', '00:01:20', 'conspiracy', 'snap-v1'],
     ]);
-    expect(flags[0].description).toContain('[also: dehumanization]');
-    // The over-budget window was never verified: a candidate row, not a flag.
-    const candidates = res.sections.filter((s) => s.verdict === 'candidate');
-    expect(candidates.map((s) => [s.start_time, s.category, s.nli_score, s.ranker])).toEqual([
-      ['00:01:10', 'conspiracy', 0.6, 'snap-v1'],
-    ]);
-    const verifications = h.generated.filter((g) => g.task === 'flags');
-    expect(verifications).toHaveLength(3); // (w1: 2 categories) + (w2: 1); none for the candidate
+    expect(flags[0].description).toBe('The speaker calls them communists and vermin as their own view. [also: dehumanization]');
+    // The passage itself is still stored, as the quote.
+    expect(flags[0].quotes[0].text).toContain('communists');
+    expect(res.sections.some((s) => s.verdict === 'candidate')).toBe(false);
     expect(res.warnings).toBeUndefined();
   });
 
-  it('with the LLM check on, the .txt report holds findings only: no candidate and no skip rows', async () => {
+  it('a rejection is stored with its reason (shown at All), and the .txt report holds findings only', async () => {
     const h = new Harness();
-    h.verify = true;
     const svc = h.service();
-    // The verifier rejects the second sub-passage (sentences 4-5; its prompt's
-    // context does not reach sentence 2): a 'skip' row.
     const base = h.answer;
     h.answer = async (prompt, task) =>
-      task === 'flags' && !prompt.includes('communists') ? { text: '{"verdict":"skip"}', inputTokens: 1, outputTokens: 1 } : base(prompt, task);
+      task === 'flags' && !prompt.includes('communists')
+        ? { text: '{"verdict":"skip","reason":"The speaker is describing a train delay, not asserting a plot."}', inputTokens: 1, outputTokens: 1 }
+        : base(prompt, task);
     const res = await svc.analyzeTranscript(options());
-    expect(res.sections.some((s) => s.verdict === 'skip')).toBe(true);
-    expect(res.sections.some((s) => s.verdict === 'candidate')).toBe(true);
+    const skips = res.sections.filter((s) => s.verdict === 'skip');
+    expect(skips.length).toBeGreaterThan(0);
+    expect(skips[0].description).toBe('The speaker is describing a train delay, not asserting a plot.');
 
     const report = fs.readFileSync(path.join(tmp, 'analysis.txt'), 'utf8');
     expect(report).toContain('communists'); // the accepted flag
-    expect(report).not.toContain('destroy everything'); // the skip row
-    expect(report).not.toContain('deep state'); // the unverified candidate
+    expect(report).not.toContain('deep state'); // the rejection
+  });
+
+  it('a verdict with no reason (a prose answer) keeps the quote as the description', async () => {
+    const h = new Harness();
+    const base = h.answer;
+    h.answer = async (prompt, task) => (task === 'flags' ? { text: '{"verdict":"flag"}', inputTokens: 1, outputTokens: 1 } : base(prompt, task));
+    const res = await h.service().analyzeTranscript(options());
+    const flag = res.sections.find((s) => s.verdict === 'flag' && s.category === 'conspiracy')!;
+    expect(flag.description).toBe('"The deep state rigged the train timetable, folks."');
   });
 
   it('a stage the engine cannot make fails the analysis BY NAME: no other engine, no LLM call', async () => {
@@ -221,9 +210,8 @@ describe('AIAnalysisService: snap is the analysis engine', () => {
     expect(h.generated).toHaveLength(0);
   });
 
-  it('with the LLM check on, a park mid-verification stops the whole run (never a quietly degraded flag)', async () => {
+  it('a park mid-verification stops the whole run (never a quietly degraded flag)', async () => {
     const h = new Harness();
-    h.verify = true;
     const base = h.answer;
     h.answer = async (prompt, task) => {
       if (task === 'flags') throw new CrucibleParkedError('mac', "Crucible on mac isn't answering.");

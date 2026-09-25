@@ -4,8 +4,8 @@
  *   Scorer stage (SnapAnalysisService, Crucible's decision door): the chapter
  *           outline + assignment + Viterbi, and the flag ranking, in one lease.
  *   Pass 2: each chapter's summary from the LLM (the outline gave its title).
- *   Pass 2b: the flag sections from the decide map (verifyFlagsWithLlm is off:
- *           no LLM check; turned on, each window is verified by the LLM).
+ *   Pass 2b: each flag section from the decide map checked by the LLM, which
+ *           answers flag or skip with a written reason (the section's description).
  *
  * Metadata (description, tags, title) is generated from chapter summaries.
  * Snap is the only engine (P7 removed the classic embedding/lexical chaptering,
@@ -43,7 +43,6 @@ import {
 import { SnapAnalysisService } from '../scorer/snap-analysis.service';
 import { leafChapters, nestAnalysisChapters } from '../scorer/chapters/chapter-tree';
 import type { SnapFlagRankResult } from '../scorer/flags/snap-flag-ranker.service';
-import { mergeSpanSubPassages, promoteCachedOverflow } from '../scorer/flags/flag-integration';
 import {
   buildChapterLines,
   buildHashtags,
@@ -88,8 +87,8 @@ export interface AnalyzedSection {
    * ABSENT on everything that is not a flag (chapter sections, legacy rows
    * from the retired discovery engine). Absent is read as 'flag' everywhere.
    *
-   * 'candidate' comes only from the snap engine: a ranked passage beyond the
-   * verify budget, stored unverified (plan §5.6) and shown only at All.
+   * 'candidate' is only ever READ: rows an earlier snap engine stored unverified
+   * past its verify budget. Every section is checked now, so none is written.
    */
   verdict?: 'flag' | 'skip' | 'candidate';
   /**
@@ -268,21 +267,15 @@ export { CRUCIBLE_OLLAMA_CONTEXT };
 const FLAG_VERIFICATION_SCHEMA: Record<string, unknown> = {
   type: 'object',
   properties: {
+    // verdict FIRST: the answer is committed before the justification is
+    // written, so the reason explains the call rather than steering it (the
+    // measurement above: room to reason before answering cost real flags).
     verdict: { type: 'string', enum: ['flag', 'skip'] },
+    reason: { type: 'string' },
   },
-  required: ['verdict'],
+  required: ['verdict', 'reason'],
   additionalProperties: false,
 };
-
-/**
- * Whether the chat model double-checks each flag section the decide map made.
- *
- * OFF (2026-09-24, the user: "decide only for now. see how it turns out"): the
- * sections come straight from the decide map, strongest first, all stored as
- * flags. Turning it back on restores the verified path below unchanged
- * (budget, verdict cache, ghosted rejections, unverified overflow).
- */
-const VERIFY_FLAGS_WITH_LLM = false;
 
 /** Flag rating maps kept for offline tuning (saveFlagMap), newest first. */
 const FLAG_MAPS_KEPT = 30;
@@ -443,8 +436,6 @@ export class AIAnalysisService {
   private readonly logger = new Logger(AIAnalysisService.name);
   /** `ollama/` models already told they are chunked for Ollama's default context (said once per process). */
   private readonly crucibleOllamaNoted = new Set<string>();
-  /** Whether the chat model double-checks each flag section (VERIFY_FLAGS_WITH_LLM; a spec turns it on to test that path). */
-  verifyFlagsWithLlm = VERIFY_FLAGS_WITH_LLM;
 
   constructor(
     private readonly aiProviderService: AIProviderService,
@@ -916,8 +907,8 @@ export class AIAnalysisService {
       // The analysis engine (3 -> ENGINE_BAND_END) is most of a run's time: it
       // asks the model about every sentence. The chat stages after it are a few
       // calls each.
-      const PASS2_BAND: [number, number] = this.verifyFlagsWithLlm ? [ENGINE_BAND_END + 1, 80] : [ENGINE_BAND_END + 1, 92];
-      const FLAG_BAND: [number, number] = this.verifyFlagsWithLlm ? [80, 92] : [92, 92];
+      const PASS2_BAND: [number, number] = [ENGINE_BAND_END + 1, 80];
+      const FLAG_BAND: [number, number] = [80, 92];
       const METADATA_BAND: [number, number] = [92, 98];
       const bandProgress = ([start, end]: [number, number], done: number, total: number) =>
         Math.round(start + (Math.min(done, total) / Math.max(1, total)) * (end - start));
@@ -1268,16 +1259,28 @@ export class AIAnalysisService {
    * as 'skip' plus a warning, never as a flag. An unreadable answer must not be
    * able to accuse anybody.
    */
-  private parseVerificationVerdict(text: string): 'flag' | 'skip' | null {
+  private parseVerification(text: string): { verdict: 'flag' | 'skip'; reason: string | null } | null {
     if (!text) return null;
     const json = /"verdict"\s*:\s*"(flag|skip)"/i.exec(text);
-    if (json) return json[1].toLowerCase() as 'flag' | 'skip';
+    if (json) {
+      let reason: string | null = null;
+      try {
+        const parsed = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)) as { reason?: unknown };
+        if (typeof parsed.reason === 'string' && parsed.reason.trim() !== '') reason = parsed.reason.trim();
+      } catch {
+        const quoted = /"reason"\s*:\s*"((?:[^"\\]|\\.)*)"/i.exec(text);
+        if (quoted && quoted[1].trim() !== '') reason = quoted[1].replace(/\\"/g, '"').trim();
+      }
+      return { verdict: json[1].toLowerCase() as 'flag' | 'skip', reason };
+    }
 
+    // A cloud upstream gets no schema and may answer in prose: the verdict word, and the prose as the reason.
     const lower = text.trim().toLowerCase();
     const hasFlag = lower.includes('flag');
     const hasSkip = lower.includes('skip');
-    if (hasFlag && !hasSkip) return 'flag';
-    if (hasSkip && !hasFlag) return 'skip';
+    const prose = text.trim().length > 12 ? text.trim() : null;
+    if (hasFlag && !hasSkip) return { verdict: 'flag', reason: prose };
+    if (hasSkip && !hasFlag) return { verdict: 'skip', reason: prose };
     return null;
   }
 
@@ -1317,8 +1320,8 @@ export class AIAnalysisService {
     verified: Array<{ window: FlagWindow; categories: WindowCategory[] }>,
     sentences: RankedSentence[],
     ranker: 'nli' | 'snap-v1',
-    /** 'candidate' for over-budget snap windows the verifier never saw (same shape, never a finding). */
-    verdict: 'flag' | 'candidate' = 'flag',
+    /** The verifier's reason per accepted category (the section's description is its primary's). */
+    reasons: ReadonlyMap<WindowCategory, string | null> = new Map(),
   ): AnalyzedSection[] {
     const sections: AnalyzedSection[] = [];
 
@@ -1337,14 +1340,14 @@ export class AIAnalysisService {
 
       sections.push({
         category: primary.category,
-        // The verifier answers with a verdict and nothing else, so there is no
-        // generated explanation to show — and inventing one would be a
-        // fabrication. The flagged passage IS the finding.
-        description: `"${text}"${also.length > 0 ? ` [also: ${also.join(', ')}]` : ''}`,
+        // The verifier's written reason for its strongest category; the quote
+        // when it gave none (a row from before prompt v4 in the cache). The
+        // passage itself is always in `quotes`.
+        description: `${reasons.get(primary) ?? `"${text}"`}${also.length > 0 ? ` [also: ${also.join(', ')}]` : ''}`,
         start_time: this.formatDisplayTime(sentences[from].start),
         end_time: this.formatDisplayTime(sentences[to].end),
         quotes: [{ timestamp: this.formatDisplayTime(sentences[from].start), text }],
-        verdict,
+        verdict: 'flag',
         nli_score: primary.score,
         ranker,
       });
@@ -1384,6 +1387,7 @@ export class AIAnalysisService {
     rejected: Array<{ window: FlagWindow; category: WindowCategory }>,
     sentences: RankedSentence[],
     ranker: 'nli' | 'snap-v1',
+    reasons: ReadonlyMap<WindowCategory, string | null> = new Map(),
   ): AnalyzedSection[] {
     const sections: AnalyzedSection[] = [];
 
@@ -1398,11 +1402,10 @@ export class AIAnalysisService {
 
       sections.push({
         category: category.category,
-        // Same shape as a flag row's description — the quote is the content. The
-        // "verifier rejected this" caption is NOT baked in here: it is a
-        // rendering decision the UI makes from `verdict`, so it can be worded,
-        // restyled and localized without rewriting stored data.
-        description: `"${text}"`,
+        // The verifier's reason for rejecting it (the quote when it gave none).
+        // The "verifier rejected this" caption is NOT baked in here: it is a
+        // rendering decision the UI makes from `verdict`.
+        description: reasons.get(category) ?? `"${text}"`,
         start_time: this.formatDisplayTime(sentences[from].start),
         end_time: this.formatDisplayTime(sentences[to].end),
         quotes: [{ timestamp: this.formatDisplayTime(sentences[from].start), text }],
@@ -1497,9 +1500,9 @@ export class AIAnalysisService {
     signal: AbortSignal | undefined,
     /**
      * The snap engine's ranking, made by the scorer before any LLM stage ran:
-     * its windows (strength-first), over-budget windows become unverified
-     * 'candidate' rows unless every question is already cached, and accepted
-     * sub-passages of one long span are stored as one section.
+     * its windows (strength-first), each a section of at most ~90 s. EVERY
+     * window is checked (in budget and past it alike): a check is one short
+     * call, and every section gets its justification.
      */
     snapRanking: SnapFlagRankResult,
   ): Promise<AnalyzedSection[]> {
@@ -1514,62 +1517,15 @@ export class AIAnalysisService {
     const passageOf = (window: FlagWindow) =>
       sentences.slice(window.contextFrom, window.contextTo + 1).map((s) => s.text);
 
-    if (!this.verifyFlagsWithLlm) {
-      // Decide only: every window the map produced is a flag section of its own.
-      // A long span was cut at its quietest points into sections of about a
-      // minute (flag-spans.ts splitSpan), and they stay apart: the user would
-      // "rather have 10 1-minute sections than one 30-minute section".
-      const all: FlagWindow[] = [...snapRanking.windows, ...snapRanking.overflow];
-      const sections = this.buildWindowSections(all.map((window) => ({ window, categories: window.categories })), sentences, ranker).sort(
-        (a, b) => this.parseDisplayTime(a.start_time) - this.parseDisplayTime(b.start_time),
-      );
-      this.logger.log(
-        `[Pass 2b] Decide only (no LLM check): ${sentences.length} sentences (${snapRanking.stats.units} units, ` +
-        `${snapRanking.stats.groupQuestions} group questions, ${snapRanking.stats.hotUnits} hot units) -> ` +
-        `${snapRanking.stats.spans} spans -> ${sections.length} flag sections ` +
-        `(${sections.map((x) => `${x.start_time}-${x.end_time}`).join(', ')})`,
-      );
-      return sections;
-    }
-
-    let windows: FlagWindow[] = snapRanking.windows;
-    // Over-budget snap windows that stay unverified ('candidate' rows).
-    let candidateWindows: FlagWindow[] = [];
-    {
-      if (snapRanking.overflow.length > 0) {
-        // Cache hits do not count against the verify budget (plan §5.5): an
-        // over-budget window whose every question is already answered costs
-        // nothing, so it is verified (from the cache) rather than stored blind.
-        // Promoted windows are weaker than every in-budget one, so appending
-        // them keeps the descending verification order.
-        const cacheOpen = this.databaseService?.isInitialized?.() === true;
-        const { promoted, candidates } = promoteCachedOverflow(snapRanking.overflow, (window, category) =>
-          cacheOpen &&
-          this.databaseService!.getFlagVerdict(
-            this.verificationQuestionHash(passageOf(window), category.category, category.proposition, verifierModel),
-          ) !== null,
-        );
-        windows = [...windows, ...promoted];
-        candidateWindows = candidates;
-        this.logger.log(
-          `[Pass 2b] Snap verify budget ${snapRanking.stats.verifyBudget}: ${snapRanking.windows.length} windows in ` +
-          `budget, ${promoted.length} over-budget window(s) fully cached (verified free), ${candidates.length} ` +
-          `stored as unverified candidates`,
-        );
-      }
-    }
-    onFlagStatus?.(`Verifying ${windows.length} flag candidate passage${windows.length === 1 ? '' : 's'}...`);
+    const windows: FlagWindow[] = [...snapRanking.windows, ...snapRanking.overflow];
+    onFlagStatus?.(`Checking ${windows.length} flag section${windows.length === 1 ? '' : 's'}...`);
     ensureNotCancelled(signal, 'flag verification');
 
     // One call per (window, category) — a passage where three categories fired
-    // costs three questions, not one per (sentence, category) pair.
-    //
-    // `windows` arrives from the snap ranker sorted by DESCENDING strength
-    // and each window's categories are ordered strongest-first, so walking them
-    // in nested order produces exactly the descending-score verification order
-    // this stage promises. The order is ASSERTED in the loop below rather than
-    // re-sorted here, so a change to rankWindows' ordering surfaces as a loud
-    // warning instead of being silently papered over.
+    // costs three questions, not one per (sentence, category) pair. Windows
+    // arrive strongest first and each window's categories strongest first, so
+    // the calls run in descending score: a run stopped halfway has checked,
+    // and cached, its most trustworthy findings.
     const jobs: Array<{
       window: FlagWindow;
       category: WindowCategory;
@@ -1590,37 +1546,12 @@ export class AIAnalysisService {
 
     this.logger.log(
       `[Pass 2b] Snap-ranked ${sentences.length} sentences (${snapRanking.stats.units} units, ` +
-      `${snapRanking.stats.spans} spans) -> ` +
-      `${windows.length} windows / ${jobs.length} verification calls on ${verifierModel}. ` +
-      `Sensitivity is NOT a run input on this path: every candidate is verified and every verdict ` +
-      `is stored, and the dial filters that stored record at display time.`,
+      `${snapRanking.stats.spans} spans) -> ${windows.length} sections / ${jobs.length} checks on ${verifierModel}. ` +
+      `Every answer is stored with its reason; the Confirmed / All filter chooses what is shown.`,
     );
 
-    // Descending-order assertion. Cheap, and it is the only thing standing
-    // between "an interrupted run keeps its best findings" and a silent
-    // regression in a sort comparator two files away.
-    for (let i = 1; i < windows.length; i++) {
-      if (windows[i].score - windows[i - 1].score > 1e-9) {
-        this.logger.warn(
-          `[Pass 2b] Verification order is NOT descending by window score at index ${i} ` +
-          `(${windows[i - 1].score.toFixed(4)} then ${windows[i].score.toFixed(4)}) — an interrupted ` +
-          `run will not have finished its most trustworthy findings first.`,
-        );
-        break;
-      }
-    }
-
-    // The call count is only known NOW, so this is where the run's API-call
-    // estimate gets corrected — the same mid-run recompute the chapter loop does
-    // after long chapters are split.
     onFlagProgress?.(0, jobs.length);
-    const candidateSections = this.buildWindowSections(
-      candidateWindows.map((window) => ({ window, categories: window.categories })),
-      sentences,
-      ranker,
-      'candidate',
-    );
-    if (jobs.length === 0) return candidateSections;
+    if (jobs.length === 0) return [];
 
     // ONE num_ctx for every verification call in the stage, sized from the
     // largest prompt. Ollama fully reloads the model on ANY num_ctx change, and
@@ -1638,14 +1569,13 @@ export class AIAnalysisService {
       signal,
       // The schema crosses for a Crucible catalog model and ollama/; a cloud
       // upstream gets none (target.ts) and answers the same prompt in prose,
-      // parsed by parseVerificationVerdict.
+      // parsed by parseVerification.
       format: FLAG_VERIFICATION_SCHEMA,
     };
 
-    // Verified categories per window, keyed by the window object itself: jobs
-    // are walked in noisy-OR order, so a window's categories can be answered
-    // consecutively but a window is only finished when all of them are.
+    // Accepted categories per window, with the verifier's reason for each.
     const verifiedByWindow = new Map<FlagWindow, WindowCategory[]>();
+    const reasons = new Map<WindowCategory, string | null>();
     const rejected: Array<{ window: FlagWindow; category: WindowCategory }> = [];
     let flaggedCalls = 0;
     let skipped = 0;
@@ -1660,10 +1590,22 @@ export class AIAnalysisService {
       );
     }
 
+    const record = (window: FlagWindow, category: WindowCategory, verdict: 'flag' | 'skip', reason: string | null): void => {
+      reasons.set(category, reason);
+      if (verdict === 'flag') {
+        flaggedCalls++;
+        const list = verifiedByWindow.get(window);
+        if (list) list.push(category);
+        else verifiedByWindow.set(window, [category]);
+      } else {
+        skipped++;
+        rejected.push({ window, category });
+      }
+    };
+
     for (let i = 0; i < jobs.length; i++) {
-      // THE big win. This loop is the longest stage in the pipeline (dozens to
-      // hundreds of verification calls on an hour-long video), so aborting the
-      // open call without this check would simply start the next one.
+      // A run can make dozens of these calls: aborting the open one without
+      // this check would simply start the next.
       ensureNotCancelled(signal, `flag verification ${i + 1}/${jobs.length}`);
 
       const { window, category, passage, prompt } = jobs[i];
@@ -1675,11 +1617,7 @@ export class AIAnalysisService {
         verifierModel,
       );
 
-      // ---- cache lookup ----------------------------------------------------
-      // A hit skips the model entirely. It is logged at log level, individually
-      // and distinctly, because "did the cache actually work" is a question that
-      // gets asked of a run's log, and a silent optimization is an unverifiable
-      // one.
+      // ---- cache lookup: a hit skips the model, and says so in the log.
       const cached = cachePresent ? this.databaseService!.getFlagVerdict(questionHash) : null;
       if (cached) {
         cacheHits++;
@@ -1688,15 +1626,7 @@ export class AIAnalysisService {
           `[Pass 2b] CACHE HIT ${where} -> ${cached.verdict} (first asked ${cached.created_at}, ` +
           `hit ${cached.hit_count + 1}x, q ${questionHash.slice(0, 12)}) — no model call`,
         );
-        if (cached.verdict === 'flag') {
-          flaggedCalls++;
-          const list = verifiedByWindow.get(window);
-          if (list) list.push(category);
-          else verifiedByWindow.set(window, [category]);
-        } else {
-          skipped++;
-          rejected.push({ window, category });
-        }
+        record(window, category, cached.verdict, cached.reason ?? null);
         onFlagProgress?.(i + 1, jobs.length);
         continue;
       }
@@ -1712,8 +1642,8 @@ export class AIAnalysisService {
             `as a rejection`,
           );
         } else {
-          const verdict = this.parseVerificationVerdict(response.text);
-          if (verdict === null) {
+          const answer = this.parseVerification(response.text);
+          if (answer === null) {
             degraded++;
             this.logger.warn(
               `[Pass 2b] No verdict in the verification answer at ${where} — not flagged, and NOT ` +
@@ -1721,26 +1651,19 @@ export class AIAnalysisService {
             );
           } else {
             // Only real verdicts are cached. A degraded call has no answer to
-            // remember, and caching "no answer" would make a transient Ollama
-            // hiccup permanent for that question.
+            // remember, and caching "no answer" would make a transient hiccup
+            // permanent for that question.
             if (cachePresent) {
               this.databaseService!.putFlagVerdict({
                 questionHash,
                 category: category.category,
                 verifierModel,
                 promptVersion: FLAG_VERIFICATION_PROMPT_VERSION,
-                verdict,
+                verdict: answer.verdict,
+                reason: answer.reason,
               });
             }
-            if (verdict === 'flag') {
-              flaggedCalls++;
-              const list = verifiedByWindow.get(window);
-              if (list) list.push(category);
-              else verifiedByWindow.set(window, [category]);
-            } else {
-              skipped++;
-              rejected.push({ window, category });
-            }
+            record(window, category, answer.verdict, answer.reason);
           }
         }
       } catch (error) {
@@ -1759,7 +1682,7 @@ export class AIAnalysisService {
     const wallSeconds = (Date.now() - startedAt) / 1000;
     const modelCalls = jobs.length - cacheHits;
     this.logger.log(
-      `[Pass 2b] Verified ${jobs.length} (window, category) pairs across ${windows.length} windows in ` +
+      `[Pass 2b] Checked ${jobs.length} (section, category) pairs across ${windows.length} sections in ` +
       `${wallSeconds.toFixed(1)}s (${(wallSeconds / jobs.length).toFixed(2)}s/pair): ` +
       `${flaggedCalls} flag, ${skipped} skip, ${degraded} unusable. ` +
       `Cache: ${cacheHits}/${jobs.length} hits (${((cacheHits / jobs.length) * 100).toFixed(1)}%), ` +
@@ -1768,36 +1691,32 @@ export class AIAnalysisService {
     );
 
     // Every single call failing is a broken stage, not a quiet result. Report it
-    // ONCE — the same shape as a chapter's total failure — so the job's failure
-    // accounting sees it without being flooded by hundreds of per-call entries.
+    // ONCE, so the job's failure accounting sees it without being flooded.
     if (degraded === jobs.length) {
       recordFailure(
         `Pass 2b flag verification produced no usable verdicts across all ${jobs.length} calls`,
       );
     }
 
-    // Windows in transcript order, so the sections are built in the order the
-    // video plays rather than in noisy-OR order. On the snap path, accepted
-    // sub-passages of ONE long span (split only so the verifier reads <= 40 s)
-    // are stored as one section covering both: no picket fence.
-    const verified = mergeSpanSubPassages(windows, verifiedByWindow);
-
-    const flagSections = this.buildWindowSections(verified, sentences, ranker);
-    const skipSections = this.buildSkipSections(rejected, sentences, ranker);
-    // Flags before ghosts at the same timestamp, so a list rendered in stored
-    // order puts the finding above the rejected (then unverified) readings of it.
-    const verdictRank = (v: AnalyzedSection['verdict']) => (v === 'skip' ? 1 : v === 'candidate' ? 2 : 0);
-    const sections = [...flagSections, ...skipSections, ...candidateSections].sort(
+    // Each window is its own section (a long span was already cut into pieces
+    // of about a minute: the user would "rather have 10 1-minute sections than
+    // one 30-minute section"), in the order the video plays.
+    const verified = windows
+      .filter((window) => verifiedByWindow.has(window))
+      .map((window) => ({ window, categories: verifiedByWindow.get(window)! }));
+    const flagSections = this.buildWindowSections(verified, sentences, ranker, reasons);
+    const skipSections = this.buildSkipSections(rejected, sentences, ranker, reasons);
+    // Flags before rejections at the same timestamp, so a list rendered in
+    // stored order puts the finding above the rejected reading of it.
+    const sections = [...flagSections, ...skipSections].sort(
       (a, b) =>
         this.parseDisplayTime(a.start_time) - this.parseDisplayTime(b.start_time) ||
-        verdictRank(a.verdict) - verdictRank(b.verdict),
+        (a.verdict === 'skip' ? 1 : 0) - (b.verdict === 'skip' ? 1 : 0),
     );
 
     this.logger.log(
-      `[Pass 2b] ${flaggedCalls} accepted (window, category) verdicts across ${verified.length} windows ` +
-      `-> ${flagSections.length} flag sections; ${skipSections.length} rejected verdicts stored as ` +
-      `ghost sections (visible only at the LOOSE filter position)` +
-      (candidateSections.length ? `; ${candidateSections.length} unverified candidates stored` : ''),
+      `[Pass 2b] ${flaggedCalls} accepted (section, category) verdicts -> ${flagSections.length} flag sections; ` +
+      `${skipSections.length} rejected verdicts stored (shown at the All filter position)`,
     );
     return sections;
   }

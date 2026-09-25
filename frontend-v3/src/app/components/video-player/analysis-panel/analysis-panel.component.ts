@@ -43,7 +43,7 @@ export class AnalysisPanelComponent implements OnChanges {
    */
   @Input() flagFilter: FlagFilter = 'confirmed';
   /** Per-position counts, so the control says what pressing it will do. */
-  @Input() flagFilterCounts: Record<FlagFilter, number> = { confirmed: 0, review: 0, all: 0 };
+  @Input() flagFilterCounts: Record<FlagFilter, number> = { confirmed: 0, all: 0 };
   @Output() sectionClick = new EventEmitter<TimelineSection>();
   @Output() sectionDelete = new EventEmitter<string>(); // section id
   @Output() chapterClick = new EventEmitter<TimelineChapter>();

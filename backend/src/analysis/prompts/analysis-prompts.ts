@@ -230,8 +230,12 @@ ${chapterText}`;
  * v3 (2026-08-25) — the sensitivity ladder was removed from this prompt; every
  * candidate is now asked the calibrated question that sensitivity 2 asked. See
  * the retirement note below.
+ *
+ * v4 (2026-09-24) — the answer carries a written justification beside the
+ * verdict (`reason`), which becomes the flag section's description (the user:
+ * "give a written justification for the markers"). The question is unchanged.
  */
-export const FLAG_VERIFICATION_PROMPT_VERSION = 'flag-verify/v3-calibrated-2026-08-25';
+export const FLAG_VERIFICATION_PROMPT_VERSION = 'flag-verify/v4-justified-2026-09-24';
 
 /**
  * THE VERIFICATION EMPHASIS LADDER IS RETIRED (operator ruling, 2026-08-25).
@@ -318,7 +322,9 @@ Question: anywhere in this passage, is the speaker asserting or promoting that c
 Answer "flag" if the speaker asserts it, endorses it, or repeats it approvingly as true.
 Answer "skip" if the speaker is reporting that other people make that claim, quoting it neutrally, asking about it, arguing against it, or if the passage does not make that claim at all.
 
-Respond with JSON only: {"verdict":"flag"} or {"verdict":"skip"}`;
+Then give the reason in one or two sentences: what the speaker says in this passage, and why that is or is not asserting the claim. Name the speaker's own words where they settle it.
+
+Respond with JSON only: {"verdict":"flag" or "skip","reason":"..."}`;
 }
 
 // -----------------------------------------------------------------------------

@@ -123,6 +123,8 @@ export interface FlagVerdictCacheRecord {
   verifier_model: string;
   prompt_version: string;
   verdict: 'flag' | 'skip';
+  /** The verifier's written justification (prompt v4+); null on a row written before it. */
+  reason: string | null;
   created_at: string;
   last_hit_at: string | null;
   hit_count: number;
@@ -646,6 +648,7 @@ export class DatabaseService {
         verifier_model TEXT NOT NULL,
         prompt_version TEXT NOT NULL,
         verdict TEXT NOT NULL,
+        reason TEXT,
         created_at TEXT NOT NULL,
         last_hit_at TEXT,
         hit_count INTEGER NOT NULL DEFAULT 0
@@ -1902,6 +1905,25 @@ export class DatabaseService {
       if (migrateChaptersOutline(db)) {
         this.saveDatabase();
         this.logger.log('Migration complete: level and parent_id columns added to chapters');
+      }
+    } catch (migrationError: any) {
+      throw new Error(
+        `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
+        `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
+        `Check that the library volume is mounted and writable, then reopen the library.`,
+      );
+    }
+
+    // Migration 28: flag_verdict_cache.reason, the verifier's written
+    // justification (prompt v4). Additive and nullable: a row from an older
+    // prompt has none, and its hash (which carries the prompt version) is never
+    // asked for again.
+    try {
+      const columns = db.prepare('PRAGMA table_info(flag_verdict_cache)').all() as Array<{ name: string }>;
+      if (columns.length > 0 && !columns.some((c) => c.name === 'reason')) {
+        db.exec('ALTER TABLE flag_verdict_cache ADD COLUMN reason TEXT');
+        this.saveDatabase();
+        this.logger.log('Migration complete: reason column added to flag_verdict_cache');
       }
     } catch (migrationError: any) {
       throw new Error(
@@ -4055,19 +4077,21 @@ export class DatabaseService {
     verifierModel: string;
     promptVersion: string;
     verdict: 'flag' | 'skip';
+    reason: string | null;
   }): void {
     try {
       const db = this.ensureInitialized();
       db.prepare(
         `INSERT OR REPLACE INTO flag_verdict_cache (
-          question_hash, category, verifier_model, prompt_version, verdict, created_at, last_hit_at, hit_count
-        ) VALUES (?, ?, ?, ?, ?, ?, NULL, 0)`
+          question_hash, category, verifier_model, prompt_version, verdict, reason, created_at, last_hit_at, hit_count
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 0)`
       ).run(
         entry.questionHash,
         entry.category,
         entry.verifierModel,
         entry.promptVersion,
         entry.verdict,
+        entry.reason,
         new Date().toISOString(),
       );
     } catch (error: any) {
