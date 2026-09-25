@@ -37,7 +37,6 @@ async function wire(url?: string): Promise<void> {
   const servers = new CrucibleServersService(h.registry, h.factory);
   chat = new CrucibleChatService(servers, h.factory, h.probes, ledger);
   const transcription = new CrucibleTranscriptionService(servers, h.probes, h.factory, ledger);
-  transcription.configDir = () => h.dir;
   lanes = new CrucibleLanesService(servers, h.probes, chat, h.factory, h.registry, transcription, ledger);
   lanes.now = () => Date.now() + offset;
   lanes.sweepTiming = { confirmForMs: 200, pollEveryMs: 20 };

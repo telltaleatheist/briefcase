@@ -124,17 +124,16 @@ describe('a server that states no informational field', () => {
   });
 
   it('transcribes: no digest on the upload, no fraction on the frames, and the SRT is written', async () => {
-    const { h, fake } = await rig({ installedJobTypes: ['echo', 'llm', 'asr'], asrInstalled: ['mlx-whisper-large-v3'] });
+    const { h, fake } = await rig(stockedForBriefcase());
     const ledger = InFlightLedger.inDir(h.dir, () => undefined);
     const svc = new CrucibleTranscriptionService(new CrucibleServersService(h.registry, h.factory), h.probes, h.factory, ledger);
-    svc.configDir = () => h.dir;
     svc.jobTiming = { doorDelaysMs: [5], streamDelaysMs: [5, 5, 5] };
     const video = path.join(tempDir('any-server-video-'), 'clip.mp4');
     fs.writeFileSync(video, Buffer.alloc(16 * 1024, 3));
     const outDir = tempDir('any-server-out-');
     const seen: Array<{ percent: number; message: string }> = [];
     const outcome = await svc.transcribe({
-      server: 'mac', model: 'mlx-whisper-large-v3', videoFile: video, outputDir: outDir, baseName: 'a', localId: 'a',
+      server: 'mac', model: 'qwen3-asr-1.7b', videoFile: video, outputDir: outDir, baseName: 'a', localId: 'a',
       onProgress: (percent, message) => seen.push({ percent, message }),
     });
     expect(outcome.cues).toBe(3);

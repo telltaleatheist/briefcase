@@ -24,7 +24,7 @@ describe('coordinationLine', () => {
   it('draws a download with its share of the total, and says it keeps going', () => {
     const state: CrucibleCoordinationState = {
       server: 'mac', phase: 'preparing', missing: [], unmet: [], followed: false,
-      progress: progress({ step: { name: 'pull mlx-whisper-large-v3', index: 3, total: 4 }, bytes: { done: 512 * 1024 ** 2, total: 1024 ** 3, file: 'w.npz' } }),
+      progress: progress({ step: { name: 'pull qwen3-asr-1.7b', index: 3, total: 4 }, bytes: { done: 512 * 1024 ** 2, total: 1024 ** 3, file: 'w.npz' } }),
     };
     const line = coordinationLine(state);
     expect(line).toContain('step 3 of 4');

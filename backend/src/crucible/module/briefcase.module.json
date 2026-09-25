@@ -1,6 +1,6 @@
 {
   "name": "briefcase",
-  "version": "1.0.23+3ca493b96a2e",
+  "version": "1.0.29+541fca66df7d",
   "job_types": [
     {
       "type": "llm",
@@ -16,6 +16,13 @@
         "cuda-linux",
         "mlx-darwin"
       ]
+    },
+    {
+      "type": "align",
+      "backends": [
+        "cuda-linux",
+        "mlx-darwin"
+      ]
     }
   ],
   "needs": [
@@ -26,15 +33,17 @@
   "subjects": [
     {
       "kind": "model",
-      "id": "faster-whisper-large-v3",
+      "id": "qwen3-asr-1.7b",
       "backends": [
-        "cuda-linux"
+        "cuda-linux",
+        "mlx-darwin"
       ]
     },
     {
       "kind": "model",
-      "id": "mlx-whisper-large-v3",
+      "id": "qwen3-aligner",
       "backends": [
+        "cuda-linux",
         "mlx-darwin"
       ]
     }

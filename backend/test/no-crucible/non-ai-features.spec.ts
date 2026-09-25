@@ -59,7 +59,6 @@ async function world(condition: Condition): Promise<World> {
   const servers = new CrucibleServersService(h.registry, h.factory);
   const chat = new CrucibleChatService(servers, h.factory, h.probes, ledger);
   const transcription = new CrucibleTranscriptionService(servers, h.probes, h.factory, ledger);
-  transcription.configDir = () => h.dir;
   const lanes = new CrucibleLanesService(servers, h.probes, chat, h.factory, h.registry, transcription, ledger);
   const readiness = new CrucibleReadinessService(servers, h.probes, h.registry, installDoor(condition === 'cannot host' ? 'no' : 'yes'));
   const rig = makeRig(lanes, readiness);

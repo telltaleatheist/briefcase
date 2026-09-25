@@ -2,9 +2,10 @@
  * transcript.json → SRT (migration plan §6.6 step 5).
  *
  * A Crucible `asr` job hands back `transcript.json` (crucible
- * docs/PHASE4-AUDIO.md §3): whisper's own segments in ABSOLUTE time, window
- * overlaps already removed, words attached when `word_timestamps` was asked
- * for. Everything downstream in Briefcase reads an SRT (transcript search, the
+ * docs/PHASE4-AUDIO.md §3, PHASE25-QWEN-ASR.md §2): segments in ABSOLUTE time,
+ * window overlaps already removed, words attached when `word_timestamps` was
+ * asked for. A Qwen3-ASR segment is one piece of up to 180 s, so Briefcase
+ * always asks for words, and its cues are cut from them (alignWordsToText). Everything downstream in Briefcase reads an SRT (transcript search, the
  * editor, analysis, snap), so this is the one place that turns one into the
  * other, and the SRT it writes is the shape whisper.cpp writes:
  *
@@ -56,8 +57,8 @@ export interface TranscriptCue {
   readonly text: string;
 }
 
-/** Sentence-final punctuation, with closing quotes/brackets after the mark. BookForge's. */
-const SENTENCE_END_RE = /[.!?…]["”’')\]]*$/;
+/** Sentence-final punctuation (full-width too), with closing quotes/brackets after the mark. BookForge's, plus 。！？. */
+const SENTENCE_END_RE = /[.!?…。！？]["”’')\]」』]*$/u;
 /** A cue that grew this long without punctuation is flushed. BookForge's `_MAX_CUE_CHARS`. */
 const MAX_CUE_CHARS = 240;
 /** Two cues overlapping by less than this are not an overlap (whisper's timestamps jitter). */
@@ -126,6 +127,72 @@ export function readCrucibleTranscript(parsed: unknown): CrucibleTranscript {
   };
 }
 
+/** How far past the last matched character an aligner word may be found (characters of letters and digits). */
+const ALIGN_LOOKAHEAD_CHARS = 40;
+
+/** Letters and digits only, lower-cased: the one spelling an aligner word and a text token are compared in. */
+function bare(text: string): string {
+  return text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+}
+
+/**
+ * A Qwen segment's aligner words, each given the PUNCTUATED text it covers.
+ *
+ * Qwen3-ASR's segment is one piece of up to 180 s; its `text` carries the
+ * punctuation and its `words` (the aligner's items) carry the times, without
+ * punctuation and not always split where the text is ("don't" may be "don" and
+ * "t"). The two are matched character by character on their letters and digits:
+ * each word is found in the text's letter stream at or just past the last one,
+ * and each text token goes to the word holding its last letter, so "don't."
+ * lands on "t" and ends a sentence there. A token with no letters ("—") goes
+ * with the word before it. A word with no token (its letters were another
+ * word's token) keeps its time and adds no text.
+ *
+ * A language written without spaces matches the same way (the letter streams
+ * are compared, not the tokens), its text split after each 。！？ so every
+ * sentence is its own token. When the text does not line up with the words at
+ * all (fewer than half of them found), the words' own text is used,
+ * unpunctuated, so the cues still carry every word at its time.
+ */
+export function alignWordsToText(segment: TranscriptSegment): TranscriptWord[] {
+  const words = segment.words ?? [];
+  // Tokens: split on spaces, and after a full-width sentence end (a language written without spaces).
+  const tokens = segment.text.split(/\s+|(?<=[。！？])/u).filter((t) => t !== '');
+  let stream = '';
+  const tokenLast: number[] = [];
+  for (const token of tokens) {
+    stream += bare(token);
+    tokenLast.push(stream.length - 1);
+  }
+  const wordOfChar = new Array<number>(stream.length).fill(-1);
+  let cursor = 0;
+  let found = 0;
+  words.forEach((w, j) => {
+    const key = bare(w.word);
+    if (key === '') return;
+    const at = stream.indexOf(key, cursor);
+    if (at < 0 || at - cursor > ALIGN_LOOKAHEAD_CHARS) return;
+    for (let c = at; c < at + key.length; c++) wordOfChar[c] = j;
+    cursor = at + key.length;
+    found++;
+  });
+  if (words.length > 0 && found * 2 < words.length) {
+    return words.map((w) => ({ start: w.start, end: w.end, word: ` ${w.word.trim()}` }));
+  }
+
+  const texts: string[][] = words.map(() => []);
+  let previous = 0;
+  tokens.forEach((token, i) => {
+    const last = tokenLast[i];
+    // A token with letters goes to the word holding its last one; an unmatched stretch rides with the word before.
+    const owner = last >= 0 && (i === 0 || last > tokenLast[i - 1]) ? wordOfChar[last] : -1;
+    const j = owner >= 0 ? owner : previous;
+    texts[j]?.push(token);
+    previous = j;
+  });
+  return words.map((w, j) => ({ start: w.start, end: w.end, word: texts[j].length > 0 ? ` ${texts[j].join(' ')}` : '' }));
+}
+
 /** One line of cue text: every run of whitespace (newlines included) folded to a space. */
 function oneLine(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
@@ -155,12 +222,14 @@ export function groupTranscriptCues(segments: readonly TranscriptSegment[]): Tra
   };
   for (const segment of segments) {
     if (segment.words !== undefined && segment.words.length > 0) {
-      for (const w of segment.words) {
+      // Qwen's aligner words carry no punctuation: give them the segment text's first.
+      const timed = alignWordsToText(segment);
+      for (const w of timed) {
         if (start === null) start = w.start;
         end = w.end;
         words.push(w.word);
         const chars = words.reduce((n, x) => n + x.length, 0);
-        if (SENTENCE_END_RE.test(w.word.trim()) || chars >= MAX_CUE_CHARS) flush();
+        if ((w.word.trim() !== '' && SENTENCE_END_RE.test(w.word.trim())) || chars >= MAX_CUE_CHARS) flush();
       }
     } else {
       flush();

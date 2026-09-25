@@ -14,8 +14,8 @@
 #      this directory, byte for byte. Never edit the JSON by hand: its `version`
 #      is a hash of its own content, and test/crucible/module-file.spec.ts checks it.
 #
-# The copy here was produced by the crucible repo's OWN generator at b95ac38
-# (Cut 1.0.23), run against this file in a scratch directory
+# The copy here was produced by the crucible repo's OWN generator at v1.0.29
+# (6ef113b), run against this file in a scratch directory
 # (`gen-modules.py --directory <scratch>`), so it is what step 2 will write.
 
 [module]
@@ -27,6 +27,11 @@ type = "llm"
 [[job_types]]
 type = "asr"
 
+# Qwen3-ASR's word timestamps run its forced aligner in the `align` worker env
+# (a missing env is refused `env_missing` at the submit).
+[[job_types]]
+type = "align"
+
 # Chapters, flags, descriptions, tags and titles: one class. The SERVER resolves
 # it per machine (PHASE15-HOST.md 5.3a), so no model id is typed here.
 #
@@ -35,15 +40,17 @@ type = "asr"
 [[needs]]
 class = "analysis"
 
-# The transcriber: large-v3 on both backends (Briefcase, 2026-09-23). Two
-# entries for one choice, because the id depends on the backend: CTranslate2
-# has no Metal backend, so faster-whisper is cuda-linux only and mlx-whisper is
-# mlx-darwin only. The generator scopes each to the backends that declare it,
-# and Briefcase strips `backends` and filters to the server's own before posting.
+# The transcriber: Qwen3-ASR-1.7B, ONE id on both backends (Briefcase,
+# 2026-09-24: "wire qwen asr in as the model we use for transcription"), and
+# the forced aligner it runs for word timestamps. Briefcase always asks Qwen
+# for words: a Qwen segment is one piece of up to 180 s, and the aligner's
+# words are what cut it into cues (crucible-transcript.ts). Before the asr
+# lineup ruling (Crucible 1.0.29) this named large-v3 twice, once per
+# backend-prefixed id; those ids are retired.
 [[subjects]]
 kind = "model"
-id = "faster-whisper-large-v3"
+id = "qwen3-asr-1.7b"
 
 [[subjects]]
 kind = "model"
-id = "mlx-whisper-large-v3"
+id = "qwen3-aligner"

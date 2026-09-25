@@ -142,12 +142,9 @@ export type AsrJobProgress =
   /** `fraction`: the server's own, or where it last put it when a frame states none (0 before any). */
   | { readonly kind: 'transcribing'; readonly fraction: number; readonly processedS: number | null; readonly totalS: number | null; readonly message: string | null };
 
-/** The asr params, exactly the three the server takes (it refuses anything else). */
-export interface AsrParams {
-  readonly language: string;
-  readonly vad_filter: boolean;
-  readonly word_timestamps: boolean;
-}
+/** The asr params (asr-models.ts asrParamsFor): the three the server requires. */
+export type { AsrParams } from './asr-models';
+import type { AsrParams } from './asr-models';
 
 /**
  * Where an upload is kept between runs of one task, so a task parked after

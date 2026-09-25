@@ -3,7 +3,7 @@
  * segments, hours), and byte-compatibility with the SRT readers downstream
  * already use on whisper.cpp's output.
  */
-import { groupTranscriptCues, readCrucibleTranscript, renderSrt, srtTimestamp, transcriptToSrt } from '../../src/crucible/asr/crucible-transcript';
+import { alignWordsToText, groupTranscriptCues, readCrucibleTranscript, renderSrt, srtTimestamp, transcriptToSrt } from '../../src/crucible/asr/crucible-transcript';
 import { parseSrt } from '../../src/scorer/flags/eval/flag-eval';
 
 function doc(segments: unknown[], extra: Record<string, unknown> = {}): Record<string, unknown> {
@@ -175,5 +175,65 @@ describe('transcript.json → SRT', () => {
     it('words: null is no words', () => {
       expect(readCrucibleTranscript(doc([{ start: 0, end: 1, text: 'x', words: null }])).segments[0].words).toBeUndefined();
     });
+  });
+});
+
+describe('Qwen3-ASR: a 180 s piece cut into cues by its aligner words', () => {
+  /** The aligner's items: no punctuation, times in absolute seconds, one per `step` seconds from `at`. */
+  const aligned = (items: string[], at = 0, step = 0.5) =>
+    items.map((word, i) => ({ start: at + i * step, end: at + i * step + 0.4, word, probability: null }));
+
+  it('gives each word the punctuated text it ends: contractions, hyphens and a dash', () => {
+    const words = alignWordsToText({
+      start: 0, end: 10,
+      text: "Well, I don't know — it's a well-known fact. Right?",
+      words: aligned(['Well', 'I', 'don', 't', 'know', 'it', 's', 'a', 'well', 'known', 'fact', 'Right']),
+    });
+    expect(words.map((w) => w.word)).toEqual([
+      ' Well,', ' I', '', " don't", ' know —', '', " it's", ' a', '', ' well-known', ' fact.', ' Right?',
+    ]);
+    // Every word keeps its own time.
+    expect(words.map((w) => w.start)).toEqual(aligned(['x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x']).map((w) => w.start));
+  });
+
+  it('a word the text does not have adds no text; the text around it is kept in order', () => {
+    const words = alignWordsToText({ start: 0, end: 3, text: 'We went home.', words: aligned(['We', 'uh', 'went', 'home']) });
+    expect(words.map((w) => w.word).join('')).toBe(' We went home.');
+  });
+
+  it('a language written without spaces: each sentence goes to the word it ends on', () => {
+    const words = alignWordsToText({ start: 0, end: 3, text: '今天天气很好。明天下雨。', words: aligned(['今天', '天气', '很', '好', '明天', '下雨']) });
+    expect(words.map((w) => w.word)).toEqual(['', '', '', ' 今天天气很好。', '', ' 明天下雨。']);
+  });
+
+  it('text that does not line up with the words at all keeps the words themselves, unpunctuated', () => {
+    const words = alignWordsToText({ start: 0, end: 2, text: 'Something else entirely.', words: aligned(['we', 'went', 'home']) });
+    expect(words.map((w) => w.word)).toEqual([' we', ' went', ' home']);
+  });
+
+  it('a Qwen transcript becomes sentence cues at the aligner\'s times, not one 180 s cue', () => {
+    const parsed = {
+      model: 'qwen3-asr-1.7b', revision: '7278e1e7', language: 'en', language_requested: 'en', duration_s: 180,
+      segments: [{
+        start: 0, end: 180,
+        text: 'Welcome back everybody. Today we are talking about pasta. Let us begin.',
+        words: aligned(['Welcome', 'back', 'everybody', 'Today', 'we', 'are', 'talking', 'about', 'pasta', 'Let', 'us', 'begin'], 10, 1),
+      }],
+    };
+    const { srt, cues } = transcriptToSrt(parsed);
+    expect(cues).toBe(3);
+    expect(analysisParse(srt)).toEqual([
+      { start: 10, end: 12.4, text: 'Welcome back everybody.' },
+      { start: 13, end: 18.4, text: 'Today we are talking about pasta.' },
+      { start: 19, end: 21.4, text: 'Let us begin.' },
+    ]);
+  });
+
+  it('a whisper transcript is unchanged: its own words are already spaced and punctuated', () => {
+    const { srt } = transcriptToSrt(doc([{
+      start: 0, end: 4, text: ' Hi there. Bye.',
+      words: [{ start: 0, end: 1, word: ' Hi' }, { start: 1, end: 2, word: ' there.' }, { start: 2, end: 3, word: ' Bye.' }],
+    }]));
+    expect(analysisParse(srt).map((c) => c.text)).toEqual(['Hi there.', 'Bye.']);
   });
 });

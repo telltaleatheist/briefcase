@@ -27,7 +27,7 @@ import type {
   UpstreamTestAnswer,
 } from '@crucible-wire/settings-wire';
 import type { AiModelsView, AiTaskModels, KeyCopyOutcome, LegacyKeysView } from '@crucible-wire/ai-wire';
-import type { TranscriptionSettingWire, TranscriptionView } from '@crucible-wire/transcription-wire';
+import type { TranscriptionView } from '@crucible-wire/transcription-wire';
 
 /** A refusal from /api/crucible, always with a sentence that carries the fix. */
 export interface CrucibleRefusal {
@@ -233,12 +233,8 @@ export class CrucibleService {
 
     // ── transcription (P5) ─────────────────────────────────────────────────
 
-  /** Where transcription runs, each server's asr models, and where a transcription queued now would go. */
+  /** Qwen3-ASR on the selected server, and where a transcription queued now would go. */
   transcription(): Observable<TranscriptionView> {
     return this.refusal(this.http.get<TranscriptionView>(`${this.base}/transcription`));
-  }
-
-  saveTranscription(setting: TranscriptionSettingWire): Observable<TranscriptionView> {
-    return this.refusal(this.http.put<TranscriptionView>(`${this.base}/transcription`, setting));
   }
 }

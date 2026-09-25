@@ -49,7 +49,6 @@ function wire() {
   const servers = new CrucibleServersService(h.registry, h.factory);
   const chat = new CrucibleChatService(servers, h.factory, h.probes, ledger);
   const transcription = new CrucibleTranscriptionService(servers, h.probes, h.factory, ledger);
-  transcription.configDir = () => h.dir;
   const lanes = new CrucibleLanesService(servers, h.probes, chat, h.factory, h.registry, transcription, ledger);
   lanes.sweepTiming = { confirmForMs: 200, pollEveryMs: 20 };
   const scorer = new CrucibleScorerService(chat, servers);

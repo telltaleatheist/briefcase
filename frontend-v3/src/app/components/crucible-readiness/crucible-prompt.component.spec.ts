@@ -68,9 +68,9 @@ describe('CruciblePromptComponent', () => {
 
   it('shows the start progress instead of buttons while starting', () => {
     readiness.asked.set(true);
-    render(readinessView({ state: 'starting', action: null, progress: 'Loading mlx-whisper-large-v3' }));
+    render(readinessView({ state: 'starting', action: null, progress: 'Loading qwen3-asr-1.7b' }));
     expect(card()!.textContent).toContain('Starting Crucible');
-    expect(card()!.textContent).toContain('Loading mlx-whisper-large-v3');
+    expect(card()!.textContent).toContain('Loading qwen3-asr-1.7b');
     expect(card()!.querySelector('.spinner')).not.toBeNull();
     expect(card()!.querySelectorAll('button').length).toBe(0);
   });

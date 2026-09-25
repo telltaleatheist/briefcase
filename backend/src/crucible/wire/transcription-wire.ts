@@ -5,34 +5,24 @@
  */
 import type { ServerReach } from './settings-wire';
 
-/**
- * Transcription is Crucible's `asr` job and nothing else (P7 removed the
- * offline whisper-cli transcriber and the `translate` option).
- */
-export interface TranscriptionSettingWire {
-  /** A Crucible asr model id, or null for the most accurate one installed. */
-  model: string | null;
-}
-
-export interface TranscriptionModelRow {
-  id: string;
+/** A model's standing on the server: listed at all, and downloaded. */
+export interface TranscriptionModelState {
+  offered: boolean;
   installed: boolean;
-  /** 0 = most accurate; null when the model is not on Briefcase's declared ladder. */
-  rank: number | null;
 }
 
+/**
+ * The selected server, as transcription sees it. Transcription is Crucible's
+ * `asr` job with Qwen3-ASR-1.7B and nothing else.
+ */
 export interface TranscriptionServerView {
   name: string;
   reach: ServerReach | null;
   /** `mlx-darwin`, `cuda-linux`, or null when the server could not be read. */
   backend: string | null;
-  offersAsr: boolean;
-  /** This backend's asr models, most accurate first. */
-  models: TranscriptionModelRow[];
-  /** The model a job would name when the setting names none. */
-  recommended: string | null;
-  /** A more accurate model the server offers but has not downloaded. */
-  betterNotInstalled: string | null;
+  /** Qwen3-ASR and its aligner on it; null when the server could not be read. */
+  qwen: TranscriptionModelState | null;
+  aligner: TranscriptionModelState | null;
   /** Why this server can't transcribe right now, or null. */
   unavailable: string | null;
 }
@@ -43,11 +33,10 @@ export type TranscriptionRouteWire =
   | { kind: 'none'; reason: string };
 
 export interface TranscriptionView {
-  setting: TranscriptionSettingWire;
-  /** False when nobody has saved a transcription setting yet. */
-  explicit: boolean;
-  ignored: string | null;
-  /** The selected Crucible server, as transcription sees it; null when none is selected. */
+  /** The one model Briefcase transcribes with, and the aligner it needs. */
+  model: string;
+  aligner: string;
+  /** The selected Crucible server; null when none is selected. */
   server: TranscriptionServerView | null;
   /** Where a transcription queued now would run. */
   route: TranscriptionRouteWire;

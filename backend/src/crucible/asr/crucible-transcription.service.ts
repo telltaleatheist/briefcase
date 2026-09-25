@@ -9,9 +9,9 @@
  * written in the job's output directory for the caller to relocate.
  *
  * What the job sends (all three params are required and Crucible defaults
- * none): `language` ("auto": Briefcase has no language setting and never
- * passed `-l` to whisper.cpp either), `vad_filter` per engine (asr-models.ts),
- * `word_timestamps: false` (nothing in Briefcase reads words yet).
+ * none), Qwen3-ASR's (asr-models.ts qwenAsrParams): `language` "en" unless
+ * stated (Qwen cannot detect), `vad_filter: false`, and words, which cut its
+ * 180 s pieces into cues.
  *
  * Salvaged from the reference branch's `crucible-transcription.service.ts`
  * (bbb7ef6). Its registry and servers seam are NOT used: P1's
@@ -22,7 +22,6 @@ import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
-import { getBriefcaseConfigDir } from '../../bridges/runtime-paths';
 import type { UploadResult } from '@crucible/client';
 import { CrucibleClientFactory } from '../client-factory';
 import { CRUCIBLE_IN_FLIGHT_LEDGER } from '../crucible.constants';
@@ -30,15 +29,9 @@ import { CrucibleServersService } from '../crucible-servers.service';
 import type { InFlightLedger } from '../in-flight-ledger';
 import { CrucibleProbeService } from '../probe';
 import type { TranscriptionServerView, TranscriptionView } from '../wire/transcription-wire';
-import { asrOfferOf, crucibleAsrLanguage, vadFilterFor, type AsrOffer } from './asr-models';
+import { QWEN_ALIGNER_MODEL, QWEN_ASR_MODEL, asrOfferOf, qwenAsrParams, qwenUnavailable, type AsrOffer } from './asr-models';
 import { classifyAsrRefusal, runAsrJob, type AsrBlobCache, type AsrJobProgress, type RunAsrJobOptions } from './crucible-asr-job';
 import { transcriptToSrt } from './crucible-transcript';
-import {
-  parseTranscriptionSettingInput,
-  readTranscriptionSetting,
-  writeTranscriptionSetting,
-  type TranscriptionSettingRead,
-} from './transcription-setting';
 import { decideTranscriptionRoute, type TranscriptionRoute, type TranscriptionVenueHost } from './transcription-venue';
 
 /** `/v1/info` is read at most this often per server for the venue rule. */
@@ -142,7 +135,6 @@ export class CrucibleTranscriptionService {
 
   /** Replaceable by a spec. */
   now: () => number = Date.now;
-  configDir: () => string = () => getBriefcaseConfigDir();
   /** Only a spec shortens these. */
   jobTiming: Pick<RunAsrJobOptions, 'doorDelaysMs' | 'streamDelaysMs' | 'uploadTickMs'> = {};
 
@@ -153,24 +145,10 @@ export class CrucibleTranscriptionService {
     @Optional() @Inject(CRUCIBLE_IN_FLIGHT_LEDGER) private readonly ledger?: InFlightLedger,
   ) {}
 
-  // ── the setting ────────────────────────────────────────────────────────
-
-  setting(): TranscriptionSettingRead {
-    return readTranscriptionSetting(this.configDir());
-  }
-
-  saveSetting(input: unknown): TranscriptionSettingRead {
-    const setting = parseTranscriptionSettingInput(input);
-    const saved = writeTranscriptionSetting(this.configDir(), setting);
-    this.logger.log(`Transcription model set to ${setting.model ?? 'the most accurate downloaded'}`);
-    return saved;
-  }
-
   // ── the venue rule ─────────────────────────────────────────────────────
 
   private host(): TranscriptionVenueHost {
     return {
-      setting: () => this.setting().setting,
       selected: () => this.servers.selected(),
       reach: async (server) => {
         const answer = await this.probes.reach(server);
@@ -209,7 +187,6 @@ export class CrucibleTranscriptionService {
   // ── the pane's view ────────────────────────────────────────────────────
 
   async view(): Promise<TranscriptionView> {
-    const read = this.setting();
     let selected: string | null = null;
     try {
       selected = this.servers.routing().selected;
@@ -219,8 +196,7 @@ export class CrucibleTranscriptionService {
     let server: TranscriptionServerView | null = null;
     if (selected !== null) {
       const view: TranscriptionServerView = {
-        name: selected, reach: null, backend: null, offersAsr: false,
-        models: [], recommended: null, betterNotInstalled: null, unavailable: null,
+        name: selected, reach: null, backend: null, qwen: null, aligner: null, unavailable: null,
       };
       try {
         const answer = await this.probes.reach(selected);
@@ -230,26 +206,16 @@ export class CrucibleTranscriptionService {
         } else {
           const offer = await this.asrOffer(selected, true);
           view.backend = offer.backend;
-          view.offersAsr = offer.offersAsr;
-          view.models = offer.choice.models.map((m) => ({ id: m.id, installed: m.installed, rank: m.rank }));
-          view.recommended = offer.choice.recommended;
-          view.betterNotInstalled = offer.choice.betterNotInstalled;
-          if (!offer.offersAsr) view.unavailable = `Crucible on ${selected} has no transcription engine.`;
-          else if (offer.choice.recommended === null) view.unavailable = `Crucible on ${selected} has no transcription model downloaded yet.`;
+          view.qwen = offer.qwen;
+          view.aligner = offer.aligner;
+          view.unavailable = qwenUnavailable(selected, offer);
         }
       } catch (err) {
         view.unavailable = `Crucible on ${selected} couldn't be read (${(err as Error)?.message ?? err}).`;
       }
       server = view;
     }
-    const route = await this.route();
-    return {
-      setting: read.setting,
-      explicit: read.explicit,
-      ignored: read.ignored ?? null,
-      server,
-      route,
-    };
+    return { model: QWEN_ASR_MODEL, aligner: QWEN_ALIGNER_MODEL, server, route: await this.route() };
   }
 
   // ── the job ────────────────────────────────────────────────────────────
@@ -262,8 +228,7 @@ export class CrucibleTranscriptionService {
   async transcribe(request: CrucibleTranscriptionRequest): Promise<CrucibleTranscriptionOutcome> {
     const { server, model, localId } = request;
     const log = (line: string): void => this.logger.log(`[${localId}] ${line}`);
-    const vad = vadFilterFor(model);
-    const language = crucibleAsrLanguage(request.language);
+    const params = qwenAsrParams(request.language);
     let client;
     try {
       client = await this.factory.clientFor(server);
@@ -272,13 +237,13 @@ export class CrucibleTranscriptionService {
       throw classifyAsrRefusal(err, server, 'the transcription');
     }
     let last = 0;
-    log(`transcribing ${path.basename(request.videoFile)} on ${server} with ${model} (language ${language}, vad_filter ${vad}, word_timestamps false)`);
+    log(`transcribing ${path.basename(request.videoFile)} on ${server} with ${model} (language ${params.language}, vad_filter ${params.vad_filter}, word_timestamps ${params.word_timestamps})`);
 
     const outcome = await runAsrJob({
       client,
       server,
       model,
-      params: { language, vad_filter: vad, word_timestamps: false },
+      params,
       file: request.videoFile,
       filename: safeUploadName(request.videoFile),
       // Unique per submission: a lost submit answer is found again by it.

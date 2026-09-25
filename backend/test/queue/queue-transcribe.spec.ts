@@ -15,11 +15,11 @@ import { CrucibleServersService } from '../../src/crucible/crucible-servers.serv
 import { InFlightLedger } from '../../src/crucible/in-flight-ledger';
 import { CrucibleChatService } from '../../src/crucible/llm/crucible-chat.service';
 import { CrucibleLanesService } from '../../src/queue/crucible-lanes';
-import { startFakeCrucible, unusedLoopbackUrl } from '../fake-crucible/fake-crucible';
+import { startFakeCrucible, stockedForBriefcase, unusedLoopbackUrl } from '../fake-crucible/fake-crucible';
 import { harness } from '../crucible/harness';
 import { analyzeJob, downloadJob, gate, makeRig, StubLanes, tick, transcribeJob, until, type Gate, type Rig } from './queue-rig';
 
-const ASR = 'mlx-whisper-large-v3';
+const ASR = 'qwen3-asr-1.7b';
 const OK: TaskResult = { success: true, data: { transcriptPath: '/tmp/t.srt' } };
 
 afterEach(() => jest.useRealTimers());
@@ -233,19 +233,18 @@ describe('no server that can transcribe', () => {
 
 describe('the real lanes against the fake Crucible', () => {
   async function realLanes(url?: string, fakeOptions: Parameters<typeof startFakeCrucible>[0] = {}) {
-    const fake = await startFakeCrucible({ installedJobTypes: ['echo', 'llm', 'asr'], asrInstalled: [ASR], ...fakeOptions });
+    const fake = await startFakeCrucible({ ...stockedForBriefcase(), ...fakeOptions });
     const h = harness();
     h.registry.add({ name: 'mac', url: url ?? fake.url, token: fake.token });
     const ledger = InFlightLedger.inDir(h.dir, () => undefined);
     const servers = new CrucibleServersService(h.registry, h.factory);
     const transcription = new CrucibleTranscriptionService(servers, h.probes, h.factory, ledger);
-    transcription.configDir = () => h.dir;
     const chat = new CrucibleChatService(servers, h.factory, h.probes, ledger);
     const lanes = new CrucibleLanesService(servers, h.probes, chat, h.factory, h.registry, transcription, ledger);
     return { fake, lanes };
   }
 
-  it('placeTranscribe: a server with asr is a GPU lane with its best model', async () => {
+  it('placeTranscribe: a server with Qwen and its aligner is a GPU lane with Qwen', async () => {
     const { fake, lanes } = await realLanes();
     try {
       expect(await lanes.placeTranscribe()).toEqual({
