@@ -1350,7 +1350,9 @@ export class QueueService implements OnDestroy {
   private mapBackendToFrontendJob(backendJob: any): QueueJob {
     const tasks: QueueTask[] = this.mapBackendTasksToFrontend(
       backendJob.tasks || [],
-      backendJob.currentTaskIndex
+      backendJob.currentTaskIndex,
+      backendJob.completedTasks,
+      backendJob.runningTasks,
     );
 
     return createQueueJob({
@@ -1374,9 +1376,18 @@ export class QueueService implements OnDestroy {
   /**
    * Map backend tasks to frontend format
    */
-  private mapBackendTasksToFrontend(backendTasks: any[], currentTaskIndex: number): QueueTask[] {
+  private mapBackendTasksToFrontend(
+    backendTasks: any[],
+    currentTaskIndex: number,
+    /** Done tasks past currentTaskIndex, and the running ones: a job's file and AI chains run side by side. */
+    completedTasks?: number[],
+    runningTasks?: number[],
+  ): QueueTask[] {
     const frontendTasks: QueueTask[] = [];
     const seenTypes = new Set<TaskType>();
+    const isDone = (i: number) => i < currentTaskIndex || (completedTasks?.includes(i) ?? false);
+    // An older backend states no running list: its one running task is currentTaskIndex.
+    const isRunning = (i: number) => !isDone(i) && (runningTasks ? runningTasks.includes(i) : i === currentTaskIndex);
 
     // Group download-related tasks into single task
     const downloadTaskTypes = ['get-info', 'download', 'import'];
@@ -1390,10 +1401,10 @@ export class QueueService implements OnDestroy {
         const task = backendTasks[i];
         if (!downloadTaskTypes.includes(task.type)) continue;
 
-        if (i < currentTaskIndex) {
+        if (isDone(i)) {
           downloadState = 'completed';
           downloadProgress = 100;
-        } else if (i === currentTaskIndex) {
+        } else if (isRunning(i)) {
           downloadState = 'running';
           if (task.type === 'download') {
             downloadProgress = task.progress || 0;
@@ -1420,9 +1431,9 @@ export class QueueService implements OnDestroy {
       seenTypes.add(taskType);
 
       let state: TaskState = 'pending';
-      if (i < currentTaskIndex) {
+      if (isDone(i)) {
         state = 'completed';
-      } else if (i === currentTaskIndex) {
+      } else if (isRunning(i)) {
         state = 'running';
       }
 

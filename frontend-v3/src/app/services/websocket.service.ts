@@ -82,6 +82,8 @@ export interface VideoPathUpdated {
   videoId: string;
   newPath: string;
   oldPath?: string;
+  /** A processing task replaced the file in place (absent: a relink, or an overwrite export). */
+  reason?: 'fix-aspect-ratio' | 'normalize-audio';
   timestamp: string;
 }
 

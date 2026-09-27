@@ -36,6 +36,40 @@ import {
   type LaneTaskView,
 } from './crucible-lanes';
 
+/**
+ * THE TWO CHAINS OF A JOB THAT RUN SIDE BY SIDE (the user, 2026-09-27: "fix
+ * aspect ratio and normalize audio volume can run concurrently with transcribe
+ * and ai analyze").
+ *
+ *   file   rewrites the video file on this computer (ffmpeg): CPU work on
+ *          the main pool.
+ *   ai     works through Crucible (a transcription reads the file once, to
+ *          upload it; an analysis reads only the transcript): a lane.
+ *
+ * Within a chain, tasks keep their order: two file tasks never rewrite the
+ * file at once, and an analysis still waits for its transcript. Across the
+ * two chains nothing waits: the timing of the words is the same before and
+ * after either file task, and a file replaced while a transcription uploads
+ * it is replaced by rename, so the upload keeps reading the file it opened.
+ * Every other task (get-info, download, import, export) is a barrier: it
+ * starts only when everything before it is done, and nothing after it starts
+ * before it is.
+ */
+export const FILE_TASK_TYPES: ReadonlySet<string> = new Set(['fix-aspect-ratio', 'strip-black-bars', 'normalize-audio', 'process-video']);
+
+export function taskChain(type: string): 'file' | 'ai' | null {
+  if (FILE_TASK_TYPES.has(type)) return 'file';
+  if (LANE_TASK_TYPES.has(type)) return 'ai';
+  return null;
+}
+
+/** Whether task `later` may run while `earlier` (before it in the job) is not done. */
+function runsAlongside(earlier: string, later: string): boolean {
+  const a = taskChain(earlier);
+  const b = taskChain(later);
+  return a !== null && b !== null && a !== b;
+}
+
 // Active task tracking
 export interface ActiveTask {
   taskId: string;
@@ -213,6 +247,16 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
   }
 
   /**
+   * A cancelled job's task has seen the cancel. The job leaves the cancelled
+   * set only when no other task of it (the other chain) is still running, so
+   * that one sees the cancel too instead of reporting its abort as a failure.
+   */
+  private settleCancel(jobId: string, own: ActiveTask | null): void {
+    const others = [this.mainPool.get(jobId), this.lanePool.get(jobId)].filter((t) => t !== undefined && t !== own);
+    if (others.length === 0) this.cancelledJobs.delete(jobId);
+  }
+
+  /**
    * Abort the running child process behind an active task. Routed by jobId via
    * the 'job.cancel-requested' event: the downloader, ffmpeg and whisper
    * services each own their processes and ignore the signal unless they hold one
@@ -321,26 +365,36 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
    * saw a task's starting progress and reaped healthy long work as stalled.
    */
   @OnEvent('task.progress')
-  handleTaskProgress(payload: { jobId?: string; progress?: number; message?: string }): void {
+  handleTaskProgress(payload: { jobId?: string; taskType?: string; progress?: number; message?: string }): void {
     if (!payload?.jobId || typeof payload.progress !== 'number') {
       return;
     }
-    this.updateTaskProgress(payload.jobId, payload.progress, payload.message);
+    this.updateTaskProgress(payload.jobId, payload.progress, payload.message, payload.taskType);
   }
 
   /**
    * Update progress for an active task (called by event handlers)
    */
-  updateTaskProgress(jobId: string, progress: number, message?: string): void {
+  updateTaskProgress(jobId: string, progress: number, message?: string, taskType?: string): void {
+    // A job may have a task in each pool (its file and AI chains side by
+    // side). A progress line that names the type of one of them is that
+    // one's alone, so a busy ffmpeg never reads as a live Crucible task to the
+    // stall watchdog, nor the other way round; one that names neither goes to
+    // both, as it always has.
+    let mainTask = this.mainPool.get(jobId);
+    let laneTask = this.lanePool.get(jobId);
+    if (taskType && mainTask && laneTask) {
+      if (mainTask.type === taskType) laneTask = undefined;
+      else if (laneTask.type === taskType) mainTask = undefined;
+    }
+
     // Update main pool if matching
-    const mainTask = this.mainPool.get(jobId);
     if (mainTask) {
       mainTask.progress = progress;
       mainTask.lastProgressAt = new Date();
       if (message) mainTask.message = message;
     }
 
-    const laneTask = this.lanePool.get(jobId);
     if (laneTask) {
       laneTask.progress = progress;
       laneTask.lastProgressAt = new Date();
@@ -590,9 +644,9 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
     // Abort the running child process (download/transcode/transcription) so it
     // stops immediately instead of running to completion. Look the active task
     // up BEFORE freeing the slot below so we still know it's ours to abort.
-    const active = this.mainPool.get(jobId) ?? this.lanePool.get(jobId);
-    if (active) {
-      this.abortActiveTask(active);
+    // Both chains: a job may have a file task and an AI task running at once.
+    for (const active of [this.mainPool.get(jobId), this.lanePool.get(jobId)]) {
+      if (active) this.abortActiveTask(active);
     }
 
     job.status = 'cancelled';
@@ -739,7 +793,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
   /**
    * Get next non-AI task from any job
    */
-  private getNextMainTask(): { task: Task; job: QueueJob } | null {
+  private getNextMainTask(): { task: Task; job: QueueJob; index: number } | null {
     for (const job of this.jobQueue.values()) {
       if (job.status !== 'pending' && job.status !== 'processing') continue;
 
@@ -747,33 +801,62 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       // under a task already running against a different library.
       if (!this.canStartJobLibrary(job)) continue;
 
-      const currentTask = job.tasks[job.currentTaskIndex];
-      if (!currentTask) {
+      if (!job.tasks[job.currentTaskIndex]) {
         this.logger.warn(`getNextMainTask: job ${job.id} has no task at index ${job.currentTaskIndex} (tasks length: ${job.tasks.length})`);
         continue;
       }
+      // One main-pool task per job (the pool is keyed by job).
+      if (this.mainPool.has(job.id)) continue;
 
-      // Skip if this task is already running
-      if (this.isTaskRunning(job.id, job.currentTaskIndex)) continue;
+      // Only non-AI tasks: every task that needs Crucible takes a lane.
+      const index = this.readyTaskIndexes(job).find((i) => !LANE_TASK_TYPES.has(job.tasks[i].type));
+      if (index === undefined) continue;
+      return { task: job.tasks[index], job, index };
+    }
+    return null;
+  }
 
-      // Check if any previous task in this job is still running
-      // Tasks must be sequential within a job
-      let previousTaskRunning = false;
-      for (let i = 0; i < job.currentTaskIndex; i++) {
-        if (this.isTaskRunning(job.id, i)) {
-          previousTaskRunning = true;
+  /** Task `index` of `job` is done (it may be past currentTaskIndex: see QueueJob). */
+  private isTaskDone(job: QueueJob, index: number): boolean {
+    return index < job.currentTaskIndex || (job.completedTasks?.includes(index) ?? false);
+  }
+
+  /**
+   * The tasks of `job` that may start now, in order: not done, not running,
+   * and every task before them that is not done is on the OTHER chain (see
+   * FILE_TASK_TYPES). A job without both chains runs strictly in order, as
+   * before.
+   */
+  private readyTaskIndexes(job: QueueJob): number[] {
+    const ready: number[] = [];
+    for (let i = job.currentTaskIndex; i < job.tasks.length; i++) {
+      if (this.isTaskDone(job, i) || this.isTaskRunning(job.id, i)) continue;
+      let blocked = false;
+      for (let j = job.currentTaskIndex; j < i; j++) {
+        if (!this.isTaskDone(job, j) && !runsAlongside(job.tasks[j].type, job.tasks[i].type)) {
+          blocked = true;
           break;
         }
       }
-      if (previousTaskRunning) {
-        continue; // Wait for previous tasks to complete
-      }
-
-      // Only non-AI tasks: every task that needs Crucible takes a lane.
-      if (LANE_TASK_TYPES.has(currentTask.type)) continue;
-      return { task: currentTask, job };
+      if (!blocked) ready.push(i);
     }
-    return null;
+    return ready;
+  }
+
+  /** Record task `index` done and move currentTaskIndex past every done task. */
+  private markTaskDone(job: QueueJob, index: number): void {
+    const done = new Set(job.completedTasks ?? []);
+    done.add(index);
+    while (done.has(job.currentTaskIndex)) {
+      done.delete(job.currentTaskIndex);
+      job.currentTaskIndex++;
+    }
+    job.completedTasks = [...done].sort((a, b) => a - b);
+  }
+
+  /** Every task of `job` is done. */
+  private allTasksDone(job: QueueJob): boolean {
+    return job.currentTaskIndex >= job.tasks.length;
   }
 
   /**
@@ -799,7 +882,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
    * Execute a task in the appropriate pool
    */
   private async executeTask(
-    { task, job }: { task: Task; job: QueueJob },
+    { task, job, index }: { task: Task; job: QueueJob; index: number },
     pool: 'main' | 'lane',
     placement?: LanePlacement,
   ): Promise<void> {
@@ -807,7 +890,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
     if (this.isJobCancelled(job.id)) {
       this.logger.log(`Job ${job.id} was cancelled, skipping task ${task.type}`);
       // Clean up cancelled job from set after acknowledging
-      this.cancelledJobs.delete(job.id);
+      this.settleCancel(job.id, null);
       this.processQueue();
       return;
     }
@@ -818,7 +901,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
     const activeTask: ActiveTask = {
       taskId,
       jobId: job.id,
-      taskIndex: job.currentTaskIndex,
+      taskIndex: index,
       type: task.type,
       pool,
       libraryId: job.libraryId ?? this.libraryManager.getActiveLibrary()?.id,
@@ -848,6 +931,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       job.venue = placement!.server;
       this.scheduleLanesEmit();
     }
+    job.runningTasks = [...new Set([...(job.runningTasks ?? []), index])].sort((a, b) => a - b);
 
     // Update job status
     if (job.status === 'pending') {
@@ -875,7 +959,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
           }
         }
 
-        job.currentPhase = `${task.type} (${job.currentTaskIndex + 1}/${job.tasks.length})`;
+        job.currentPhase = `${task.type} (${index + 1}/${job.tasks.length})`;
 
         this.logger.log(
           `[${pool.toUpperCase()} POOL] Starting task ${taskId}: ${task.type} for job ${job.id}` +
@@ -918,15 +1002,26 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       }
 
       // Check if job was cancelled during execution
-      if (this.isJobCancelled(job.id)) {
+      if (this.isJobCancelled(job.id) || job.status === 'cancelled') {
         this.logger.log(`Job ${job.id} was cancelled during ${task.type} execution`);
-        this.cancelledJobs.delete(job.id);
+        this.settleCancel(job.id, activeTask);
         // Don't process results - just clean up and return
         return;
       }
 
       if (!result.success) {
         throw new Error(result.error || 'Task failed');
+      }
+
+      // The job's other chain failed while this task ran: its work stands (a
+      // finished transcript or analysis is saved by the task itself), but the
+      // job stays failed and nothing after it starts.
+      if (job.status === 'failed') {
+        this.eventService.emit('task.completed', {
+          taskId, jobId: job.id, videoId: job.videoId, type: task.type, result: result.data,
+          duration: (Date.now() - activeTask.startedAt.getTime()) / 1000, timestamp: new Date().toISOString(),
+        });
+        return;
       }
 
       // Collect non-fatal degradations onto the job so the UI can surface them.
@@ -976,11 +1071,11 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
 
       // Move to next task in job
       job.parkCount = 0;
-      job.currentTaskIndex++;
-      job.progress = Math.round((job.currentTaskIndex / job.tasks.length) * 100);
+      this.markTaskDone(job, index);
+      job.progress = Math.round(((job.currentTaskIndex + (job.completedTasks?.length ?? 0)) / job.tasks.length) * 100);
 
       // Check if job is complete
-      if (job.currentTaskIndex >= job.tasks.length) {
+      if (this.allTasksDone(job)) {
         job.status = 'completed';
         job.progress = 100;
         job.currentPhase = 'Completed';
@@ -1005,9 +1100,9 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       // media op reject), don't report it as a failure. cancelJob already set
       // status='cancelled' and emitted job.cancelled; just clean up the
       // cancelled-set entry (avoid a Set leak) and fall through to the finally.
-      if (this.isJobCancelled(job.id)) {
+      if (this.isJobCancelled(job.id) || job.status === 'cancelled') {
         this.logger.log(`Job ${job.id} was cancelled during ${task.type} execution (caught abort)`);
-        this.cancelledJobs.delete(job.id);
+        this.settleCancel(job.id, activeTask);
         return;
       }
 
@@ -1036,6 +1131,9 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       // a second failure or clobber state — just fall through to the finally.
       if (activeTask.abandoned) {
         this.logger.warn(`Task ${taskId} threw after being abandoned by the watchdog; suppressing duplicate failure`);
+      } else if (job.status === 'failed') {
+        // The job's other chain failed first: that failure is the job's.
+        this.logger.warn(`Task ${taskId} (${task.type}) also failed after its job had failed: ${(error as Error)?.message ?? error}`);
       } else {
         // Task failed
         job.status = 'failed';
@@ -1061,6 +1159,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         }, 5000);
       }
     } finally {
+      job.runningTasks = (job.runningTasks ?? []).filter((i) => i !== index);
       // Remove from pool, but only if THIS task still owns the slot. The watchdog
       // may have already reclaimed it and started a different task there; clearing
       // unconditionally would clobber that newer task's slot tracking.
@@ -1129,24 +1228,20 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
   }
 
   /** AI tasks that could go to a lane now, oldest first. */
-  private laneCandidates(now: number): Array<{ task: Task; job: QueueJob }> {
-    const out: Array<{ task: Task; job: QueueJob }> = [];
+  private laneCandidates(now: number): Array<{ task: Task; job: QueueJob; index: number }> {
+    const out: Array<{ task: Task; job: QueueJob; index: number }> = [];
     for (const job of this.jobQueue.values()) {
       if (job.status !== 'pending' && job.status !== 'processing') continue;
-      const task = job.tasks[job.currentTaskIndex];
-      if (!task || !LANE_TASK_TYPES.has(task.type)) continue;
-      if (this.isTaskRunning(job.id, job.currentTaskIndex)) continue;
-      let previousRunning = false;
-      for (let i = 0; i < job.currentTaskIndex; i++) {
-        if (this.isTaskRunning(job.id, i)) { previousRunning = true; break; }
-      }
-      if (previousRunning) continue;
-      if (job.aiWaitingIndex !== job.currentTaskIndex) {
-        job.aiWaitingIndex = job.currentTaskIndex;
+      // One lane task per job (the lanes are keyed by job).
+      if (this.lanePool.has(job.id)) continue;
+      const index = this.readyTaskIndexes(job).find((i) => LANE_TASK_TYPES.has(job.tasks[i].type));
+      if (index === undefined) continue;
+      if (job.aiWaitingIndex !== index) {
+        job.aiWaitingIndex = index;
         job.aiWaitingSince = now;
       }
       if (job.parkedUntil !== undefined && job.parkedUntil > now) continue;
-      out.push({ task, job });
+      out.push({ task: job.tasks[index], job, index });
     }
     return out;
   }
@@ -1155,9 +1250,9 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
   private stillWaiting(job: QueueJob, taskIndex: number): boolean {
     return this.jobQueue.get(job.id) === job
       && (job.status === 'pending' || job.status === 'processing')
-      && job.currentTaskIndex === taskIndex
       && !this.isJobCancelled(job.id)
-      && !this.isTaskRunning(job.id, taskIndex);
+      && !this.lanePool.has(job.id)
+      && this.readyTaskIndexes(job).includes(taskIndex);
   }
 
   private async admitPass(): Promise<void> {
@@ -1170,8 +1265,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
     const decisions = new Map<string, ReturnType<CrucibleLanesService['place']>>();
     let transcribeDecision: ReturnType<CrucibleLanesService['placeTranscribe']> | null = null;
     const byLane = new Map<string, Array<{ task: Task; job: QueueJob; index: number; placement: LanePlacement }>>();
-    for (const { task, job } of candidates) {
-      const index = job.currentTaskIndex;
+    for (const { task, job, index } of candidates) {
       if (!this.canStartJobLibrary(job)) continue;
       if (task.type === 'transcribe') {
         // P5: the transcription venue rule, once per pass. No server that can
@@ -1238,7 +1332,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
           if (!this.canStartJobLibrary(c.job)) continue;
         }
         this.admit(c.job);
-        this.executeTask({ task: c.task, job: c.job }, 'lane', c.placement).catch((err) => {
+        this.executeTask({ task: c.task, job: c.job, index: c.index }, 'lane', c.placement).catch((err) => {
           this.logger.error(`Lane task failed: ${err?.message || err}`);
         });
         free--;
@@ -1274,14 +1368,15 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
     if (job.libraryId === undefined) {
       job.libraryId = libraryId ?? this.libraryManager.getActiveLibrary()?.id;
     }
-    job.status = 'pending';
+    // The job's file chain may still be running while its AI task waits.
+    job.status = this.mainPool.has(job.id) ? 'processing' : 'pending';
     job.currentPhase = reason;
     if (changed) {
       this.logger.log(`[${job.id}] parked: ${reason}`);
       this.eventService.emit('task.parked', {
         jobId: job.id,
         videoId: job.videoId,
-        type: job.tasks[job.currentTaskIndex]?.type,
+        type: job.tasks[job.aiWaitingIndex ?? job.currentTaskIndex]?.type,
         reason,
         server,
         timestamp: new Date().toISOString(),
@@ -1354,7 +1449,8 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
     const waiting = new Map<string, number>();
     for (const job of this.jobQueue.values()) {
       if ((job.status === 'pending' || job.status === 'processing') && job.lane && !this.lanePool.has(job.id)
-        && LANE_TASK_TYPES.has(job.tasks[job.currentTaskIndex]?.type ?? '')) {
+        && job.aiWaitingIndex !== undefined && !this.isTaskDone(job, job.aiWaitingIndex)
+        && LANE_TASK_TYPES.has(job.tasks[job.aiWaitingIndex]?.type ?? '')) {
         waiting.set(job.lane, (waiting.get(job.lane) ?? 0) + 1);
       }
     }
@@ -1522,13 +1618,17 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
             }
           }
         }
-        result = await this.mediaOps.fixAspectRatio(
-          job.videoId || job.videoPath!,
-          task.options,
-          taskId,
-        );
-        if (result.success && result.data && result.data.outputPath) {
-          job.videoPath = result.data.outputPath;
+        {
+          const before = this.fileSignatureOf(job);
+          result = await this.mediaOps.fixAspectRatio(
+            job.videoId || job.videoPath!,
+            task.options,
+            taskId,
+          );
+          if (result.success && result.data && result.data.outputPath) {
+            job.videoPath = result.data.outputPath;
+          }
+          if (result.success) this.announceIfReplaced(job, before, 'fix-aspect-ratio');
         }
         // UPDATE DATABASE FLAG — a failed flag write fails the task: the video
         // was re-encoded but skip-detection would re-encode it again on every
@@ -1570,13 +1670,17 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         // aspect-ratio flag above. normalizeAudio measures the file and returns
         // it untouched when it is genuinely on target, so the skip decision is
         // made on what the audio actually is, not on what a past run recorded.
-        result = await this.mediaOps.normalizeAudio(
-          job.videoId || job.videoPath!,
-          task.options,
-          taskId,
-        );
-        if (result.success && result.data && result.data.outputPath) {
-          job.videoPath = result.data.outputPath;
+        {
+          const before = this.fileSignatureOf(job);
+          result = await this.mediaOps.normalizeAudio(
+            job.videoId || job.videoPath!,
+            task.options,
+            taskId,
+          );
+          if (result.success && result.data && result.data.outputPath) {
+            job.videoPath = result.data.outputPath;
+          }
+          if (result.success) this.announceIfReplaced(job, before, 'normalize-audio');
         }
         // UPDATE DATABASE FLAG — failure fails the task (see aspect-ratio note).
         if (result.success && job.videoId) {
@@ -1598,13 +1702,19 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
             error: 'No video ID or path available for process-video task',
           };
         }
-        result = await this.mediaOps.processVideo(
-          job.videoId || job.videoPath!,
-          task.options,
-          taskId,
-        );
-        if (result.success && result.data && result.data.outputPath) {
-          job.videoPath = result.data.outputPath;
+        {
+          const before = this.fileSignatureOf(job);
+          result = await this.mediaOps.processVideo(
+            job.videoId || job.videoPath!,
+            task.options,
+            taskId,
+          );
+          if (result.success && result.data && result.data.outputPath) {
+            job.videoPath = result.data.outputPath;
+          }
+          if (result.success) {
+            this.announceIfReplaced(job, before, task.options?.fixAspectRatio ? 'fix-aspect-ratio' : 'normalize-audio');
+          }
         }
         // UPDATE DATABASE FLAGS based on what was processed — failure fails
         // the task (see aspect-ratio note).
@@ -1691,6 +1801,43 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
   /**
    * Execute strip-black-bars: crop center 9:16 portrait, blur-fill to 16:9, overwrite original
    */
+  /**
+   * The video file's identity right now (inode, size, mtime), or null when it
+   * can't be read. Compared before and after a file-modifying task: the file
+   * is replaced IN PLACE (atomicReplaceFile), so the path alone can't say
+   * whether it changed, and a task that found nothing to do leaves it as is.
+   */
+  private fileSignatureOf(job: QueueJob): string | null {
+    let file = job.videoPath;
+    if (!file && job.videoId) {
+      file = (this.databaseService.findVideoById(job.videoId) as { current_path?: string } | null)?.current_path;
+    }
+    if (!file) return null;
+    try {
+      const st = fs.statSync(file);
+      return `${file}\0${st.ino}\0${st.size}\0${st.mtimeMs}`;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Tell every open player the file under this video was replaced, the moment
+   * it was (before the thumbnail and dimension refresh), so Scout reloads it at
+   * the same spot instead of reading the new file's bytes as the old one's and
+   * dying mid-playback (the user, 2026-09-27: on air, "when it finishes fixing
+   * aspect ratio, the video dies and kills the entire video player").
+   * `reason` says what changed: after normalize-audio the picture is the same,
+   * so Scout keeps its zoom and border; after fix-aspect-ratio it is not.
+   */
+  private announceIfReplaced(job: QueueJob, before: string | null, reason: 'fix-aspect-ratio' | 'normalize-audio'): void {
+    if (!job.videoId) return;
+    const after = this.fileSignatureOf(job);
+    if (after === null || after === before) return;
+    const file = after.split('\0')[0];
+    this.eventService.emitVideoPathUpdated(job.videoId, file, file, reason);
+  }
+
   private async executeStripBlackBars(
     job: QueueJob,
     taskId: string,

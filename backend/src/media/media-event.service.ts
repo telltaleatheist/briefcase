@@ -304,11 +304,18 @@ export class MediaEventService {
   /**
    * Video path updated event (notify frontend when a video's path changes, e.g., after relinking)
    */
-  emitVideoPathUpdated(videoId: string, newPath: string, oldPath?: string): void {
+  emitVideoPathUpdated(
+    videoId: string,
+    newPath: string,
+    oldPath?: string,
+    /** Why: a processing task that replaced the file in place (absent: a relink, or an overwrite export). */
+    reason?: 'fix-aspect-ratio' | 'normalize-audio',
+  ): void {
     this.emitEvent('video-path-updated', {
       videoId,
       newPath,
       oldPath,
+      ...(reason ? { reason } : {}),
       timestamp: this.getTimestamp()
     });
   }

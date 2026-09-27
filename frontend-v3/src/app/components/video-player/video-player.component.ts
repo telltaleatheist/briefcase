@@ -147,6 +147,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
   private isRestoringTab = false; // Flag to ignore time updates during tab restore
   private pendingSeekTime: number | null = null; // Time to seek to after video loads
   private restoreTabTimeout?: ReturnType<typeof setTimeout>; // Fallback to clear isRestoringTab if the video never reports a duration (e.g. media error)
+  private lastErrorReloadAt = 0; // onVideoError reloads a video that died mid-playback at most once a minute
   private waveformPollInterval?: ReturnType<typeof setInterval>; // Server waveform progress poller, cleared on destroy
 
   // Computed active tab - derives current state from tabs array
@@ -806,15 +807,24 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
     }
 
     // Listen for video-path-updated events so replaced videos reload automatically.
-    // This fires after an overwrite export, where the new file already has scale
-    // and border baked in — so we reset those per-tab settings to defaults to
-    // avoid double-applying the zoom on top of the already-zoomed content.
+    //
+    // WHY IT HAPPENS. An overwrite export, or a processing task (normalize
+    // audio, fix aspect ratio) that replaced the file in place. The stream
+    // keeps reading the same path, so the element would go on fetching the
+    // NEW file's bytes as if they were the old one's and die mid-playback.
+    //
+    // WHAT SCOUT DOES. Reloads the file and carries on from the exact spot it
+    // was at, still playing if it was playing (the user plays downloads on air
+    // while they are still being processed). Zoom and border are reset when
+    // the picture changed (an overwrite export has them baked in, and a fixed
+    // aspect ratio is a different frame); after normalize-audio the picture is
+    // the same file's, so they are kept.
     this.unsubVideoPathUpdated = this.websocketService.onVideoPathUpdated((event) => {
       const tabs = this.tabs();
       const matchingTab = tabs.find(t => t.videoId === event.videoId);
       if (!matchingTab) return;
 
-      // Update the tab's videoUrl with a cache-busting param to force reload
+      const keepView = event.reason === 'normalize-audio';
       const freshUrl = `${this.API_BASE}/database/videos/${event.videoId}/stream?t=${Date.now()}`;
       this.tabs.update(allTabs => allTabs.map(t =>
         t.videoId === event.videoId
@@ -822,21 +832,21 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
               ...t,
               videoUrl: freshUrl,
               videoPath: event.newPath,
-              videoScale: 1.0,
-              showBorder: false,
-              borderAspectRatio: '16:9',
+              ...(keepView ? {} : { videoScale: 1.0, showBorder: false, borderAspectRatio: '16:9' }),
             }
           : t
       ));
 
-      // If this is the active tab, update the live signals so the video element
-      // reloads and the scale/border controls reflect the defaults.
+      // A tab in the background restores its own saved position when it is
+      // next shown (restoreTabState). The active one reloads now, in place.
       if (this.activeTabId() === matchingTab.id) {
-        this.videoUrl.set(freshUrl);
         this.videoPath.set(event.newPath);
-        this.videoScale.set(1.0);
-        this.showBorder.set(false);
-        this.borderAspectRatio.set('16:9');
+        if (!keepView) {
+          this.videoScale.set(1.0);
+          this.showBorder.set(false);
+          this.borderAspectRatio.set('16:9');
+        }
+        this.reloadInPlace(freshUrl);
       }
     });
 
@@ -2770,6 +2780,11 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
 
   // Media failed to load — clear any in-flight tab-restore state so time updates
   // aren't dropped for later tabs. (Wire via (error) on <app-media-display>.)
+  //
+  // A video that errors MID-PLAYBACK is most likely one whose file was just
+  // replaced under it (a processing task finished before its notice arrived),
+  // so it is reloaded once at the spot it reached. A second error within the
+  // minute is a real failure and is left on screen.
   onVideoError(_message?: string) {
     if (this.restoreTabTimeout) {
       clearTimeout(this.restoreTabTimeout);
@@ -2777,6 +2792,26 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
     }
     this.isRestoringTab = false;
     this.pendingSeekTime = null;
+
+    const videoId = this.videoId();
+    const now = Date.now();
+    if (videoId && this.editorState().currentTime > 0 && now - this.lastErrorReloadAt > 60_000) {
+      this.lastErrorReloadAt = now;
+      console.warn('[Editor] The video stopped mid-playback; reloading it where it was');
+      this.reloadInPlace(`${this.API_BASE}/database/videos/${videoId}/stream?t=${now}`);
+    }
+  }
+
+  /**
+   * Load `url` into the player and pick up exactly where the current one is,
+   * playing if it was playing. The media element (and the volume boost wired
+   * to it) is kept; only its source changes.
+   */
+  private reloadInPlace(url: string): void {
+    const at = this.videoPlayer?.getCurrentTime() || this.editorState().currentTime;
+    this.videoPlayer?.reloadAt(at, this.editorState().isPlaying);
+    this.videoUrl.set(url);
+    this.tabs.update(allTabs => allTabs.map(t => t.id === this.activeTabId() ? { ...t, videoUrl: url } : t));
   }
 
   // Utilities

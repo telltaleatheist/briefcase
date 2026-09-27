@@ -41,6 +41,12 @@ export class MediaDisplayComponent implements OnChanges, AfterViewInit, OnDestro
   errorMessage: string = '';
 
   private isSeeking: boolean = false;
+  /**
+   * An in-place reload (reloadAt): where the next source starts and whether it
+   * plays. While it is pending, the element's own time (0 on a fresh source)
+   * is neither reported nor overwritten by the parent's currentTime input.
+   */
+  private reload: { at: number; play: boolean } | null = null;
   private updateThrottleTimeout?: any;
 
   // Web Audio API for volume amplification beyond 100%
@@ -68,7 +74,7 @@ export class MediaDisplayComponent implements OnChanges, AfterViewInit, OnDestro
 
     const video = this.videoRef.nativeElement;
 
-    if (changes['currentTime'] && !this.isSeeking) {
+    if (changes['currentTime'] && !this.isSeeking && !this.reload) {
       const diff = Math.abs(video.currentTime - this.currentTime);
       if (diff > 0.5) {
         video.currentTime = this.currentTime;
@@ -113,10 +119,23 @@ export class MediaDisplayComponent implements OnChanges, AfterViewInit, OnDestro
       this.duration = video.duration;
       this.durationChange.emit(video.duration);
       this.isLoading = false;
+      // An in-place reload: seek FIRST, then play, so not a frame of the
+      // start is shown or heard.
+      const reload = this.reload;
+      if (reload) {
+        if (reload.at > 0 && reload.at < video.duration) video.currentTime = reload.at;
+        else this.reload = null;
+        if (reload.play) {
+          video.play().catch(err => {
+            console.error('Failed to resume video after reload:', err);
+            this.playStateChange.emit(false);
+          });
+        }
+      }
     });
 
     video.addEventListener('timeupdate', () => {
-      if (!this.isSeeking) {
+      if (!this.isSeeking && !this.reload) {
         // Throttle time updates
         if (!this.updateThrottleTimeout) {
           this.updateThrottleTimeout = setTimeout(() => {
@@ -155,6 +174,7 @@ export class MediaDisplayComponent implements OnChanges, AfterViewInit, OnDestro
     });
 
     video.addEventListener('error', () => {
+      this.reload = null;
       this.hasError = true;
       this.errorMessage = 'Failed to load video';
       this.error.emit(this.errorMessage);
@@ -166,8 +186,23 @@ export class MediaDisplayComponent implements OnChanges, AfterViewInit, OnDestro
 
     video.addEventListener('seeked', () => {
       this.isSeeking = false;
+      this.reload = null;
       this.timeUpdate.emit(video.currentTime);
     });
+  }
+
+  /**
+   * The next source (set on videoUrl right after this) starts at `at`
+   * seconds, playing if `play`: a file replaced under the player picks up
+   * where it was.
+   */
+  reloadAt(at: number, play: boolean): void {
+    this.reload = { at, play };
+  }
+
+  /** Where the element is right now (0 when there is none). */
+  getCurrentTime(): number {
+    return this.videoRef?.nativeElement?.currentTime ?? 0;
   }
 
   seekTo(time: number): void {

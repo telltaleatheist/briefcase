@@ -212,7 +212,18 @@ export interface QueueJob {
   displayName?: string;
   libraryId?: string; // Target library for import (uses active library if not specified)
   tasks: Task[];
+  /**
+   * The first task not yet done. Tasks run in order, except that a job's FILE
+   * chain (fix aspect ratio, strip black bars, normalize audio, process video)
+   * and its AI chain (transcribe, analyze) run side by side once everything
+   * before them is done (queue-manager.service.ts `readyTaskIndexes`), so a
+   * later task may be done while this one is still running.
+   */
   currentTaskIndex: number;
+  /** Indexes of tasks done at or after currentTaskIndex (the other chain ran ahead). */
+  completedTasks?: number[];
+  /** Indexes of the tasks running now: at most one per chain. */
+  runningTasks?: number[];
   status: 'pending' | 'paused' | 'processing' | 'completed' | 'failed' | 'cancelled';
   progress: number; // 0-100
   currentPhase: string;
