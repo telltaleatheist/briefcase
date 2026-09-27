@@ -253,8 +253,6 @@ export class MediaOperationsService {
       // UUIDs follow pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
       let videoPath: string;
       let videoId: string | undefined;
-      // What is known about the video, for Qwen's spelling of names. A bare path: its file name (WhisperService).
-      let context: string | null | undefined;
 
       const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       const isUUID = uuidPattern.test(videoIdOrPath);
@@ -267,7 +265,6 @@ export class MediaOperationsService {
         }
         videoPath = video.current_path as string;
         videoId = videoIdOrPath;
-        context = this.asrContextFor(video);
       } else {
         // It's a file path
         videoPath = videoIdOrPath;
@@ -344,8 +341,6 @@ export class MediaOperationsService {
       // UUIDs follow pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
       let videoPath: string;
       let videoId: string | undefined;
-      // What is known about the video, for Qwen's spelling of names. A bare path: its file name (WhisperService).
-      let context: string | null | undefined;
 
       const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       const isUUID = uuidPattern.test(videoIdOrPath);
@@ -358,7 +353,6 @@ export class MediaOperationsService {
         }
         videoPath = video.current_path as string;
         videoId = videoIdOrPath;
-        context = this.asrContextFor(video);
       } else {
         // It's a file path
         videoPath = videoIdOrPath;
@@ -416,8 +410,6 @@ export class MediaOperationsService {
       // UUIDs follow pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
       let videoPath: string;
       let videoId: string | undefined;
-      // What is known about the video, for Qwen's spelling of names. A bare path: its file name (WhisperService).
-      let context: string | null | undefined;
 
       const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       const isUUID = uuidPattern.test(videoIdOrPath);
@@ -430,7 +422,6 @@ export class MediaOperationsService {
         }
         videoPath = video.current_path as string;
         videoId = videoIdOrPath;
-        context = this.asrContextFor(video);
       } else {
         // It's a file path
         videoPath = videoIdOrPath;
