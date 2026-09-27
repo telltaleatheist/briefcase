@@ -271,6 +271,7 @@ export class CrucibleTranscriptionService {
         request.onProgress?.(percent, mapped.message);
       },
       blobCache: this.blobCacheFor(server, request.videoFile),
+      uploadFile: (file, filename, opts) => this.factory.uploadFile(server, file, filename, opts),
       ...(this.ledger === undefined ? {} : {
         ledger: {
           record: (jobId: string) => this.ledger!.record({ server, kind: 'job', id: jobId, jobType: 'asr', model, localId }),

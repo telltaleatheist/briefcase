@@ -16,6 +16,7 @@ import { Injectable } from '@nestjs/common';
 import { CrucibleClient } from '@crucible/client';
 import { CrucibleRegistryService } from './registry.service';
 import { EngineResolver, type ClientMaker, type ResolvedEngine } from './engine-resolve';
+import { streamUpload, type StreamUploadResult } from './stream-upload';
 
 export const CRUCIBLE_CLIENT_NAME = 'briefcase';
 
@@ -51,6 +52,22 @@ export class CrucibleClientFactory {
    */
   async clientFor(name: string, options?: ClientOptions): Promise<CrucibleClient> {
     return this.resolver.engineClientFor(this.registry.getWithToken(name), options);
+  }
+
+  /**
+   * Upload a file to the engine behind `name` (`POST /v1/uploads`), streamed
+   * from disk: the SDK's upload holds the whole body in memory and stalls on
+   * a multi-GB video (stream-upload.ts has the measurement).
+   */
+  async uploadFile(
+    name: string,
+    file: string,
+    filename: string,
+    options: { signal?: AbortSignal; onBytes?: (n: number) => void } = {},
+  ): Promise<StreamUploadResult> {
+    const entry = this.registry.getWithToken(name);
+    const engine = await this.resolver.resolve(entry);
+    return streamUpload({ url: engine.url, token: entry.token, clientName: CRUCIBLE_CLIENT_NAME, file, filename, ...options });
   }
 
   /** The engine a registered address resolves to (cached 60 s). */

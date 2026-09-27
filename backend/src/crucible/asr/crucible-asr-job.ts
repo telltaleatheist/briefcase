@@ -4,7 +4,9 @@
  *
  * Salvaged from the reference branch's `crucible-job.ts` (bbb7ef6, itself cut
  * down from BookForge's electron/crucible/job.ts). Kept: uploads streamed from
- * disk (`fs.openAsBlob`, never read whole); a submit whose answer never came
+ * disk, never held whole (node:http from a file stream, stream-upload.ts: the
+ * SDK's fetch upload kept every byte in memory and stalled at 2.63 GB of a
+ * 6.9 GB video); a submit whose answer never came
  * (CrucibleUnreachable: refused before connecting, OR admitted and the answer
  * lost) is looked up by its `client_ref` before it is sent again, so a lost
  * answer never becomes a second job on the card; cancel is a `DELETE`, not a
@@ -190,6 +192,13 @@ export interface RunAsrJobOptions {
   readonly ledger?: AsrJobLedger;
   /** An earlier run's upload of this file on this server, reused when the server still has it. */
   readonly blobCache?: AsrBlobCache;
+  /**
+   * Uploads the file streamed from disk (CrucibleClientFactory.uploadFile,
+   * stream-upload.ts): the way every real transcription uploads. Absent, the
+   * SDK's upload, which holds the whole body in memory and stalls on a
+   * multi-GB video; only specs that call this directly go that way.
+   */
+  readonly uploadFile?: (file: string, filename: string, options: { signal?: AbortSignal; onBytes: (n: number) => void }) => Promise<UploadResult>;
   /** Only a spec overrides these. */
   readonly doorDelaysMs?: readonly number[];
   readonly streamDelaysMs?: readonly number[];
@@ -315,7 +324,7 @@ export async function runAsrJob(options: RunAsrJobOptions): Promise<AsrJobOutcom
     throw new Error(`Video file not found: ${options.file}`);
   }
   if (size === 0) throw new Error(`The video file is empty: ${options.file}`);
-  if (openAsBlob === undefined) {
+  if (options.uploadFile === undefined && openAsBlob === undefined) {
     throw new CrucibleAsrUnavailable('crucible_runtime_too_old', server,
       `uploading to Crucible needs fs.openAsBlob (Node 19.8+), which this runtime (${process.versions.node}) lacks.`);
   }
@@ -327,14 +336,28 @@ export async function runAsrJob(options: RunAsrJobOptions): Promise<AsrJobOutcom
       // Reported at once, then every tick until the server answers: bytes sent
       // when they can be counted, and a beat for the stall watchdog either way.
       let sent = 0;
-      const blob = await openAsBlob(options.file);
-      const counted = countingBlob(blob, options.filename, (n) => { sent += n; });
-      const report = (): void => options.onProgress?.({ kind: 'uploading', sentBytes: counted === null ? null : Math.min(sent, size), totalBytes: size });
+      // Bytes sent are known when the stream counts them: always on the
+      // streamed upload, and on the SDK's only when its FormData takes the
+      // counting blob-like.
+      let counting = true;
+      const send = async (): Promise<UploadResult> => {
+        if (options.uploadFile !== undefined) {
+          return options.uploadFile(options.file, options.filename, {
+            ...(signal === undefined ? {} : { signal }),
+            onBytes: (n) => { sent += n; },
+          });
+        }
+        const blob = await openAsBlob!(options.file);
+        const counted = countingBlob(blob, options.filename, (n) => { sent += n; });
+        counting = counted !== null;
+        return client.upload(counted ?? blob, { filename: options.filename });
+      };
+      const report = (): void => options.onProgress?.({ kind: 'uploading', sentBytes: counting ? Math.min(sent, size) : null, totalBytes: size });
       report();
       const ticker = setInterval(report, options.uploadTickMs ?? UPLOAD_TICK_MS);
       ticker.unref?.();
       try {
-        uploaded = await client.upload(counted ?? blob, { filename: options.filename });
+        uploaded = await send();
         report();
       } catch (err) {
         // A cancel during the retry wait wakes the sleep early; the attempt that
