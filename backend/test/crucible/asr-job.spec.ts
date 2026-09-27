@@ -131,6 +131,16 @@ describe('the job flow', () => {
     expect(fake.jobs[1].params).toEqual({ language: 'en', vad_filter: false, word_timestamps: true });
   });
 
+  it('a server that takes speech_only (1.0.50+) is sent it, so silence and music are cut before Qwen hears them; an older one is not', async () => {
+    await wire({ version: '1.0.50' });
+    await svc.transcribe(request({ context: null }));
+    expect(fake.jobs[0].params).toEqual({ language: 'en', vad_filter: false, word_timestamps: true, speech_only: true });
+    await fake.close();
+    await wire({ version: '1.0.49' });
+    await svc.transcribe(request({ context: null }));
+    expect(fake.jobs[0].params).toEqual({ language: 'en', vad_filter: false, word_timestamps: true });
+  });
+
   it('a language Qwen does not take is refused by name before anything is uploaded', async () => {
     await wire();
     const err = await svc.transcribe(request({ language: 'nl' })).catch((e) => e);

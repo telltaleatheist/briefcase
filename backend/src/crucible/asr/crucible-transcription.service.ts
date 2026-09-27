@@ -232,7 +232,16 @@ export class CrucibleTranscriptionService {
   async transcribe(request: CrucibleTranscriptionRequest): Promise<CrucibleTranscriptionOutcome> {
     const { server, model, localId } = request;
     const log = (line: string): void => this.logger.log(`[${localId}] ${line}`);
-    const params = qwenAsrParams(request.language, request.context);
+    // speech_only goes to a server that states it takes it (asr-models.ts); a
+    // server whose /v1/info can't be read now gets none, and the job itself
+    // meets whatever is wrong with the server.
+    let speechOnly = false;
+    try {
+      speechOnly = (await this.asrOffer(server)).speechOnly;
+    } catch {
+      speechOnly = false;
+    }
+    const params = qwenAsrParams(request.language, request.context, { speechOnly });
     let client;
     try {
       client = await this.factory.clientFor(server);
@@ -241,7 +250,7 @@ export class CrucibleTranscriptionService {
       throw classifyAsrRefusal(err, server, 'the transcription');
     }
     let last = 0;
-    log(`transcribing ${path.basename(request.videoFile)} on ${server} with ${model} (language ${params.language}, vad_filter ${params.vad_filter}, word_timestamps ${params.word_timestamps}, ${params.context ? `context of ${params.context.length} characters` : 'no context'})`);
+    log(`transcribing ${path.basename(request.videoFile)} on ${server} with ${model} (language ${params.language}, vad_filter ${params.vad_filter}, word_timestamps ${params.word_timestamps}, ${params.context ? `context of ${params.context.length} characters` : 'no context'}, ${params.speech_only ? 'silence and music taken out first (speech_only)' : 'every second heard (this server has no speech_only)'})`);
 
     const outcome = await runAsrJob({
       client,

@@ -38,8 +38,17 @@ describe('the transcriber: Qwen3-ASR-1.7B, and nothing else', () => {
   it('reads that model and its aligner off /v1/info', () => {
     expect(asrOfferOf(info({ installed: READY }))).toEqual({
       backend: 'mlx-darwin', offersAsr: true, model: 'qwen3-asr-0.6b-mlx',
-      qwen: { offered: true, installed: true }, aligner: { offered: true, installed: true },
+      qwen: { offered: true, installed: true }, aligner: { offered: true, installed: true }, speechOnly: false,
     });
+  });
+
+  it('speech_only is offered by a server that states 1.0.50 or later, never by one that states nothing', () => {
+    const at = (version: string | null) => {
+      const i = info({ installed: READY }) as unknown as { server: { version: string | null } };
+      i.server.version = version;
+      return asrOfferOf(i as unknown as ServerInfo).speechOnly;
+    };
+    expect([at('1.0.49'), at('1.0.50'), at('1.0.51'), at('1.1.0'), at(null), at('')]).toEqual([false, true, true, true, false, false]);
   });
 
   it('every reason a server can\'t transcribe with it, by name; whisper installed does not count', () => {

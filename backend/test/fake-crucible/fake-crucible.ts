@@ -1212,7 +1212,10 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
       return;
     }
     const params = (body['params'] ?? {}) as Record<string, unknown>;
-    const keys = Object.keys(params).filter((key) => key !== 'context').sort();
+    // 1.0.50+: `speech_only` (both engines); an older server's params forbid unknown keys.
+    const speechOnlyKnown = compareFakeVersions(options.version ?? '1.0.24', '1.0.50') >= 0;
+    const optional = new Set(['context', ...(speechOnlyKnown ? ['speech_only'] : [])]);
+    const keys = Object.keys(params).filter((key) => !optional.has(key)).sort();
     if (keys.join(',') !== 'language,vad_filter,word_timestamps') {
       refusal(res, 400, 'invalid_params', `asr params are language, vad_filter, word_timestamps and an optional context; got ${Object.keys(params).sort().join(', ') || 'none'}`);
       return;
@@ -1228,6 +1231,14 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
         refusal(res, 400, 'invalid_params', 'context must be plain, non-blank text of at most 8192 characters');
         return;
       }
+    }
+    if ('speech_only' in params && typeof params['speech_only'] !== 'boolean') {
+      refusal(res, 400, 'invalid_params', 'speech_only must be a boolean');
+      return;
+    }
+    if (params['speech_only'] === true && params['vad_filter'] === true) {
+      refusal(res, 400, 'invalid_params', 'speech_only and vad_filter are two speech detectors; send one');
+      return;
     }
     if (typeof params['language'] !== 'string' || typeof params['vad_filter'] !== 'boolean' || typeof params['word_timestamps'] !== 'boolean') {
       refusal(res, 400, 'invalid_params', 'asr params have the wrong types');

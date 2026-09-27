@@ -26,8 +26,19 @@
  *                     (crucible-transcript.ts).
  *   context           optional: what is known about the video, for the
  *                     spelling of names (asr-context.ts). Absent when nothing is.
+ *   speech_only       true on a server that has it (Crucible 1.0.50+): the
+ *                     server cuts silence and music out with a speech detector
+ *                     before Qwen hears them and keeps the original timeline, so
+ *                     an opening music bed is not transcribed as invented words
+ *                     (the user, 2026-09-27: "we should pass in that flag so i
+ *                     dont have to trim stuff before pulling it in anymore").
+ *                     Crucible's own default is off until it is measured; its
+ *                     tuning knobs are left at the server's defaults. An older
+ *                     server refuses the field, so it is sent only to one that
+ *                     states 1.0.50 or later.
  */
 import type { ServerInfo } from '@crucible/client';
+import { compareVersions } from '../probe';
 
 /** The asr model Briefcase uses, and the Mac's faster build of it. */
 export const QWEN_ASR_MODEL = 'qwen3-asr-0.6b';
@@ -60,6 +71,15 @@ export interface AsrParams {
   readonly vad_filter: boolean;
   readonly word_timestamps: boolean;
   readonly context?: string;
+  readonly speech_only?: boolean;
+}
+
+/** The first Crucible whose asr job takes `speech_only`. */
+export const SPEECH_ONLY_MIN_VERSION = '1.0.50';
+
+/** Whether a server stating `version` takes `speech_only`. An unstated version is not assumed to. */
+export function takesSpeechOnly(version: string | null | undefined): boolean {
+  return typeof version === 'string' && version !== '' && compareVersions(version, SPEECH_ONLY_MIN_VERSION) >= 0;
 }
 
 /**
@@ -67,7 +87,11 @@ export interface AsrParams {
  * meaning "not stated"). Refused by name, before anything is sent, for a
  * language Qwen does not take.
  */
-export function qwenAsrParams(requested: string | undefined | null, context?: string | null): AsrParams {
+export function qwenAsrParams(
+  requested: string | undefined | null,
+  context?: string | null,
+  options: { speechOnly?: boolean } = {},
+): AsrParams {
   const raw = (requested ?? '').trim().toLowerCase();
   const unstated = raw === '' || raw === 'auto' || raw === 'und' || raw === 'undetermined' || raw === 'unknown' || raw === 'mul';
   const language = unstated ? QWEN_DEFAULT_LANGUAGE : raw;
@@ -77,7 +101,13 @@ export function qwenAsrParams(requested: string | undefined | null, context?: st
       `Qwen3-ASR transcribes ${[...QWEN_ASR_LANGUAGES].join(', ')}; "${language}" is not one of them.`,
     );
   }
-  return { language, vad_filter: false, word_timestamps: true, ...(context ? { context } : {}) };
+  return {
+    language,
+    vad_filter: false,
+    word_timestamps: true,
+    ...(context ? { context } : {}),
+    ...(options.speechOnly ? { speech_only: true } : {}),
+  };
 }
 
 /** One model row of `/v1/info`, as much as the venue rule needs. */
@@ -98,6 +128,8 @@ export interface AsrOffer {
   readonly qwen: AsrModelState;
   /** The aligner, from the `align` capability's rows. */
   readonly aligner: AsrModelState;
+  /** The server takes `speech_only` (it states 1.0.50 or later). */
+  readonly speechOnly: boolean;
 }
 
 function modelState(info: ServerInfo, jobType: string, id: string): AsrModelState {
@@ -116,6 +148,7 @@ export function asrOfferOf(info: ServerInfo): AsrOffer {
     model,
     qwen: modelState(info, 'asr', model),
     aligner: modelState(info, 'align', QWEN_ALIGNER_MODEL),
+    speechOnly: takesSpeechOnly(info.server?.version),
   };
 }
 
