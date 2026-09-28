@@ -37,7 +37,7 @@ import type { ModelInfo } from '@crucible/client';
 import type { AiModelOption, AiOptionGroup, AiOptionGroupKind, AiResolvedValue } from '../wire/ai-wire';
 import { isAnalysisModel } from './crucible-chat.service';
 import { crucibleChoiceForOllama } from './ollama-map';
-import { CrucibleTargetError, crucibleTargetOf, type UpstreamName } from './target';
+import { CrucibleTargetError, RETIRED_LOCAL_MODELS, crucibleTargetOf, type UpstreamName } from './target';
 
 export const UPSTREAM_ORDER: readonly UpstreamName[] = ['anthropic', 'openai', 'ollama'];
 
@@ -215,5 +215,10 @@ export function resolveStoredModel(stored: string, facts: AnalysisOptionFacts, o
 
   const canonical = `local:${target.bareModel}`;
   if (options.has(canonical)) return as(canonical, value === canonical ? null : `Saved as ${value}.`, null);
+  // A model the server stopped carrying runs as its replacement (target.ts RETIRED_LOCAL_MODELS).
+  const replacement = RETIRED_LOCAL_MODELS[target.bareModel];
+  if (replacement !== undefined && options.has(`local:${replacement}`)) {
+    return as(`local:${replacement}`, `Saved as ${target.bareModel}, which ${facts.server} no longer has. It runs as ${replacement}.`, null);
+  }
   return as(null, null, localUnavailable(target.bareModel, facts));
 }

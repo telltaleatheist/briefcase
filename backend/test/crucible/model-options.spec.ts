@@ -184,6 +184,20 @@ describe('what a stored choice is among the options', () => {
     expect(resolve('', facts)).toEqual({ value: '', option: null, note: null, unavailable: null });
   });
 
+  it('a saved 27B 4-bit choice is itself while the server has it, and runs as the 8-bit once it is removed', () => {
+    expect(resolve('local:qwen3.8-27b-4bit', macFacts())).toMatchObject({ option: 'local:qwen3.8-27b-4bit', note: null, unavailable: null });
+    const removed = macFacts({
+      models: MAC_MODELS.filter((m) => !m.id.startsWith('qwen3.8-27b-4bit')),
+      classCandidates: ['qwen3.8-27b-8bit', 'qwen3.5-9b'],
+    });
+    expect(resolve('local:qwen3.8-27b-4bit', removed)).toEqual({
+      value: 'local:qwen3.8-27b-4bit',
+      option: 'local:qwen3.8-27b-8bit',
+      note: 'Saved as qwen3.8-27b-4bit, which owens-mac-studio no longer has. It runs as qwen3.8-27b-8bit.',
+      unavailable: null,
+    });
+  });
+
   it('a saved value the server offers nothing for is unavailable, with the reason, never another model', () => {
     const mac = macFacts();
     expect(resolve('claude:claude-sonnet-5', mac)).toMatchObject({

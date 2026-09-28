@@ -101,6 +101,19 @@ export function crucibleTargetOf(provider: string | undefined, model: string): C
   throw new CrucibleTargetError(`"${provider}" is not an AI provider Briefcase knows (claude, openai, ollama, or a Crucible model).`);
 }
 
+/**
+ * Crucible models a server stops carrying, and the model a choice saved as one
+ * runs as instead. Consulted only when the server no longer offers the retired
+ * model installed (CrucibleChatService.effectiveTarget, resolveStoredModel), so
+ * nothing changes while it is still there.
+ *
+ * qwen3.8-27b-4bit: the user, 2026-09-28: "we're about to remove the 4 bit 27b
+ * from crucible on mac. we're migrating to the 8 bit 27b."
+ */
+export const RETIRED_LOCAL_MODELS: Readonly<Record<string, string>> = {
+  'qwen3.8-27b-4bit': 'qwen3.8-27b-8bit',
+};
+
 /** Cloud upstreams: the ones that are never sent a sampling parameter. */
 export function isCloudTarget(target: CrucibleTarget): boolean {
   return target.upstream === 'anthropic' || target.upstream === 'openai';

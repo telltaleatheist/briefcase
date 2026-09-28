@@ -74,7 +74,7 @@ import {
   CrucibleNoVenueError,
   parseRetryAfter,
 } from './errors';
-import { buildChatBody, crucibleTargetOf, type ChatBodyInput, type CrucibleTarget, type UpstreamName } from './target';
+import { RETIRED_LOCAL_MODELS, buildChatBody, crucibleTargetOf, type ChatBodyInput, type CrucibleTarget, type UpstreamName } from './target';
 import { CRUCIBLE_ANALYSIS_CONTEXT, crucibleChoiceForOllama, isPageReader, servedContextOf, type MappableModel } from './ollama-map';
 
 /** Capability class sent as `X-Crucible-Act` and as every lease's act. */
@@ -687,6 +687,7 @@ export class CrucibleChatService {
    * never switches models between calls.
    */
   async effectiveTarget(target: CrucibleTarget, server?: string): Promise<EffectiveTarget> {
+    if (target.route === 'local' && RETIRED_LOCAL_MODELS[target.model] !== undefined) return this.replacementTarget(target, server);
     if (target.upstream !== 'ollama') return { target, server: null, mappedFrom: null };
     const scope = this.runs.getStore();
     const key = `${server ?? ''}\n${target.model}`;
@@ -732,6 +733,48 @@ export class CrucibleChatService {
           + (chosen.loadContext === undefined ? '' : `, loaded at ${chosen.loadContext} tokens`));
       }
       else this.logger.log(`${target.model}: the selected Crucible server has no model of its own for it, so it goes to Ollama through Crucible`);
+    }
+    scope?.mapped.set(key, chosen);
+    return chosen;
+  }
+
+  /**
+   * A retired Crucible model (RETIRED_LOCAL_MODELS) runs as its replacement on
+   * a server that no longer has it installed and does have the replacement.
+   * Where the retired model is still installed, or the replacement is not,
+   * the target is taken as it is (and the server answers for it as for any
+   * model).
+   */
+  private async replacementTarget(target: CrucibleTarget, server?: string): Promise<EffectiveTarget> {
+    const scope = this.runs.getStore();
+    const key = `${server ?? ''}\n${target.model}`;
+    const kept = scope?.mapped.get(key);
+    if (kept !== undefined) return kept;
+    const replacement = RETIRED_LOCAL_MODELS[target.model]!;
+    let name: string | null = server ?? null;
+    if (name === null) {
+      try {
+        name = this.servers.selected();
+      } catch {
+        name = null;
+      }
+    }
+    let chosen: EffectiveTarget = { target, server: null, mappedFrom: null };
+    if (name !== null) {
+      try {
+        const models = await this.modelsOn(name);
+        const installed = (id: string) => models.some((m) => m.id === id && m.installed === true);
+        if (!installed(target.model) && installed(replacement)) {
+          chosen = { target: { model: replacement, route: 'local', upstream: null, bareModel: replacement }, server: name, mappedFrom: target.model };
+          const note = `${name}\n${target.model}`;
+          if (!this.mappingNoted.has(note)) {
+            this.mappingNoted.add(note);
+            this.logger.log(`[${name}] ${target.model} is no longer on this server; it runs as ${replacement}`);
+          }
+        }
+      } catch {
+        // The listing could not be read: the target as it is, and the server answers for it.
+      }
     }
     scope?.mapped.set(key, chosen);
     return chosen;

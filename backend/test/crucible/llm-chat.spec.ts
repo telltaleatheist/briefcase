@@ -69,6 +69,18 @@ describe('CrucibleChatService: one server', () => {
     expect(fake.chatBodies()[0]).not.toHaveProperty('chat_template_kwargs');
   });
 
+  it('a saved 27B 4-bit runs as the 8-bit once the server no longer has it, and as itself while it does', async () => {
+    await start({ models: [{ id: 'qwen3.8-27b-4bit', paramsB: 27, installed: false }, { id: 'qwen3.8-27b-8bit', paramsB: 27 }] });
+    await chat.chat({ model: 'local:qwen3.8-27b-4bit', prompt: 'x' });
+    expect(fake.jobs.map((j) => [j.type, j.model])).toEqual([['load-model', 'qwen3.8-27b-8bit']]);
+    expect(fake.chatBodies()[0]).toMatchObject({ model: 'qwen3.8-27b-8bit' });
+    await fake.close();
+
+    await start({ models: [{ id: 'qwen3.8-27b-4bit', paramsB: 27 }, { id: 'qwen3.8-27b-8bit', paramsB: 27 }] });
+    await chat.chat({ model: 'local:qwen3.8-27b-4bit', prompt: 'x' });
+    expect(fake.chatBodies()[0]).toMatchObject({ model: 'qwen3.8-27b-4bit' });
+  });
+
   it('withModel: load with a lease, heartbeat it, release it when the run ends', async () => {
     await start();
     await chat.withModel(undefined, 'qwen3.5-9b', async (held) => {

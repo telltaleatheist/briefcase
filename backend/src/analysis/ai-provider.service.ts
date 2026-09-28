@@ -168,11 +168,13 @@ export class AIProviderService {
    */
   async crucibleContextWindow(model: string, loadContext?: number): Promise<number> {
     if (loadContext !== undefined) return Math.min(loadContext, CRUCIBLE_ANALYSIS_CONTEXT);
-    const target = crucibleTargetOf('local', model);
+    let target = crucibleTargetOf('local', model);
     let venue: string | null = null;
     let stated: { tokens: number } | null;
     let listed: boolean;
     try {
+      // A retired model sizes as the replacement it will run as (target.ts RETIRED_LOCAL_MODELS).
+      target = (await this.crucibleChat.effectiveTarget(target)).target;
       venue = await this.crucibleChat.venueFor(target);
       listed = (await this.crucibleChat.modelsOn(venue)).some((m) => m.id === target.model);
       stated = listed ? await this.crucibleChat.statedLocalContext(venue, target.model) : null;
