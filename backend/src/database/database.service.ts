@@ -3883,6 +3883,29 @@ export class DatabaseService {
   }
 
   /**
+   * Delete the AI sections that START inside [startSeconds, endSeconds): what a
+   * flag analysis of one chapter replaces. Sections that start before or after
+   * it (other chapters' flags) and user markers are kept. Returns the count.
+   */
+  deleteAIAnalysisSectionsInRange(videoId: string, startSeconds: number, endSeconds: number): number {
+    const db = this.ensureInitialized();
+    const { changes } = db
+      .prepare('DELETE FROM analysis_sections WHERE video_id = ? AND source = ? AND start_seconds >= ? AND start_seconds < ?')
+      .run(videoId, 'ai', startSeconds, endSeconds);
+    this.logger.log(`Deleted ${changes} AI analysis section(s) for video ${videoId} inside ${startSeconds}-${endSeconds}s`);
+    return changes;
+  }
+
+  /** How many AI sections a video has stored (the analysis row's sections_count). */
+  countAIAnalysisSections(videoId: string): number {
+    const db = this.ensureInitialized();
+    const row = db
+      .prepare('SELECT COUNT(*) as count FROM analysis_sections WHERE video_id = ? AND source = ?')
+      .get(videoId, 'ai') as { count: number } | undefined;
+    return row?.count ?? 0;
+  }
+
+  /**
    * Delete all analysis sections for a video (including user markers)
    * WARNING: This deletes everything. Use deleteAIAnalysisSections to preserve user markers.
    */

@@ -9,7 +9,16 @@ import { DownloaderService } from '../downloader/downloader.service';
 import { FileScannerService } from '../database/file-scanner.service';
 import { DatabaseService, type VideoRecord } from '../database/database.service';
 import { buildAsrContext, titleFromFilename } from '../crucible/asr/asr-context';
-import { AIAnalysisService } from '../analysis/ai-analysis.service';
+import { AIAnalysisService, type Chapter } from '../analysis/ai-analysis.service';
+import {
+  AnalysisPart,
+  AnalysisRange,
+  describeParts,
+  formatHms,
+  resolveAnalysisParts,
+  resolveAnalysisRange,
+} from '../analysis/analysis-parts';
+import { mergeAnalysisReport } from '../analysis/analysis-report';
 import { parseProviderModel } from '../analysis/model-utils';
 import { isCancellation } from '../analysis/cancellation';
 import { SharedConfigService } from '../config/shared-config.service';
@@ -632,7 +641,16 @@ export class MediaOperationsService {
   }
 
   /**
-   * AI analysis of video transcript
+   * AI analysis of video transcript: the parts the task asked for
+   * (analysis-parts.ts; all three when unsaid). Only the stored output of the
+   * parts the run made is replaced:
+   *
+   *   metadata  AI tags, the description and the suggested title
+   *   chapters  the chapter outline
+   *   flags     the AI flag sections: all of them, or with a range only those
+   *             that start inside it (one chapter's)
+   *
+   * and the analysis row's report is merged the same way (analysis-report.ts).
    */
   async analyzeVideo(
     videoId: string,
@@ -640,6 +658,8 @@ export class MediaOperationsService {
       aiModel: string;
       aiProvider?: 'local' | 'ollama' | 'claude' | 'openai';
       customInstructions?: string;
+      parts?: AnalysisPart[];
+      range?: AnalysisRange;
     },
     jobId?: string,
   ): Promise<AnalyzeResult> {
@@ -648,6 +668,11 @@ export class MediaOperationsService {
 
     try {
       this.logger.log(`[${jobId || 'standalone'}] Analyzing video: ${videoId}`);
+
+      // What was asked, checked before any work: an impossible request fails
+      // by name (never run as something else).
+      const asked = resolveAnalysisParts(options.parts);
+      const range = resolveAnalysisRange(options.range, asked);
 
       // Get video and transcript from database
       const video = this.databaseService.getVideoById(videoId);
@@ -672,13 +697,15 @@ export class MediaOperationsService {
       // anything. Same for any failure — a run that died on call one left the
       // video worse off than not re-analyzing at all.
       //
-      // The clear now happens right before the results are written (search
-      // for `hadPreviousAnalysis` below), where it is safe: `analyses` has
-      // video_id as its PRIMARY KEY and the insert is INSERT OR REPLACE, and
-      // the save path already deletes AI sections, AI tags and chapters before
-      // re-inserting them. Nothing about the end state of a SUCCESSFUL
-      // re-analysis changes; only the failure and cancel paths do.
-      const hadPreviousAnalysis = !!this.databaseService.getAnalysis(videoId);
+      // Each part's stored output is replaced right before the results are
+      // written (below the analyzeTranscript await), and only for the parts
+      // the run made: `analyses` has video_id as its PRIMARY KEY and the insert
+      // is INSERT OR REPLACE, and each part's save deletes its own old rows
+      // (AI tags, AI sections, chapters) before re-inserting them.
+
+      // Metadata without chapters is written from the video's stored chapters.
+      const existingChapters =
+        asked.has('metadata') && !asked.has('chapters') ? this.storedChaptersForMetadata(videoId) : undefined;
 
       this.eventService.emitTaskProgress(jobId || '', 'analyze', 0, 'Starting AI analysis...');
 
@@ -734,6 +761,9 @@ export class MediaOperationsService {
         // 'job.cancel-requested' for the same id aborts the in-flight
         // generation, stops every stage loop and releases the models.
         jobId,
+        parts: [...asked],
+        ...(range ? { range } : {}),
+        ...(existingChapters ? { existingChapters } : {}),
       });
 
       // EVERY database write in this method is below this await. A cancelled
@@ -753,78 +783,53 @@ export class MediaOperationsService {
         suggested_title: analysisResult.suggested_title,
       }));
 
-      // Read analysis file
-      const analysisText = fs.readFileSync(analysisOutputPath, 'utf8');
+      // The parts this run made: only their stored output is replaced.
+      const made = new Set(analysisResult.parts);
+      const tag = jobId || 'standalone';
+      const previous = this.databaseService.getAnalysis(videoId);
 
-      // Now — and only now, with real results in hand — retire the previous
-      // analysis. Description and suggested title are nulled here rather than
-      // relying on the writes below, because a run that legitimately produces
-      // neither must not leave the OLD ones sitting under a new analysis.
-      // User-created markers are preserved (deleteAnalysis only removes
-      // source='ai' sections).
-      if (hadPreviousAnalysis) {
-        this.logger.log(`[${jobId || 'standalone'}] Replacing the previous analysis for video ${videoId}`);
-        this.databaseService.deleteAnalysis(videoId);
+      // Now — and only now, with real results in hand — replace what the run
+      // made. Description and suggested title are nulled when metadata ran
+      // rather than relying on the writes below, because a run that
+      // legitimately produces neither must not leave the OLD ones sitting under
+      // a new analysis. User-created markers and tags are always preserved
+      // (only source='ai' rows are deleted).
+      if (made.has('metadata')) {
         this.databaseService.deleteAITagsForVideo(videoId);
         this.databaseService.updateVideoDescription(videoId, null);
         this.databaseService.updateVideoSuggestedTitle(videoId, null);
-      }
-
-      // Save analysis to database (including title suggestion in summary field)
-      this.databaseService.insertAnalysis({
-        videoId,
-        aiAnalysis: analysisText,
-        summary: analysisResult.suggested_title || undefined,  // Save title suggestion as summary
-        sectionsCount: analysisResult.sections_count || 0,
-        aiModel: cleanModelName,
-        aiProvider: provider,
-      });
-
-      this.logger.log(`[${jobId || 'standalone'}] Analysis saved to database (${analysisResult.sections_count} sections, title: ${analysisResult.suggested_title || 'none'})`);
-
-      // Extract and save tags from analysis result
-      if (analysisResult.tags) {
-        // Delete existing AI tags first
-        this.databaseService.deleteAITagsForVideo(videoId);
 
         // Add new AI-generated tags from people and topics
-        const allTags: string[] = [];
-        if (analysisResult.tags.people) {
-          allTags.push(...analysisResult.tags.people);
+        if (analysisResult.tags) {
+          const allTags: string[] = [...(analysisResult.tags.people ?? []), ...(analysisResult.tags.topics ?? [])];
+          for (const tagName of allTags) {
+            const tagId = `ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+            this.databaseService.insertTag({
+              id: tagId,
+              videoId,
+              tagName: tagName,
+              source: 'ai',
+              confidence: 0.8,
+            });
+          }
+          this.logger.log(`[${tag}] Saved ${allTags.length} AI tags`);
         }
-        if (analysisResult.tags.topics) {
-          allTags.push(...analysisResult.tags.topics);
+        if (analysisResult.description) {
+          this.databaseService.updateVideoDescription(videoId, analysisResult.description);
+          this.logger.log(`[${tag}] Saved AI description`);
         }
-
-        for (const tagName of allTags) {
-          const tagId = `ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-          this.databaseService.insertTag({
-            id: tagId,
-            videoId,
-            tagName: tagName,
-            source: 'ai',
-            confidence: 0.8,
-          });
+        if (analysisResult.suggested_title) {
+          this.databaseService.updateVideoSuggestedTitle(videoId, analysisResult.suggested_title);
+          this.logger.log(`[${tag}] Saved suggested title: ${analysisResult.suggested_title}`);
         }
-        this.logger.log(`[${jobId || 'standalone'}] Saved ${allTags.length} AI tags`);
       }
 
-      // Save AI description
-      if (analysisResult.description) {
-        this.databaseService.updateVideoDescription(videoId, analysisResult.description);
-        this.logger.log(`[${jobId || 'standalone'}] Saved AI description`);
-      }
-
-      // Save suggested title
-      if (analysisResult.suggested_title) {
-        this.databaseService.updateVideoSuggestedTitle(videoId, analysisResult.suggested_title);
-        this.logger.log(`[${jobId || 'standalone'}] Saved suggested title: ${analysisResult.suggested_title}`);
-      }
-
-      // Save analysis sections (delete existing AI sections first to avoid duplicates)
-      this.databaseService.deleteAIAnalysisSections(videoId);
-      if (analysisResult.sections && Array.isArray(analysisResult.sections)) {
-        for (const section of analysisResult.sections) {
+      if (made.has('flags')) {
+        // One chapter's flags replace only the stored flags that start inside it.
+        const runRange = analysisResult.range;
+        if (runRange) this.databaseService.deleteAIAnalysisSectionsInRange(videoId, runRange.start, runRange.end);
+        else this.databaseService.deleteAIAnalysisSections(videoId);
+        for (const section of analysisResult.sections ?? []) {
           const sectionId = `section-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
           const startSeconds = this.parseTimeToSeconds(section.start_time);
           const endSeconds = section.end_time ? this.parseTimeToSeconds(section.end_time) : startSeconds + 30;
@@ -847,16 +852,21 @@ export class MediaOperationsService {
             ranker: section.ranker,
           });
         }
-        this.logger.log(`[${jobId || 'standalone'}] Saved ${analysisResult.sections.length} analysis sections`);
+        this.logger.log(
+          `[${tag}] Saved ${analysisResult.sections?.length ?? 0} analysis sections` +
+            (runRange ? ` inside ${formatHms(runRange.start)}-${formatHms(runRange.end)}` : ''),
+        );
       }
 
-      // Save chapters (delete existing to avoid duplicates)
-      if (analysisResult.chapters && Array.isArray(analysisResult.chapters) && analysisResult.chapters.length > 0) {
-        this.logger.log(`[${jobId || 'standalone'}] Saving ${analysisResult.chapters.length} chapters...`);
+      // Save chapters (delete existing to avoid duplicates). A chapter whose
+      // summary failed is not stored: it has no content, only its failure.
+      const chaptersToSave = (analysisResult.chapters ?? []).filter((chapter) => !chapter.failed);
+      if (made.has('chapters') && chaptersToSave.length > 0) {
+        this.logger.log(`[${tag}] Saving ${chaptersToSave.length} chapters...`);
         this.databaseService.deleteChapters(videoId);
 
         const chapterIds = new Map<number, string>();
-        for (const chapter of analysisResult.chapters) {
+        for (const chapter of chaptersToSave) {
           const chapterId = `chapter-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
           const startSeconds = this.parseTimeToSeconds(chapter.start_time);
           const endSeconds = chapter.end_time ? this.parseTimeToSeconds(chapter.end_time) : startSeconds + 60;
@@ -873,10 +883,32 @@ export class MediaOperationsService {
             ...chapterPlace(chapter, chapterId, chapterIds),
           });
         }
-        this.logger.log(`[${jobId || 'standalone'}] Saved ${analysisResult.chapters.length} chapters`);
-      } else {
-        this.logger.log(`[${jobId || 'standalone'}] No chapters to save (chapters: ${analysisResult.chapters?.length || 0})`);
+        this.logger.log(`[${tag}] Saved ${chaptersToSave.length} chapters`);
+      } else if (made.has('chapters')) {
+        this.logger.log(`[${tag}] No chapters to save (chapters: ${analysisResult.chapters?.length || 0})`);
       }
+
+      // The analysis row: its report keeps the previous report's half this run
+      // did not make, and its title suggestion changes only with metadata.
+      const analysisText = mergeAnalysisReport(previous?.ai_analysis, fs.readFileSync(analysisOutputPath, 'utf8'), {
+        metadata: made.has('metadata'),
+        flags: made.has('flags'),
+        range: analysisResult.range ?? null,
+      });
+      const suggestedTitle = made.has('metadata') ? analysisResult.suggested_title : previous?.summary ?? undefined;
+      const sectionsCount = this.databaseService.countAIAnalysisSections(videoId);
+      this.databaseService.insertAnalysis({
+        videoId,
+        aiAnalysis: analysisText,
+        summary: suggestedTitle || undefined,  // Save title suggestion as summary
+        sectionsCount,
+        aiModel: cleanModelName,
+        aiProvider: provider,
+      });
+      this.logger.log(
+        `[${tag}] Analysis saved to database: made ${describeParts(made)} ` +
+          `(${sectionsCount} sections stored, title: ${suggestedTitle || 'none'})`,
+      );
 
       // Emit finalizing progress before completing
       this.eventService.emitTaskProgress(jobId || '', 'analyze', 95, 'Finalizing and saving results...');
@@ -887,11 +919,13 @@ export class MediaOperationsService {
       this.eventService.emitTaskProgress(jobId || '', 'analyze', 100, 'Analysis complete');
 
       // Emit analysis-completed event AFTER all data is saved
-      // This ensures the frontend can reload and get ALL the data at once
+      // This ensures the frontend can reload and get ALL the data at once.
+      // What is stored now, which includes the metadata a partial run kept.
+      const saved = this.databaseService.getVideoById(videoId);
       this.eventService.emitAnalysisCompleted(
         videoId,
-        analysisResult.suggested_title || '',
-        analysisResult.description || ''
+        (saved?.suggested_title as string | null | undefined) || '',
+        (saved?.ai_description as string | null | undefined) || '',
       );
 
       this.logger.log(`[${jobId || 'standalone'}] Emitted analysis-completed event for video ${videoId}`);
@@ -899,7 +933,7 @@ export class MediaOperationsService {
       return {
         success: true,
         data: {
-          sectionsCount: analysisResult.sections_count || 0,
+          sectionsCount,
         },
         // Non-fatal degradations from the analysis itself (currently: flag
         // detection fell back to the per-chapter LLM pass because the NLI
@@ -926,6 +960,26 @@ export class MediaOperationsService {
         error: error instanceof Error ? error.message : 'Analysis failed',
       };
     }
+  }
+
+  /**
+   * The video's stored chapters as metadata's input: the outline's LEAVES (a
+   * parent's children tile it and carry the summaries; parents have none), in
+   * order, with their summaries. Empty when the video has none.
+   */
+  private storedChaptersForMetadata(videoId: string): Chapter[] {
+    const rows = this.databaseService.getChapters(videoId);
+    const parents = new Set(rows.map((r) => r.parent_id).filter((id): id is string => !!id));
+    return rows
+      .filter((r) => !parents.has(r.id))
+      .sort((a, b) => a.start_seconds - b.start_seconds)
+      .map((r, i) => ({
+        sequence: i + 1,
+        start_time: formatHms(r.start_seconds),
+        end_time: formatHms(r.end_seconds),
+        title: r.title,
+        summary: r.description ?? '',
+      }));
   }
 
   /**

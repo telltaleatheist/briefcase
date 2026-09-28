@@ -146,4 +146,37 @@ describe('ProcessConfigComponent Crucible gate', () => {
     expect(fixture.componentInstance.canSubmit()).toBeTrue();
     expect(fixture.componentInstance.composedSteps().find(s => s.type === 'ai-analyze')!.config['aiModel']).toBe('local:qwen3.8-27b-8bit');
   }));
+
+  it('the three parts are card toggles in the options; the job carries exactly the ones checked, and none checked blocks Add', fakeAsync(() => {
+    ready();
+    const partsOf = () => fixture.componentInstance.composedSteps().find(s => s.type === 'ai-analyze')!.config['parts'];
+    // A remembered config from before parts existed runs all three.
+    expect(partsOf()).toEqual(['metadata', 'chapters', 'flags']);
+    expect(card('AI Analyze').textContent).toContain('Metadata, Chapters and Analysis');
+
+    openAnalyzeOptions();
+    const partCards = () => Array.from(fixture.nativeElement.querySelectorAll('.part-card')) as HTMLLabelElement[];
+    expect(partCards().map(c => c.querySelector('.part-title')!.textContent!.trim())).toEqual(['Metadata', 'Chapters', 'Analysis']);
+    expect(partCards().every(c => c.classList.contains('on'))).toBeTrue();
+
+    // Clicking anywhere on a card toggles its part.
+    partCards()[1].click();
+    fixture.detectChanges();
+    expect(partsOf()).toEqual(['metadata', 'flags']);
+    expect(partCards()[1].classList).not.toContain('on');
+    expect(fixture.nativeElement.textContent).toContain("Metadata is written from the video's chapters");
+
+    partCards()[0].click();
+    partCards()[2].click();
+    fixture.detectChanges();
+    expect(partsOf()).toEqual([]);
+    expect(fixture.componentInstance.blockReason()).toBe('Check at least one part of AI Analyze to run');
+    expect(fixture.componentInstance.canSubmit()).toBeFalse();
+
+    partCards()[2].click();
+    fixture.detectChanges();
+    expect(partsOf()).toEqual(['flags']);
+    expect(card('AI Analyze').textContent).toContain('Analysis');
+    expect(fixture.componentInstance.canSubmit()).toBeTrue();
+  }));
 });

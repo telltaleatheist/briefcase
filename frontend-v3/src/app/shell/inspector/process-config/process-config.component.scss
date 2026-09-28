@@ -421,6 +421,60 @@
     color: var(--text-tertiary);
   }
 
+  // ── AI Analyze parts (metadata / chapters / analysis) ──────────────────────
+  // The same checkbox card as the steps (add-popover's .trim-row): the whole
+  // card toggles the part, orange border when on.
+  .part-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .part-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 9px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-input);
+    cursor: pointer;
+    transition: border-color 120ms ease;
+
+    &:hover {
+      border-color: var(--primary-orange);
+    }
+
+    &.on {
+      border-color: rgba(255, 107, 53, 0.5);
+    }
+
+    .part-box {
+      flex: none;
+      accent-color: var(--primary-orange);
+      margin-top: 2px;
+      cursor: pointer;
+    }
+
+    .part-text {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      min-width: 0;
+    }
+
+    .part-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .part-sub {
+      font-size: 11px;
+      color: var(--text-tertiary);
+    }
+  }
+
   // ── Custom instructions textarea + history ─────────────────────────────────
   .opt-textarea {
     width: 100%;

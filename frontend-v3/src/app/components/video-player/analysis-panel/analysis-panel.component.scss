@@ -910,7 +910,8 @@
     background: var(--bg-secondary, #f8f9fa);
     transform: translateX(2px);
 
-    .chapter-delete {
+    .chapter-delete,
+    .chapter-analyze {
       opacity: 1;
     }
   }
@@ -1021,6 +1022,41 @@
   &:hover {
     color: var(--danger, #dc3545);
     background: rgba(220, 53, 69, 0.1);
+  }
+}
+
+// Analyze just this chapter (its flags): shown on hover like delete, and kept
+// visible while its request is on the way.
+.chapter-analyze {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  opacity: 0;
+  color: var(--text-muted, #adb5bd);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+
+  &:hover:not(:disabled) {
+    color: var(--primary-orange, #ff6b35);
+    background: rgba(255, 107, 53, 0.1);
+  }
+
+  &:disabled {
+    cursor: default;
+  }
+
+  &.busy {
+    opacity: 1;
+    color: var(--primary-orange, #ff6b35);
+  }
+
+  &:focus-visible {
+    opacity: 1;
+    outline: 2px solid var(--primary-orange, #ff6b35);
+    outline-offset: -2px;
   }
 }
 

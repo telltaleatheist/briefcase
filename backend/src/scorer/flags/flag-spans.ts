@@ -542,7 +542,8 @@ export function rankFromRatingMap(
   const hot = hotness(map, params);
   const passages = spans.flatMap((sp) => splitSpan(sp, map, hot, params)).sort(compareSpans);
   const all = spansToWindows(passages, sentences, map.units, plan);
-  const duration = sentences.length ? sentences[sentences.length - 1].end : 0;
+  // The stretch actually scored: one chapter of a long video is its own length, not its end time.
+  const duration = sentences.length ? sentences[sentences.length - 1].end - sentences[0].start : 0;
   const budget = verifyBudget(duration, params);
   const { verify, overflow } = applyVerifyBudget(all, budget);
   const calls = (ws: FlagWindow[]) => ws.reduce((n, w) => n + w.categories.length, 0);

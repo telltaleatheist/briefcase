@@ -8,6 +8,13 @@
  *           answers flag or skip with a written reason (the section's description).
  *
  * Metadata (description, tags, title) is generated from chapter summaries.
+ *
+ * A run makes the PARTS it is asked for (analysis-parts.ts: metadata, chapters,
+ * flags; all three when unsaid) and only the stages they need: chapters alone
+ * is the scorer's chapter pass + Pass 2; flags alone is the scorer's flag pass +
+ * Pass 2b, over the whole video or one chapter's range; metadata alone is
+ * written from the video's stored chapters (made first when it has none).
+ *
  * Snap is the only engine (P7 removed the classic embedding/lexical chaptering,
  * the NLI ranker and LLM chapter discovery): a stage that cannot be made fails
  * the analysis by name, and a busy or silent Crucible parks the task.
@@ -41,7 +48,17 @@ import {
   AnalysisCategory,
 } from './prompts/analysis-prompts';
 import { SnapAnalysisService } from '../scorer/snap-analysis.service';
-import { leafChapters, nestAnalysisChapters } from '../scorer/chapters/chapter-tree';
+import {
+  AnalysisPart,
+  AnalysisRange,
+  analysisProgressBands,
+  describeParts,
+  formatHms,
+  resolveAnalysisParts,
+  resolveAnalysisRange,
+  segmentsInRange,
+} from './analysis-parts';
+import { ChapterTreeResult, leafChapters, nestAnalysisChapters } from '../scorer/chapters/chapter-tree';
 import type { SnapFlagRankResult } from '../scorer/flags/snap-flag-ranker.service';
 import {
   buildChapterLines,
@@ -174,6 +191,22 @@ export interface AnalysisOptions {
    * unaffected by anyone else's cancel.
    */
   jobId?: string;
+  /**
+   * The parts to make (analysis-parts.ts). Absent: all three, as every run
+   * made before parts existed. The result's `parts` says what was made.
+   */
+  parts?: AnalysisPart[];
+  /**
+   * Flags only: the stretch of the video to rank and verify (one chapter). Only
+   * the transcript inside it is read; timestamps stay on the real timeline.
+   */
+  range?: AnalysisRange;
+  /**
+   * The video's stored chapters (leaves, with their summaries), which metadata
+   * is written from when this run does not make chapters. None: the run makes
+   * chapters first (see analyzeTranscriptRun).
+   */
+  existingChapters?: Chapter[];
 }
 
 export interface TokenStats {
@@ -201,6 +234,14 @@ export interface AnalysisResult {
    * answers read as no evidence (the label-mass gate), counted.
    */
   warnings?: string[];
+  /**
+   * The parts this run made, which are the parts whose stored output it
+   * replaces. Can hold 'chapters' when only metadata was asked for: the video
+   * had none, and metadata is written from them.
+   */
+  parts: AnalysisPart[];
+  /** The range a flags-only run was restricted to. */
+  range?: AnalysisRange;
 }
 
 // =============================================================================
@@ -279,9 +320,6 @@ const FLAG_VERIFICATION_SCHEMA: Record<string, unknown> = {
 
 /** Flag rating maps kept for offline tuning (saveFlagMap), newest first. */
 const FLAG_MAPS_KEPT = 30;
-
-/** Where the analysis engine's share of the progress bar ends (it starts at 3). */
-const ENGINE_BAND_END = 70;
 
 /**
  * Output budget for one verification call, used only to SIZE num_ctx.
@@ -708,6 +746,50 @@ export class AIAnalysisService {
     try {
       sendProgress('analysis', 0, `Starting AI analysis with ${model}...`);
 
+      // ---- the parts this run makes (analysis-parts.ts) ----------------------
+      const asked = resolveAnalysisParts(options.parts);
+      const range = resolveAnalysisRange(options.range, asked);
+      if (range) {
+        // One chapter's flags: only its transcript is read, at its real times.
+        segments = segmentsInRange(segments ?? [], range);
+        if (segments.length === 0) {
+          throw new Error(`no transcript falls inside ${formatHms(range.start)}-${formatHms(range.end)}`);
+        }
+      }
+      // Metadata is written FROM chapter summaries. Asked for without chapters,
+      // it is written from the video's stored chapters; a video that has none
+      // gets its chapters made first (and they are stored: real chapters, and
+      // there were none to replace). The job says so. Writing metadata from the
+      // raw transcript instead would be a second, unmeasured prompt family, and
+      // a 4-hour transcript does not fit in one call anyway.
+      const storedChapters = (options.existingChapters ?? []).filter((ch) => !ch.failed && ch.title.trim() !== '');
+      const chaptersFirst = asked.has('metadata') && !asked.has('chapters') && storedChapters.length === 0;
+      const makeChapters = asked.has('chapters') || chaptersFirst;
+      const makeFlags = asked.has('flags');
+      const makeMetadata = asked.has('metadata');
+      const made: AnalysisPart[] = [
+        ...(makeChapters ? (['chapters'] as const) : []),
+        ...(makeFlags ? (['flags'] as const) : []),
+        ...(makeMetadata ? (['metadata'] as const) : []),
+      ];
+      // A stage this run does not make takes no share of the progress bar.
+      const bands = analysisProgressBands({
+        engine: makeChapters || makeFlags,
+        summaries: makeChapters,
+        flags: makeFlags,
+        metadata: makeMetadata,
+      });
+      const runNotes: string[] = [];
+      if (chaptersFirst) {
+        runNotes.push('Chapters were made first: metadata is written from chapter summaries, and this video had none.');
+      }
+      this.logger.log(
+        `[Analysis] Making ${describeParts(made)}` +
+          (range ? ` inside ${formatHms(range.start)}-${formatHms(range.end)} (${segments.length} segments)` : '') +
+          (makeMetadata && !makeChapters ? ` from the ${storedChapters.length} stored chapters` : '') +
+          (chaptersFirst ? ' (chapters first: the video has none to write metadata from)' : ''),
+      );
+
       // Write header to file
       fs.writeFileSync(
         outputFile,
@@ -759,8 +841,15 @@ export class AIAnalysisService {
         return tag !== null && !crucibleStandIn.get(tag);
       };
       const crucibleOllamaSized = new Map<string, boolean>();
+      const rawTranscriptTasks: AITaskKind[] = [
+        ...(makeChapters ? (['chapter'] as const) : []),
+        ...(makeFlags ? (['flags'] as const) : []),
+      ];
       {
-        const sized = [aiConfig, ...(['chapter', 'flags'] as AITaskKind[]).map((t) => this.resolveTaskConfig(aiConfig, t, taskModels))];
+        // Only the stages this run makes are sized: a metadata-only run reads no raw transcript.
+        const sized = rawTranscriptTasks.length
+          ? [aiConfig, ...rawTranscriptTasks.map((t) => this.resolveTaskConfig(aiConfig, t, taskModels))]
+          : [];
         for (const cfg of sized) {
           const tag = ollamaTagOf(cfg);
           if (tag !== null && !crucibleStandIn.has(tag)) {
@@ -802,7 +891,6 @@ export class AIAnalysisService {
         return 128000; // claude/openai have large windows
       };
 
-      const rawTranscriptTasks: AITaskKind[] = ['chapter', 'flags'];
       const perTaskLimits = rawTranscriptTasks.map((t) => {
         const cfg = this.resolveTaskConfig(aiConfig, t, taskModels);
         const ctx = contextFor(cfg);
@@ -812,9 +900,9 @@ export class AIAnalysisService {
       // The CHARACTER cap is a CORRECTNESS guarantee and takes the minimum: a
       // model reading text sized for a larger model's context would silently
       // truncate its prompt, losing transcript with no error.
-      const contextTokens = Math.min(...perTaskLimits.map((x) => x.ctx));
+      const contextTokens = perTaskLimits.length ? Math.min(...perTaskLimits.map((x) => x.ctx)) : 0;
       const modelLimits: ModelLimits = {
-        maxChapterChars: Math.min(...perTaskLimits.map((x) => x.limits.maxChapterChars)),
+        maxChapterChars: perTaskLimits.length ? Math.min(...perTaskLimits.map((x) => x.limits.maxChapterChars)) : 0,
       };
 
       const distinct = [...new Set(perTaskLimits.map((x) => x.model))];
@@ -825,50 +913,66 @@ export class AIAnalysisService {
             .join(', ')}) — using the most conservative limits`,
         );
       }
-      this.logger.log(
-        `[Model Limits] effective ctx=${contextTokens}: maxChapterChars=${modelLimits.maxChapterChars}`,
-      );
+      if (perTaskLimits.length) {
+        this.logger.log(
+          `[Model Limits] effective ctx=${contextTokens}: maxChapterChars=${modelLimits.maxChapterChars}`,
+        );
+      }
 
       // =========================================================================
       // THE SCORER STAGE (snap, on Crucible's decision door)
       // =========================================================================
-      // Both passes in one scorer lease, BEFORE every LLM stage. There is no
-      // other engine: a stage it cannot make throws (SnapEngineError, naming
-      // why) and fails the analysis; a busy or silent server parks the task; a
-      // cancel propagates as a cancellation and never falls into more work.
-      sendProgress('analysis', 3, 'Starting the analysis engine...');
-      const snap = await this.snapAnalysis.run({
-        segments,
-        categories: categories || [],
-        chapters: true,
-        flags: true,
-        signal,
-        onProgress: (p) => sendProgress('analysis', 3 + Math.round(p.fraction * (ENGINE_BAND_END - 3)), p.message),
-      });
+      // The passes this run makes, in one scorer lease, BEFORE every LLM stage:
+      // chapters and flags together share the lease and the primed transcript;
+      // one alone runs only that pass; a metadata-only run on stored chapters
+      // never takes the scorer. There is no other engine: a stage it cannot
+      // make throws (SnapEngineError, naming why) and fails the analysis; a
+      // busy or silent server parks the task; a cancel propagates as a
+      // cancellation and never falls into more work.
       const engineWarnings: string[] = [];
-      if (snap.chapterTreeError) engineWarnings.push(`Sub-chapters were skipped: ${snap.chapterTreeError}`);
-      const gated = snap.labelMassGated.total;
-      if (gated > 0) {
-        engineWarnings.push(
-          `${gated} of the analysis engine's answers were read as no evidence (the model put under 1% of its ` +
-            `probability on the answer letters); they did not move any chapter or flag.`,
-        );
+      let snapTree: ChapterTreeResult | null = null;
+      let snapChapters: Array<{ startSeconds: number; title: string }> = [];
+      let flagRanking: SnapFlagRankResult | null = null;
+      if (bands.engine) {
+        const [engineStart, engineEnd] = bands.engine;
+        sendProgress('analysis', engineStart, 'Starting the analysis engine...');
+        const snap = await this.snapAnalysis.run({
+          segments,
+          categories: categories || [],
+          chapters: makeChapters,
+          flags: makeFlags,
+          signal,
+          onProgress: (p) => sendProgress('analysis', engineStart + Math.round(p.fraction * (engineEnd - engineStart)), p.message),
+        });
+        if (snap.chapterTreeError) engineWarnings.push(`Sub-chapters were skipped: ${snap.chapterTreeError}`);
+        const gated = snap.labelMassGated.total;
+        if (gated > 0) {
+          engineWarnings.push(
+            `${gated} of the analysis engine's answers were read as no evidence (the model put under 1% of its ` +
+              `probability on the answer letters); they did not move any chapter or flag.`,
+          );
+        }
+        if (makeChapters) {
+          // A refined outline: Pass 2 works on its LEAVES (they tile the video, as
+          // flat chapters do); the parents are put back around them at the end.
+          snapTree = snap.chapterTree && snap.chapterTree.depth > 1 ? snap.chapterTree : null;
+          snapChapters = snapTree ? leafChapters(snapTree.flat) : snap.chapters?.chapters ?? [];
+          sendProgress('analysis', engineEnd, `Found ${snapChapters.length} chapter${snapChapters.length === 1 ? '' : 's'}`);
+        }
+        if (makeFlags) {
+          flagRanking = snap.flags;
+          if (!flagRanking) throw new Error('the analysis engine returned no flag ranking');
+          this.saveFlagMap(flagRanking, segments, videoTitle, jobId);
+        }
       }
-      // A refined outline: Pass 2 works on its LEAVES (they tile the video, as
-      // flat chapters do); the parents are put back around them at the end.
-      const snapTree = snap.chapterTree && snap.chapterTree.depth > 1 ? snap.chapterTree : null;
-      const snapChapters = snapTree ? leafChapters(snapTree.flat) : snap.chapters?.chapters ?? [];
-      const flagRanking = snap.flags;
-      if (!flagRanking) throw new Error('the analysis engine returned no flag ranking');
-      this.saveFlagMap(flagRanking, segments, videoTitle, jobId);
 
       // The chapters: the scorer's outline + Viterbi path, the outline labels as titles.
       const boundaries = snapChapters.map((c) => c.startSeconds);
-      sendProgress('analysis', ENGINE_BAND_END, `Found ${boundaries.length} chapter${boundaries.length === 1 ? '' : 's'}`);
 
       // Calculate total API calls for accurate progress reporting: one summary
       // call per chapter + one verification call per (window, category) + the
-      // FOUR metadata calls (tags, description hook, description body, title).
+      // FOUR metadata calls (tags, description hook, description body, title),
+      // for the stages this run makes.
       //
       // The narrated-actor re-ask (at most one per viewer-facing field) is NOT
       // counted here, exactly as chapter and flag PARSE retries are not: this
@@ -886,8 +990,9 @@ export class AIAnalysisService {
       // chapter and then sit still. Unknown work claims no space until the
       // ranker reports its actual count.
       let flagCallCount = 0;
+      const metadataCallCount = makeMetadata ? 4 : 0;
       const recomputeTotalApiCalls = () => {
-        totalApiCalls = chapterCallCount + flagCallCount + 4;
+        totalApiCalls = chapterCallCount + flagCallCount + metadataCallCount;
       };
       recomputeTotalApiCalls();
       completedApiCalls = 0;
@@ -902,82 +1007,127 @@ export class AIAnalysisService {
       // real count arrived. Bands make each stage's share fixed and its motion
       // smooth: a stage that has not started occupies none of the bar, and a
       // stage that discovers more work slows down inside its own band instead
-      // of stealing another stage's.
+      // of stealing another stage's. A stage this run does not make has no band
+      // at all (analysisProgressBands).
       //
-      // The analysis engine (3 -> ENGINE_BAND_END) is most of a run's time: it
-      // asks the model about every sentence. The chat stages after it are a few
-      // calls each.
-      const PASS2_BAND: [number, number] = [ENGINE_BAND_END + 1, 80];
-      const FLAG_BAND: [number, number] = [80, 92];
-      const METADATA_BAND: [number, number] = [92, 98];
+      // The analysis engine is most of a run's time: it asks the model about
+      // every sentence. The chat stages after it are a few calls each.
       const bandProgress = ([start, end]: [number, number], done: number, total: number) =>
         Math.round(start + (Math.min(done, total) / Math.max(1, total)) * (end - start));
       // Message-only ticks (stage announcements) report where their stage
       // currently sits rather than recomputing a global fraction.
-      let lastProgress = PASS2_BAND[0];
-      const calculateProgress = () => lastProgress;
+      let lastProgress = 3;
 
       // =========================================================================
-      // PASS 2: Analyze each chapter (title, summary), then extract flags (2b)
+      // PASS 2: each chapter's summary (the outline gave its title)
       // =========================================================================
-      sendProgress('analysis', PASS2_BAND[0], `Analyzing ${boundaries.length} chapters (0/${totalApiCalls} API calls)...`);
-      const { chapters, flags, warnings: flagWarnings } = await this.analyzeChaptersPass2(
-        aiConfig,
-        segments,
-        boundaries,
-        videoTitle,
-        categories || [],
-        modelLimits,
-        recordFailure,
-        customInstructions,
-        trackTokens,
-        (current, total) => {
-          if (total !== chapterCallCount) {
-            chapterCallCount = total;
-            recomputeTotalApiCalls();
-          }
-          completedApiCalls = current;
-          lastProgress = bandProgress(PASS2_BAND, current, total);
-          sendProgress('analysis', lastProgress, `Analyzing chapter ${current}/${total}...`);
-        },
-        taskModels,
-        (current, total) => {
-          if (total !== flagCallCount) {
-            flagCallCount = total;
-            recomputeTotalApiCalls();
-          }
-          completedApiCalls = chapterCallCount + current;
-          lastProgress = bandProgress(FLAG_BAND, current, total);
-          sendProgress('analysis', lastProgress, `Verifying flag candidates ${current}/${total}...`);
-        },
-        // A message at the CURRENT percentage, not counted in totalApiCalls.
-        (message) => {
-          // Ranking runs at the START of the flag band: chapters are done, no
-          // verification has happened yet, and the candidate count is about to
-          // become known.
-          lastProgress = FLAG_BAND[0];
-          sendProgress('analysis', lastProgress, message);
-        },
-        signal,
-        {
-          chapterTitles: snapChapters.map((c) => c.title),
-          flagRanking,
-        },
-      );
-      lastProgress = METADATA_BAND[0];
-      sendProgress('analysis', lastProgress, `Analyzed ${chapters.length} chapters, found ${flags.length} flags`);
+      let chapters: Chapter[] = [];
+      if (makeChapters) {
+        const summariesBand = bands.summaries!;
+        lastProgress = summariesBand[0];
+        sendProgress('analysis', lastProgress, `Analyzing ${boundaries.length} chapters (0/${totalApiCalls} API calls)...`);
+        chapters = await this.analyzeChaptersPass2(
+          aiConfig,
+          segments,
+          boundaries,
+          videoTitle,
+          modelLimits,
+          recordFailure,
+          customInstructions,
+          trackTokens,
+          (current, total) => {
+            if (total !== chapterCallCount) {
+              chapterCallCount = total;
+              recomputeTotalApiCalls();
+            }
+            completedApiCalls = current;
+            lastProgress = bandProgress(summariesBand, current, total);
+            sendProgress('analysis', lastProgress, `Analyzing chapter ${current}/${total}...`);
+          },
+          taskModels,
+          signal,
+          snapChapters.map((c) => c.title),
+        );
 
-      // Honest-failure gate: if NOT ONE chapter was successfully analyzed, the
-      // run produced nothing real (every API call failed). Fail loudly with the
-      // real reason instead of returning an empty analysis that looks successful
-      // — stale/no data beats a lie. A partial run (some chapters analyzed, some
-      // failed) still completes below with whatever succeeded.
-      const successfulChapters = chapters.filter((ch) => !ch.failed).length;
-      if (successfulChapters === 0) {
-        throw new Error(
-          lastFailureReason
-            ? `no chapters could be analyzed — every analysis call failed. Last failure: ${lastFailureReason}`
-            : 'no chapters could be analyzed — every analysis call failed.',
+        // Honest-failure gate: if NOT ONE chapter was successfully analyzed, the
+        // run produced nothing real (every API call failed). Fail loudly with the
+        // real reason instead of returning an empty analysis that looks successful
+        // — stale/no data beats a lie. A partial run (some chapters analyzed, some
+        // failed) still completes below with whatever succeeded. Checked before
+        // the flag stage, which is never entered on a run that will fail.
+        const successfulChapters = chapters.filter((ch) => !ch.failed).length;
+        if (successfulChapters === 0) {
+          throw new Error(
+            lastFailureReason
+              ? `no chapters could be analyzed — every analysis call failed. Last failure: ${lastFailureReason}`
+              : 'no chapters could be analyzed — every analysis call failed.',
+          );
+        }
+      }
+
+      // =========================================================================
+      // PASS 2b: flag verification, as its own phase, after every chapter, so
+      // each model loads once even when 'flags' is routed to a different model
+      // than 'chapter'.
+      // =========================================================================
+      let flags: AnalyzedSection[] = [];
+      if (makeFlags) {
+        const flagBand = bands.flags!;
+        const flagConfig = this.resolveTaskConfig(aiConfig, 'flags', taskModels);
+        // The snap ranker already ranked the candidates (before any LLM stage
+        // ran); each window is verified here. The flag stage is the expensive
+        // one: never entered on a cancelled run.
+        ensureNotCancelled(signal, 'the flag stage');
+        const stage = await this.runRankedFlagStage(
+          flagConfig,
+          segments,
+          recordFailure,
+          trackTokens,
+          (current, total) => {
+            if (total !== flagCallCount) {
+              flagCallCount = total;
+              recomputeTotalApiCalls();
+            }
+            completedApiCalls = chapterCallCount + current;
+            lastProgress = bandProgress(flagBand, current, total);
+            sendProgress('analysis', lastProgress, `Verifying flag candidates ${current}/${total}...`);
+          },
+          // A message at the CURRENT percentage, not counted in totalApiCalls.
+          (message) => {
+            // Ranking is done by now, at the START of the flag band: no
+            // verification has happened yet, and the candidate count is about to
+            // become known.
+            lastProgress = flagBand[0];
+            sendProgress('analysis', lastProgress, message);
+          },
+          signal,
+          flagRanking!,
+        );
+        flags = stage.sections;
+        this.logger.log(
+          `[Pass 2b] ranked + verified (snap scorer ranking, verify budget ${flagRanking!.stats.verifyBudget}) — ` +
+            `${flags.length} sections (${flags.filter((r) => r.verdict === 'flag').length} flag, ` +
+            `${flags.filter((r) => r.verdict === 'skip').length} ghosted rejections, ` +
+            `${flags.filter((r) => r.verdict === 'candidate').length} unverified candidates)`,
+        );
+        // Every check failing is a broken stage. When flags are all this run
+        // makes, completing would replace the stored flags with nothing: fail
+        // with the real reason, and the previous flags stay.
+        if (!makeChapters && !makeMetadata && stage.checks > 0 && stage.unusable === stage.checks) {
+          throw new Error(
+            `no flag section could be checked — every verification call failed.` +
+              (lastFailureReason ? ` Last failure: ${lastFailureReason}` : ''),
+          );
+        }
+      }
+      lastProgress = bands.metadata?.[0] ?? lastProgress;
+      if (makeChapters || makeFlags) {
+        sendProgress(
+          'analysis',
+          lastProgress,
+          [makeChapters ? `Analyzed ${chapters.length} chapters` : '', makeFlags ? `found ${flags.length} flags` : '']
+            .filter(Boolean)
+            .join(', '),
         );
       }
 
@@ -994,6 +1144,9 @@ export class AIAnalysisService {
       // =========================================================================
       // Generate metadata FROM chapters
       // =========================================================================
+      // The chapters this run made, or the video's stored ones when it made
+      // none (the metadata part alone).
+      //
       // These three are independent functions of `chapters` — none reads another's
       // result — so they may run in any order. They are therefore ORDERED BY
       // MODEL, not by name: everything still on the main model runs first (it is
@@ -1009,71 +1162,87 @@ export class AIAnalysisService {
       let tags: Tags | null = null;
       let suggestedTitle: string | null = null;
 
-      // TAGS RUNS FIRST, and the order in this array is load-bearing: grouping is
-      // stable within a model group, and the description step CONSUMES the tags
-      // result (people ground the body, topics feed the hook and the code-built
-      // hashtag line). With every task on one model — the default — this array
-      // order is the execution order, so tags always lands first. When tags is
-      // routed to a different model, grouping may still run description first;
-      // that degrades cleanly (the chapter summaries carry the same names) rather
-      // than failing, which is why this is an ordering preference and not a
-      // dependency the loop enforces.
-      //
-      // `calls` is what the ETA counter advances by: description is TWO calls
-      // now (hook, then body), not one.
-      const metadataSteps = (
-        [
-          { task: 'tags', label: 'Extracting tags', calls: 1 },
-          { task: 'description', label: 'Generating description', calls: 2 },
-          { task: 'title', label: 'Generating title', calls: 1 },
-        ] as const
-      ).map((step) => {
-        const cfg = this.resolveTaskConfig(aiConfig, step.task, taskModels);
-        return { ...step, cfg, key: `${cfg.provider}:${cfg.model}` };
-      });
+      if (makeMetadata) {
+        const metadataBand = bands.metadata!;
+        const metadataChapters = makeChapters ? chapters : storedChapters;
 
-      const mainKey = `${aiConfig.provider}:${aiConfig.model}`;
-      // Main model first (already loaded), then each other model in first-appearance
-      // order. Stable within a group, so same-model tasks keep their relative order.
-      const orderedKeys = [
-        ...(metadataSteps.some((s) => s.key === mainKey) ? [mainKey] : []),
-        ...metadataSteps
-          .map((s) => s.key)
-          .filter((k, i, arr) => k !== mainKey && arr.indexOf(k) === i),
-      ];
-      if (orderedKeys.length > 1) {
-        this.logger.log(
-          `[TaskModels] Metadata runs grouped by model, one load each: ${orderedKeys.join(' -> ')}`,
-        );
-      }
+        // TAGS RUNS FIRST, and the order in this array is load-bearing: grouping is
+        // stable within a model group, and the description step CONSUMES the tags
+        // result (people ground the body, topics feed the hook and the code-built
+        // hashtag line). With every task on one model — the default — this array
+        // order is the execution order, so tags always lands first. When tags is
+        // routed to a different model, grouping may still run description first;
+        // that degrades cleanly (the chapter summaries carry the same names) rather
+        // than failing, which is why this is an ordering preference and not a
+        // dependency the loop enforces.
+        //
+        // `calls` is what the ETA counter advances by: description is TWO calls
+        // now (hook, then body), not one.
+        const metadataSteps = (
+          [
+            { task: 'tags', label: 'Extracting tags', calls: 1 },
+            { task: 'description', label: 'Generating description', calls: 2 },
+            { task: 'title', label: 'Generating title', calls: 1 },
+          ] as const
+        ).map((step) => {
+          const cfg = this.resolveTaskConfig(aiConfig, step.task, taskModels);
+          return { ...step, cfg, key: `${cfg.provider}:${cfg.model}` };
+        });
 
-      let metadataStepsDone = 0;
-      for (const key of orderedKeys) {
-        for (const step of metadataSteps.filter((s) => s.key === key)) {
-          // Each metadata step is 1-2 more generation calls. A cancelled run
-          // stops here rather than spending them.
-          ensureNotCancelled(signal, `metadata step '${step.task}'`);
+        const mainKey = `${aiConfig.provider}:${aiConfig.model}`;
+        // Main model first (already loaded), then each other model in first-appearance
+        // order. Stable within a group, so same-model tasks keep their relative order.
+        const orderedKeys = [
+          ...(metadataSteps.some((s) => s.key === mainKey) ? [mainKey] : []),
+          ...metadataSteps
+            .map((s) => s.key)
+            .filter((k, i, arr) => k !== mainKey && arr.indexOf(k) === i),
+        ];
+        if (orderedKeys.length > 1) {
+          this.logger.log(
+            `[TaskModels] Metadata runs grouped by model, one load each: ${orderedKeys.join(' -> ')}`,
+          );
+        }
 
-          completedApiCalls += step.calls;
-          lastProgress = bandProgress(METADATA_BAND, metadataStepsDone++, metadataSteps.length);
-          sendProgress('analysis', lastProgress, `${step.label}...`);
-          switch (step.task) {
-            case 'description':
-              description = await this.generateDescriptionFromChapters(
-                step.cfg, chapters, videoTitle, tags, recordFailure, trackTokens, signal,
-              );
-              break;
-            case 'tags':
-              tags = await this.generateTagsFromChapters(
-                step.cfg, chapters, recordFailure, trackTokens, signal,
-              );
-              break;
-            case 'title':
-              suggestedTitle = await this.generateTitleFromChapters(
-                step.cfg, chapters, videoTitle, recordFailure, trackTokens, signal,
-              );
-              break;
+        let metadataStepsDone = 0;
+        for (const key of orderedKeys) {
+          for (const step of metadataSteps.filter((s) => s.key === key)) {
+            // Each metadata step is 1-2 more generation calls. A cancelled run
+            // stops here rather than spending them.
+            ensureNotCancelled(signal, `metadata step '${step.task}'`);
+
+            completedApiCalls += step.calls;
+            lastProgress = bandProgress(metadataBand, metadataStepsDone++, metadataSteps.length);
+            sendProgress('analysis', lastProgress, `${step.label}...`);
+            switch (step.task) {
+              case 'description':
+                description = await this.generateDescriptionFromChapters(
+                  step.cfg, metadataChapters, videoTitle, tags, recordFailure, trackTokens, signal,
+                );
+                break;
+              case 'tags':
+                tags = await this.generateTagsFromChapters(
+                  step.cfg, metadataChapters, recordFailure, trackTokens, signal,
+                );
+                break;
+              case 'title':
+                suggestedTitle = await this.generateTitleFromChapters(
+                  step.cfg, metadataChapters, videoTitle, recordFailure, trackTokens, signal,
+                );
+                break;
+            }
           }
+        }
+
+        // Metadata that is all this run was asked for, and produced neither tags
+        // nor a description, made nothing: completing would replace the stored
+        // metadata with nothing. Fail with the real reason; the old metadata stays.
+        // (A missing title alone is a legitimate "keep the filename".)
+        if (!asked.has('chapters') && !asked.has('flags') && tags === null && description === null) {
+          throw new Error(
+            'no metadata could be written — the tags and the description both failed.' +
+              (lastFailureReason ? ` Last failure: ${lastFailureReason}` : ''),
+          );
         }
       }
 
@@ -1107,24 +1276,23 @@ export class AIAnalysisService {
       sendProgress('analysis', 100, 'Analysis complete!');
 
       // Debug: Log what we're returning
-      console.log(`[analyzeTranscript] RETURNING: sections=${flags.length}, chapters=${chapters.length}, tags=${JSON.stringify(tags)}`);
+      console.log(`[analyzeTranscript] RETURNING (${describeParts(made)}): sections=${flags.length}, chapters=${chapters.length}, tags=${JSON.stringify(tags)}`);
       if (chapters.length > 0) {
         console.log(`[analyzeTranscript] Chapters being returned: ${JSON.stringify(chapters)}`);
       }
 
+      const warnings = [...runNotes, ...engineWarnings];
       return {
         sections_count: flags.length,
-        sections: flags,           // Category flags from chapter analysis
+        sections: flags,           // The verified flag sections (flags part)
         // Chapter list with titles/summaries; a refined outline adds its parents.
         chapters: snapTree ? nestAnalysisChapters(chapters, snapTree.flat) : chapters,
-        tags,
-        description,
-        suggested_title: suggestedTitle || undefined,
+        // Only a run that made metadata carries it: undefined = not attempted.
+        ...(makeMetadata ? { tags, description, suggested_title: suggestedTitle || undefined } : {}),
         tokenStats: tokenStats.apiCalls > 0 ? tokenStats : undefined,
-        warnings:
-          engineWarnings.length + (flagWarnings?.length ?? 0) > 0
-            ? [...engineWarnings, ...(flagWarnings ?? [])]
-            : undefined,
+        warnings: warnings.length > 0 ? warnings : undefined,
+        parts: made,
+        ...(range ? { range } : {}),
       };
     } catch (error) {
       // A cancellation is NOT a failure. It must not be wrapped as one (the
@@ -1505,11 +1673,17 @@ export class AIAnalysisService {
      * call, and every section gets its justification.
      */
     snapRanking: SnapFlagRankResult,
-  ): Promise<AnalyzedSection[]> {
+  ): Promise<{
+    sections: AnalyzedSection[];
+    /** (section, category) questions asked, cache hits included. */
+    checks: number;
+    /** Checks with no usable verdict (token ceiling, no verdict, a failed call). */
+    unusable: number;
+  }> {
     const sentences = assembleSentences(segments);
     if (sentences.length === 0) {
       this.logger.warn('[Pass 2b] No sentences could be assembled from the transcript');
-      return [];
+      return { sections: [], checks: 0, unusable: 0 };
     }
 
     const ranker = 'snap-v1' as const;
@@ -1551,7 +1725,7 @@ export class AIAnalysisService {
     );
 
     onFlagProgress?.(0, jobs.length);
-    if (jobs.length === 0) return [];
+    if (jobs.length === 0) return { sections: [], checks: 0, unusable: 0 };
 
     // ONE num_ctx for every verification call in the stage, sized from the
     // largest prompt. Ollama fully reloads the model on ANY num_ctx change, and
@@ -1580,6 +1754,8 @@ export class AIAnalysisService {
     let flaggedCalls = 0;
     let skipped = 0;
     let degraded = 0;
+    /** Why the last failed call failed, so a stage where every call failed says why. */
+    let lastCallError = '';
     let cacheHits = 0;
     const cachePresent = this.databaseService?.isInitialized?.() === true;
     const startedAt = Date.now();
@@ -1671,6 +1847,7 @@ export class AIAnalysisService {
         // also let the loop continue to the next candidate.
         if (stopsTheRun(error)) throw error;
         degraded++;
+        lastCallError = (error as Error).message;
         this.logger.warn(
           `[Pass 2b] Verification call failed at ${where}: ${(error as Error).message} — not flagged, ` +
           `and NOT recorded as a rejection`,
@@ -1694,7 +1871,8 @@ export class AIAnalysisService {
     // ONCE, so the job's failure accounting sees it without being flooded.
     if (degraded === jobs.length) {
       recordFailure(
-        `Pass 2b flag verification produced no usable verdicts across all ${jobs.length} calls`,
+        `Pass 2b flag verification produced no usable verdicts across all ${jobs.length} calls` +
+          (lastCallError ? ` (last error: ${lastCallError})` : ''),
       );
     }
 
@@ -1718,7 +1896,7 @@ export class AIAnalysisService {
       `[Pass 2b] ${flaggedCalls} accepted (section, category) verdicts -> ${flagSections.length} flag sections; ` +
       `${skipSections.length} rejected verdicts stored (shown at the All filter position)`,
     );
-    return sections;
+    return { sections, checks: jobs.length, unusable: degraded };
   }
 
   /**
@@ -1748,51 +1926,45 @@ export class AIAnalysisService {
   }
 
   /**
-   * PASS 2: Analyze each chapter with full context
-   * Generates title and summary per chapter, then runs the dedicated flag pass
+   * PASS 2: Analyze each chapter with full context. The LLM writes each
+   * chapter's summary; the title is the scorer's outline label. Flag
+   * verification (Pass 2b) is its own stage (runRankedFlagStage), run by
+   * analyzeTranscriptRun only when the run makes flags.
    */
   private async analyzeChaptersPass2(
     config: AIProviderConfig,
     segments: Segment[],
     boundaries: number[],
     videoTitle: string,
-    categories: AnalysisCategory[],
     limits: ModelLimits,
     recordFailure: (what: string) => void,
     customInstructions: string | undefined,
     onTokens: ((response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void) | undefined,
     onChapterProgress: ((current: number, total: number) => void) | undefined,
     taskModels: Partial<Record<AITaskKind, string>>,
-    onFlagProgress: ((current: number, total: number) => void) | undefined,
-    onFlagStatus: ((message: string) => void) | undefined,
     signal: AbortSignal | undefined,
     /**
-     * The snap engine's output:
-     *   chapterTitles  one per boundary, the scorer's outline labels. The LLM
-     *                  chapter call supplies only the summary (its title is
-     *                  discarded), and long chapters are NOT split: Viterbi's
-     *                  switch cost owns granularity, and a forced split would
-     *                  manufacture chapters at arbitrary times (plan §4.5).
-     *   flagRanking    the snap ranker's windows for the verifier stage.
+     * The snap engine's outline labels, one per boundary. The LLM chapter call
+     * supplies only the summary (its title is discarded), and long chapters are
+     * NOT split: Viterbi's switch cost owns granularity, and a forced split
+     * would manufacture chapters at arbitrary times (plan §4.5).
      */
-    snap: { chapterTitles: string[]; flagRanking: SnapFlagRankResult },
-  ): Promise<{ chapters: Chapter[]; flags: AnalyzedSection[]; warnings?: string[] }> {
+    chapterTitles: string[],
+  ): Promise<Chapter[]> {
     const chapters: Chapter[] = [];
-    const warnings: string[] = [];
-    const allFlags: AnalyzedSection[] = [];
 
     if (!segments || segments.length === 0) {
       this.logger.warn('[Pass 2] No segments available for chapter analysis');
-      return { chapters, flags: allFlags, warnings };
+      return chapters;
     }
 
     const videoDuration = segments[segments.length - 1].end;
 
     // Snap chapters: boundaries and titles come as a set, one title each.
-    if (snap.chapterTitles.length !== boundaries.length) {
-      throw new Error(`the analysis engine gave ${snap.chapterTitles.length} chapter titles for ${boundaries.length} chapters`);
+    if (chapterTitles.length !== boundaries.length) {
+      throw new Error(`the analysis engine gave ${chapterTitles.length} chapter titles for ${boundaries.length} chapters`);
     }
-    const presetTitles = snap.chapterTitles;
+    const presetTitles = chapterTitles;
     const adjustedBoundaries = boundaries;
 
     let previousChapterSummary = '';
@@ -1805,10 +1977,6 @@ export class AIAnalysisService {
     if (chapterConfig.model !== config.model) {
       this.logger.log(`[Pass 2] Analyzing chapters on ${chapterConfig.provider}:${chapterConfig.model}`);
     }
-
-    // Chapters that succeeded: flags are verified only when at least one did
-    // (a run with none fails below, with the real reason).
-    let succeededChapters = 0;
 
     for (let i = 0; i < adjustedBoundaries.length; i++) {
       // Do not start chapter i+1 on a cancelled run.
@@ -1877,11 +2045,10 @@ export class AIAnalysisService {
         continue;
       }
 
-      // Flag verification deliberately does NOT happen here — see Pass 2b
-      // below. Running it inline would alternate chapter/flags per iteration,
-      // which reloads a model between every call the moment the two tasks are
-      // routed to different models.
-      succeededChapters++;
+      // Flag verification deliberately does NOT happen here — see Pass 2b in
+      // analyzeTranscriptRun. Running it inline would alternate chapter/flags
+      // per iteration, which reloads a model between every call the moment the
+      // two tasks are routed to different models.
 
       // The title is the outline label the boundary came from; the LLM call
       // supplied the summary only.
@@ -1905,39 +2072,8 @@ export class AIAnalysisService {
     }
 
 
-    // =========================================================================
-    // PASS 2b: flag verification, as its own phase, after every chapter, so
-    // each model loads once even when 'flags' is routed to a different model
-    // than 'chapter'.
-    // =========================================================================
-    const flagConfig = this.resolveTaskConfig(config, 'flags', taskModels);
-
-    // The snap ranker already ranked the candidates (before any LLM stage ran);
-    // each window is verified here. The flag stage is the expensive one: never
-    // entered on a cancelled run.
-    if (succeededChapters > 0) {
-      ensureNotCancelled(signal, 'the flag stage');
-      const ranked = await this.runRankedFlagStage(
-        flagConfig,
-        segments,
-        recordFailure,
-        onTokens,
-        onFlagProgress,
-        onFlagStatus,
-        signal,
-        snap.flagRanking,
-      );
-      this.logger.log(
-        `[Pass 2b] ranked + verified (snap scorer ranking, verify budget ${snap.flagRanking.stats.verifyBudget}) — ` +
-          `${ranked.length} sections (${ranked.filter((r) => r.verdict === 'flag').length} flag, ` +
-          `${ranked.filter((r) => r.verdict === 'skip').length} ghosted rejections, ` +
-          `${ranked.filter((r) => r.verdict === 'candidate').length} unverified candidates)`,
-      );
-      allFlags.push(...ranked);
-    }
-
-    this.logger.log(`[Pass 2] Analyzed ${chapters.length} chapters, found ${allFlags.length} flag sections`);
-    return { chapters, flags: allFlags, warnings };
+    this.logger.log(`[Pass 2] Analyzed ${chapters.length} chapters`);
+    return chapters;
   }
 
   /**

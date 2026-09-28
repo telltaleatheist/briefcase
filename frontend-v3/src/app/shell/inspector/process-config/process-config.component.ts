@@ -8,6 +8,13 @@ import { AiModelOptionsService } from '../../../services/ai-model-options.servic
 import { AiModelSelectComponent } from '../../../components/ai-model-select/ai-model-select.component';
 import { CrucibleReadinessService, taskNeedsCrucible } from '../../../services/crucible-readiness.service';
 import {
+  ANALYSIS_PARTS,
+  ANALYSIS_PART_DEFS,
+  AnalysisPart,
+  analysisPartsOf,
+  describeAnalysisParts,
+} from '../../../models/analysis-parts';
+import {
   PIPELINE_STEPS,
   PipelinePreset,
   PipelinePresetsService,
@@ -280,6 +287,40 @@ export class ProcessConfigComponent {
   // optional one for API compatibility. The stored `defaultGranularity` in
   // app-config.json is config-file-only. There is no UI in front of it anywhere.
 
+  // Parts: metadata / chapters / analysis ------------------------------------
+  // Each is its own set of calls on Crucible; the job carries exactly the
+  // ones checked (`parts` on the step's config, models/analysis-parts.ts).
+
+  readonly partDefs = ANALYSIS_PART_DEFS;
+
+  /** The checked parts (a config from before parts existed: all three). */
+  readonly aiParts = computed(() => analysisPartsOf(this.config('ai-analyze')));
+
+  hasPart(part: AnalysisPart): boolean {
+    return this.aiParts().includes(part);
+  }
+
+  togglePart(part: AnalysisPart): void {
+    const current = this.aiParts();
+    const next = current.includes(part) ? current.filter(p => p !== part) : [...current, part];
+    this.setOption('ai-analyze', 'parts', ANALYSIS_PARTS.filter(p => next.includes(p)));
+  }
+
+  /** The step card's sub-line: what the analysis will run. */
+  readonly partsSummary = computed(() => {
+    const parts = this.aiParts();
+    return parts.length === 0 ? 'Nothing checked to run' : describeAnalysisParts(parts);
+  });
+
+  /** Said under the parts when a choice depends on what the video already has. */
+  readonly partsHint = computed<string | null>(() => {
+    const parts = this.aiParts();
+    if (parts.includes('metadata') && !parts.includes('chapters')) {
+      return "Metadata is written from the video's chapters. A video without chapters gets them made first.";
+    }
+    return null;
+  });
+
   // Custom instructions + history --------------------------------------------
 
   instructionsHistory = signal<InstructionHistoryItem[]>([]);
@@ -424,11 +465,13 @@ export class ProcessConfigComponent {
   });
 
   /**
-   * AI Analyze is on and its model is missing or can't run on the connected
-   * server: why. Hosts with their own submit (the Add popover) read it too.
+   * AI Analyze is on and can't be queued as set (no part checked, or its model
+   * is missing or can't run on the connected server): why. Hosts with their
+   * own submit (the Add popover) read it too.
    */
   readonly aiModelProblem = computed<string | null>(() => {
     if (!this.isEnabled('ai-analyze') || !this.readiness.ready()) return null;
+    if (this.aiParts().length === 0) return 'Check at least one part of AI Analyze to run';
     // The picker says why a model can't run; this only says what to do.
     if (!this.aiModelValue() || this.aiModelUnavailable()) return 'Pick an AI model for AI Analyze';
     return null;

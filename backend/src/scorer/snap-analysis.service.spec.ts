@@ -331,4 +331,37 @@ describe('SnapAnalysisService', () => {
     expect(res.chapters).toBeNull();
     expect(res.flags!.spans.length).toBe(1);
   });
+
+  it("flags only on one chapter three hours in: its units only, on the video's real timeline, budget for its own length", async () => {
+    const fake = new FakeHandle();
+    const { server, leases } = fakeServer(fake);
+    const late = segments().map((s) => ({ ...s, start: s.start + 3 * 3600, end: s.end + 3 * 3600 }));
+    const res = await new SnapAnalysisService(server, new SnapFlagRanker()).run({
+      segments: late, categories: CATEGORIES, chapters: false, flags: true,
+    });
+    expect(leases()).toBe(1);
+    expect(fake.generates).toBe(0);
+    expect(res.transcript!.units[0].start).toBe(3 * 3600);
+    // Every time is inside the chapter's own stretch (3 h to 3 h + 60 s), never from zero.
+    const span = res.flags!.spans[0];
+    expect(span.start).toBeGreaterThanOrEqual(3 * 3600);
+    expect(span.end).toBeLessThanOrEqual(3 * 3600 + 60);
+    const window = [...res.flags!.windows, ...res.flags!.overflow][0];
+    const fired = res.transcript!.sentences.slice(window.firedFrom, window.firedTo + 1).map((x) => x.text).join(' ');
+    expect(fired).toContain('communists');
+    expect(res.transcript!.sentences[window.firedFrom].start).toBeGreaterThanOrEqual(3 * 3600);
+    // A minute of transcript is a minute's budget (the floor), not three hours' worth.
+    expect(res.flags!.stats.verifyBudget).toBe(20);
+  });
+
+  it('chapters only: no flag question is asked', async () => {
+    const fake = new FakeHandle();
+    const { server } = fakeServer(fake);
+    const res = await new SnapAnalysisService(server, new SnapFlagRanker()).run({
+      segments: segments(), categories: CATEGORIES, chapters: true, flags: false, chapterOptions: { switchCost: 2 },
+    });
+    expect(res.flags).toBeNull();
+    expect(res.chapters!.chapters.map((c) => c.title)).toEqual(['Cooking pasta', 'Travel plans']);
+    expect(fake.decides.every((r) => r.questions.every((q) => !q.name.startsWith('g:')))).toBe(true);
+  });
 });

@@ -1,5 +1,7 @@
 // Task types and interfaces for the queue system
 
+import type { AnalysisPart, AnalysisRange } from '../../analysis/analysis-parts';
+
 export type TaskType =
   | 'get-info'
   | 'download'
@@ -89,6 +91,14 @@ export interface AnalyzeTask extends BaseTask {
     /** `local` = a model in the Crucible server's own catalog; the rest are its upstreams. */
     aiProvider?: 'local' | 'ollama' | 'claude' | 'openai';
     customInstructions?: string;
+    /**
+     * The parts to make: 'metadata' (title, description, tags), 'chapters',
+     * 'flags' (the "Analysis" in the UI). Absent: all three, as every job
+     * queued before parts existed (analysis/analysis-parts.ts).
+     */
+    parts?: AnalysisPart[];
+    /** Flags only: one chapter's stretch of the video, in seconds (Scout's chapter action). */
+    range?: AnalysisRange;
   };
 }
 
