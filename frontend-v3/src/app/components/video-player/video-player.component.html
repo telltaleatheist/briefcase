@@ -7,6 +7,13 @@
       <button type="button" class="toast-dismiss" (click)="dismissEditorError()" title="Dismiss">✕</button>
     </div>
   }
+  <!-- In-editor note: what was queued from here (a chapter's analysis) -->
+  @if (editorInfoToast(); as infoMsg) {
+    <div class="editor-info-toast" role="status">
+      <span>{{ infoMsg }}</span>
+      <button type="button" class="toast-dismiss" (click)="dismissEditorInfo()" title="Dismiss">✕</button>
+    </div>
+  }
   <!-- Dismissible chip: analysis failed to load, timeline missing AI sections -->
   @if (analysisLoadFailed()) {
     <div class="analysis-failed-chip" role="status">
@@ -424,6 +431,9 @@
           (sectionDelete)="onSectionDeleteFromPanel($event)"
           (chapterClick)="onChapterClick($event)"
           (chapterDelete)="onChapterDelete($event)"
+          [chapterAnalyzeBusyId]="chapterAnalyzeBusyId()"
+          [chapterAnalyzeLocked]="chapterAnalyzeLocked()"
+          (chapterAnalyze)="onChapterAnalyze($event)"
           (filterToggle)="onFilterToggle($event)"
           (filterSelectAll)="onFilterSelectAll()"
           (filterDeselectAll)="onFilterDeselectAll()"

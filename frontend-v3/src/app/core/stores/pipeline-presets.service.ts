@@ -56,8 +56,9 @@ export const PIPELINE_STEPS: {
   {
     type: 'ai-analyze',
     label: 'AI Analyze',
-    description: 'Chapters and flags on Crucible',
-    defaultConfig: { customInstructions: '', aiModel: '' },
+    description: 'Metadata, chapters and flags on Crucible',
+    // `parts`: which of metadata / chapters / flags to run (models/analysis-parts.ts).
+    defaultConfig: { customInstructions: '', aiModel: '', parts: ['metadata', 'chapters', 'flags'] },
   },
 ];
 

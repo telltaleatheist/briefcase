@@ -7,6 +7,7 @@ import { VideoWeek, VideoItem } from '../models/video.model';
 import { JobRequest } from '../models/task.model';
 import { Library, NewLibrary } from '../models/library.model';
 import { getApiBase } from '../core/runtime-url';
+import { analysisPartsOf } from '../models/analysis-parts';
 
 export interface ApiResponse<T> {
   success: boolean;
@@ -598,6 +599,8 @@ export class LibraryService {
             aiModel,
             aiProvider,
             customInstructions: config?.customInstructions || '',
+            // Exactly the parts asked for (an older config without them: all three).
+            parts: analysisPartsOf(config),
           }
         }];
       }

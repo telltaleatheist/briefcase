@@ -70,8 +70,13 @@
               <span class="step-title">{{ def.label }}</span>
               @if (aiLocked(def.type)) {
                 <span class="step-sub step-reason">{{ readiness.reason() }}</span>
-              } @else if (doneHint(def.type)) {
-                <span class="step-sub">{{ doneHint(def.type) }}</span>
+              } @else {
+                @if (def.type === 'ai-analyze' && isEnabled(def.type)) {
+                  <span class="step-sub">{{ partsSummary() }}</span>
+                }
+                @if (doneHint(def.type)) {
+                  <span class="step-sub">{{ doneHint(def.type) }}</span>
+                }
               }
             </span>
           </label>
@@ -136,6 +141,29 @@
                 </div>
               }
               @case ('ai-analyze') {
+
+                <!-- What to run: each part is its own set of calls on Crucible -->
+                <div class="opt-block">
+                  <span class="opt-label">Run</span>
+                  <div class="part-list" role="group" aria-label="Parts of the AI analysis to run">
+                    @for (part of partDefs; track part.part) {
+                      <label class="part-card" [class.on]="hasPart(part.part)">
+                        <input
+                          type="checkbox"
+                          class="part-box"
+                          [checked]="hasPart(part.part)"
+                          (change)="togglePart(part.part)" />
+                        <span class="part-text">
+                          <span class="part-title">{{ part.label }}</span>
+                          <span class="part-sub">{{ part.description }}</span>
+                        </span>
+                      </label>
+                    }
+                  </div>
+                  @if (partsHint(); as hint) {
+                    <span class="opt-hint">{{ hint }}</span>
+                  }
+                </div>
 
                 <!-- Custom instructions + history -->
                 <div class="opt-block">

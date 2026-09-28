@@ -232,6 +232,17 @@
                   </span>
                 </div>
               </button>
+              <button class="chapter-analyze"
+                [class.busy]="chapterAnalyzeBusyId === row.chapter.id"
+                [disabled]="chapterAnalyzeBusyId === row.chapter.id || !!chapterAnalyzeLocked"
+                (click)="onChapterAnalyze(row.chapter)"
+                [attr.aria-label]="'Analyze flags in ' + row.chapter.title"
+                [title]="chapterAnalyzeTitle(row.chapter)">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M4 22V4"/>
+                  <path d="M4 4h12l-2 4 2 4H4"/>
+                </svg>
+              </button>
               <button class="chapter-delete" (click)="onChapterDelete(row.chapter)" title="Delete chapter">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M18 6L6 18M6 6l12 12"/>

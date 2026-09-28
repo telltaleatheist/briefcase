@@ -49,6 +49,9 @@ import { MarkerDialogComponent, MarkerDialogData } from './marker-dialog/marker-
 import { KeyboardShortcutsDialogComponent } from './keyboard-shortcuts-dialog/keyboard-shortcuts-dialog.component';
 import { TabBarComponent } from './tab-bar/tab-bar.component';
 import { getApiBase } from '../../core/runtime-url';
+import { CrucibleReadinessService } from '../../services/crucible-readiness.service';
+import { PipelinePresetsService } from '../../core/stores/pipeline-presets.service';
+import { splitAiModelValue } from '../../models/ai-model-value';
 import { chapterSubtreeIds, topLevelChapters } from './analysis-panel/chapter-outline';
 
 // Tool types for editor
@@ -136,6 +139,8 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
   private http = inject(HttpClient);
   private tourService = inject(TourService);
   private websocketService = inject(WebsocketService);
+  private readiness = inject(CrucibleReadinessService);
+  private pipelinePresets = inject(PipelinePresetsService);
 
   private readonly API_BASE = getApiBase();
   private readonly MAX_TABS = 15;
@@ -545,6 +550,26 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
     this.editorErrorToast.set(null);
   }
 
+  /** A neutral note inside the editor (what was queued), cleared like the error toast. */
+  editorInfoToast = signal<string | null>(null);
+  private editorInfoSub?: Subscription;
+
+  private showEditorInfo(message: string): void {
+    this.editorInfoToast.set(message);
+    this.editorInfoSub?.unsubscribe();
+    this.editorInfoSub = timer(6000).subscribe(() => this.editorInfoToast.set(null));
+  }
+
+  dismissEditorInfo(): void {
+    this.editorInfoSub?.unsubscribe();
+    this.editorInfoToast.set(null);
+  }
+
+  /** The chapter whose flag analysis is being queued (its button waits). */
+  chapterAnalyzeBusyId = signal<string | null>(null);
+  /** Chapter analysis is an AI action: disabled, with the reason, while Crucible is not ready. */
+  chapterAnalyzeLocked = computed(() => (this.readiness.ready() ? null : this.readiness.reason()));
+
   /**
    * Dismissible chip: AI analysis/sections failed to load — the timeline is
    * rendering without them (progressive render stands, silence doesn't).
@@ -712,6 +737,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
   private playbackInterval?: any;
   private unsubVideoPathUpdated?: () => void;
   private unsubVideoRenamed?: () => void;
+  private unsubAnalysisCompleted?: () => void;
 
   // Track playing state separately to avoid effect re-triggering
   private wasPlaying = false;
@@ -868,6 +894,13 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
       if (this.activeTabId() === matchingTab.id) {
         this.videoPath.set(event.newPath);
       }
+    });
+
+    // An analysis of the open video finished (a chapter's flags queued from
+    // here, or any other run): show what is stored now.
+    this.unsubAnalysisCompleted = this.websocketService.onAnalysisCompleted((event) => {
+      if (event.videoId !== this.videoId()) return;
+      this.loadAnalysisForVideo(event.videoId).catch(err => console.error('Failed to reload analysis:', err));
     });
 
     // Try to start the video editor tour (basic tour first, then advanced)
@@ -1504,6 +1537,8 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
     // Clean up websocket subscriptions
     this.unsubVideoPathUpdated?.();
     this.unsubVideoRenamed?.();
+    this.unsubAnalysisCompleted?.();
+    this.editorInfoSub?.unsubscribe();
 
     // Remove event listeners
     window.removeEventListener('wheel', this.wheelHandler);
@@ -3023,6 +3058,70 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
         videoName: this.metadata().filename
       }
     });
+  }
+
+  /**
+   * Run the flag analysis (the "Analysis" part) on one chapter only: a queue
+   * job whose analyze task carries parts ['flags'] and the chapter's range. The
+   * backend ranks and checks only the transcript inside the range, at its real
+   * times, and replaces only the stored flags that start inside it; the rest of
+   * the video's flags, its chapters and its metadata are kept. It is queued to
+   * run now (this window has no staging queue of its own) and shows up in the
+   * main window's queue; when it finishes the analysis-completed event reloads
+   * this panel.
+   */
+  async onChapterAnalyze(chapter: TimelineChapter): Promise<void> {
+    const videoId = this.videoId();
+    if (!videoId || this.chapterAnalyzeBusyId()) return;
+    if (!this.readiness.requireReady()) {
+      this.showEditorError(`Crucible is needed to analyze a chapter: ${this.readiness.reason()}`, null);
+      return;
+    }
+
+    this.chapterAnalyzeBusyId.set(chapter.id);
+    try {
+      const model = await this.resolveAnalysisModel();
+      if (!model) {
+        this.showEditorError('No AI model is chosen: pick one in Process or Settings, then try again', null);
+        return;
+      }
+      const { aiProvider, aiModel } = splitAiModelValue(model);
+      const range = { start: chapter.startTime, end: chapter.endTime, label: chapter.title };
+      await firstValueFrom(
+        this.http.post<{ success: boolean; jobId: string }>(`${this.API_BASE}/queue/jobs`, {
+          videoId,
+          displayName: `${this.metadata().filename || this.videoTitle()} — flags in "${chapter.title}"`,
+          tasks: [{ type: 'analyze', options: { aiModel, aiProvider, parts: ['flags'], range } }],
+        })
+      );
+      this.showEditorInfo(
+        `Queued: flags for "${chapter.title}" (${this.formatTime(chapter.startTime)} - ${this.formatTime(chapter.endTime)}). ` +
+        `They appear here when the job finishes.`
+      );
+    } catch (error) {
+      const refusal = this.readiness.handleRefusal(error);
+      this.showEditorError(refusal ?? "Couldn't queue the chapter analysis — try again", error);
+    } finally {
+      this.chapterAnalyzeBusyId.set(null);
+    }
+  }
+
+  /**
+   * The AI model a chapter analysis runs on, in the library page's order: the
+   * model last chosen in the Process picker, then the library's default, then
+   * the global default. Null when none is set (the user is told, nothing runs).
+   */
+  private async resolveAnalysisModel(): Promise<string | null> {
+    const remembered = this.pipelinePresets.lastChosenAiModel();
+    if (remembered) return remembered;
+    const library = await firstValueFrom(
+      this.http.get<{ aiModel: string | null }>(`${this.API_BASE}/database/libraries/default-ai-model`)
+    ).catch(() => null);
+    if (library?.aiModel) return library.aiModel;
+    const global = await firstValueFrom(
+      this.http.get<{ defaultAI: { provider: string; model: string } | null }>(`${this.API_BASE}/config/default-ai`)
+    ).catch(() => null);
+    return global?.defaultAI ? `${global.defaultAI.provider}:${global.defaultAI.model}` : null;
   }
 
   // ========== TAB MANAGEMENT ==========

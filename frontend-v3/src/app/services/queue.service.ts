@@ -23,6 +23,7 @@ import { CrucibleReadinessService, taskNeedsCrucible } from './crucible-readines
 import { LibraryService, BackendJobRequest, BackendTask } from './library.service';
 import { ErrorSurface } from '../core/error-surface.service';
 import { getApiBase } from '../core/runtime-url';
+import { analysisPartsOf } from '../models/analysis-parts';
 
 const STORAGE_KEY = 'briefcase-queue-jobs';
 const RETENTION_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -1545,6 +1546,10 @@ export class QueueService implements OnDestroy {
             aiModel,
             aiProvider,
             customInstructions: analyzeTask.options?.['customInstructions'],
+            // Exactly the parts asked for (an older config without them: all three).
+            parts: analysisPartsOf(analyzeTask.options),
+            // One chapter's flags (Scout): its stretch of the video, kept on a re-submit.
+            ...(analyzeTask.options?.['range'] ? { range: analyzeTask.options['range'] } : {}),
           }
         });
       }

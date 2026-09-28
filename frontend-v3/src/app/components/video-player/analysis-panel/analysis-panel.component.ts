@@ -48,6 +48,15 @@ export class AnalysisPanelComponent implements OnChanges {
   @Output() sectionDelete = new EventEmitter<string>(); // section id
   @Output() chapterClick = new EventEmitter<TimelineChapter>();
   @Output() chapterDelete = new EventEmitter<string>(); // chapter id
+  /**
+   * Run the flag analysis on just this chapter's stretch of the video (a job
+   * that ranks and checks only its transcript, and replaces only its flags).
+   */
+  @Output() chapterAnalyze = new EventEmitter<TimelineChapter>();
+  /** The chapter whose analysis request is on its way (its button waits). */
+  @Input() chapterAnalyzeBusyId: string | null = null;
+  /** Why a chapter can't be analyzed now (Crucible is not ready), or null. AI actions wait for Crucible. */
+  @Input() chapterAnalyzeLocked: string | null = null;
   @Output() flagFilterChange = new EventEmitter<FlagFilter>();
   @Output() filterToggle = new EventEmitter<string>();
   @Output() filterSelectAll = new EventEmitter<void>();
@@ -236,6 +245,16 @@ export class AnalysisPanelComponent implements OnChanges {
 
   onChapterDelete(chapter: TimelineChapter): void {
     this.chapterDelete.emit(chapter.id);
+  }
+
+  onChapterAnalyze(chapter: TimelineChapter): void {
+    this.chapterAnalyze.emit(chapter);
+  }
+
+  chapterAnalyzeTitle(chapter: TimelineChapter): string {
+    if (this.chapterAnalyzeLocked) return this.chapterAnalyzeLocked;
+    return `Analyze this chapter: find and check flags in ${this.formatTimeRange(chapter.startTime, chapter.endTime)} only ` +
+      `(replaces this chapter's flags; the rest of the video is kept)`;
   }
 
   formatChapterDuration(chapter: TimelineChapter): string {
