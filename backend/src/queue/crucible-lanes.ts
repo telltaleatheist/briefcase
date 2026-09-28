@@ -60,6 +60,7 @@ import { decideVenue, type VenueAnswer } from '../crucible/venue-decision';
 import type { ServerReach } from '../crucible/wire/settings-wire';
 import type { Task } from '../common/interfaces/task.interface';
 import { CrucibleTranscriptionService } from '../crucible/asr/crucible-transcription.service';
+import { SCORER_LOAD_CONTEXT, SCORER_PREFERRED_MODEL } from '../scorer/crucible-scorer.service';
 
 export const GPU_LANE_WIDTH = 1;
 export const CLOUD_LANE_WIDTH = 2;
@@ -368,7 +369,14 @@ export class CrucibleLanesService implements OnModuleInit, BeforeApplicationShut
           const ok = typeof result === 'object' && result !== null && (result as { success?: unknown }).success === true;
           if (parked !== null && !ok) throw new CrucibleParkedError(parked.server ?? server, parked.reason);
           return result;
-        }, { signal });
+        }, {
+          signal,
+          // The analysis engine reads its decisions from this same model at
+          // SCORER_LOAD_CONTEXT. Reserved at its default window it is loaded
+          // twice, once here and again for the engine (measured on the PC,
+          // 2026-09-27: 1.5 minutes each); reserved at the engine's window, once.
+          ...(target.route === 'local' && target.model === SCORER_PREFERRED_MODEL ? { loadContext: SCORER_LOAD_CONTEXT } : {}),
+        });
       } catch (err) {
         if (!reserved && err instanceof CrucibleBusyError) throw new CrucibleParkedError(err.server, err.busyLine);
         if (!reserved && err instanceof CrucibleChatError && err.code === 'unreachable') {

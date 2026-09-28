@@ -85,7 +85,9 @@ describe('the reservation', () => {
     const id = rig.qm.addJob(analyzeJob('v1', 'local:qwen3.5-9b'));
     await until(() => rig.qm.getJob(id)?.status === 'completed');
     // The load (with its lease) happened before the task started, once.
-    expect(fake.jobs.map((j) => [j.type, j.model, (j.params as any).lease?.act])).toEqual([['load-model', 'qwen3.5-9b', 'analysis']]);
+    // At the analysis engine's window: the engine reads its decisions from this
+    // same model, and a reservation at the default window would load it twice.
+    expect(fake.jobs.map((j) => [j.type, j.model, (j.params as any).lease?.act, (j.params as any).context])).toEqual([['load-model', 'qwen3.5-9b', 'analysis', 32768]]);
     const startedAt = rig.events.findIndex((e) => e.name === 'task.started');
     expect(rig.events[startedAt].data).toMatchObject({ jobId: id, pool: 'lane', lane: 'gpu:mac', venue: 'mac' });
     // Inside the run the lease was on the ledger; after it, released and gone.
@@ -94,6 +96,17 @@ describe('the reservation', () => {
     expect(fake.openLease()).toBeNull();
     expect(ledger.read()).toEqual([]);
     expect(rig.qm.getJob(id)).toMatchObject({ lane: 'gpu:mac', venue: 'mac' });
+  });
+});
+
+describe('the reservation of a model the analysis engine does not read from', () => {
+  it('loads at the model\'s own default window', async () => {
+    await wire();
+    const rig = makeRig(lanes);
+    rig.media.analyze = analysisThatCalls(['qwen3.5-4b']);
+    const id = rig.qm.addJob(analyzeJob('v1', 'local:qwen3.5-4b'));
+    await until(() => rig.qm.getJob(id)?.status === 'completed');
+    expect(fake.jobs.map((j) => [j.type, j.model, (j.params as any).context])).toEqual([['load-model', 'qwen3.5-4b', undefined]]);
   });
 });
 

@@ -20,7 +20,7 @@ import { PLUG } from '../../src/scorer/chapters/snap-prompts';
 import type { SentenceUnit } from '../../src/scorer/chapters/units';
 import * as crucibleDecide from '../../src/scorer/crucible-decide';
 import { DECIDE_TOP_K_MARGIN, LABEL_MASS_GATE, floorAnswer, toWireRequest } from '../../src/scorer/crucible-decide';
-import { CrucibleScorerService, SCORER_LOAD_CONTEXT, pickDecideModel } from '../../src/scorer/crucible-scorer.service';
+import { COUNT_PIECE_CHARS, CrucibleScorerService, SCORER_LOAD_CONTEXT, countPieces, pickDecideModel } from '../../src/scorer/crucible-scorer.service';
 import { SnapFlagRanker } from '../../src/scorer/flags/snap-flag-ranker.service';
 import { SnapAnalysisService, SnapEngineError } from '../../src/scorer/snap-analysis.service';
 import type { ScorerHandle } from '../../src/scorer/scorer-handle';
@@ -505,6 +505,36 @@ describe('one lease across the pass, and every "can\'t" by name', () => {
     expect(counts).toEqual([3, 2]);
     // One chat for the template, one per text.
     expect(fake.chatBodies().filter((b) => b['max_tokens'] === 1)).toHaveLength(3);
+  });
+
+  it('a transcript longer than the loaded window is counted in pieces that each fit it, and the pieces add up', async () => {
+    // REGRESSION (2026-09-27, the PC): a four-hour transcript counted in one
+    // chat was over the 32768-token load, and vLLM refused it ("maximum
+    // context length is 32768 tokens"), failing the analysis before it began.
+    const { fake, chat, scorer } = await started();
+    const line = 'word '.repeat(40).trim();
+    const lines = Array.from({ length: 1200 }, () => line);
+    const text = lines.join('\n');
+    expect(text.length).toBeGreaterThan(2 * COUNT_PIECE_CHARS);
+    const count = await chat.withRun(() => scorer.withScorer((h) => h.countTokens(text)));
+    expect(count).toBe(1200 * 40);
+    const counted = fake.chatBodies().filter((b) => b['max_tokens'] === 1).slice(1);
+    expect(counted.length).toBe(countPieces(text, COUNT_PIECE_CHARS).length);
+    for (const body of counted) {
+      const content = String((body['messages'] as Array<{ content: string }>)[0].content);
+      expect(content.length).toBeLessThanOrEqual(COUNT_PIECE_CHARS);
+      expect(content.length).toBeLessThan(SCORER_LOAD_CONTEXT);
+    }
+  });
+
+  it('countPieces cuts after a line break when one is in reach, hard otherwise, and joins back to the text', () => {
+    expect(countPieces('', 10)).toEqual(['']);
+    expect(countPieces('short', 10)).toEqual(['short']);
+    expect(countPieces('aaaa\nbbbb\ncccc', 10)).toEqual(['aaaa\nbbbb\n', 'cccc']);
+    expect(countPieces('x'.repeat(25), 10)).toEqual(['x'.repeat(10), 'x'.repeat(10), 'x'.repeat(5)]);
+    const text = Array.from({ length: 500 }, (_, i) => `line ${i} ${'y'.repeat(i % 37)}`).join('\n');
+    expect(countPieces(text, 300).join('')).toBe(text);
+    expect(countPieces(text, 300).every((p) => p.length <= 300)).toBe(true);
   });
 
   it('a decide refused by the SDK for asking the wrong thing is a ScorerError by name, not a park', async () => {

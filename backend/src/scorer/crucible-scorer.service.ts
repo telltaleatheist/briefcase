@@ -81,6 +81,35 @@ export const DECIDE_MIN_VERSION = '1.0.24';
  * `context_over_limit` by name.
  */
 export const SCORER_LOAD_CONTEXT = 32768;
+/**
+ * The most characters one token count sends. A token is at least one
+ * character (a CJK character can be one each), so a piece this long is under
+ * {@link SCORER_LOAD_CONTEXT} tokens whatever the language, with the chat
+ * template's own tokens to spare.
+ */
+export const COUNT_PIECE_CHARS = 24_000;
+
+/**
+ * `text` in pieces of at most `max` characters, cut after a line break where
+ * there is one in reach, else hard at `max`. Joined back, the pieces are
+ * `text` exactly. An empty text is one empty piece.
+ */
+export function countPieces(text: string, max: number): string[] {
+  if (text.length <= max) return [text];
+  const pieces: string[] = [];
+  let from = 0;
+  while (from < text.length) {
+    let to = Math.min(from + max, text.length);
+    if (to < text.length) {
+      const nl = text.lastIndexOf('\n', to - 1);
+      if (nl >= from) to = nl + 1;
+    }
+    pieces.push(text.slice(from, to));
+    from = to;
+  }
+  return pieces;
+}
+
 /** The capability classes this seam names its work by (X-Crucible-Act). */
 export const DECIDE_ACT = 'decide';
 export const GENERATE_ACT = 'generate';
@@ -359,6 +388,15 @@ export class CrucibleScorerService {
   /**
    * Tokens `text` is on this model: prompt_tokens of a one-token chat holding
    * it, less the template's own (a chat of nothing, measured once per model).
+   *
+   * IN PIECES OF AT MOST {@link COUNT_PIECE_CHARS}, summed. The count is asked
+   * of the model loaded at {@link SCORER_LOAD_CONTEXT}, and a whole long
+   * transcript is more than that window: vLLM (the PC) refuses such a prompt
+   * outright ("maximum context length is 32768 tokens ... your prompt contains
+   * at least 32768 input tokens"), which failed a four-hour video's analysis
+   * before it began, while mlx (the Mac) quietly took it. A piece is cut at a
+   * line break (the transcript is one unit per line), so the sum differs from
+   * a one-shot count by at most a token per cut.
    */
   private async countTokens(server: string, model: string, text: string, signal?: AbortSignal): Promise<number> {
     const key = `${server}\n${model}`;
@@ -367,7 +405,11 @@ export class CrucibleScorerService {
       template = await this.promptTokens(server, model, '', signal);
       this.templateTokens.set(key, template);
     }
-    return Math.max(0, (await this.promptTokens(server, model, text, signal)) - template);
+    let total = 0;
+    for (const piece of countPieces(text, COUNT_PIECE_CHARS)) {
+      total += Math.max(0, (await this.promptTokens(server, model, piece, signal)) - template);
+    }
+    return total;
   }
 
   private async promptTokens(server: string, model: string, content: string, signal?: AbortSignal): Promise<number> {
