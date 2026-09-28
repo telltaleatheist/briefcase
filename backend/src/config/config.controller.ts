@@ -2,6 +2,7 @@ import { BadRequestException, Controller, Post, Body, Get, OnModuleInit } from '
 import { SharedConfigService } from './shared-config.service';
 import { DEFAULT_PROMPTS, DEFAULT_CATEGORIES } from '../analysis/prompts/analysis-prompts';
 import { DEFAULT_TIME_WINDOWS, WINDOW_SECONDS_RANGE, readWindowsSetting, windowsOf } from '../scorer/windows';
+import { DEFAULT_FLAG_FINDER, flagFinderOf, readFlagFinder } from '../analysis/flag-generate';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -372,6 +373,40 @@ export class ConfigController implements OnModuleInit {
       return { success: true, setting };
     } catch (error: any) {
       return { success: false, message: `Failed to save the analysis windows setting: ${(error as Error).message}` };
+    }
+  }
+
+  /**
+   * How the Analysis part finds its flag candidates: the flags model reading
+   * the transcript ('generate', the default) or the scorer's ranking ('snap')
+   * (analysis/flag-generate.ts). Stored as `flagFinder` in app-config.json.
+   */
+  @Get('flag-finder')
+  async getFlagFinder() {
+    try {
+      const config = fs.existsSync(this.configPath) ? JSON.parse(fs.readFileSync(this.configPath, 'utf8')) : {};
+      return { success: true, finder: flagFinderOf(config.flagFinder), default: DEFAULT_FLAG_FINDER };
+    } catch (error: any) {
+      return { success: false, message: `Failed to read how flags are found: ${(error as Error).message}` };
+    }
+  }
+
+  @Post('flag-finder')
+  async saveFlagFinder(@Body() body: unknown) {
+    const finder = readFlagFinder(body);
+    if (finder !== 'generate' && finder !== 'snap') {
+      throw new BadRequestException({ success: false, message: `How flags are found was not saved: ${finder}` });
+    }
+    try {
+      const configDir = path.dirname(this.configPath);
+      if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true });
+      const config = fs.existsSync(this.configPath) ? JSON.parse(fs.readFileSync(this.configPath, 'utf8')) : {};
+      config.flagFinder = finder;
+      config.lastUpdated = new Date().toISOString();
+      fs.writeFileSync(this.configPath, JSON.stringify(config, null, 2), 'utf8');
+      return { success: true, finder };
+    } catch (error: any) {
+      return { success: false, message: `Failed to save how flags are found: ${(error as Error).message}` };
     }
   }
 

@@ -41,7 +41,7 @@ const PROMPT_KEYS: (keyof AnalysisPrompts)[] = ['description', 'title', 'tags', 
 /** The tasks that can each have their own model (app-config `taskModels`). */
 const AI_TASKS: { key: AiTaskName; label: string; hint: string }[] = [
   { key: 'chapter', label: 'Chapter titles and summaries', hint: 'Names and summarises the chapters the scorer found.' },
-  { key: 'flags', label: 'Flag checks', hint: 'Checks each flag the scorer ranked, and keeps or drops it.' },
+  { key: 'flags', label: 'Flag checks', hint: 'Reads the transcript for flags (when the model finds them), then checks each one and keeps or drops it.' },
   { key: 'description', label: 'Description', hint: '' },
   { key: 'tags', label: 'Tags', hint: '' },
   { key: 'title', label: 'Suggested title', hint: '' },
@@ -121,6 +121,11 @@ export class AiPaneComponent {
   readonly windowsSaved = signal(false);
   readonly windowsError = signal<string | null>(null);
 
+  // How flags are found (backend analysis/flag-generate.ts)
+  readonly flagFinder = signal<'generate' | 'snap'>('generate');
+  readonly flagFinderSaved = signal(false);
+  readonly flagFinderError = signal<string | null>(null);
+
   // Categories
   categories = signal<AnalysisCategory[]>([]);
   editingCategoryId = signal<string | null>(null);
@@ -150,6 +155,43 @@ export class AiPaneComponent {
     void this.loadCategories();
     void this.loadPrompts();
     void this.loadWindows();
+    void this.loadFlagFinder();
+  }
+
+  private async loadFlagFinder(): Promise<void> {
+    try {
+      const response = await fetch(`${this.apiBase}/config/flag-finder`);
+      if (!response.ok) throw new Error(`Flag finder request failed (${response.status})`);
+      const data = await response.json();
+      if (data.finder === 'generate' || data.finder === 'snap') this.flagFinder.set(data.finder);
+    } catch (error) {
+      this.errorSurface.surfaceError("Couldn't load how flags are found", error);
+    }
+  }
+
+  onFlagFinderChange(finder: 'generate' | 'snap'): void {
+    this.flagFinder.set(finder);
+    void this.saveFlagFinder();
+  }
+
+  private async saveFlagFinder(): Promise<void> {
+    this.flagFinderError.set(null);
+    try {
+      const response = await fetch(`${this.apiBase}/config/flag-finder`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ finder: this.flagFinder() }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        this.flagFinderError.set(data?.message ?? `Not saved (${response.status})`);
+        return;
+      }
+      this.flagFinderSaved.set(true);
+      setTimeout(() => this.flagFinderSaved.set(false), 1500);
+    } catch (error) {
+      this.errorSurface.surfaceError("How flags are found didn't save", error);
+    }
   }
 
   private async loadWindows(): Promise<void> {

@@ -134,10 +134,39 @@
     <p class="hint warn">{{ error }}</p>
   }
   <p class="hint">
-    In windows, chapters and flags are found by asking about each stretch of the transcript (90 s windows
+    This is how the scorer reads: chapters, and flags when the scorer finds them.
+    In windows, they are found by asking about each stretch of the transcript (90 s windows
     every 60 s by default) instead of every sentence: many times fewer questions, so long videos finish
     far sooner, with chapter and flag edges on a 30 s grid. A brief remark inside a window can be missed;
     sentence by sentence catches it, but takes about two hours for a four-hour show.
+  </p>
+</div>
+
+<div class="pane-section">
+  <p class="section-label">How flags are found</p>
+  <div class="radio-row" role="radiogroup" aria-label="How flags are found">
+    <label>
+      <input type="radio" name="flag-finder" id="flag-finder-generate"
+        [checked]="flagFinder() === 'generate'" (change)="onFlagFinderChange('generate')" />
+      Model reads the transcript
+    </label>
+    <label>
+      <input type="radio" name="flag-finder" id="flag-finder-snap"
+        [checked]="flagFinder() === 'snap'" (change)="onFlagFinderChange('snap')" />
+      Scorer
+    </label>
+  </div>
+  @if (flagFinderSaved()) {
+    <span class="save-flash">Saved</span>
+  }
+  @if (flagFinderError(); as error) {
+    <p class="hint warn">{{ error }}</p>
+  }
+  <p class="hint">
+    The model reads the transcript about 8,000 characters at a time and marks every passage where a category
+    may apply; it is the "Flag checks" model above, so pick the 9B or the 27B there. The scorer ranks every
+    stretch of the transcript against the categories instead. Either way, each passage is then checked and
+    given its reason. Chapters always come from the scorer.
   </p>
 </div>
 
