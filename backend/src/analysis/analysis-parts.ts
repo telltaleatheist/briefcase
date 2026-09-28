@@ -123,6 +123,13 @@ export interface AnalysisProgressBands {
  * summaries 71-80, flags 80-92, metadata 92-98.
  */
 const STAGE_WEIGHTS = { engine: 67, summaries: 10, flags: 12, metadata: 6 } as const;
+
+/**
+ * The flag stage's weight when the model reads the transcript for flags: one
+ * generation per ~8,000 characters, then the checks, so it takes over the flag
+ * scan's share of the engine's time.
+ */
+export const GENERATE_FLAGS_STAGE_WEIGHT = 30;
 const BAR_START = 3;
 const BAR_END = 98;
 
@@ -131,16 +138,25 @@ const BAR_END = 98;
  * bar in proportion to their usual weights, so a skipped stage takes none of it
  * and the bar never sits still across a stage that is not happening.
  */
-export function analysisProgressBands(run: { engine: boolean; summaries: boolean; flags: boolean; metadata: boolean }): AnalysisProgressBands {
+export function analysisProgressBands(
+  run: { engine: boolean; summaries: boolean; flags: boolean; metadata: boolean },
+  /**
+   * A stage's weight when it is not its usual share: the flag stage when the
+   * model reads the transcript for flags (flag-generate.ts), which is then the
+   * flag stage's work rather than the engine's.
+   */
+  weights: Partial<Record<keyof typeof STAGE_WEIGHTS, number>> = {},
+): AnalysisProgressBands {
   const order = ['engine', 'summaries', 'flags', 'metadata'] as const;
-  const total = order.reduce((sum, stage) => sum + (run[stage] ? STAGE_WEIGHTS[stage] : 0), 0);
+  const weight = (stage: (typeof order)[number]) => weights[stage] ?? STAGE_WEIGHTS[stage];
+  const total = order.reduce((sum, stage) => sum + (run[stage] ? weight(stage) : 0), 0);
   const bands: AnalysisProgressBands = { engine: null, summaries: null, flags: null, metadata: null };
   if (total === 0) return bands;
   const scale = (BAR_END - BAR_START) / total;
   let at = BAR_START;
   for (const stage of order) {
     if (!run[stage]) continue;
-    const end = at + STAGE_WEIGHTS[stage] * scale;
+    const end = at + weight(stage) * scale;
     // The summaries start one point past the engine's end, where "Found N
     // chapters" is said (as they always have).
     const start = stage === 'summaries' && run.engine ? at + 1 : at;

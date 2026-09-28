@@ -35,8 +35,11 @@ export interface FlagCandidate {
   score: number;
   /** The stance proposition the verifier will test this candidate against. */
   proposition: string;
-  /** Which pass produced it — sentence-level scoring or sliding-window scoring. */
-  source: 'sentence' | 'window';
+  /**
+   * Which pass produced it: sentence-level or sliding-window scoring, or a
+   * passage the model returned reading the transcript (flag-generate.ts).
+   */
+  source: 'sentence' | 'window' | 'generate';
   /**
    * True when this pair never cleared a threshold on its own and exists only
    * because corroborating categories fired near it (a stored field; the snap

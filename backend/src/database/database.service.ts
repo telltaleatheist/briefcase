@@ -102,13 +102,15 @@ export interface AnalysisSectionRecord {
    *
    * On a row with ranker = 'snap-v1' this is the snap ranker's per-category
    * span score s_c, not an NLI entailment probability: same column, different
-   * scale, told apart by `ranker` (docs/snap-analysis-plan.md §5.6).
+   * scale, told apart by `ranker` (docs/snap-analysis-plan.md §5.6). NULL on
+   * 'generate-v1' rows: the model named the passage, nothing scored it.
    */
   nli_score: number | null;
   /**
-   * Which ranker produced the row's candidate: 'nli', 'snap-v1', or NULL on
-   * legacy/discovery rows (migration 26). Lets readers pick a per-ranker
-   * threshold for `nli_score`.
+   * Which ranker produced the row's candidate: 'nli', 'snap-v1',
+   * 'generate-v1' (the flags model reading the transcript,
+   * analysis/flag-generate.ts), or NULL on legacy/discovery rows (migration
+   * 26). Lets readers pick a per-ranker threshold for `nli_score`.
    */
   ranker: string | null;
 }
@@ -4033,7 +4035,7 @@ export class DatabaseService {
     verdict?: 'flag' | 'skip' | 'candidate';
     /** The ranker's score for this row's category. Omitted on paths with no score. */
     nliScore?: number;
-    /** Which ranker scored the row ('nli' | 'snap-v1'). Omitted on paths with no ranker. */
+    /** Which ranker produced the row ('nli' | 'snap-v1' | 'generate-v1'). Omitted on paths with no ranker. */
     ranker?: string;
   }) {
     const db = this.ensureInitialized();

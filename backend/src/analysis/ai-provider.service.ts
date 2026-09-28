@@ -96,6 +96,17 @@ export interface AIGenerateOverrides {
    * cancellation for a failure worth retrying, recording, or degrading around.
    */
   signal?: AbortSignal;
+  /**
+   * The output ceiling for THIS call. Sent to a Crucible catalog model only
+   * (as max_tokens); cloud upstreams are never sent one (target.ts), and
+   * absent, the model's manifest default applies.
+   */
+  maxTokens?: number;
+  /**
+   * Thinking on or off for THIS call. Sent to a Crucible catalog model only
+   * (chat_template_kwargs.enable_thinking); absent, the manifest's default.
+   */
+  thinking?: boolean;
 }
 
 /**
@@ -358,6 +369,8 @@ export class AIProviderService {
         temperature,
         responseFormat: overrides?.format,
         schemaName: task ?? 'answer',
+        ...(overrides?.maxTokens !== undefined ? { maxTokens: overrides.maxTokens } : {}),
+        ...(overrides?.thinking !== undefined ? { thinking: overrides.thinking } : {}),
         contextTokens,
         signal,
         busyWait: parkOnBusy ? undefined : {
