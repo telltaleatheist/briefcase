@@ -13,6 +13,23 @@ import {
 import { QueueManagerService } from './queue-manager.service';
 import { Task } from '../common/interfaces/task.interface';
 import { DEFAULT_LOUDNESS_TARGET } from '../ffmpeg/ffmpeg.service';
+import { AnalysisRequestError, resolveAnalysisParts, resolveAnalysisRange } from '../analysis/analysis-parts';
+
+/**
+ * An analyze task asks for parts (and maybe a chapter range) the pipeline can
+ * make, or the request is refused here, by name, before a job exists.
+ */
+function assertAnalyzeOptions(tasks: Task[]): void {
+  for (const task of tasks) {
+    if (task.type !== 'analyze') continue;
+    try {
+      resolveAnalysisRange(task.options?.range, resolveAnalysisParts(task.options?.parts));
+    } catch (error) {
+      if (error instanceof AnalysisRequestError) throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
+      throw error;
+    }
+  }
+}
 
 @Controller('queue')
 export class QueueController {
@@ -41,6 +58,7 @@ export class QueueController {
         HttpStatus.BAD_REQUEST,
       );
     }
+    assertAnalyzeOptions(body.tasks);
 
     const jobId = this.queueManager.addJob({
       url: body.url,
@@ -81,6 +99,7 @@ export class QueueController {
     if (!body.jobs || body.jobs.length === 0) {
       throw new HttpException('At least one job is required', HttpStatus.BAD_REQUEST);
     }
+    for (const job of body.jobs) assertAnalyzeOptions(job.tasks ?? []);
 
     const jobIds: string[] = [];
 

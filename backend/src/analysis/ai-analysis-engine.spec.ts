@@ -294,6 +294,197 @@ describe('AIAnalysisService: snap is the analysis engine', () => {
   });
 });
 
+describe('AIAnalysisService: the parts a run makes', () => {
+  beforeAll(() => {
+    Logger.overrideLogger(false);
+    jest_silence();
+  });
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'engine-parts-spec-'));
+    process.env.APPDATA = tmp;
+  });
+
+  const tasks = (h: Harness) => h.generated.map((g) => g.task);
+  const metadataTasks = ['tags', 'description', 'title'];
+  /** The video's stored chapters, as media-operations hands them over. */
+  const stored = [
+    { sequence: 1, start_time: '00:00:00', end_time: '00:01:00', title: 'Stored pasta', summary: 'They boil water.' },
+    { sequence: 2, start_time: '00:01:00', end_time: '00:01:20', title: 'Stored travel', summary: 'Summer plans.' },
+  ];
+
+  it('no parts named is all three, chapters and flags sharing one scorer lease', async () => {
+    const h = new Harness();
+    const res = await h.service().analyzeTranscript(options());
+    expect(h.snapRuns).toHaveLength(1);
+    expect(h.snapRuns[0]).toMatchObject({ chapters: true, flags: true });
+    expect(res.parts).toEqual(['chapters', 'flags', 'metadata']);
+  });
+
+  it('chapters and flags together: one scorer run for both, no metadata', async () => {
+    const h = new Harness();
+    const res = await h.service().analyzeTranscript({ ...options(), parts: ['flags', 'chapters'] });
+    expect(h.snapRuns).toHaveLength(1);
+    expect(h.snapRuns[0]).toMatchObject({ chapters: true, flags: true });
+    expect(res.parts).toEqual(['chapters', 'flags']);
+    expect(res.chapters).toHaveLength(2);
+    expect(res.sections.length).toBeGreaterThan(0);
+    expect(tasks(h).some((t) => metadataTasks.includes(t))).toBe(false);
+    expect('tags' in res || 'description' in res || 'suggested_title' in res).toBe(false);
+  });
+
+  it('chapters alone: only the chapter pass and the summaries', async () => {
+    const h = new Harness();
+    h.snapRun = async () => snapResult({ flags: null });
+    const res = await h.service().analyzeTranscript({ ...options(), parts: ['chapters'] });
+    expect(h.snapRuns[0]).toMatchObject({ chapters: true, flags: false });
+    expect(new Set(tasks(h))).toEqual(new Set(['chapter']));
+    expect(res.parts).toEqual(['chapters']);
+    expect(res.chapters.map((c) => c.title)).toEqual(['Pasta day', 'Summer travel']);
+    expect(res.sections).toEqual([]);
+    expect(res.tags).toBeUndefined();
+  });
+
+  it('flags alone: only the flag pass and the checks, no chapter or metadata call', async () => {
+    const h = new Harness();
+    h.snapRun = async () => snapResult({ chapters: null });
+    const res = await h.service().analyzeTranscript({ ...options(), parts: ['flags'] });
+    expect(h.snapRuns[0]).toMatchObject({ chapters: false, flags: true });
+    expect(new Set(tasks(h))).toEqual(new Set(['flags']));
+    expect(res.parts).toEqual(['flags']);
+    expect(res.chapters).toEqual([]);
+    expect(res.sections.filter((s) => s.verdict === 'flag')).toHaveLength(3);
+  });
+
+  it("metadata alone is written from the video's stored chapters, with no scorer at all", async () => {
+    const h = new Harness();
+    const res = await h.service().analyzeTranscript({ ...options(), parts: ['metadata'], existingChapters: stored });
+    expect(h.snapRuns).toHaveLength(0);
+    expect(tasks(h).sort()).toEqual(['description', 'description', 'tags', 'title']);
+    const tagsPrompt = h.generated.find((g) => g.task === 'tags')!.prompt;
+    expect(tagsPrompt).toContain('Stored pasta: They boil water.');
+    expect(res.parts).toEqual(['metadata']);
+    expect(res.chapters).toEqual([]);
+    expect(res.tags).toEqual({ people: [], topics: ['cooking'] });
+    expect(res.description).toContain('A hook.');
+    expect(res.warnings).toBeUndefined();
+  });
+
+  it('metadata alone on a video with no chapters makes its chapters first, and the job says so', async () => {
+    const h = new Harness();
+    h.snapRun = async () => snapResult({ flags: null });
+    const res = await h.service().analyzeTranscript({ ...options(), parts: ['metadata'], existingChapters: [] });
+    expect(h.snapRuns[0]).toMatchObject({ chapters: true, flags: false });
+    expect(res.parts).toEqual(['chapters', 'metadata']);
+    expect(res.chapters.map((c) => c.title)).toEqual(['Pasta day', 'Summer travel']);
+    expect(h.generated.find((g) => g.task === 'tags')!.prompt).toContain('Pasta day: A summary of it.');
+    expect(res.warnings).toEqual(['Chapters were made first: metadata is written from chapter summaries, and this video had none.']);
+  });
+
+  it('flags and metadata on stored chapters: the flag pass alone in the scorer, metadata from the stored chapters', async () => {
+    const h = new Harness();
+    h.snapRun = async () => snapResult({ chapters: null });
+    const res = await h.service().analyzeTranscript({ ...options(), parts: ['flags', 'metadata'], existingChapters: stored });
+    expect(h.snapRuns[0]).toMatchObject({ chapters: false, flags: true });
+    expect(tasks(h).includes('chapter')).toBe(false);
+    expect(res.parts).toEqual(['flags', 'metadata']);
+    expect(h.generated.find((g) => g.task === 'title')!.prompt).toContain('Stored travel');
+  });
+
+  it("one chapter's flags: only its transcript is scored and checked, and every time is on the video's timeline", async () => {
+    const h = new Harness();
+    h.snapRun = async (req) => {
+      // The scorer sees lines 2-5 (20 s to 60 s); its sentence indices are into them.
+      expect(req.segments.map((s) => s.start)).toEqual([20, 30, 40, 50]);
+      const window = {
+        contextFrom: 0, contextTo: 3, firedFrom: 0, firedTo: 1,
+        categories: [{ ...wcat('political-demonization', 0.9, [0, 1]), start: 20, end: 40 }],
+        score: 0.9, spanIds: [0], strength: -3, heat: 1,
+      } as FlagWindow;
+      return snapResult({ chapters: null, flags: { ...snapResult().flags!, windows: [window] as any, overflow: [] } });
+    };
+    const res = await h.service().analyzeTranscript({ ...options(), parts: ['flags'], range: { start: 20, end: 60, label: 'Rant' } });
+    expect(res.range).toEqual({ start: 20, end: 60, label: 'Rant' });
+    expect(res.sections.map((s) => [s.start_time, s.end_time, s.verdict])).toEqual([['00:00:20', '00:00:40', 'flag']]);
+    expect(res.sections[0].quotes[0].text).toBe(`${LINES[2]} ${LINES[3]}`);
+    // The checker read the chapter's passage, not the video's start.
+    const checked = h.generated.filter((g) => g.task === 'flags');
+    expect(checked).toHaveLength(1);
+    expect(checked[0].prompt).toContain('communists');
+    expect(checked[0].prompt).not.toContain('pasta day');
+  });
+
+  it('a range that is not a flags-only run, or holds no transcript, fails by name', async () => {
+    const h = new Harness();
+    const both = await h.service().analyzeTranscript({ ...options(), parts: ['flags', 'chapters'], range: { start: 0, end: 30 } }).catch((e) => e);
+    expect((both as Error).message).toMatch(/Only the flag analysis can run on part of a video/);
+    const empty = await h.service().analyzeTranscript({ ...options(), parts: ['flags'], range: { start: 500, end: 600 } }).catch((e) => e);
+    expect((empty as Error).message).toMatch(/no transcript falls inside 00:08:20-00:10:00/);
+    expect(h.snapRuns).toHaveLength(0);
+  });
+
+  it('flags alone with every check failing fails (the stored flags stay), never an empty success', async () => {
+    const h = new Harness();
+    h.snapRun = async () => snapResult({ chapters: null });
+    h.answer = async () => {
+      throw new Error('Crucible http_500: the verifier fell over');
+    };
+    const err = await h.service().analyzeTranscript({ ...options(), parts: ['flags'] }).catch((e) => e);
+    expect((err as Error).message).toMatch(/no flag section could be checked.*the verifier fell over/);
+  });
+
+  it('metadata alone with neither tags nor description fails (the stored metadata stays)', async () => {
+    const h = new Harness();
+    h.answer = async () => {
+      throw new Error('Crucible http_500: down');
+    };
+    const err = await h.service().analyzeTranscript({ ...options(), parts: ['metadata'], existingChapters: stored }).catch((e) => e);
+    expect((err as Error).message).toMatch(/no metadata could be written.*down/);
+  });
+
+  it('progress: a skipped stage takes no share, the bar only moves forward, and it ends at 100', async () => {
+    const run = async (extra: Partial<AnalysisOptions>, snap?: Partial<SnapStageResult>) => {
+      const h = new Harness();
+      h.snapRun = async (req) => {
+        req.onProgress?.({ stage: 'chapters', fraction: 0.5, message: 'half' });
+        req.onProgress?.({ stage: 'done', fraction: 1, message: 'done' });
+        return snapResult(snap);
+      };
+      const seen: number[] = [];
+      await h.service().analyzeTranscript({ ...options(), ...extra, onProgress: (p) => seen.push(p.progress) });
+      return seen;
+    };
+    for (const seen of [
+      await run({ parts: ['flags'] }, { chapters: null }),
+      await run({ parts: ['chapters'] }, { flags: null }),
+      await run({ parts: ['metadata'], existingChapters: stored }),
+      await run({}),
+    ]) {
+      expect(seen[seen.length - 1]).toBe(100);
+      for (let i = 1; i < seen.length; i++) expect(seen[i]).toBeGreaterThanOrEqual(seen[i - 1]);
+    }
+    // Flags alone: the engine fills 3-84, the checks 84-98 (no chapter or metadata band).
+    const flags = await run({ parts: ['flags'] }, { chapters: null });
+    expect(flags).toContain(84);
+    expect(flags.filter((p) => p > 84 && p < 100).length).toBeGreaterThan(0);
+    // Metadata alone starts at 3 and fills the bar.
+    const metadata = await run({ parts: ['metadata'], existingChapters: stored });
+    expect(metadata).toEqual([0, 3, 35, 66, 100]);
+  });
+
+  it('a cancel during a flags-only run is a cancellation, with no metadata or chapter call after it', async () => {
+    const h = new Harness();
+    const svc = h.service();
+    h.snapRun = async () => snapResult({ chapters: null });
+    h.answer = async (_prompt, task) => {
+      svc.cancelAnalysis('job-parts');
+      return { text: '{"verdict":"flag","reason":"r"}', inputTokens: 1, outputTokens: 1, task } as any;
+    };
+    const err = await svc.analyzeTranscript({ ...options(), parts: ['flags'], jobId: 'job-parts' }).catch((e) => e);
+    expect(isCancellation(err)).toBe(true);
+    expect(tasks(h)).toEqual(['flags']);
+  });
+});
+
 /** analyzeTranscript also console.logs; keep the test output readable. */
 function jest_silence() {
   for (const k of ['log', 'warn', 'error'] as const) (console as any)[k] = () => undefined;

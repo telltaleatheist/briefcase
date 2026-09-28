@@ -1768,8 +1768,10 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
           return { success: false, error: 'AI model is required for analyze task' };
         }
 
-        // Always run analysis — if the video already has one, mediaOps.analyzeVideo
-        // will clear it before re-running (via processAnalyzePhase cleanup logic)
+        // Always run analysis. The task's options carry the parts asked for
+        // (and a flags-only chapter range); mediaOps.analyzeVideo replaces the
+        // stored output of exactly those parts, and only once the run has
+        // produced them (a cancel or failure keeps the previous analysis).
         result = await this.mediaOps.analyzeVideo(job.videoId, task.options as any, taskId);
         if (result.success && result.data) {
           job.analysisPath = result.data.analysisPath;
