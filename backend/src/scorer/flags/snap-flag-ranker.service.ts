@@ -57,6 +57,7 @@ import {
   rankFromRatingMap,
 } from './flag-spans';
 import { ChunkOptions, FlagChunk, FlagUnit, UnitOptions, buildFlagUnits, planFlagChunks } from './flag-units';
+import { TimeWindows, timeWindows } from '../windows';
 
 /** The one scorer call the ranker needs. A ScorerHandle (withScorer) satisfies it; tests pass a fake. */
 export interface FlagScorer {
@@ -93,6 +94,12 @@ export interface SnapFlagRankOptions {
    * (flagChunksFromPlan). Absent: planned here (planFlagChunks, estimated tokens).
    */
   chunkPlan?: FlagChunk[];
+  /**
+   * Ask one group question per time window of the transcript (windows.ts)
+   * instead of per GROUP_SIZE units. Absent or null: the unit groups (the
+   * measured setup).
+   */
+  windows?: TimeWindows | null;
   /** Questions per decide() call (each call primes once, a cache hit after the first). Default 64. */
   batchSize?: number;
   /** Engine top-n. Default 100 (plan §3.4); missing letters are floored, never refused. */
@@ -191,6 +198,7 @@ export class SnapFlagRanker {
       chunks,
       groupSize: GROUP_SIZE,
       groupStride: GROUP_STRIDE,
+      ...(options.windows ? { windowSeconds: options.windows.windowSeconds, stepSeconds: options.windows.stepSeconds } : {}),
       groups: [],
       p1: [],
       labelMass: [],
@@ -224,7 +232,7 @@ export class SnapFlagRanker {
     };
     this.logger.log(
       `[SnapFlags] ${stats.sentences} sentences -> ${stats.units} units in ${stats.chunks} chunk(s), ` +
-        `layout ${layout}: ${stats.groupQuestions} group questions (${GROUP_SIZE} units, stride ${GROUP_STRIDE}) ` +
+        `layout ${layout}: ${stats.groupQuestions} group questions (${options.windows ? `${options.windows.windowSeconds}s windows every ${options.windows.stepSeconds}s` : `${GROUP_SIZE} units, stride ${GROUP_STRIDE}`}) ` +
         `(${stats.hotUnits} hot units) -> ${stats.spans} spans / ${stats.passages} passages -> ` +
         `${stats.windows} windows, ${stats.verifyCalls} verify calls (budget ${stats.verifyBudget}; ` +
         `${stats.overflowWindows} windows / ${stats.overflowCalls} calls over it) in ${(stats.wallMs / 1000).toFixed(1)}s` +
@@ -298,7 +306,9 @@ export class SnapFlagRanker {
     };
 
     // Every chunk's groups, planned up front so progress has a total.
-    const perChunk = map.chunks.map((chunk) => SnapFlagRanker.groupsOf(chunk.coreFrom, chunk.coreTo));
+    const windows = options.windows ?? null;
+    const perChunk = map.chunks.map((chunk) =>
+      windows ? timeWindows(units, chunk.coreFrom, chunk.coreTo, windows) : SnapFlagRanker.groupsOf(chunk.coreFrom, chunk.coreTo));
     const total = perChunk.reduce((n, g) => n + g.length, 0);
     const unitsTotal = units.length;
     let unitsDone = 0;

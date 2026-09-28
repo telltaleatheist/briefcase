@@ -102,6 +102,46 @@
 </div>
 
 <div class="pane-section">
+  <p class="section-label">How the analysis reads the video</p>
+  <div class="radio-row" role="radiogroup" aria-label="How the analysis reads the video">
+    <label>
+      <input type="radio" name="analysis-windows" id="analysis-windows-windows"
+        [checked]="windowsMode() === 'windows'" (change)="onWindowsModeChange('windows')" />
+      In windows (faster)
+    </label>
+    <label>
+      <input type="radio" name="analysis-windows" id="analysis-windows-sentence"
+        [checked]="windowsMode() === 'sentence'" (change)="onWindowsModeChange('sentence')" />
+      Sentence by sentence (finer)
+    </label>
+  </div>
+  @if (windowsMode() === 'windows') {
+    <div class="window-fields">
+      <label class="field-label" for="analysis-window-seconds">Window (seconds)</label>
+      <input class="text-input" id="analysis-window-seconds" type="number"
+        [min]="windowRange.min" [max]="windowRange.max" [value]="windowSeconds()"
+        (change)="onWindowSecondsChange($any($event.target).value, 'window')" />
+      <label class="field-label" for="analysis-step-seconds">A new window every (seconds)</label>
+      <input class="text-input" id="analysis-step-seconds" type="number"
+        [min]="windowRange.min" [max]="windowSeconds()" [value]="stepSeconds()"
+        (change)="onWindowSecondsChange($any($event.target).value, 'step')" />
+    </div>
+  }
+  @if (windowsSaved()) {
+    <span class="save-flash">Saved</span>
+  }
+  @if (windowsError(); as error) {
+    <p class="hint warn">{{ error }}</p>
+  }
+  <p class="hint">
+    In windows, chapters and flags are found by asking about each stretch of the transcript (90 s windows
+    every 60 s by default) instead of every sentence: many times fewer questions, so long videos finish
+    far sooner, with chapter and flag edges on a 30 s grid. A brief remark inside a window can be missed;
+    sentence by sentence catches it, but takes about two hours for a four-hour show.
+  </p>
+</div>
+
+<div class="pane-section">
   <p class="section-label">Analysis categories</p>
   <p class="hint" style="margin: 0 0 10px;">
     The categories AI uses to classify video content.

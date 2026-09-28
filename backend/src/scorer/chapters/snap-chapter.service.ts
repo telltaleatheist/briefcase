@@ -18,10 +18,11 @@
  */
 
 import { Logger } from '@nestjs/common';
-import { ChoiceAnswer, DecideOptions, DecideRequest, DecideResponse, GenerateOptions, GenerateResult, ScorerError, YesNoAnswer } from '../scorer.types';
+import { ChoiceAnswer, ChoiceQuestion, DecideOptions, DecideRequest, DecideResponse, GenerateOptions, GenerateResult, ScorerError, YesNoAnswer } from '../scorer.types';
 import { viterbi } from '../scorer-viterbi';
 import { Chunk, ChunkPath, ChunkPlanOptions, Seam, planChunks, stitchChunks } from './chunks';
-import { BATCH, OUTLINE_MAX_TOKENS, PLUG, START_OF_VIDEO, outlinePrompt, plugStatement } from './snap-prompts';
+import { BATCH, OUTLINE_MAX_TOKENS, PLUG, START_OF_VIDEO, assignWindowInstructions, outlinePrompt, plugStatement } from './snap-prompts';
+import { TimeWindows, timeWindows, unitMeans } from '../windows';
 import {
   PlugVerdict,
   SnapChapter,
@@ -83,6 +84,12 @@ export interface BuildChaptersOptions {
    * before the section, as chunks after the first already do.
    */
   prevBefore?: string;
+  /**
+   * Ask one assign question per time window of the transcript instead of one
+   * per sentence (windows.ts); each unit's row is then the mean of its
+   * windows' answers. Absent or null: per sentence (the measured setup).
+   */
+  windows?: TimeWindows | null;
 }
 
 export interface ChunkResult {
@@ -190,19 +197,45 @@ export async function runSnapChapters(
     const L: number[][] = [];
     let floored = 0;
     report('assign', k, W_OUTLINE);
-    for (let b = 0; b < sents.length; b += BATCH) {
-      throwIfAborted(signal);
-      const end = Math.min(sents.length, b + BATCH);
-      const questions = assignQuestions(sents, b, end, options, prevBefore);
-      const resp = await scorer.decide({ state: text, questions, missingLabels: 'floor' }, { signal });
-      for (let i = b; i < end; i++) {
-        const ans = resp.answers[`s${i}`] as ChoiceAnswer | undefined;
-        if (!ans) throw new ScorerError('engine_error', `decide returned no answer for s${i}`);
-        if (ans.missingLabels?.length) floored++;
-        L.push(logRow(ans.logProbs));
+    if (opts.windows) {
+      // One question per window; every unit's row is the mean of its windows'.
+      const spans = timeWindows(units, chunk.start, chunk.end, opts.windows);
+      const probs: number[][] = [];
+      for (let b = 0; b < spans.length; b += BATCH) {
+        throwIfAborted(signal);
+        const end = Math.min(spans.length, b + BATCH);
+        const questions: ChoiceQuestion[] = [];
+        for (let w = b; w < end; w++) {
+          const [first, last] = spans[w];
+          questions.push({ type: 'choice', name: `w${w}`, instructions: assignWindowInstructions(texts.slice(first, last + 1)), options });
+        }
+        const resp = await scorer.decide({ state: text, questions, missingLabels: 'floor' }, { signal });
+        for (let w = b; w < end; w++) {
+          const ans = resp.answers[`w${w}`] as ChoiceAnswer | undefined;
+          if (!ans) throw new ScorerError('engine_error', `decide returned no answer for w${w}`);
+          if (ans.missingLabels?.length) floored++;
+          probs.push(ans.logProbs.map((lp) => Math.exp(lp)));
+        }
+        unitsDone += spans[end - 1][1] + 1 - (b === 0 ? chunk.start : spans[b - 1][1] + 1);
+        report('assign', k, W_OUTLINE + W_ASSIGN * (end / spans.length));
       }
-      unitsDone += end - b;
-      report('assign', k, W_OUTLINE + W_ASSIGN * (end / sents.length));
+      for (const row of unitMeans(chunk.start, chunk.end, spans, probs)) L.push(logRow(row.map((p) => Math.log(p))));
+      logger?.log(`[snap-chapters] chunk ${k}: ${spans.length} window questions for ${sents.length} sentences`);
+    } else {
+      for (let b = 0; b < sents.length; b += BATCH) {
+        throwIfAborted(signal);
+        const end = Math.min(sents.length, b + BATCH);
+        const questions = assignQuestions(sents, b, end, options, prevBefore);
+        const resp = await scorer.decide({ state: text, questions, missingLabels: 'floor' }, { signal });
+        for (let i = b; i < end; i++) {
+          const ans = resp.answers[`s${i}`] as ChoiceAnswer | undefined;
+          if (!ans) throw new ScorerError('engine_error', `decide returned no answer for s${i}`);
+          if (ans.missingLabels?.length) floored++;
+          L.push(logRow(ans.logProbs));
+        }
+        unitsDone += end - b;
+        report('assign', k, W_OUTLINE + W_ASSIGN * (end / sents.length));
+      }
     }
     timings.assignMs += Date.now() - t;
     if (floored) logger?.warn(`[snap-chapters] chunk ${k}: ${floored}/${sents.length} answers had a floored label`);

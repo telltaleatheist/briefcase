@@ -48,6 +48,7 @@ import {
   AnalysisCategory,
 } from './prompts/analysis-prompts';
 import { SnapAnalysisService } from '../scorer/snap-analysis.service';
+import { DEFAULT_TIME_WINDOWS, windowsOf, type TimeWindows } from '../scorer/windows';
 import {
   AnalysisPart,
   AnalysisRange,
@@ -556,6 +557,23 @@ export class AIAnalysisService {
     return path.join(userDataPath, 'briefcase', 'app-config.json');
   }
 
+  /**
+   * How the analysis engine asks about the transcript (app-config.json
+   * `analysisWindows`, Settings › AI Analysis): time windows, 90 s every 60 s
+   * unless set otherwise, or null for one question per sentence. An unreadable
+   * config is the default, said once in the log.
+   */
+  private loadAnalysisWindows(): TimeWindows | null {
+    try {
+      const configPath = this.appConfigPath();
+      const stored = fs.existsSync(configPath) ? JSON.parse(fs.readFileSync(configPath, 'utf8'))?.analysisWindows : undefined;
+      return windowsOf(stored);
+    } catch (error) {
+      this.logger.warn(`[Engine] Using the default analysis windows; the config could not be read: ${(error as Error).message}`);
+      return DEFAULT_TIME_WINDOWS;
+    }
+  }
+
   private loadTaskModelOverrides(): Partial<Record<AITaskKind, string>> {
     try {
       const configPath = this.appConfigPath();
@@ -936,11 +954,16 @@ export class AIAnalysisService {
       if (bands.engine) {
         const [engineStart, engineEnd] = bands.engine;
         sendProgress('analysis', engineStart, 'Starting the analysis engine...');
+        const windows = this.loadAnalysisWindows();
+        this.logger.log(
+          `[Engine] asking ${windows ? `per ${windows.windowSeconds}s window every ${windows.stepSeconds}s` : 'per sentence'}`,
+        );
         const snap = await this.snapAnalysis.run({
           segments,
           categories: categories || [],
           chapters: makeChapters,
           flags: makeFlags,
+          windows,
           signal,
           onProgress: (p) => sendProgress('analysis', engineStart + Math.round(p.fraction * (engineEnd - engineStart)), p.message),
         });

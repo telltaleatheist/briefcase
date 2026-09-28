@@ -43,6 +43,7 @@ import { CrucibleScorerService } from './crucible-scorer.service';
 import type { ScorerHandle } from './scorer-handle';
 import { isScorerError } from './scorer.types';
 import { SnapTranscript, buildSnapTranscript } from './snap-transcript';
+import type { TimeWindows } from './windows';
 
 export type SnapStage = 'start' | 'prepare' | 'chapters' | 'flags' | 'refine' | 'done';
 
@@ -66,6 +67,11 @@ export interface SnapStageRequest {
   flagOptions?: Omit<SnapFlagRankOptions, 'signal' | 'onProgress' | 'scorer' | 'unitList' | 'chunkPlan'>;
   /** Outline refinement of long chapters (chapter-tree.ts defaults when absent); false turns it off. */
   refineOptions?: Omit<RefineOptions, 'signal' | 'onProgress'> | false;
+  /**
+   * Ask chapters, flags and refinement per time window instead of per
+   * sentence (windows.ts). Absent or null: per sentence.
+   */
+  windows?: TimeWindows | null;
 }
 
 export interface SnapStageResult {
@@ -218,6 +224,7 @@ export class SnapAnalysisService {
             transcript.units,
             {
               ...(req.chapterOptions ?? {}),
+              ...(req.windows ? { windows: req.windows } : {}),
               chunkPlan: transcript.chunks,
               totalSeconds: transcript.totalSeconds,
               signal,
@@ -261,6 +268,7 @@ export class SnapAnalysisService {
         try {
           result.flags = await this.flagRanker.rank(transcript.sentences, req.categories, {
             ...(req.flagOptions ?? {}),
+            ...(req.windows ? { windows: req.windows } : {}),
             scorer: handle,
             unitList: transcript.units,
             chunkPlan: transcript.flagChunks,
@@ -298,6 +306,7 @@ export class SnapAnalysisService {
             result.chapters,
             {
               ...refineOpts!,
+              ...(req.windows ? { windows: req.windows } : {}),
               signal,
               onProgress: (p) =>
                 report(

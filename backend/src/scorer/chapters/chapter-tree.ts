@@ -98,6 +98,8 @@ export interface RefineOptions {
   chunking?: BuildChaptersOptions['chunking'];
   /** Who writes each sub-outline. Default: the scorer model, as level 0. */
   writeOutline?: BuildChaptersOptions['writeOutline'];
+  /** Ask per time window inside each section, as level 0 does (BuildChaptersOptions.windows). */
+  windows?: BuildChaptersOptions['windows'];
   signal?: AbortSignal;
   onProgress?: (p: RefineProgress) => void;
 }
@@ -267,6 +269,7 @@ export async function refineChapters(
             signal,
             chunking: opts.chunking,
             writeOutline: opts.writeOutline,
+            windows: opts.windows,
             prevBefore: a > 0 ? units[a - 1].text : START_OF_VIDEO,
             totalSeconds: node.endSeconds,
             onProgress: (p) => tick(p.phase === 'done' ? 'assign' : p.phase, p.fraction),

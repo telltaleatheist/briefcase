@@ -113,6 +113,14 @@ export class AiPaneComponent {
   readonly configuredDefault = signal('');
   savedFlash = signal(false);
 
+  // How the analysis reads the video (backend scorer/windows.ts)
+  readonly windowRange = { min: 15, max: 600 };
+  readonly windowsMode = signal<'windows' | 'sentence'>('windows');
+  readonly windowSeconds = signal(90);
+  readonly stepSeconds = signal(60);
+  readonly windowsSaved = signal(false);
+  readonly windowsError = signal<string | null>(null);
+
   // Categories
   categories = signal<AnalysisCategory[]>([]);
   editingCategoryId = signal<string | null>(null);
@@ -141,6 +149,60 @@ export class AiPaneComponent {
     void this.loadDefaultModel();
     void this.loadCategories();
     void this.loadPrompts();
+    void this.loadWindows();
+  }
+
+  private async loadWindows(): Promise<void> {
+    try {
+      const response = await fetch(`${this.apiBase}/config/analysis-windows`);
+      if (!response.ok) throw new Error(`Analysis windows request failed (${response.status})`);
+      const data = await response.json();
+      const setting = data.setting as { mode: 'windows' | 'sentence'; windowSeconds?: number; stepSeconds?: number } | undefined;
+      if (!setting) return;
+      this.windowsMode.set(setting.mode);
+      if (setting.mode === 'windows') {
+        this.windowSeconds.set(setting.windowSeconds ?? 90);
+        this.stepSeconds.set(setting.stepSeconds ?? 60);
+      }
+    } catch (error) {
+      this.errorSurface.surfaceError("Couldn't load how the analysis reads the video", error);
+    }
+  }
+
+  onWindowsModeChange(mode: 'windows' | 'sentence'): void {
+    this.windowsMode.set(mode);
+    void this.saveWindows();
+  }
+
+  onWindowSecondsChange(raw: string, which: 'window' | 'step'): void {
+    const value = Number(raw);
+    if (!Number.isFinite(value)) return;
+    if (which === 'window') this.windowSeconds.set(value);
+    else this.stepSeconds.set(value);
+    void this.saveWindows();
+  }
+
+  private async saveWindows(): Promise<void> {
+    this.windowsError.set(null);
+    const body = this.windowsMode() === 'sentence'
+      ? { mode: 'sentence' }
+      : { mode: 'windows', windowSeconds: this.windowSeconds(), stepSeconds: this.stepSeconds() };
+    try {
+      const response = await fetch(`${this.apiBase}/config/analysis-windows`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        this.windowsError.set(data?.message ?? `Not saved (${response.status})`);
+        return;
+      }
+      this.windowsSaved.set(true);
+      setTimeout(() => this.windowsSaved.set(false), 1500);
+    } catch (error) {
+      this.errorSurface.surfaceError("How the analysis reads the video didn't save", error);
+    }
   }
 
   promptLabel(key: string): string {

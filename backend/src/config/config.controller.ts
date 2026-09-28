@@ -1,6 +1,7 @@
-import { Controller, Post, Body, Get, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, Controller, Post, Body, Get, OnModuleInit } from '@nestjs/common';
 import { SharedConfigService } from './shared-config.service';
 import { DEFAULT_PROMPTS, DEFAULT_CATEGORIES } from '../analysis/prompts/analysis-prompts';
+import { DEFAULT_TIME_WINDOWS, WINDOW_SECONDS_RANGE, readWindowsSetting, windowsOf } from '../scorer/windows';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -332,6 +333,45 @@ export class ConfigController implements OnModuleInit {
         success: false,
         message: `Failed to get default AI settings: ${(error as Error).message}`
       };
+    }
+  }
+
+  /**
+   * How the analysis engine asks about the transcript: per time window (the
+   * default, 90 s windows every 60 s) or per sentence (scorer/windows.ts).
+   */
+  @Get('analysis-windows')
+  async getAnalysisWindows() {
+    try {
+      const config = fs.existsSync(this.configPath) ? JSON.parse(fs.readFileSync(this.configPath, 'utf8')) : {};
+      const windows = windowsOf(config.analysisWindows);
+      return {
+        success: true,
+        setting: windows ? { mode: 'windows', ...windows } : { mode: 'sentence' },
+        default: { mode: 'windows', ...DEFAULT_TIME_WINDOWS },
+        range: WINDOW_SECONDS_RANGE,
+      };
+    } catch (error: any) {
+      return { success: false, message: `Failed to read the analysis windows setting: ${(error as Error).message}` };
+    }
+  }
+
+  @Post('analysis-windows')
+  async saveAnalysisWindows(@Body() body: unknown) {
+    const setting = readWindowsSetting(body);
+    if (typeof setting === 'string') {
+      throw new BadRequestException({ success: false, message: `The analysis windows setting was not saved: ${setting}` });
+    }
+    try {
+      const configDir = path.dirname(this.configPath);
+      if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true });
+      const config = fs.existsSync(this.configPath) ? JSON.parse(fs.readFileSync(this.configPath, 'utf8')) : {};
+      config.analysisWindows = setting;
+      config.lastUpdated = new Date().toISOString();
+      fs.writeFileSync(this.configPath, JSON.stringify(config, null, 2), 'utf8');
+      return { success: true, setting };
+    } catch (error: any) {
+      return { success: false, message: `Failed to save the analysis windows setting: ${(error as Error).message}` };
     }
   }
 

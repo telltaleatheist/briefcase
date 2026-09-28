@@ -127,6 +127,9 @@ export interface FlagRatingMap {
   /** Units per group, and how far each group moves on (size 3, stride 2: consecutive groups share one unit). */
   groupSize: number;
   groupStride: number;
+  /** Set when the groups were time windows instead (windows.ts): their length and step, in seconds. */
+  windowSeconds?: number;
+  stepSeconds?: number;
   /** Every group asked, in transcript order, with the model's whole vector. */
   groups: FlagGroup[];
   /** Per unit: the mean of the vectors of the groups that contain it, [...categories, none]. */

@@ -60,6 +60,18 @@ export function assignInstructions(sentence: string, prev: string): string {
   );
 }
 
+/**
+ * The windowed form of the assign question (windows.ts): one stretch of the
+ * transcript, quoted, instead of one sentence and the one before it. Clipped
+ * to 2000 characters, well over what 90 s of speech runs to (~1300).
+ */
+export function assignWindowInstructions(sentences: string[]): string {
+  return (
+    `Passage from the transcript above: "${clip(sentences.join(' '), 2000)}"\n` +
+    'Which section of the video is this passage part of?'
+  );
+}
+
 /** segment.py:94-96 — the yes/no statement that confirms a stretch assigned to the plug item. */
 export function plugStatement(sentences: string[]): string {
   const passage = clip(sentences.join(' '), 700);
