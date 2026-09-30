@@ -978,6 +978,16 @@
   color: var(--text-secondary, #6c757d);
 }
 
+// A story (a row with chapters inside): a heavier edge and title than its chapters.
+.chapter-item.story {
+  border-left-width: 4px;
+
+  .chapter-title {
+    font-size: 13px;
+    font-weight: 700;
+  }
+}
+
 // Nested chapters: the chevron is the only way a row opens (never automatically).
 .chapter-chevron {
   display: flex;

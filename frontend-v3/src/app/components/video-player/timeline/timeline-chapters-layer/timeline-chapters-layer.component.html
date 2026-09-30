@@ -1,17 +1,18 @@
 <div class="chapters-layer">
-  @for (chapter of chapters; track chapter.id) {
+  @for (chapter of chapters; track chapter.id; let i = $index) {
     <div
       class="chapter-block"
       [class.current]="isCurrentChapter(chapter)"
       [class.selected]="selectedChapterId === chapter.id"
+      [class.story-start]="i > 0 && storyStarts.has(chapter.id)"
       [style.left]="getChapterStyle(chapter).left"
       [style.width]="getChapterStyle(chapter).width"
       [style.display]="getChapterStyle(chapter).display"
-      [title]="chapter.title + ' (' + formatDuration(chapter) + ')'"
+      [title]="blockTitle(chapter)"
       (click)="onChapterClick(chapter, $event)"
       (mouseenter)="onChapterMouseEnter(chapter)"
       (mouseleave)="onChapterMouseLeave()">
-      <span class="chapter-number">{{ chapter.sequence }}</span>
+      <span class="chapter-number">{{ i + 1 }}</span>
       <span class="chapter-title">{{ chapter.title }}</span>
     </div>
   }

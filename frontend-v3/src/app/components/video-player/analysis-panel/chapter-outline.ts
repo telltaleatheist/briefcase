@@ -1,10 +1,12 @@
 import type { TimelineChapter } from '../../../models/video-editor.model';
 
 /**
- * Nested chapters (the snap engine's outline): rows carry `parentId`, stored
- * parents-first in sequence order. The timeline shows only the top level
- * (which tiles the video, as flat chapters do); the chapter list shows the
- * nesting, collapsed until the user opens a row with its chevron.
+ * Nested chapters (the analysis outline): rows carry `parentId`, stored
+ * parents-first in sequence order. Since 2026-09-30 the outline is STORIES
+ * (the top level, which tiles the video) with their CHAPTERS inside. The
+ * timeline shows the chapters (the leaves, which tile the video too) and marks
+ * where each story starts; the chapter list shows the stories as an accordion,
+ * collapsed until the user opens a row with its chevron (never by itself).
  *
  * A flat list (every row top level) comes out exactly as before: every row,
  * in order, numbered by its sequence.
@@ -18,6 +20,8 @@ export interface ChapterRow {
   expanded: boolean;
   /** What the number badge shows: the sequence on a flat list, else "2", "2.1", "2.1.3". */
   number: string;
+  /** Rows directly inside this one (a story's chapters). */
+  childCount: number;
 }
 
 /** Rows without a parent (or whose parent is not in the list) are top level. */
@@ -51,7 +55,7 @@ export function chapterRows(chapters: TimelineChapter[], expanded: ReadonlySet<s
       const hasChildren = (kids.get(chapter.id)?.length ?? 0) > 0;
       const open = hasChildren && expanded.has(chapter.id);
       const number = nested ? `${prefix}${i + 1}` : String(chapter.sequence);
-      rows.push({ chapter, depth, hasChildren, expanded: open, number });
+      rows.push({ chapter, depth, hasChildren, expanded: open, number, childCount: kids.get(chapter.id)?.length ?? 0 });
       if (open) walk(chapter.id, depth + 1, `${number}.`);
     });
   };
@@ -70,6 +74,39 @@ export function chapterSubtreeIds(chapters: TimelineChapter[], id: string): Set<
         grew = true;
       }
     }
+  }
+  return out;
+}
+
+/** The leaves: rows no row in the list names as its parent (on a flat list, every row), in time order. */
+export function leafChapters(chapters: TimelineChapter[]): TimelineChapter[] {
+  const ids = new Set(chapters.map((c) => c.id));
+  const parents = new Set(chapters.map((c) => parentOf(c, ids)).filter((p): p is string => p !== null));
+  return chapters.filter((c) => !parents.has(c.id)).sort((a, b) => a.startTime - b.startTime);
+}
+
+/**
+ * Where each story starts, for the timeline: the first leaf inside each
+ * top-level row that has children, mapped to that story's title. Empty on a
+ * flat list.
+ */
+export function storyStarts(chapters: TimelineChapter[]): Map<string, string> {
+  const out = new Map<string, string>();
+  if (!isNested(chapters)) return out;
+  const ids = new Set(chapters.map((c) => c.id));
+  const leaves = leafChapters(chapters);
+  const byId = new Map(chapters.map((c) => [c.id, c]));
+  const storyOf = (c: TimelineChapter): TimelineChapter => {
+    let at = c;
+    for (let p = parentOf(at, ids); p !== null; p = parentOf(at, ids)) at = byId.get(p)!;
+    return at;
+  };
+  const seen = new Set<string>();
+  for (const leaf of leaves) {
+    const story = storyOf(leaf);
+    if (story.id === leaf.id || seen.has(story.id)) continue;
+    seen.add(story.id);
+    out.set(leaf.id, story.title);
   }
   return out;
 }

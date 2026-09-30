@@ -31,7 +31,7 @@
       (click)="setActiveTab('chapters')">
       Chapters
       @if (chapters.length > 0) {
-        <span class="tab-count">{{ topChapterCount }}</span>
+        <span class="tab-count">{{ chapterCount }}</span>
       }
     </button>
     <button
@@ -208,6 +208,7 @@
             <div
               class="chapter-item"
               [class.nested]="row.depth > 0"
+              [class.story]="row.hasChildren"
               [style.margin-left.px]="row.depth * 16"
               [class.current]="isCurrentChapter(row.chapter)"
               [class.follow-current]="followCursor() && row.chapter.id === currentChapterId"
@@ -217,7 +218,8 @@
                 <button class="chapter-chevron" [class.open]="row.expanded"
                   (click)="toggleChapterExpanded(row.chapter, $event)"
                   [attr.aria-expanded]="row.expanded"
-                  [title]="row.expanded ? 'Hide sub-chapters' : 'Show sub-chapters'">
+                  [attr.aria-label]="(row.expanded ? 'Hide the chapters of ' : 'Show the chapters of ') + row.chapter.title"
+                  [title]="row.expanded ? 'Hide chapters' : 'Show chapters'">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M9 6l6 6-6 6"/>
                   </svg>
@@ -228,7 +230,11 @@
                 <div class="chapter-info">
                   <span class="chapter-title">{{ row.chapter.title }}</span>
                   <span class="chapter-meta">
-                    {{ formatTime(row.chapter.startTime) }} - {{ formatChapterDuration(row.chapter) }}
+                    @if (row.hasChildren) {
+                      {{ storyMeta(row) }}
+                    } @else {
+                      {{ formatTime(row.chapter.startTime) }} - {{ formatChapterDuration(row.chapter) }}
+                    }
                   </span>
                 </div>
               </button>

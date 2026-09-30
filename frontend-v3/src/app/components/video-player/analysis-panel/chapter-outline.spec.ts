@@ -1,5 +1,5 @@
 import type { TimelineChapter } from '../../../models/video-editor.model';
-import { chapterRows, chapterSubtreeIds, isNested, topLevelChapters } from './chapter-outline';
+import { chapterRows, chapterSubtreeIds, isNested, leafChapters, storyStarts, topLevelChapters } from './chapter-outline';
 
 // Plain describe/it/expect only, so this runs under Karma/Jasmine (ng test) and Jest alike.
 const ch = (id: string, sequence: number, start: number, end: number, parentId?: string): TimelineChapter => ({
@@ -56,6 +56,24 @@ describe('chapter outline', () => {
   it('a row whose parent is gone is top level', () => {
     const orphan = [ch('A1', 2, 0, 30, 'A'), ch('B', 6, 60, 90)];
     expect(topLevelChapters(orphan).map((c) => c.id)).toEqual(['A1', 'B']);
+  });
+
+  it('a stories outline: the timeline gets the chapters (the leaves), each story start marked with its title', () => {
+    const stories = [
+      ch('S1', 1, 0, 600),
+      ch('S1a', 2, 0, 300, 'S1'),
+      ch('S1b', 3, 300, 600, 'S1'),
+      ch('S2', 4, 600, 900),
+      ch('S2a', 5, 600, 900, 'S2'),
+    ];
+    expect(leafChapters(stories).map((c) => c.id)).toEqual(['S1a', 'S1b', 'S2a']);
+    expect([...storyStarts(stories)]).toEqual([['S1a', 'S1'], ['S2a', 'S2']]);
+    const rows = chapterRows(stories, new Set());
+    expect(rows.map((r) => [r.chapter.id, r.childCount])).toEqual([['S1', 2], ['S2', 1]]);
+    // A flat list: every row is a leaf, and there are no stories to mark.
+    const flat = [ch('x', 1, 0, 10), ch('y', 2, 10, 20)];
+    expect(leafChapters(flat).map((c) => c.id)).toEqual(['x', 'y']);
+    expect(storyStarts(flat).size).toBe(0);
   });
 
   it('deleting a chapter removes its subtree', () => {

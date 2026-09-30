@@ -34,6 +34,12 @@
     border-left-color: var(--chapter-current-border, rgba(99, 102, 241, 0.9));
   }
 
+  // The first chapter of a story after the first: a heavier edge marks the story boundary.
+  &.story-start {
+    border-left-width: 3px;
+    border-left-color: var(--chapter-story-border, rgba(79, 70, 229, 1));
+  }
+
   &.selected {
     background: var(--chapter-selected-bg, rgba(99, 102, 241, 0.4));
     box-shadow: 0 0 0 1px var(--chapter-selected-border, rgba(99, 102, 241, 0.7));

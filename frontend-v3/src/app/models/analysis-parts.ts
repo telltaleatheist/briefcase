@@ -4,7 +4,7 @@
  * 4-hour broadcast only pays for what is wanted:
  *
  *   metadata  suggested title, description and tags, written from the chapters
- *   chapters  chapter boundaries, titles, summaries and sub-chapters
+ *   chapters  the outline: stories, the chapters inside each, their titles and summaries
  *   flags     "Analysis": flag passages ranked, each checked with a reason
  *
  * Stored on the ai-analyze step's config as `parts`; a config from before parts
@@ -18,7 +18,7 @@ export const ANALYSIS_PARTS: readonly AnalysisPart[] = ['metadata', 'chapters', 
 
 export const ANALYSIS_PART_DEFS: ReadonlyArray<{ part: AnalysisPart; label: string; description: string }> = [
   { part: 'metadata', label: 'Metadata', description: 'Suggested title, description and tags' },
-  { part: 'chapters', label: 'Chapters', description: 'Chapter boundaries, titles and summaries' },
+  { part: 'chapters', label: 'Chapters', description: 'Stories, the chapters inside them, titles and summaries' },
   { part: 'flags', label: 'Analysis', description: 'Flagged passages, each checked with a reason' },
 ];
 

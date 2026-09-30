@@ -52,7 +52,7 @@ import { getApiBase } from '../../core/runtime-url';
 import { CrucibleReadinessService } from '../../services/crucible-readiness.service';
 import { PipelinePresetsService } from '../../core/stores/pipeline-presets.service';
 import { splitAiModelValue } from '../../models/ai-model-value';
-import { chapterSubtreeIds, topLevelChapters } from './analysis-panel/chapter-outline';
+import { chapterSubtreeIds, leafChapters, storyStarts } from './analysis-panel/chapter-outline';
 
 // Tool types for editor
 export enum EditorTool {
@@ -591,8 +591,9 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
 
   // Timeline chapters from analysis
   chapters = signal<TimelineChapter[]>([]);
-  /** The timeline shows the top level of a nested outline (it tiles the video). */
-  topLevelChapters = computed(() => topLevelChapters(this.chapters()));
+  /** The timeline shows the chapters (the outline's leaves, which tile the video) and marks where each story starts. */
+  timelineChapters = computed(() => leafChapters(this.chapters()));
+  timelineStoryStarts = computed(() => storyStarts(this.chapters()));
   selectedChapterId = signal<string | undefined>(undefined);
 
   // Transcript for video

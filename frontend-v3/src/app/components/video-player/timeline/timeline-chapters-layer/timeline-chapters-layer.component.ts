@@ -17,6 +17,8 @@ interface ChapterStyle {
 })
 export class TimelineChaptersLayerComponent implements OnChanges {
   @Input() chapters: TimelineChapter[] = [];
+  /** Chapters that begin a story (id -> story title): a stories outline marks them. */
+  @Input() storyStarts: ReadonlyMap<string, string> = new Map();
   @Input() duration: number = 0;
   @Input() zoomState: ZoomState = { level: 1, offset: 0 };
   @Input() currentTime: number = 0;
@@ -95,6 +97,12 @@ export class TimelineChaptersLayerComponent implements OnChanges {
 
   onChapterMouseLeave(): void {
     this.chapterHover.emit(null);
+  }
+
+  /** The hover text: the chapter and its length, and the story it begins. */
+  blockTitle(chapter: TimelineChapter): string {
+    const story = this.storyStarts.get(chapter.id);
+    return `${story ? `Story: ${story}\n` : ''}${chapter.title} (${this.formatDuration(chapter)})`;
   }
 
   formatDuration(chapter: TimelineChapter): string {

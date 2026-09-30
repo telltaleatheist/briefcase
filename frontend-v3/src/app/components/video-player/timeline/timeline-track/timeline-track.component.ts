@@ -22,6 +22,8 @@ import { TimelineSection, TimelineChapter, MuteSection, ZoomState, WaveformData,
 export class TimelineTrackComponent {
   @Input() sections: TimelineSection[] = [];
   @Input() chapters: TimelineChapter[] = [];
+  /** Chapters that begin a story (id -> story title): a stories outline marks them. */
+  @Input() storyStarts: ReadonlyMap<string, string> = new Map();
   @Input() muteSections: MuteSection[] = [];
   @Input() duration: number = 0;
   @Input() currentTime: number = 0;

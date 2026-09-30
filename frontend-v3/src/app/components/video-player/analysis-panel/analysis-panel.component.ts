@@ -13,7 +13,7 @@ import {
 } from '../../../models/flag-filter';
 import { TranscriptionSegment } from '../../../models/video-info.model';
 import { TranscriptSearchService, TranscriptSearchOptions } from '../../../services/transcript-search.service';
-import { ChapterRow, chapterRows, topLevelChapters } from './chapter-outline';
+import { ChapterRow, chapterRows, leafChapters } from './chapter-outline';
 
 @Component({
   selector: 'app-analysis-panel',
@@ -82,7 +82,8 @@ export class AnalysisPanelComponent implements OnChanges {
   // itself (not on load, not by following the cursor).
   expandedChapterIds = signal<ReadonlySet<string>>(new Set());
   chapterRows: ChapterRow[] = [];
-  topChapterCount = 0;
+  /** Chapters (the outline's leaves: on a stories outline, the chapters inside the stories). */
+  chapterCount = 0;
 
   // Primary tabs
   activeTab = signal<'analysis' | 'chapters' | 'transcript'>('analysis');
@@ -178,7 +179,10 @@ export class AnalysisPanelComponent implements OnChanges {
   private updateCurrentIds(): void {
     const t = this.currentTime;
     const within = (start: number, end: number) => t >= start && t < end;
-    this.currentChapterId = this.chapters.find(c => within(c.startTime, c.endTime))?.id ?? null;
+    // The deepest VISIBLE row at the playhead: a collapsed story, or the
+    // chapter inside an opened one (rows are in outline order, so the last).
+    const visible = this.chapterRows.filter(r => within(r.chapter.startTime, r.chapter.endTime));
+    this.currentChapterId = visible.length ? visible[visible.length - 1].chapter.id : null;
     this.currentSectionId = this.filteredSections.find(s => within(s.startTime, s.endTime))?.id ?? null;
     this.currentSegmentId = this.transcript.find(s => within(s.startTime, s.endTime))?.id ?? null;
   }
@@ -222,7 +226,7 @@ export class AnalysisPanelComponent implements OnChanges {
 
   private refreshChapterRows(): void {
     this.chapterRows = chapterRows(this.chapters, this.expandedChapterIds());
-    this.topChapterCount = topLevelChapters(this.chapters).length;
+    this.chapterCount = leafChapters(this.chapters).length;
   }
 
   toggleChapterExpanded(chapter: TimelineChapter, event: Event): void {
@@ -232,6 +236,13 @@ export class AnalysisPanelComponent implements OnChanges {
     else next.add(chapter.id);
     this.expandedChapterIds.set(next);
     this.refreshChapterRows();
+    this.updateCurrentIds();
+  }
+
+  /** A story row's meta: HH:MM:SS start – end, and how many chapters it holds. */
+  storyMeta(row: ChapterRow): string {
+    return `${this.formatTime(row.chapter.startTime)} – ${this.formatTime(row.chapter.endTime)} · ` +
+      `${row.childCount} chapter${row.childCount === 1 ? '' : 's'}`;
   }
 
   // Check if a chapter is currently playing
@@ -253,8 +264,9 @@ export class AnalysisPanelComponent implements OnChanges {
 
   chapterAnalyzeTitle(chapter: TimelineChapter): string {
     if (this.chapterAnalyzeLocked) return this.chapterAnalyzeLocked;
-    return `Analyze this chapter: find and check flags in ${this.formatTimeRange(chapter.startTime, chapter.endTime)} only ` +
-      `(replaces this chapter's flags; the rest of the video is kept)`;
+    const what = this.chapters.some(c => c.parentId === chapter.id) ? 'story' : 'chapter';
+    return `Analyze this ${what}: find and check flags in ${this.formatTimeRange(chapter.startTime, chapter.endTime)} only ` +
+      `(replaces this ${what}'s flags; the rest of the video is kept)`;
   }
 
   formatChapterDuration(chapter: TimelineChapter): string {
