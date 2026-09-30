@@ -1,5 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import {
+  GENERATE_MAX_PASSAGE_SECONDS,
+  splitLongPassage,
   anchorWords,
   buildGenerateFlagsPrompt,
   chunkSentences,
@@ -197,6 +199,25 @@ describe('windowsFromPassages', () => {
       [5, 7, ['hate', 'conspiracy']],
       [25, 25, ['hate']],
     ]);
+  });
+});
+
+describe('splitLongPassage', () => {
+  // A sentence every 10 s.
+  const sentences = Array.from({ length: 30 }, (_, i) => ({ start: i * 10, end: i * 10 + 10 }));
+
+  it('keeps a passage within 90 s whole, and cuts a 3-minute one into pieces of at most 90 s between sentences', () => {
+    expect(splitLongPassage(sentences, { from: 2, to: 9, categories: ['hate'] })).toEqual([{ from: 2, to: 9, categories: ['hate'] }]);
+    const pieces = splitLongPassage(sentences, { from: 0, to: 17, categories: ['hate', 'conspiracy'] });
+    expect(pieces).toEqual([
+      { from: 0, to: 8, categories: ['hate', 'conspiracy'] },
+      { from: 9, to: 17, categories: ['hate', 'conspiracy'] },
+    ]);
+    for (const p of pieces) expect(sentences[p.to].end - sentences[p.from].start).toBeLessThanOrEqual(GENERATE_MAX_PASSAGE_SECONDS);
+  });
+
+  it('a single sentence longer than the cap stays whole', () => {
+    expect(splitLongPassage([{ start: 0, end: 200 }], { from: 0, to: 0, categories: ['hate'] })).toEqual([{ from: 0, to: 0, categories: ['hate'] }]);
   });
 });
 

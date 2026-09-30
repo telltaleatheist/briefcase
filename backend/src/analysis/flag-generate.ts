@@ -462,6 +462,34 @@ export interface AnchoredPassage {
 }
 
 /**
+ * The longest passage the verifier is asked about, in seconds. A longer one is
+ * cut at sentence boundaries into consecutive pieces of at most this, each
+ * keeping the passage's categories: the snap path cuts its spans at the same
+ * 90 s, and the verifier measurably drops a passage's second category on long
+ * passages (flag-windows.ts, WINDOW_MAX_MERGED_SECONDS). A single sentence
+ * longer than this stays whole.
+ */
+export const GENERATE_MAX_PASSAGE_SECONDS = 90;
+
+/** `passage` as consecutive pieces of at most `maxSeconds`, cut between sentences. */
+export function splitLongPassage(
+  sentences: Array<Pick<RankedSentence, 'start' | 'end'>>,
+  passage: AnchoredPassage,
+  maxSeconds: number = GENERATE_MAX_PASSAGE_SECONDS,
+): AnchoredPassage[] {
+  const pieces: AnchoredPassage[] = [];
+  let from = passage.from;
+  for (let i = passage.from; i <= passage.to; i++) {
+    if (i > from && sentences[i].end - sentences[from].start > maxSeconds) {
+      pieces.push({ ...passage, from, to: i - 1 });
+      from = i;
+    }
+  }
+  pieces.push({ ...passage, from, to: passage.to });
+  return pieces;
+}
+
+/**
  * The matched passages as the verifier's windows, by the snap path's rules
  * (buildWindows): each passage expanded by its context sentences, and nearby
  * passages merged category-blind up to the merge cap. The same passage
@@ -476,7 +504,7 @@ export function windowsFromPassages(
   const propositionOf = new Map(plan.map((p) => [p.category, p.proposition]));
   const seen = new Set<string>();
   const candidates: FlagCandidate[] = [];
-  for (const passage of passages) {
+  for (const passage of passages.flatMap((p) => splitLongPassage(sentences, p))) {
     for (const category of passage.categories) {
       const proposition = propositionOf.get(category);
       const key = `${passage.from}:${passage.to}:${category}`;
