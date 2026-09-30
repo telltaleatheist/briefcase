@@ -9,7 +9,9 @@ import type { TimelineChapter } from '../../../models/video-editor.model';
  * collapsed until the user opens a row with its chevron (never by itself).
  *
  * A flat list (every row top level) comes out exactly as before: every row,
- * in order, numbered by its sequence.
+ * in order, numbered by its sequence. So does an outline that is ONE story
+ * (the user: "hide it when theres only one"): its chapters, numbered 1..n,
+ * with no story row and no story mark on the timeline.
  */
 
 export interface ChapterRow {
@@ -39,8 +41,19 @@ export function isNested(chapters: TimelineChapter[]): boolean {
   return chapters.some((c) => parentOf(c, ids) !== null);
 }
 
+/** An outline that is one story holding every other row (shown as its chapters alone). */
+export function isLoneStory(chapters: TimelineChapter[]): boolean {
+  const top = topLevelChapters(chapters);
+  return top.length === 1 && top.length < chapters.length;
+}
+
 /** The visible rows: children only under an expanded parent (whose ancestors are expanded too). */
 export function chapterRows(chapters: TimelineChapter[], expanded: ReadonlySet<string>): ChapterRow[] {
+  if (isLoneStory(chapters)) {
+    return leafChapters(chapters).map((chapter, i) => ({
+      chapter, depth: 0, hasChildren: false, expanded: false, number: String(i + 1), childCount: 0,
+    }));
+  }
   const ids = new Set(chapters.map((c) => c.id));
   const nested = isNested(chapters);
   const kids = new Map<string | null, TimelineChapter[]>();
@@ -88,11 +101,11 @@ export function leafChapters(chapters: TimelineChapter[]): TimelineChapter[] {
 /**
  * Where each story starts, for the timeline: the first leaf inside each
  * top-level row that has children, mapped to that story's title. Empty on a
- * flat list.
+ * flat list and on one story.
  */
 export function storyStarts(chapters: TimelineChapter[]): Map<string, string> {
   const out = new Map<string, string>();
-  if (!isNested(chapters)) return out;
+  if (!isNested(chapters) || isLoneStory(chapters)) return out;
   const ids = new Set(chapters.map((c) => c.id));
   const leaves = leafChapters(chapters);
   const byId = new Map(chapters.map((c) => [c.id, c]));

@@ -8,7 +8,7 @@ const ch = (id: string, sequence: number, start: number, end: number, parentId: 
 });
 
 const OUTLINE: TimelineChapter[] = [
-  ch('S1', 1, 0, 600),
+  { ...ch('S1', 1, 0, 600), description: 'Why the timeline lines up with 9/11.' },
   ch('S1c1', 2, 0, 300, 'S1'),
   ch('S1c2', 3, 300, 600, 'S1'),
   ch('S2', 4, 600, 3725),
@@ -84,5 +84,23 @@ describe('AnalysisPanelComponent: stories accordion', () => {
     (rows()[0].querySelector('.chapter-chevron') as HTMLButtonElement).click();
     fixture.detectChanges();
     expect(panel.currentChapterId).toBe('S1c2');
+  });
+
+  it('an open story shows its summary above its chapters; a closed one does not', () => {
+    const summary = () => rows()[0].querySelector('.story-summary')?.textContent?.trim();
+    expect(summary()).toBeUndefined();
+    (rows()[0].querySelector('.chapter-chevron') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(summary()).toBe('Why the timeline lines up with 9/11.');
+  });
+
+  it('an outline of one story shows its chapters alone, numbered 1..n, with no story row', () => {
+    const lone = [ch('S', 1, 0, 600), ch('C1', 2, 0, 300, 'S'), ch('C2', 3, 300, 600, 'S')];
+    panel.chapters = lone;
+    panel.ngOnChanges({ chapters: { currentValue: lone, previousValue: OUTLINE, firstChange: false, isFirstChange: () => false } });
+    fixture.detectChanges();
+    expect(titles()).toEqual(['Title C1', 'Title C2']);
+    expect(rows().map((r) => r.querySelector('.chapter-number')!.textContent!.trim())).toEqual(['1', '2']);
+    expect(rows().some((r) => r.classList.contains('story') || r.querySelector('.chapter-chevron'))).toBeFalse();
   });
 });

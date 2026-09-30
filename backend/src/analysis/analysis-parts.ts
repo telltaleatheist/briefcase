@@ -4,9 +4,9 @@
  *
  *   metadata  suggested title, description, tags. Written FROM chapter
  *             summaries, as it always was (see analyzeTranscriptRun).
- *   chapters  the outline: stories (the chapter model reading the transcript,
- *             analysis/stories.ts; one story under 10 minutes), then each
- *             story's chapters on the scorer, and one LLM summary per chapter.
+ *   chapters  the outline: the scorer's chapters, one LLM summary each, then
+ *             the chapters grouped into stories by one LLM call
+ *             (analysis/stories.ts; a video under 10 minutes is one story).
  *   flags     the "Analysis" in the UI: snap flag ranking, then the LLM check of
  *             every flag section with its written reason.
  *
@@ -109,7 +109,7 @@ export type Band = [number, number];
 
 /** A stage that does not run has no band, and takes no share of the bar. */
 export interface AnalysisProgressBands {
-  /** Finding the stories: the chapter model reads the transcript (videos of 10 minutes or more). */
+  /** Grouping the chapters into stories: one call on the chapter model (videos of 10 minutes or more). */
   stories: Band | null;
   /** The scorer stage (chapter outline and/or flag ranking). */
   engine: Band | null;
@@ -125,9 +125,10 @@ export interface AnalysisProgressBands {
  * Each stage's weight on the 3-98% stretch of the bar. With every stage but
  * the stories running these are exactly the bands the pipeline always had:
  * engine 3-70, summaries 71-80, flags 80-92, metadata 92-98. The stories stage
- * (one long read of the transcript, videos of 10 minutes or more) comes first.
+ * (one call over the chapter list, videos of 10 minutes or more) comes after
+ * the summaries it reads.
  */
-const STAGE_WEIGHTS = { stories: 8, engine: 67, summaries: 10, flags: 12, metadata: 6 } as const;
+const STAGE_WEIGHTS = { stories: 2, engine: 67, summaries: 10, flags: 12, metadata: 6 } as const;
 
 /**
  * The flag stage's weight when the model reads the transcript for flags: one
@@ -152,7 +153,7 @@ export function analysisProgressBands(
    */
   weights: Partial<Record<keyof typeof STAGE_WEIGHTS, number>> = {},
 ): AnalysisProgressBands {
-  const order = ['stories', 'engine', 'summaries', 'flags', 'metadata'] as const;
+  const order = ['engine', 'summaries', 'stories', 'flags', 'metadata'] as const;
   const weight = (stage: (typeof order)[number]) => weights[stage] ?? STAGE_WEIGHTS[stage];
   const total = order.reduce((sum, stage) => sum + (run[stage] ? weight(stage) : 0), 0);
   const bands: AnalysisProgressBands = { stories: null, engine: null, summaries: null, flags: null, metadata: null };

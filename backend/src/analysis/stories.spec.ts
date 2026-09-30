@@ -1,325 +1,160 @@
-import { describe, expect, it } from '@jest/globals';
-import type { RankedSentence } from './flag-windows';
+import { describe, expect, it, jest } from '@jest/globals';
 import { AnalysisCancelledError } from './cancellation';
 import {
-  buildStoriesPrompt,
-  buildStoryPairPrompt,
-  buildStoryTitlePrompt,
-  findStories,
-  mapStoryQuotes,
-  oneStory,
-  parsePairAnswer,
-  parseStoryAnswer,
-  parseStoryTitle,
+  buildStoryGroupingPrompt,
+  groupStories,
+  parseStoryGrouping,
   runtimePhrase,
-  storyBand,
-  storyCallBudget,
-  storySpans,
-  storyWindows,
-  STORY_MIN_GAP_SECONDS,
-  StoryGenerateResult,
+  storiesFromGrouping,
+  StoryChapter,
 } from './stories';
 
-/** A 20-minute show: four subjects, 5 minutes each, one sentence every 20 s. */
-const SUBJECTS = [
-  ['The city council voted on the new stadium deal last night', 'stadium'],
-  ['Now over to the weather service and the storm warning for the coast', 'storm'],
-  ['Our next story is about the school board and its book ban vote', 'school'],
-  ['Finally a word about the county fair and its giant pumpkin contest', 'fair'],
-] as const;
+const ch = (startSeconds: number, endSeconds: number, title: string, summary = `About ${title}.`, isAd = false): StoryChapter =>
+  ({ startSeconds, endSeconds, title, summary, isAd });
 
-function show(): RankedSentence[] {
-  const out: RankedSentence[] = [];
-  SUBJECTS.forEach(([opener, word], k) => {
-    for (let i = 0; i < 15; i++) {
-      const t = k * 300 + i * 20;
-      out.push({ start: t, end: t + 20, text: i === 0 ? `${opener}.` : `${word} ${word} remark ${i} on the ${word} ${word} matter.` });
-    }
-  });
-  return out;
-}
+/** A 40-minute show shaped like the user's example: an intro and an argument, a sponsor, then new subjects. */
+const SHOW = [
+  ch(0, 120, 'Introduction and welcome'),
+  ch(120, 600, 'Prophetic timeline and 9/11'),
+  ch(600, 900, 'The Purim pattern and the book of Esther'),
+  ch(900, 990, 'Sponsor / self-promotion', 'A sponsor read.', true),
+  ch(990, 1500, 'The midterms'),
+  ch(1500, 2000, 'AI'),
+  ch(2000, 2400, 'Book promotion', 'Promoting the new book.', true),
+];
 
-const answer = (text: string, truncated = false): StoryGenerateResult => ({ text, truncated });
-
-describe('the story prompt', () => {
-  it('states the runtime once, gives no timestamps, and asks for titles and verbatim first sentences', () => {
-    const p = buildStoriesPrompt('line one\nline two', 42 * 60);
-    expect(p).toContain('Below is the complete transcript of one video, with no timestamps. The video runs 42 minutes.');
-    expect(p).toContain('TRANSCRIPT:\nline one\nline two');
-    expect(p).toContain('the way the next video in a playlist would start');
-    expect(p).toContain('Each item of a news broadcast is its own story.');
-    expect(p).toContain('A sponsor read or a plug belongs to the story around it.');
-    expect(p).toContain('OPENING: <a short title for it>');
-    expect(p).toContain('copied from the transcript above EXACTLY as it appears there, word for word, at least 6 words long');
-    expect(p).toContain('usually holds 1 to 8 stories, and one that stays on one subject is one story');
-    expect(p).not.toMatch(/\d\d:\d\d/);
+describe('the grouping prompt', () => {
+  it('lists every chapter with its times, sponsor mark and summary, states the runtime, and asks for no count', () => {
+    const prompt = buildStoryGroupingPrompt(SHOW, 2400);
+    expect(prompt).toContain('The video runs 40 minutes.');
+    expect(prompt).toContain('1. [00:00:00-00:02:00] Introduction and welcome\n   About Introduction and welcome.');
+    expect(prompt).toContain('4. [00:15:00-00:16:30] [SPONSOR] Sponsor / self-promotion\n   A sponsor read.');
+    expect(prompt).toContain('<number of its first chapter> | <a short title for the story> | <one or two sentences on what the story covers>');
+    // Models anchor on counts: none is given.
+    expect(prompt).not.toMatch(/\b\d+ (?:to|-) \d+ stories\b/);
+    expect(prompt).toContain('There is no expected number of stories');
   });
 
-  it('a window is told it is one part, and its own runtime', () => {
-    const p = buildStoriesPrompt('x', 70 * 60, { index: 2, total: 3 });
-    expect(p).toContain('Below is part 2 of 3 of one video\'s transcript, with no timestamps. This part runs 1 hour 10 minutes.');
-    expect(p).toContain('List the stories this part tells');
+  it('a chapter with no summary is its title line alone', () => {
+    expect(buildStoryGroupingPrompt([ch(0, 700, 'Only', ''), ch(700, 800, 'Next')], 800)).toContain('1. [00:00:00-00:11:40] Only\n2.');
   });
 
-  it('a loose band by runtime, one story always allowed below 90 minutes', () => {
-    expect(storyBand(15 * 60)).toBe('1 to 4 stories');
-    expect(storyBand(60 * 60)).toBe('1 to 8 stories');
-    expect(storyBand(4 * 3600)).toBe('3 to 15 stories');
-    expect(runtimePhrase(3600)).toBe('1 hour');
-    expect(runtimePhrase(59)).toBe('1 minute');
+  it('runtimes read as a person says them', () => {
+    expect(runtimePhrase(30)).toBe('1 minute');
+    expect(runtimePhrase(2400)).toBe('40 minutes');
+    expect(runtimePhrase(3900)).toBe('1 hour 5 minutes');
+    expect(runtimePhrase(7200)).toBe('2 hours');
   });
 });
 
-describe('reading the answer', () => {
-  it('reads the OPENING line and "title | sentence" lines, tolerating numbering, bold and quotes', () => {
-    const a = parseStoryAnswer(
-      '```\n**OPENING:** Stadium deal\n1. Storm warning | "Now over to the weather service and the storm warning for the coast."\n- School board | Our next story is about the school board\nHere you go!\n```',
-    );
-    expect(a).toEqual({
-      opening: 'Stadium deal',
-      stories: [
-        { title: 'Storm warning', quote: 'Now over to the weather service and the storm warning for the coast.' },
-        { title: 'School board', quote: 'Our next story is about the school board' },
+describe('parseStoryGrouping', () => {
+  it('reads story lines, tolerant of bullets, bold, fences, "Chapter 3" and a missing summary', () => {
+    const read = parseStoryGrouping('```\n- **1 | The timeline | Why it lines up.**\nChapter 4 | Sponsor\n5 | "The midterms" | What they mean. | And more.\n```', 7);
+    expect(read).toEqual({
+      lines: [
+        { firstChapter: 1, title: 'The timeline', summary: 'Why it lines up.' },
+        { firstChapter: 4, title: 'Sponsor', summary: '' },
+        { firstChapter: 5, title: 'The midterms', summary: 'What they mean. | And more.' },
       ],
-      unreadable: ['Here you go!'],
     });
   });
 
-  it('an answer with neither form is unreadable (null); OPENING alone is one story', () => {
-    expect(parseStoryAnswer('I cannot do that.')).toBeNull();
-    expect(parseStoryAnswer('')).toBeNull();
-    expect(parseStoryAnswer('OPENING: The only subject')).toEqual({ opening: 'The only subject', stories: [], unreadable: [] });
+  it('ignores lines that are not story lines', () => {
+    expect(parseStoryGrouping('Here are the stories:\n1 | A | a.', 3)).toEqual({ lines: [{ firstChapter: 1, title: 'A', summary: 'a.' }] });
+  });
+
+  it('names what makes an answer unusable', () => {
+    expect(parseStoryGrouping('', 3)).toEqual({ problem: 'it was empty' });
+    expect(parseStoryGrouping('I cannot help with that.', 3)).toEqual({ problem: expect.stringContaining('no line had the form') });
+    expect(parseStoryGrouping('2 | A | a.', 3)).toEqual({ problem: 'the first story must start at chapter 1, not 2' });
+    expect(parseStoryGrouping('1 | A | a.\n3 | B | b.\n2 | C | c.', 3)).toEqual({ problem: expect.stringContaining('must be in order') });
+    expect(parseStoryGrouping('1 | A | a.\n3 | B | b.\n3 | C | c.', 3)).toEqual({ problem: expect.stringContaining('must be in order') });
+    expect(parseStoryGrouping('1 | A | a.\n9 | B | b.', 3)).toEqual({ problem: 'story "B" starts at chapter 9, but there are only 3 chapters' });
   });
 });
 
-describe('quote mapping (forward cursor)', () => {
-  const s = show();
-
-  it('an exact quote maps to its sentence', () => {
-    const { starts, dropped } = mapStoryQuotes(s, [{ title: 'Storm', quote: 'Now over to the weather service and the storm warning for the coast.' }]);
-    expect(dropped).toEqual([]);
-    expect(starts).toEqual([{ sentence: 15, title: 'Storm', quote: 'Now over to the weather service and the storm warning for the coast.' }]);
+describe('storiesFromGrouping', () => {
+  it('the model\'s groups, each sponsor chapter its own story named by the chapter, the subject after it a new story', () => {
+    const stories = storiesFromGrouping(SHOW, [
+      { firstChapter: 1, title: 'The prophetic timeline', summary: 'Timeline.' },
+      // The model kept the sponsor and the midterms together: code splits them.
+      { firstChapter: 4, title: 'The midterms', summary: 'Midterms.' },
+      { firstChapter: 6, title: 'AI', summary: 'AI.' },
+    ]);
+    expect(stories.map((s) => [s.title, s.firstChapter, s.lastChapter, s.startSeconds, s.endSeconds, s.isAd])).toEqual([
+      ['The prophetic timeline', 0, 2, 0, 900, false],
+      ['Sponsor / self-promotion', 3, 3, 900, 990, true],
+      ['The midterms', 4, 4, 990, 1500, false],
+      ['AI', 5, 5, 1500, 2000, false],
+      ['Book promotion', 6, 6, 2000, 2400, true],
+    ]);
+    expect(stories[1].summary).toBe('A sponsor read.');
   });
 
-  it('a fuzzy quote (ASR spelling, punctuation, case) maps to the same sentence', () => {
-    const { starts } = mapStoryQuotes(s, [{ title: 'School', quote: 'our next story is about the skool board, and its book-ban vote' }]);
-    expect(starts.map((x) => x.sentence)).toEqual([30]);
-  });
-
-  it('an unplaceable quote is dropped and named, never approximated', () => {
-    const { starts, dropped } = mapStoryQuotes(s, [
-      { title: 'Invented', quote: 'The submarine fleet departed Reykjavik before dawn today' },
-      { title: 'Short', quote: 'The fair' },
-    ]);
-    expect(starts).toEqual([]);
-    expect(dropped.map((d) => [d.title, d.reason])).toEqual([
-      ['Invented', 'not found'],
-      ['Short', 'too short'],
+  it('a subject either side of a sponsor inside one group is two stories with the group\'s title', () => {
+    const stories = storiesFromGrouping(SHOW.slice(0, 5), [{ firstChapter: 1, title: 'All of it', summary: 's' }]);
+    expect(stories.map((s) => [s.title, s.firstChapter, s.lastChapter])).toEqual([
+      ['All of it', 0, 2],
+      ['Sponsor / self-promotion', 3, 3],
+      ['All of it', 4, 4],
     ]);
   });
 
-  it('a quote found only before the previous start is dropped as out of order', () => {
-    const { starts, dropped } = mapStoryQuotes(s, [
-      { title: 'School', quote: 'Our next story is about the school board and its book ban vote' },
-      { title: 'Storm', quote: 'Now over to the weather service and the storm warning for the coast' },
-      { title: 'Fair', quote: 'Finally a word about the county fair and its giant pumpkin contest' },
-    ]);
-    expect(starts.map((x) => [x.title, x.sentence])).toEqual([
-      ['School', 30],
-      ['Fair', 45],
-    ]);
-    expect(dropped).toEqual([{ title: 'Storm', quote: expect.any(String), reason: 'out of order' }]);
+  it('the stories tile the chapters', () => {
+    const stories = storiesFromGrouping(SHOW, [{ firstChapter: 1, title: 'A', summary: '' }, { firstChapter: 3, title: 'B', summary: '' }]);
+    for (let k = 1; k < stories.length; k++) expect(stories[k].firstChapter).toBe(stories[k - 1].lastChapter + 1);
+    expect(stories[0].firstChapter).toBe(0);
+    expect(stories[stories.length - 1].lastChapter).toBe(SHOW.length - 1);
   });
 });
 
-describe('tiling the stories', () => {
-  const s = show();
-
-  it('the opening story starts at 0, each ends where the next starts, the last at the video end', () => {
-    const { stories, merged } = storySpans(s, [
-      { sentence: 15, title: 'Storm', quote: 'q1' },
-      { sentence: 45, title: 'Fair', quote: 'q3' },
-    ], 'Stadium', 1200);
-    expect(merged).toBe(0);
-    expect(stories).toEqual([
-      { title: 'Stadium', startSentence: 0, startSeconds: 0, endSeconds: 300 },
-      { title: 'Storm', startSentence: 15, startSeconds: 300, endSeconds: 900, quote: 'q1' },
-      { title: 'Fair', startSentence: 45, startSeconds: 900, endSeconds: 1200, quote: 'q3' },
-    ]);
-  });
-
-  it(`a start within ${STORY_MIN_GAP_SECONDS}s of the one before, or the opening quoted again, is not doubled`, () => {
-    const { stories, merged } = storySpans(s, [
-      { sentence: 0, title: 'Stadium again', quote: 'q0' },
-      { sentence: 15, title: 'Storm', quote: 'q1' },
-      { sentence: 16, title: 'Storm again', quote: 'q1b' },
-    ], null, 1200);
-    expect(merged).toBe(2);
-    expect(stories.map((x) => [x.title, x.startSeconds, x.endSeconds])).toEqual([
-      ['Stadium again', 0, 300],
-      ['Storm', 300, 1200],
-    ]);
-  });
-
-  it('oneStory spans the video, untitled', () => {
-    expect(oneStory(480)).toEqual([{ title: '', startSentence: 0, startSeconds: 0, endSeconds: 480 }]);
-  });
-});
-
-describe('windows', () => {
-  it('one window when it fits; overlapping windows at sentence boundaries when not', () => {
-    const s = show();
-    const total = s.reduce((n, x) => n + x.text.length + 1, 0);
-    expect(storyWindows(s, total + 10)).toEqual([{ from: 0, to: 59, chars: total - 1 }]);
-    const w = storyWindows(s, 1200, 0.25);
-    expect(w.length).toBeGreaterThan(2);
-    expect(w[0].from).toBe(0);
-    expect(w[w.length - 1].to).toBe(59);
-    for (let k = 1; k < w.length; k++) {
-      expect(w[k].from).toBeLessThanOrEqual(w[k - 1].to); // overlap
-      expect(w[k].from).toBeGreaterThan(w[k - 1].from); // forward
-      expect(w[k].chars).toBeLessThanOrEqual(1200);
+describe('groupStories', () => {
+  it('under 10 minutes, or one chapter, is one story with no call', async () => {
+    const generate = jest.fn(async () => ({ text: '', truncated: false }));
+    for (const [list, total] of [[SHOW.slice(0, 3), 599], [[ch(0, 2400, 'Only')], 2400]] as const) {
+      const res = await groupStories([...list], total, { generate });
+      expect(res).toEqual({ calls: 0, stories: [expect.objectContaining({ firstChapter: 0, lastChapter: list.length - 1, isAd: false })] });
     }
+    expect(generate).not.toHaveBeenCalled();
   });
 
-  it('the budget: Claude takes a 4-hour transcript in one call; a small window leaves a quarter for output', () => {
-    expect(storyCallBudget(128000).maxChars).toBeGreaterThan(220000);
-    expect(storyCallBudget(128000).maxOutputTokens).toBe(8192);
-    expect(storyCallBudget(4096)).toEqual({ maxChars: (4096 - 1024 - 1024) * 3, maxOutputTokens: 1024 });
-  });
-});
-
-describe('findStories', () => {
-  const s = show();
-
-  it('one call reads the whole transcript; the quotes become the stories', async () => {
+  it('one call when the answer reads', async () => {
     const prompts: string[] = [];
-    const found = await findStories(s, 1200, {
-      maxChars: 100000,
-      maxOutputTokens: 8192,
-      generate: async (prompt) => {
-        prompts.push(prompt);
-        return answer(
-          'OPENING: Stadium deal\n' +
-            'Storm warning | Now over to the weather service and the storm warning for the coast.\n' +
-            'School board | Our next story is about the school board and its book ban vote.\n' +
-            'County fair | Finally a word about the county fair and its giant pumpkin contest.',
-        );
+    const res = await groupStories(SHOW, 2400, {
+      generate: async (p) => {
+        prompts.push(p);
+        return { text: '1 | Timeline | t.\n5 | Midterms | m.\n6 | AI | a.', truncated: false };
       },
     });
     expect(prompts).toHaveLength(1);
-    expect(prompts[0]).toContain('The video runs 20 minutes.');
-    expect(found.stories.map((x) => [x.title, x.startSeconds, x.endSeconds])).toEqual([
-      ['Stadium deal', 0, 300],
-      ['Storm warning', 300, 600],
-      ['School board', 600, 900],
-      ['County fair', 900, 1200],
-    ]);
-    expect(found.warnings).toEqual([]);
-    expect(found.pairQuestions).toBe(0);
+    expect(res.calls).toBe(1);
+    expect(res.stories.map((s) => s.title)).toEqual(['Timeline', 'Sponsor / self-promotion', 'Midterms', 'AI', 'Book promotion']);
   });
 
-  it('dropped quotes are named in the warnings; a cut-off answer is a named warning', async () => {
-    const found = await findStories(s, 1200, {
-      maxChars: 100000,
-      maxOutputTokens: 8192,
-      generate: async () =>
-        answer('OPENING: Stadium\nStorm | Now over to the weather service and the storm warning for the coast.\nMade up | The submarine fleet departed Reykjavik before dawn', true),
-    });
-    expect(found.stories.map((x) => x.title)).toEqual(['Stadium', 'Storm']);
-    expect(found.warnings).toEqual([
-      'Stories: the story list reached the model\'s output limit (8192 tokens) in the transcript; stories after the cut were not listed.',
-      'Stories: 1 of the 2 story starts the model gave could not be placed in the transcript and were dropped: "Made up" (not found: "The submarine fleet departed Reykjavik before dawn")',
-    ]);
-  });
-
-  it('every start dropped: one story spanning the video, NAMED in the warnings', async () => {
-    const found = await findStories(s, 1200, {
-      maxChars: 100000,
-      maxOutputTokens: 8192,
-      generate: async () => answer('OPENING: Everything\nMade up | The submarine fleet departed Reykjavik before dawn'),
-    });
-    expect(found.stories).toEqual([{ title: 'Everything', startSentence: 0, startSeconds: 0, endSeconds: 1200 }]);
-    expect(found.warnings[found.warnings.length - 1]).toBe(
-      'Stories: none of the 1 story starts the model gave could be placed, so the whole video is one story.',
-    );
-  });
-
-  it('an unreadable answer or a failed call fails the stage with the reason; a cancel propagates as it is', async () => {
-    const base = { maxChars: 100000, maxOutputTokens: 8192 };
-    await expect(findStories(s, 1200, { ...base, generate: async () => answer('Sorry, no.') })).rejects.toThrow(
-      'the stories could not be found: the answer held no story lines',
-    );
-    await expect(
-      findStories(s, 1200, {
-        ...base,
-        generate: async () => {
-          throw new Error('upstream 500');
-        },
-      }),
-    ).rejects.toThrow('the stories could not be found: upstream 500');
-    await expect(
-      findStories(s, 1200, {
-        ...base,
-        generate: async () => {
-          throw new AnalysisCancelledError('stop');
-        },
-      }),
-    ).rejects.toBeInstanceOf(AnalysisCancelledError);
-  });
-
-  it('windowed reading: starts from each window, overlap duplicates merged, then adjacent pairs asked and merged while same', async () => {
-    const calls: Array<{ kind: string; prompt: string }> = [];
-    // Each window reports every subject opener it holds (the overlap repeats some)
-    // and, being windowed, invents a split inside the school story.
-    const found = await findStories(s, 1200, {
-      maxChars: 2000,
-      maxOutputTokens: 8192,
-      generate: async (prompt, kind) => {
-        calls.push({ kind, prompt });
-        if (kind === 'pair') {
-          // Part B's head is the school story's middle: the same story as A.
-          return answer(prompt.includes('PART B (its start):\nschool school remark 8') ? 'same' : 'different');
-        }
-        const found: Array<[number, string]> = [];
-        for (const [opener, word] of SUBJECTS) if (prompt.includes(opener)) found.push([prompt.indexOf(opener), `${word} | ${opener}.`]);
-        const extra = 'school school remark 8 on the school school matter.';
-        if (prompt.includes(extra)) found.push([prompt.indexOf(extra), `school, part two | ${extra}`]);
-        const lines = ['OPENING: whatever this part opens with', ...found.sort((a, b) => a[0] - b[0]).map(([, line]) => line)];
-        return answer(lines.join('\n'));
+  it('an unusable answer is asked again with its problem; a second failure throws the reason', async () => {
+    const prompts: string[] = [];
+    const answers = ['9 | Late | x.', 'still nothing'];
+    const err = await groupStories(SHOW, 2400, {
+      generate: async (p) => {
+        prompts.push(p);
+        return { text: answers.shift()!, truncated: false };
       },
-    });
-    const reads = calls.filter((c) => c.kind === 'stories');
-    expect(reads.length).toBe(found.windows);
-    expect(found.windows).toBeGreaterThan(1);
-    expect(reads[0].prompt).toContain(`part 1 of ${found.windows}`);
-    expect(found.stories.map((x) => [x.title, x.startSeconds, x.endSeconds])).toEqual([
-      ['whatever this part opens with', 0, 300],
-      ['storm', 300, 600],
-      ['school', 600, 900],
-      ['fair', 900, 1200],
-    ]);
-    expect(found.pairMerges).toBe(1);
-    expect(found.pairQuestions).toBe(calls.filter((c) => c.kind === 'pair').length);
-    expect(found.pairQuestions).toBe(4);
+    }).catch((e) => e);
+    expect(prompts[1]).toContain('Your previous answer could not be used: the first story must start at chapter 1, not 9.');
+    expect((err as Error).message).toMatch(/^the stories could not be found: .*Last problem: no line had the form/);
   });
 
-  it('the pair prompt quotes A\'s tail and B\'s head; its answer is read by its first word', () => {
-    const p = buildStoryPairPrompt('end of a', 'start of b');
-    expect(p).toContain('PART A (its end):\nend of a');
-    expect(p).toContain('PART B (its start):\nstart of b');
-    expect(p).toContain('Answer with one word: same or different.');
-    expect(parsePairAnswer('Same.')).toBe('same');
-    expect(parsePairAnswer('<think>x</think>different')).toBe('different');
-    expect(parsePairAnswer('maybe')).toBeNull();
+  it('a cut-off answer that reads is used; one that does not says it was cut off', async () => {
+    const answers = [{ text: '1 | A | cut', truncated: true }];
+    expect((await groupStories(SHOW, 2400, { generate: async () => answers.shift()! })).stories[0].title).toBe('A');
+    const err = await groupStories(SHOW, 2400, { generate: async () => ({ text: '', truncated: true }) }).catch((e) => e);
+    expect((err as Error).message).toContain('(the answer was cut off at the output limit)');
   });
-});
 
-describe('a story titled from its chapters', () => {
-  it('lists the chapters with their summaries and reads one line back', () => {
-    const p = buildStoryTitlePrompt([{ title: 'A', summary: 'first' }, { title: 'B', summary: '' }]);
-    expect(p).toContain('1. A: first\n2. B');
-    expect(parseStoryTitle('\n**Title:** "The stadium deal"\n')).toBe('The stadium deal');
-    expect(parseStoryTitle('   ')).toBeNull();
+  it('a model error fails with its message; a cancel propagates as it is', async () => {
+    await expect(groupStories(SHOW, 2400, { generate: async () => { throw new Error('upstream 500'); } }))
+      .rejects.toThrow('the stories could not be found: upstream 500');
+    const cancel = new AnalysisCancelledError('cancelled');
+    await expect(groupStories(SHOW, 2400, { generate: async () => { throw cancel; } })).rejects.toBe(cancel);
   });
 });

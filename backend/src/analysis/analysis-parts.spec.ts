@@ -99,11 +99,11 @@ describe('progress bands', () => {
     expect(flags).toEqual({ stories: null, engine: [3, 84], summaries: null, flags: [84, 98], metadata: null });
   });
 
-  it('finding the stories comes first, before the scorer stage', () => {
+  it('grouping the stories comes after the summaries it reads', () => {
     const b = analysisProgressBands({ stories: true, engine: true, summaries: true, flags: false, metadata: false });
-    expect(b.stories![0]).toBe(3);
-    expect(b.engine![0]).toBe(b.stories![1]);
-    expect(b.summaries![1]).toBe(98);
+    expect(b.engine![0]).toBe(3);
+    expect(b.stories![0]).toBe(b.summaries![1]);
+    expect(b.stories![1]).toBe(98);
   });
 
   it('nothing to run is no bands', () => {

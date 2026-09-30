@@ -1,5 +1,5 @@
 import type { TimelineChapter } from '../../../models/video-editor.model';
-import { chapterRows, chapterSubtreeIds, isNested, leafChapters, storyStarts, topLevelChapters } from './chapter-outline';
+import { chapterRows, chapterSubtreeIds, isLoneStory, isNested, leafChapters, storyStarts, topLevelChapters } from './chapter-outline';
 
 // Plain describe/it/expect only, so this runs under Karma/Jasmine (ng test) and Jest alike.
 const ch = (id: string, sequence: number, start: number, end: number, parentId?: string): TimelineChapter => ({
@@ -79,5 +79,18 @@ describe('chapter outline', () => {
   it('deleting a chapter removes its subtree', () => {
     expect([...chapterSubtreeIds(nested, 'A')].sort()).toEqual(['A', 'A1', 'A1a', 'A1b', 'A2']);
     expect([...chapterSubtreeIds(nested, 'B')]).toEqual(['B']);
+  });
+
+  it('one story is shown as its chapters alone: no story row, numbered 1..n, no story mark', () => {
+    const lone = [ch('S', 1, 0, 90), ch('C1', 2, 0, 30, 'S'), ch('C2', 3, 30, 90, 'S')];
+    expect(isLoneStory(lone)).toBe(true);
+    expect(chapterRows(lone, new Set(['S'])).map((r) => [r.chapter.id, r.depth, r.hasChildren, r.number])).toEqual([
+      ['C1', 0, false, '1'],
+      ['C2', 0, false, '2'],
+    ]);
+    expect(storyStarts(lone).size).toBe(0);
+    // A flat list and a two-story outline are not one story.
+    expect(isLoneStory([ch('X', 1, 0, 10)])).toBe(false);
+    expect(isLoneStory(nested)).toBe(false);
   });
 });

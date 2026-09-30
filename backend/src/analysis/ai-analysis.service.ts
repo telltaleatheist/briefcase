@@ -1,14 +1,13 @@
 /**
  * AI Analysis Service — the snap engine, then the LLM stages, all on Crucible.
  *
- *   Stories: the outline's top level (stories.ts). Under 10 minutes a video is
- *           one story; a longer one's stories are found by the `chapter` model
- *           reading the transcript, BEFORE the scorer lease, so the chat model
- *           and the scorer never hold the card at once.
- *   Scorer stage (SnapAnalysisService, Crucible's decision door): each story's
- *           chapters (outline + assignment + Viterbi + ad check), and the flag
- *           ranking when flags are found by the scorer, in one lease.
+ *   Scorer stage (SnapAnalysisService, Crucible's decision door): the whole
+ *           video's chapters (outline + assignment + Viterbi + ad check), and
+ *           the flag ranking when flags are found by the scorer, in one lease.
  *   Pass 2: each chapter's summary from the LLM (the outline gave its title).
+ *   Stories: the outline's top level (stories.ts): one call on the `chapter`
+ *           model groups the chapters, with their summaries, into stories.
+ *           Under 10 minutes, or when it is one story, the outline stays flat.
  *   Flags:  the candidates are found by the flags model reading the transcript
  *           in ~8,000-character chunks (flag-generate.ts, the default), or by
  *           the scorer's decide ranking in the scorer stage ("How flags are
@@ -86,19 +85,10 @@ import {
   resolveAnalysisRange,
   segmentsInRange,
 } from './analysis-parts';
-import { ChapterTreeResult, leafChapters, nestAnalysisChapters } from '../scorer/chapters/chapter-tree';
-import { storyTreeFromChapters } from '../scorer/chapters/story-chapters';
-import {
-  buildStoryTitlePrompt,
-  findStories,
-  oneStory,
-  parseStoryTitle,
-  runtimePhrase,
-  STORIES_MIN_VIDEO_SECONDS,
-  STORY_PAIR_MAX_OUTPUT_TOKENS,
-  storyCallBudget,
-  StorySpan,
-} from './stories';
+import { ChapterTreeResult, nestAnalysisChapters } from '../scorer/chapters/chapter-tree';
+import { storyTreeFromGroups } from '../scorer/chapters/story-chapters';
+import type { SnapChapter } from '../scorer/chapters/segmenter';
+import { groupStories, runtimePhrase, STORIES_MIN_VIDEO_SECONDS, STORY_GROUP_MAX_OUTPUT_TOKENS, Story } from './stories';
 import type { SnapFlagRankResult } from '../scorer/flags/snap-flag-ranker.service';
 import {
   buildChapterLines,
@@ -875,15 +865,15 @@ export class AIAnalysisService {
         ...(makeFlags ? (['flags'] as const) : []),
         ...(makeMetadata ? (['metadata'] as const) : []),
       ];
-      // The outline's top level: a video under 10 minutes is one story (no
-      // model call); a longer one has its stories found by the chapter model
-      // reading the transcript (stories.ts), before the scorer stage.
+      // The outline's top level: a video of 10 minutes or more has its
+      // chapters grouped into stories after Pass 2 (stories.ts); a shorter one
+      // is one story, and its outline stays flat.
       const videoSeconds = segments && segments.length ? segments[segments.length - 1].end : 0;
-      const findStoriesStage = makeChapters && videoSeconds >= STORIES_MIN_VIDEO_SECONDS;
+      const groupStoriesStage = makeChapters && !range && videoSeconds >= STORIES_MIN_VIDEO_SECONDS;
       // A stage this run does not make takes no share of the progress bar.
       const bands = analysisProgressBands(
         {
-          stories: findStoriesStage,
+          stories: groupStoriesStage,
           engine: makeChapters || flagsOnScorer,
           summaries: makeChapters,
           flags: makeFlags,
@@ -1043,30 +1033,8 @@ export class AIAnalysisService {
       // busy or silent server parks the task; a cancel propagates as a
       // cancellation and never falls into more work.
       const engineWarnings: string[] = [];
-      // ---- STORIES (chat generate on the chapter model, before the scorer
-      // lease, so the chat model and the scorer never hold the card together)
-      let stories: StorySpan[] | null = null;
-      if (makeChapters) {
-        if (findStoriesStage) {
-          const found = await this.runStoryStage(
-            this.resolveTaskConfig(aiConfig, 'chapter', taskModels),
-            segments,
-            videoSeconds,
-            contextFor(this.resolveTaskConfig(aiConfig, 'chapter', taskModels)),
-            bands.stories!,
-            (at, message) => sendProgress('analysis', at, message),
-            trackTokens,
-            signal,
-          );
-          stories = found.stories;
-          engineWarnings.push(...found.warnings);
-        } else {
-          stories = oneStory(videoSeconds);
-          this.logger.log(`[Stories] ${runtimePhrase(videoSeconds)}, under ${STORIES_MIN_VIDEO_SECONDS / 60} minutes: one story`);
-        }
-      }
       let snapTree: ChapterTreeResult | null = null;
-      let snapChapters: Array<{ startSeconds: number; title: string }> = [];
+      let snapChapters: SnapChapter[] = [];
       let flagRanking: SnapFlagRankResult | null = null;
       if (bands.engine) {
         const [engineStart, engineEnd] = bands.engine;
@@ -1081,12 +1049,13 @@ export class AIAnalysisService {
           chapters: makeChapters,
           flags: flagsOnScorer,
           windows,
-          stories,
+          // No sub-chapters inside long chapters: the outline's second level is
+          // the stories, made from these chapters after Pass 2.
+          refineOptions: false,
           signal,
           onProgress: (p) => sendProgress('analysis', engineStart + Math.round(p.fraction * (engineEnd - engineStart)), p.message),
         });
         if (snap.chapterTreeError) engineWarnings.push(`Sub-chapters were skipped: ${snap.chapterTreeError}`);
-        if (snap.chapterWarnings?.length) engineWarnings.push(...snap.chapterWarnings);
         const gated = snap.labelMassGated.total;
         if (gated > 0) {
           engineWarnings.push(
@@ -1095,22 +1064,8 @@ export class AIAnalysisService {
           );
         }
         if (makeChapters) {
-          // The outline is stories then chapters: Pass 2 works on its LEAVES (the
-          // chapters, which tile the video as flat chapters do); the stories are
-          // put back around them at the end. A scorer stage that answered flat
-          // chapters only has them placed under the stories here.
-          snapTree =
-            snap.chapterTree && snap.chapterTree.depth > 1
-              ? snap.chapterTree
-              : storyTreeFromChapters(stories ?? oneStory(videoSeconds), snap.chapters?.chapters ?? []);
-          snapChapters = leafChapters(snapTree.flat);
-          const storyCount = snapTree.tree.length;
-          sendProgress(
-            'analysis',
-            engineEnd,
-            `Found ${snapChapters.length} chapter${snapChapters.length === 1 ? '' : 's'}` +
-              (storyCount > 1 ? ` in ${storyCount} stories` : ''),
-          );
+          snapChapters = snap.chapters?.chapters ?? [];
+          sendProgress('analysis', engineEnd, `Found ${snapChapters.length} chapter${snapChapters.length === 1 ? '' : 's'}`);
         }
         if (flagsOnScorer) {
           flagRanking = snap.flags;
@@ -1219,20 +1174,23 @@ export class AIAnalysisService {
           );
         }
 
-        // A story the story call did not name (a video under 10 minutes, an
-        // opening without an OPENING line) is titled from its chapters: its one
-        // chapter's title, or one call on the chapter model over its chapters'
-        // titles and summaries.
-        if (snapTree) {
-          engineWarnings.push(
-            ...(await this.titleUntitledStories(
-              this.resolveTaskConfig(aiConfig, 'chapter', taskModels),
-              snapTree,
-              chapters,
-              trackTokens,
-              signal,
-            )),
+        // STORIES: the chapters, with their summaries, grouped by the chapter
+        // model (one call, stories.ts). More than one story makes the outline
+        // two levels; one keeps it flat, as a video under 10 minutes is.
+        if (groupStoriesStage && snapChapters.length > 1) {
+          const stories = await this.groupChaptersIntoStories(
+            this.resolveTaskConfig(aiConfig, 'chapter', taskModels),
+            snapChapters,
+            chapters,
+            videoSeconds,
+            bands.stories!,
+            (at, message) => sendProgress('analysis', at, message),
+            trackTokens,
+            signal,
           );
+          if (stories.length > 1) snapTree = storyTreeFromGroups(stories, snapChapters);
+        } else if (makeChapters) {
+          this.logger.log(`[Stories] ${runtimePhrase(videoSeconds)}${range ? ' (a range)' : ''}, ${snapChapters.length} chapter(s): one story, flat outline`);
         }
       }
 
@@ -2321,125 +2279,64 @@ export class AIAnalysisService {
   }
 
   /**
-   * STORIES: the chapter model reads the transcript and lists the video's
-   * stories, each with its first sentence copied verbatim; code places each
-   * sentence (stories.ts). One call when the transcript fits the model's
-   * context, else large overlapping windows and then a same-story question per
-   * adjacent pair. On a Crucible catalog model: thinking off, temperature 0,
-   * an output ceiling sized so a long list is never cut (a cut answer is a
-   * named warning). A cloud upstream is sent the prompt alone (target.ts).
-   *
-   * Throws when no story answer could be read (the Chapters part fails with
-   * the reason); a cancel or a park stops the run as it is.
+   * STORIES: one call on the chapter model groups the chapters (times, titles,
+   * Pass 2 summaries, sponsor marks) into stories (stories.ts). On a Crucible
+   * catalog model: thinking off, temperature 0 (a cloud upstream is sent the
+   * prompt alone, target.ts). Throws with the reason when the grouping cannot
+   * be read after one retry (the Chapters part fails); a cancel or a park
+   * stops the run as it is.
    */
-  private async runStoryStage(
-    storyConfig: AIProviderConfig,
-    segments: Segment[],
+  private async groupChaptersIntoStories(
+    chapterConfig: AIProviderConfig,
+    snapChapters: SnapChapter[],
+    rows: Chapter[],
     videoSeconds: number,
-    contextTokens: number,
     band: [number, number],
     progress: (at: number, message: string) => void,
     onTokens: ((response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void) | undefined,
     signal: AbortSignal | undefined,
-  ): Promise<{ stories: StorySpan[]; warnings: string[] }> {
-    const sentences = assembleSentences(segments);
-    const budget = storyCallBudget(contextTokens);
-    const model = `${storyConfig.provider}:${storyConfig.model}`;
+  ): Promise<Story[]> {
+    // Chapter k (0-based) is Pass 2's row `sequence` k + 1; a failed row has no summary.
+    const bySequence = new Map(rows.map((r) => [r.sequence, r]));
+    const list = snapChapters.map((c, k) => {
+      const row = bySequence.get(k + 1);
+      return {
+        startSeconds: c.startSeconds,
+        endSeconds: c.endSeconds,
+        title: c.title,
+        summary: row && !row.failed ? row.summary ?? '' : '',
+        isAd: c.isAd,
+      };
+    });
+    const model = `${chapterConfig.provider}:${chapterConfig.model}`;
     const startedAt = Date.now();
-    this.logger.log(
-      `[Stories] Reading ${sentences.length} sentences (${runtimePhrase(videoSeconds)}) for stories on ${model} ` +
-        `(context ${contextTokens} tokens: up to ${budget.maxChars} characters a call, ${budget.maxOutputTokens} output tokens)`,
-    );
-    progress(band[0], 'Finding stories...');
-    const found = await findStories(sentences, videoSeconds, {
-      maxChars: budget.maxChars,
-      maxOutputTokens: budget.maxOutputTokens,
-      generate: async (prompt, kind) => {
-        ensureNotCancelled(signal, kind === 'stories' ? 'finding the stories' : 'a same-story question');
-        const maxTokens = kind === 'stories' ? budget.maxOutputTokens : STORY_PAIR_MAX_OUTPUT_TOKENS;
-        const response = await this.aiProviderService.generateText(prompt, storyConfig, 'chapter', {
-          // Sent to an ollama/ upstream only; one size for the stage.
-          numCtx: estimateNumCtx(kind === 'stories' ? budget.maxChars : prompt.length, storyConfig.model, maxTokens),
+    progress(band[0], `Grouping ${list.length} chapters into stories...`);
+    this.logger.log(`[Stories] grouping ${list.length} chapters (${runtimePhrase(videoSeconds)}) on ${model}`);
+    const found = await groupStories(list, videoSeconds, {
+      generate: async (prompt) => {
+        ensureNotCancelled(signal, 'grouping the stories');
+        const response = await this.aiProviderService.generateText(prompt, chapterConfig, 'chapter', {
+          // Sent to an ollama/ upstream only.
+          numCtx: estimateNumCtx(prompt.length, chapterConfig.model, STORY_GROUP_MAX_OUTPUT_TOKENS),
           temperature: 0,
           thinking: false,
-          maxTokens,
+          maxTokens: STORY_GROUP_MAX_OUTPUT_TOKENS,
           signal,
         });
         onTokens?.(response);
         return { text: response.text, truncated: response.doneReason === 'length' };
       },
-      onProgress: (fraction, message) => progress(Math.round(band[0] + fraction * (band[1] - band[0])), message),
       log: (message) => this.logger.log(message),
     });
+    progress(band[1], `Found ${found.stories.length} stor${found.stories.length === 1 ? 'y' : 'ies'}`);
     this.logger.log(
       `[Stories] ${found.stories.length} stor${found.stories.length === 1 ? 'y' : 'ies'} in ${((Date.now() - startedAt) / 1000).toFixed(1)}s ` +
-        `(${found.calls} call(s) over ${found.windows} part(s), ${found.given} start(s) given, ${found.dropped.length} dropped, ` +
-        `${found.pairQuestions} same-story question(s), ${found.pairMerges} merged): ` +
-        found.stories.map((st) => `${formatHms(st.startSeconds)} "${st.title || '(untitled)'}"`).join(', '),
+        `(${found.calls} call(s)): ` +
+        found.stories
+          .map((st) => `${formatHms(st.startSeconds)} "${st.title}" (chapters ${st.firstChapter + 1}-${st.lastChapter + 1}${st.isAd ? ', sponsor' : ''})`)
+          .join(', '),
     );
-    return { stories: found.stories, warnings: found.warnings };
-  }
-
-  /**
-   * Title every story nothing named yet, from its chapters (mutates the tree's
-   * nodes, which nestAnalysisChapters reads): the one chapter's title when it
-   * has one, else one call on the chapter model over its chapters' titles and
-   * summaries. A failed call titles it by its first chapter and says so.
-   */
-  private async titleUntitledStories(
-    chapterConfig: AIProviderConfig,
-    tree: ChapterTreeResult,
-    leafRows: Chapter[],
-    onTokens: ((response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void) | undefined,
-    signal: AbortSignal | undefined,
-  ): Promise<string[]> {
-    const warnings: string[] = [];
-    // Leaf k (1-based, in preorder) is Pass 2's chapter `sequence` k.
-    const rowOf = new Map(leafRows.filter((c) => !c.failed).map((c) => [c.sequence, c]));
-    let leaf = 0;
-    const leavesUnder = new Map<number, Chapter[]>();
-    for (const node of tree.flat) {
-      if (!node.isLeaf) continue;
-      leaf++;
-      const row = rowOf.get(leaf);
-      if (row && node.parent !== null) {
-        if (!leavesUnder.has(node.parent)) leavesUnder.set(node.parent, []);
-        leavesUnder.get(node.parent)!.push(row);
-      }
-    }
-    for (const node of tree.flat) {
-      if (node.level !== 0 || node.title.trim()) continue;
-      const kids = leavesUnder.get(node.index) ?? [];
-      const first = tree.flat.find((c) => c.parent === node.index);
-      let title: string | null = null;
-      if (kids.length === 1) title = kids[0].title;
-      else if (kids.length > 1) {
-        ensureNotCancelled(signal, 'titling the story');
-        try {
-          const response = await this.aiProviderService.generateText(buildStoryTitlePrompt(kids), chapterConfig, 'chapter', {
-            temperature: 0,
-            thinking: false,
-            maxTokens: 128,
-            signal,
-          });
-          onTokens?.(response);
-          title = parseStoryTitle(response.text);
-          if (!title) this.logger.warn(`[Stories] the story title answer held no title: ${response.text.slice(0, 120)}`);
-        } catch (error) {
-          if (stopsTheRun(error)) throw error;
-          this.logger.warn(`[Stories] the story could not be titled: ${(error as Error).message}`);
-        }
-        if (!title) {
-          title = kids[0].title;
-          warnings.push(`Stories: the story at ${formatHms(node.startSeconds)} could not be titled from its chapters, so it carries its first chapter's title.`);
-        }
-      }
-      title ??= first?.title || 'Untitled story';
-      node.title = title;
-      node.label = title;
-      this.logger.log(`[Stories] story at ${formatHms(node.startSeconds)} titled from its ${kids.length} chapter(s): "${title}"`);
-    }
-    return warnings;
+    return found.stories;
   }
 
   /**

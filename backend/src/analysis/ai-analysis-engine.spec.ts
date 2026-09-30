@@ -84,8 +84,8 @@ class Harness {
   snapRuns: SnapStageRequest[] = [];
   snapRun: (req: SnapStageRequest) => Promise<SnapStageResult> = async () => snapResult();
   /** Replaceable: every LLM call's answer. */
-  answer: (prompt: string, task: string) => Promise<{ text: string; inputTokens: number; outputTokens: number; doneReason?: string }> = async (prompt, task) => ({
-    text: prompt.startsWith('Below are the chapters of one story') ? 'Pasta and travel plans' : task === 'flags'
+  answer: (prompt: string, task: string) => Promise<{ text: string; inputTokens: number; outputTokens: number; doneReason?: string }> = async (_prompt, task) => ({
+    text: task === 'flags'
       ? '{"verdict":"flag","reason":"The speaker calls them communists and vermin as their own view."}'
       : '{"title":"LLM title","summary":"A summary of it.","people":[],"topics":["cooking"],"hook":"A hook.","body":"A body."}',
     inputTokens: 1, outputTokens: 1,
@@ -149,17 +149,11 @@ describe('AIAnalysisService: snap is the analysis engine', () => {
     expect(h.snapRuns[0]).toMatchObject({ chapters: true, flags: true });
     expect(h.snapRuns[0].signal).toBeDefined();
 
-    // Chapters: the scorer's boundaries and outline labels; the LLM wrote only
-    // summaries. A video under 10 minutes is one story, titled from its chapters.
-    expect(res.chapters.map((c) => [c.start_time, c.title, c.summary, c.level, c.parent_sequence])).toEqual([
-      ['00:00:00', 'Pasta and travel plans', '', 0, undefined],
-      ['00:00:00', 'Pasta day', 'A summary of it.', 1, 1],
-      ['00:01:00', 'Summer travel', 'A summary of it.', 1, 1],
+    // Chapters: the scorer's boundaries and outline labels; the LLM wrote only summaries.
+    expect(res.chapters.map((c) => [c.start_time, c.title, c.summary])).toEqual([
+      ['00:00:00', 'Pasta day', 'A summary of it.'],
+      ['00:01:00', 'Summer travel', 'A summary of it.'],
     ]);
-    // No story call on a short video; one title call for the story.
-    expect(h.generated.filter((g) => g.prompt.startsWith('Below is the complete transcript'))).toHaveLength(0);
-    expect(h.generated.filter((g) => g.prompt.startsWith('Below are the chapters of one story'))).toHaveLength(1);
-    expect(h.snapRuns[0].stories).toEqual([{ title: '', startSentence: 0, startSeconds: 0, endSeconds: 80 }]);
 
     // One check per (section, category): 2 + 1 + 1, the overflow window included.
     expect(h.generated.filter((g) => g.task === 'flags')).toHaveLength(4);
@@ -246,12 +240,7 @@ describe('AIAnalysisService: snap is the analysis engine', () => {
       },
     });
     const res = await h.service().analyzeTranscript(options());
-    // One story holding one chapter: the story takes the chapter's title, no call.
-    expect(res.chapters.map((c) => [c.start_time, c.end_time, c.title, c.level])).toEqual([
-      ['00:00:00', '00:01:20', 'Pasta day', 0],
-      ['00:00:00', '00:01:20', 'Pasta day', 1],
-    ]);
-    expect(h.generated.some((g) => g.prompt.startsWith('Below are the chapters of one story'))).toBe(false);
+    expect(res.chapters.map((c) => [c.start_time, c.end_time, c.title])).toEqual([['00:00:00', '00:01:20', 'Pasta day']]);
   });
 
   it('answers under the label-mass gate are counted and said on the job, never silent', async () => {
@@ -284,7 +273,7 @@ describe('AIAnalysisService: snap is the analysis engine', () => {
     writeAppConfig({ flagFinder: 'snap', taskModels: { boundary: 'ollama:qwen3.5:4b' } });
     const h = new Harness();
     const res = await h.service().analyzeTranscript(options());
-    expect(res.chapters.filter((c) => c.level === 1)).toHaveLength(2);
+    expect(res.chapters).toHaveLength(2);
     expect(h.generated.some((g) => g.task === 'boundary')).toBe(false);
   });
 
@@ -345,7 +334,7 @@ describe('AIAnalysisService: the parts a run makes', () => {
     expect(h.snapRuns).toHaveLength(1);
     expect(h.snapRuns[0]).toMatchObject({ chapters: true, flags: true });
     expect(res.parts).toEqual(['chapters', 'flags']);
-    expect(res.chapters.filter((c) => c.level === 1)).toHaveLength(2);
+    expect(res.chapters).toHaveLength(2);
     expect(res.sections.length).toBeGreaterThan(0);
     expect(tasks(h).some((t) => metadataTasks.includes(t))).toBe(false);
     expect('tags' in res || 'description' in res || 'suggested_title' in res).toBe(false);
@@ -358,7 +347,7 @@ describe('AIAnalysisService: the parts a run makes', () => {
     expect(h.snapRuns[0]).toMatchObject({ chapters: true, flags: false });
     expect(new Set(tasks(h))).toEqual(new Set(['chapter']));
     expect(res.parts).toEqual(['chapters']);
-    expect(res.chapters.map((c) => c.title)).toEqual(['Pasta and travel plans', 'Pasta day', 'Summer travel']);
+    expect(res.chapters.map((c) => c.title)).toEqual(['Pasta day', 'Summer travel']);
     expect(res.sections).toEqual([]);
     expect(res.tags).toBeUndefined();
   });
@@ -394,10 +383,8 @@ describe('AIAnalysisService: the parts a run makes', () => {
     const res = await h.service().analyzeTranscript({ ...options(), parts: ['metadata'], existingChapters: [] });
     expect(h.snapRuns[0]).toMatchObject({ chapters: true, flags: false });
     expect(res.parts).toEqual(['chapters', 'metadata']);
-    expect(res.chapters.map((c) => c.title)).toEqual(['Pasta and travel plans', 'Pasta day', 'Summer travel']);
+    expect(res.chapters.map((c) => c.title)).toEqual(['Pasta day', 'Summer travel']);
     expect(h.generated.find((g) => g.task === 'tags')!.prompt).toContain('Pasta day: A summary of it.');
-    // Metadata reads the chapters (the leaves), never the story row.
-    expect(h.generated.find((g) => g.task === 'tags')!.prompt).not.toContain('Pasta and travel plans');
     expect(res.warnings).toEqual(['Chapters were made first: metadata is written from chapter summaries, and this video had none.']);
   });
 
@@ -714,7 +701,7 @@ describe('AIAnalysisService: the model reads the transcript for flags (the defau
   });
 });
 
-describe('AIAnalysisService: stories, then chapters inside them', () => {
+describe('AIAnalysisService: stories are the chapters grouped', () => {
   beforeAll(() => {
     Logger.overrideLogger(false);
     jest_silence();
@@ -725,78 +712,97 @@ describe('AIAnalysisService: stories, then chapters inside them', () => {
     writeAppConfig({ flagFinder: 'snap' });
   });
 
-  // A 20-minute news show: two stories of 10 minutes, a sentence every 20 s.
-  const STORY_OPENERS = ['Tonight the city council approved the new stadium deal downtown.', 'In other news a big storm is heading for the coast this weekend.'];
-  const LONG = [
-    ...Array.from({ length: 30 }, (_, i) => (i === 0 ? STORY_OPENERS[0] : `The stadium detail ${i} was discussed at length.`)),
-    ...Array.from({ length: 30 }, (_, i) => (i === 0 ? STORY_OPENERS[1] : `The storm detail ${i} was discussed at length.`)),
-  ].map((text, i) => ({ start: i * 20, end: i * 20 + 20, text }));
+  // A 20-minute show, a sentence every 20 s.
+  const LONG = Array.from({ length: 60 }, (_, i) => ({ start: i * 20, end: i * 20 + 20, text: `Detail number ${i} was discussed at length.` }));
   const longOptions = (): AnalysisOptions => ({ ...options(), segments: LONG, transcript: LONG.map((s) => s.text).join(' '), parts: ['chapters'] });
-  const storyCall = (g: { prompt: string }) => g.prompt.startsWith('Below is the complete transcript');
-  const chapters = {
-    chapters: [
-      { startSeconds: 0, endSeconds: 300, title: 'Stadium vote', label: 'Stadium vote', sentenceRange: [0, 15] as [number, number], isAd: false },
-      { startSeconds: 300, endSeconds: 600, title: 'Stadium cost', label: 'Stadium cost', sentenceRange: [15, 30] as [number, number], isAd: false },
-      { startSeconds: 600, endSeconds: 1200, title: 'Storm track', label: 'Storm track', sentenceRange: [30, 60] as [number, number], isAd: false },
-    ],
-    outline: [], chunks: [], seams: [], timings: { outlineMs: 0, assignMs: 0, adsMs: 0, totalMs: 0 },
-  };
+  const grouping = (g: { prompt: string }) => g.prompt.startsWith('Below are the chapters of one video');
+  const ch = (startSeconds: number, endSeconds: number, title: string, from: number, to: number, isAd = false) =>
+    ({ startSeconds, endSeconds, title, label: title, sentenceRange: [from, to] as [number, number], isAd });
+  const chapterRun = (list: ReturnType<typeof ch>[]) => ({
+    chapters: list, outline: [], chunks: [], seams: [], timings: { outlineMs: 0, assignMs: 0, adsMs: 0, totalMs: 0 },
+  });
+  const FOUR = [
+    ch(0, 300, 'Prophetic timeline', 0, 15),
+    ch(300, 600, 'The Purim pattern', 15, 30),
+    ch(600, 660, 'Sponsor / self-promotion', 30, 33, true),
+    ch(660, 1200, 'The midterms', 33, 60),
+  ];
 
-  function longHarness(storyAnswer: string): Harness {
+  function longHarness(groupingAnswers: string[], list = FOUR): Harness {
     const h = new Harness();
     const base = h.answer;
     h.answer = async (prompt, task) =>
-      prompt.startsWith('Below is the complete transcript') ? { text: storyAnswer, inputTokens: 1, outputTokens: 1 } : base(prompt, task);
-    h.snapRun = async () => snapResult({ chapters, flags: null });
+      grouping({ prompt }) ? { text: groupingAnswers.shift() ?? '', inputTokens: 1, outputTokens: 1 } : base(prompt, task);
+    h.snapRun = async () => snapResult({ chapters: chapterRun(list), flags: null });
     return h;
   }
 
-  it('a video of 10 minutes or more: one story call on the chapter model, then chapters inside each story, stored two levels deep', async () => {
-    const h = longHarness(`OPENING: The stadium deal\nThe storm | ${STORY_OPENERS[1]}`);
+  it('10 minutes or more: after the summaries, one call on the chapter model groups the chapters; sponsors stand alone', async () => {
+    const h = longHarness(['1 | The prophetic timeline | Why 9/11 and Purim line up.\n3 | Ad | x\n4 | The midterms | What the midterms mean.']);
     const seen: string[] = [];
     const res = await h.service().analyzeTranscript({ ...longOptions(), onProgress: (p) => seen.push(p.message) });
-    const reads = h.generated.filter(storyCall);
-    expect(reads).toHaveLength(1);
-    expect(reads[0].task).toBe('chapter');
-    expect(reads[0].prompt).toContain('The video runs 20 minutes.');
-    expect(reads[0].prompt).toContain(`TRANSCRIPT:\n${STORY_OPENERS[0]}\nThe stadium detail 1 was discussed at length.`);
-    // A cloud model: temperature and thinking are the provider's to strip (target.ts); the ceiling is sized.
-    expect(reads[0].overrides).toMatchObject({ temperature: 0, thinking: false, maxTokens: 8192 });
-    expect(h.snapRuns[0].stories).toEqual([
-      { title: 'The stadium deal', startSentence: 0, startSeconds: 0, endSeconds: 600 },
-      { title: 'The storm', startSentence: 30, startSeconds: 600, endSeconds: 1200, quote: STORY_OPENERS[1] },
+    const calls = h.generated.filter(grouping);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].task).toBe('chapter');
+    expect(calls[0].overrides).toMatchObject({ temperature: 0, thinking: false, maxTokens: 8192 });
+    expect(calls[0].prompt).toContain('The video runs 20 minutes.');
+    expect(calls[0].prompt).toContain('1. [00:00:00-00:05:00] Prophetic timeline\n   A summary of it.');
+    expect(calls[0].prompt).toContain('3. [00:10:00-00:11:00] [SPONSOR] Sponsor / self-promotion');
+    // The chapters are the whole video's, with no sub-chapters: stories are the second level.
+    expect(h.snapRuns[0]).toMatchObject({ refineOptions: false });
+    expect(res.chapters.map((c) => [c.start_time, c.end_time, c.title, c.summary, c.level, c.parent_sequence])).toEqual([
+      ['00:00:00', '00:10:00', 'The prophetic timeline', 'Why 9/11 and Purim line up.', 0, undefined],
+      ['00:00:00', '00:05:00', 'Prophetic timeline', 'A summary of it.', 1, 1],
+      ['00:05:00', '00:10:00', 'The Purim pattern', 'A summary of it.', 1, 1],
+      // A sponsor story is named by its chapter, whatever the model called it.
+      ['00:10:00', '00:11:00', 'Sponsor / self-promotion', 'A summary of it.', 0, undefined],
+      ['00:10:00', '00:11:00', 'Sponsor / self-promotion', 'A summary of it.', 1, 4],
+      ['00:11:00', '00:20:00', 'The midterms', 'What the midterms mean.', 0, undefined],
+      ['00:11:00', '00:20:00', 'The midterms', 'A summary of it.', 1, 6],
     ]);
-    expect(res.chapters.map((c) => [c.start_time, c.end_time, c.title, c.level, c.parent_sequence])).toEqual([
-      ['00:00:00', '00:10:00', 'The stadium deal', 0, undefined],
-      ['00:00:00', '00:05:00', 'Stadium vote', 1, 1],
-      ['00:05:00', '00:10:00', 'Stadium cost', 1, 1],
-      ['00:10:00', '00:20:00', 'The storm', 0, undefined],
-      ['00:10:00', '00:20:00', 'Storm track', 1, 4],
-    ]);
-    // The story call comes before the scorer stage, and says so.
-    expect(seen.indexOf('Finding stories...')).toBeGreaterThanOrEqual(0);
-    expect(seen.indexOf('Finding stories...')).toBeLessThan(seen.indexOf('Starting the analysis engine...'));
+    // After the summaries it reads.
+    const summaries = seen.findIndex((m) => m.startsWith('Analyzing chapter'));
+    expect(seen.indexOf('Grouping 4 chapters into stories...')).toBeGreaterThan(summaries);
     expect(res.warnings).toBeUndefined();
   });
 
-  it('a dropped quote is named on the job; the stories that placed stand', async () => {
-    const h = longHarness(`OPENING: The stadium deal\nInvented | The submarine fleet departed Reykjavik before dawn today\nThe storm | ${STORY_OPENERS[1]}`);
+  it('a sponsor the model left inside a story is split out, and the subject after it is a new story', async () => {
+    const h = longHarness(['1 | One long argument | All of it.']);
     const res = await h.service().analyzeTranscript(longOptions());
-    expect(h.snapRuns[0].stories!.map((s) => s.title)).toEqual(['The stadium deal', 'The storm']);
-    expect(res.warnings).toEqual([expect.stringContaining('1 of the 2 story starts the model gave could not be placed in the transcript and were dropped: "Invented" (not found')]);
+    expect(res.chapters.filter((c) => c.level === 0).map((c) => [c.start_time, c.title])).toEqual([
+      ['00:00:00', 'One long argument'],
+      ['00:10:00', 'Sponsor / self-promotion'],
+      ['00:11:00', 'One long argument'],
+    ]);
   });
 
-  it('an unreadable story answer fails the Chapters part with the reason; the scorer is never taken', async () => {
-    const h = longHarness('I am not able to help with that.');
+  it('one story keeps the outline flat: no story row', async () => {
+    const list = [ch(0, 600, 'Part one', 0, 30), ch(600, 1200, 'Part two', 30, 60)];
+    const h = longHarness(['1 | The whole thing | One subject.'], list);
+    const res = await h.service().analyzeTranscript(longOptions());
+    expect(res.chapters.map((c) => [c.title, (c as { level?: number }).level])).toEqual([['Part one', undefined], ['Part two', undefined]]);
+  });
+
+  it('an unusable grouping is asked again once with its problem named, then fails the Chapters part', async () => {
+    const h = longHarness(['2 | Starts late | x', 'I cannot help with that.']);
     const err = await h.service().analyzeTranscript(longOptions()).catch((e) => e);
-    expect((err as Error).message).toBe('AI analysis failed: the stories could not be found: the answer held no story lines');
-    expect(h.snapRuns).toHaveLength(0);
+    const calls = h.generated.filter(grouping);
+    expect(calls).toHaveLength(2);
+    expect(calls[1].prompt).toContain('Your previous answer could not be used: the first story must start at chapter 1, not 2.');
+    expect((err as Error).message).toMatch(/^AI analysis failed: the stories could not be found: .*could not be used twice. Last problem: no line had the form/);
   });
 
-  it('a video under 10 minutes makes no story call', async () => {
+  it('a retry that reads is used', async () => {
+    const h = longHarness(['nonsense', '1 | A | a.\n4 | B | b.']);
+    const res = await h.service().analyzeTranscript(longOptions());
+    expect(res.chapters.filter((c) => c.level === 0).map((c) => c.title)).toEqual(['A', 'Sponsor / self-promotion', 'B']);
+  });
+
+  it('a video under 10 minutes makes no grouping call and stays flat', async () => {
     const h = new Harness();
-    await h.service().analyzeTranscript({ ...options(), parts: ['chapters'] });
-    expect(h.generated.some(storyCall)).toBe(false);
+    const res = await h.service().analyzeTranscript({ ...options(), parts: ['chapters'] });
+    expect(h.generated.some(grouping)).toBe(false);
+    expect(res.chapters.map((c) => c.title)).toEqual(['Pasta day', 'Summer travel']);
   });
 });
 

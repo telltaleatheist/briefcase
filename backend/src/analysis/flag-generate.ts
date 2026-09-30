@@ -376,7 +376,7 @@ function similarity(a: string, b: string): number {
 }
 
 /** Where an anchor was found in the chunk's word stream: [first word, last word]. */
-export interface AnchorHit {
+interface AnchorHit {
   from: number;
   to: number;
   score: number;
@@ -390,7 +390,7 @@ export interface AnchorHit {
  * the earliest on a tie. A window is only scored when at least half the
  * anchor's words are in it, which keeps a long chunk cheap.
  */
-export function findAnchor(words: string[], anchor: string[], notBefore: number, mustEndAfter = -1): AnchorHit | null {
+function findAnchor(words: string[], anchor: string[], notBefore: number, mustEndAfter = -1): AnchorHit | null {
   const n = anchor.length;
   if (n === 0) return null;
   for (let p = notBefore; p + n <= words.length; p++) {

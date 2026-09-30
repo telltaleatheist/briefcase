@@ -51,6 +51,8 @@ export interface ChapterNode {
   isAd: boolean;
   /** Unit range [start, end) over the video's units. */
   sentenceRange: [number, number];
+  /** A story's summary (stories.ts); chapters get theirs from Pass 2. */
+  summary?: string;
   children: ChapterNode[];
 }
 
@@ -367,7 +369,8 @@ export interface NestedAnalysisChapter {
  * Interleave the outline's parent rows with the per-leaf analysis chapters.
  * `leafRows` are the Pass 2 chapters, whose `sequence` is the 1-based leaf
  * index (a leaf Pass 2 skipped, e.g. no speech, is simply absent). Output is
- * preorder, renumbered 1..n; parents get the outline title and no summary.
+ * preorder, renumbered 1..n; parents get the outline title and their node's
+ * summary (a story's, from the grouping call).
  */
 export function nestAnalysisChapters<C extends { sequence: number; start_time: string; end_time: string; title: string; summary?: string; failed?: boolean }>(
   leafRows: C[],
@@ -392,7 +395,7 @@ export function nestAnalysisChapters<C extends { sequence: number; start_time: s
         start_time: formatHms(node.startSeconds),
         end_time: formatHms(node.endSeconds),
         title: node.title,
-        summary: '',
+        summary: node.summary ?? '',
         ...place,
       } as C & NestedAnalysisChapter);
     }

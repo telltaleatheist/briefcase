@@ -236,6 +236,9 @@
                       {{ formatTime(row.chapter.startTime) }} - {{ formatChapterDuration(row.chapter) }}
                     }
                   </span>
+                  @if (row.hasChildren && row.expanded && row.chapter.description) {
+                    <span class="story-summary">{{ row.chapter.description }}</span>
+                  }
                 </div>
               </button>
               <button class="chapter-analyze"

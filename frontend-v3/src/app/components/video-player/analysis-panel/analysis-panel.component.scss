@@ -986,6 +986,17 @@
     font-size: 13px;
     font-weight: 700;
   }
+
+  // Shown while the story is open, above its chapters.
+  .story-summary {
+    display: block;
+    margin-top: 4px;
+    font-size: 11px;
+    line-height: 1.45;
+    color: var(--text-secondary, #6c757d);
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
 }
 
 // Nested chapters: the chevron is the only way a row opens (never automatically).

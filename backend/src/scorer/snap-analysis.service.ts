@@ -6,12 +6,6 @@
  *   prepare   assembleSentences + assembleUnits + one chunk plan (/tokenize)
  *   chapters  outline -> assign -> Viterbi -> ad confirmation (SnapChapterService's pipeline)
  *   flags     pass 1 -> pass 2 -> spans -> windows + verify budget (SnapFlagRanker)
- *   stories   when the request carries the video's stories (analysis/stories.ts,
- *             found by the chat model BEFORE this lease), the chapter pass is
- *             each story's own snap chapters (story-chapters.ts): a two-level
- *             outline, and no refinement. A one-story video is chaptered as the
- *             whole video on the shared chunk plan, as before. When no story
- *             needs the scorer and no flag pass runs, no lease is taken.
  *   refine    sub-outlines inside long chapters (chapter-tree.ts), AFTER the
  *             flag pass: each refinement primes its own section, so running it
  *             between chapters and flags would evict the transcript the flag
@@ -42,8 +36,7 @@ import type { AnalysisCategory } from '../analysis/prompts/analysis-prompts';
 import { OutlineError } from './chapters/segmenter';
 import { ChapterTreeResult, RefineOptions, flatChapterTree, mayRefine, refineChapters } from './chapters/chapter-tree';
 import { BuildChaptersOptions, BuildChaptersResult, ChapterScorer, runSnapChapters } from './chapters/snap-chapter.service';
-import { StoryPlan, placeStories, runStoryChapters, storyNeedsScorer } from './chapters/story-chapters';
-import { TranscriptSegment, assembleUnits } from './chapters/units';
+import { TranscriptSegment } from './chapters/units';
 import { SnapFlagRankOptions, SnapFlagRankResult, SnapFlagRanker } from './flags/snap-flag-ranker.service';
 import { isParked } from '../crucible/llm/errors';
 import { CrucibleScorerService } from './crucible-scorer.service';
@@ -79,13 +72,6 @@ export interface SnapStageRequest {
    * sentence (windows.ts). Absent or null: per sentence.
    */
   windows?: TimeWindows | null;
-  /**
-   * The video's stories (analysis/stories.ts): the chapter pass then makes
-   * each story's chapters (story-chapters.ts) and the outline is two levels,
-   * stories then chapters; refinement does not run. Absent: the whole-video
-   * chapter pass, refined as before.
-   */
-  stories?: StoryPlan[] | null;
 }
 
 export interface SnapStageResult {
@@ -99,8 +85,6 @@ export interface SnapStageResult {
   chapterTree?: ChapterTreeResult | null;
   /** Why refinement stopped (the flat level-0 chapters still stand). */
   chapterTreeError?: string;
-  /** Named outcomes of chaptering inside stories (a story left one chapter, a story joined to its neighbour). */
-  chapterWarnings?: string[];
   flags: SnapFlagRankResult | null;
   /** The scorer's model name as the engine reports it. */
   model: string | null;
@@ -173,43 +157,6 @@ export class SnapAnalysisService {
     const stageFailed = (stage: 'chapters' | 'flags', reason: string, err: unknown): never => {
       throw isParked(err) ? err : new SnapEngineError(stage, reason);
     };
-    const stories = req.chapters && req.stories && req.stories.length ? req.stories : null;
-    const storyMessage = (story: number, total: number) =>
-      total > 1 ? `Finding chapters in story ${story}/${total}...` : 'Finding chapters...';
-
-    // Stories whose chapters need no model (every story too short to hold two
-    // chapters) and no flag pass: no lease is taken for nothing.
-    if (stories && !req.flags) {
-      const units = assembleUnits(req.segments);
-      const placed = placeStories(units, stories);
-      const needs =
-        placed.stories.length === 1 ||
-        placed.stories.some((s, k) =>
-          storyNeedsScorer(placed.ranges[k][1] - placed.ranges[k][0], s.endSeconds - s.startSeconds, false),
-        );
-      if (!needs) {
-        const noScorer: ChapterScorer = {
-          decide: async () => {
-            throw new Error('no scorer: every story is one chapter');
-          },
-          generate: async () => {
-            throw new Error('no scorer: every story is one chapter');
-          },
-        };
-        const last = req.segments.length ? req.segments[req.segments.length - 1].end : 0;
-        const made = await runStoryChapters(noScorer, units, stories, {
-          totalSeconds: Math.max(last, units.length ? units[units.length - 1].end : 0),
-          signal,
-        });
-        result.chapters = made.chapters;
-        result.chapterTree = made.tree;
-        result.chapterWarnings = made.warnings;
-        this.logger.log(`[Snap] ${stories.length} stories, each too short for chapters of its own: no scorer lease`);
-        timings.totalMs = Date.now() - t0;
-        report('done', 1, 'Chapters found');
-        return result;
-      }
-    }
     report('start', 0, 'Starting the analysis engine...');
 
     const leased = async (lease: ScorerHandle) => {
@@ -252,7 +199,7 @@ export class SnapAnalysisService {
       // Bands: [chapters][flags][refine]. Refinement reserves a band only when
       // the video is long enough for a section to need it, so a short video's
       // progress is exactly what it was.
-      const refineOpts = req.refineOptions === false || stories ? null : (req.refineOptions ?? {});
+      const refineOpts = req.refineOptions === false ? null : (req.refineOptions ?? {});
       const refineShare =
         req.chapters && refineOpts && mayRefine(transcript.units.length, transcript.totalSeconds, refineOpts)
           ? both
@@ -272,25 +219,7 @@ export class SnapAnalysisService {
         t = Date.now();
         const span = chapterShare;
         try {
-          if (stories) {
-            const made = await runStoryChapters(
-              scorer,
-              transcript.units,
-              stories,
-              {
-                chapterOptions: req.chapterOptions,
-                windows: req.windows ?? null,
-                chunkPlan: transcript.chunks,
-                totalSeconds: transcript.totalSeconds,
-                signal,
-                onProgress: (p) => report('chapters', p.fraction * span, storyMessage(p.story, p.stories)),
-              },
-              this.logger,
-            );
-            result.chapters = made.chapters;
-            result.chapterTree = made.tree;
-            result.chapterWarnings = made.warnings;
-          } else result.chapters = await runSnapChapters(
+          result.chapters = await runSnapChapters(
             scorer,
             transcript.units,
             {
@@ -361,9 +290,8 @@ export class SnapAnalysisService {
         timings.flagsMs = Date.now() - t;
       }
 
-      // ---- refine: sub-outlines inside long chapters (after flags; see the header).
-      // Chapters inside stories are the whole outline: two levels, no refinement.
-      if (result.chapters && !stories) {
+      // ---- refine: sub-outlines inside long chapters (after flags; see the header)
+      if (result.chapters) {
         if (!refineShare) {
           result.chapterTree = flatChapterTree(result.chapters.chapters);
           return;
