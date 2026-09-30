@@ -364,4 +364,57 @@ describe('SnapAnalysisService', () => {
     expect(res.chapters!.chapters.map((c) => c.title)).toEqual(['Cooking pasta', 'Travel plans']);
     expect(fake.decides.every((r) => r.questions.every((q) => !q.name.startsWith('g:')))).toBe(true);
   });
+
+  it('with stories: each story\'s chapters in one lease, two levels, no refinement, "Finding chapters in story k/N"', async () => {
+    const fake = new FakeHandle();
+    // 60 units, 10 s each: cooking (pasta 15, sauce 15) then travel (train 15, hotel 15).
+    const segs = [
+      ...Array.from({ length: 15 }, (_, i) => `Pasta note number ${i} is here, cooking.`),
+      ...Array.from({ length: 15 }, (_, i) => `Sauce note number ${i} is here, cooking.`),
+      ...Array.from({ length: 15 }, (_, i) => `Train note number ${i} is here, travel.`),
+      ...Array.from({ length: 15 }, (_, i) => `Hotel note number ${i} is here, travel.`),
+    ].map((text, i) => ({ start: i * 10, end: i * 10 + 10, text }));
+    fake.outlineFor = (p) => (p.includes('Pasta') ? 'Pasta\nSauce' : 'Train\nHotel');
+    const events: SnapStageProgress[] = [];
+    const { server, leases } = fakeServer(fake);
+    const res = await new SnapAnalysisService(server, new SnapFlagRanker()).run({
+      segments: segs,
+      categories: CATEGORIES,
+      chapters: true,
+      flags: false,
+      chapterOptions: { switchCost: 2 },
+      stories: [
+        { title: 'Cooking', startSentence: 0, startSeconds: 0, endSeconds: 300 },
+        { title: 'Travel', startSentence: 30, startSeconds: 300, endSeconds: 600 },
+      ],
+      onProgress: (p) => events.push(p),
+    });
+    expect(leases()).toBe(1);
+    expect(res.chapterTree!.depth).toBe(2);
+    expect(res.chapterTree!.tree.map((s) => [s.title, s.children.length])).toEqual([['Cooking', 2], ['Travel', 2]]);
+    expect(res.chapters!.chapters.map((c) => c.title)).toEqual(['Pasta', 'Sauce', 'Train', 'Hotel']);
+    expect(events.some((e) => e.message === 'Finding chapters in story 2/2...')).toBe(true);
+    expect(events.some((e) => e.stage === 'refine')).toBe(false);
+    expect(res.chapterWarnings).toEqual([]);
+  });
+
+  it('with stories each too short for chapters of their own and no flags: no scorer lease at all', async () => {
+    const fake = new FakeHandle();
+    const { server, leases } = fakeServer(fake);
+    const res = await new SnapAnalysisService(server, new SnapFlagRanker()).run({
+      segments: segments(),
+      categories: CATEGORIES,
+      chapters: true,
+      flags: false,
+      stories: [
+        { title: 'Cooking', startSentence: 0, startSeconds: 0, endSeconds: 30 },
+        { title: 'Travel', startSentence: 3, startSeconds: 30, endSeconds: 60 },
+      ],
+    });
+    expect(leases()).toBe(0);
+    expect(fake.generates).toBe(0);
+    expect(res.chapterTree!.flat.map((c) => [c.title, c.level])).toEqual([
+      ['Cooking', 0], ['Cooking', 1], ['Travel', 0], ['Travel', 1],
+    ]);
+  });
 });

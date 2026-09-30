@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { chapterPlace, migrateChaptersOutline } from './chapter-outline';
+import { chapterPlace, leafChapterRows, migrateChaptersOutline } from './chapter-outline';
 
 /**
  * Needs a better-sqlite3 built for this Node (see ranker-migration.spec.ts);
@@ -99,5 +99,47 @@ suite('DatabaseService chapter outline round-trip', () => {
 
     svc.deleteChapter('ch1');
     expect(svc.getChapters('v1').map((r) => r.id)).toEqual(['ch4']);
+  });
+
+  it('a stories outline: stories at level 0, their chapters at level 1 under them; read back, the leaves are the chapters', async () => {
+    const { DatabaseService } = await import('./database.service');
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'briefcase-stories-'));
+    const svc = new DatabaseService({ setLibraryPath: () => undefined } as any);
+    svc.initializeDatabase(path.join(dir, 'library.db'));
+    svc.insertVideo({ id: 'v1', filename: 'v1.mp4', fileHash: 'hash-v1', currentPath: path.join(dir, 'v1.mp4') });
+
+    // As the Chapters part returns them (nestAnalysisChapters over stories; see story-chapters.spec.ts).
+    const analysis = [
+      { sequence: 1, start: 0, end: 600, title: 'The stadium deal', summary: '', level: 0 },
+      { sequence: 2, start: 0, end: 300, title: 'Stadium vote', summary: 'The vote.', level: 1, parent_sequence: 1 },
+      { sequence: 3, start: 300, end: 600, title: 'Stadium cost', summary: 'The cost.', level: 1, parent_sequence: 1 },
+      { sequence: 4, start: 600, end: 1200, title: 'The storm', summary: '', level: 0 },
+      { sequence: 5, start: 600, end: 1200, title: 'Storm track', summary: 'The track.', level: 1, parent_sequence: 4 },
+    ];
+    const ids = new Map<number, string>();
+    for (const c of analysis) {
+      const id = `ch${c.sequence}`;
+      svc.insertChapter({
+        id, videoId: 'v1', sequence: c.sequence, startSeconds: c.start, endSeconds: c.end, title: c.title,
+        description: c.summary, source: 'ai', ...chapterPlace(c, id, ids),
+      });
+    }
+    const rows = svc.getChapters('v1');
+    expect(rows.map((r) => [r.title, r.level, r.parent_id])).toEqual([
+      ['The stadium deal', 0, null],
+      ['Stadium vote', 1, 'ch1'],
+      ['Stadium cost', 1, 'ch1'],
+      ['The storm', 0, null],
+      ['Storm track', 1, 'ch4'],
+    ]);
+    // What metadata is written from when chapters are not remade: the chapters, in time order.
+    expect(leafChapterRows(rows).map((r) => [r.title, r.start_seconds, r.description])).toEqual([
+      ['Stadium vote', 0, 'The vote.'],
+      ['Stadium cost', 300, 'The cost.'],
+      ['Storm track', 600, 'The track.'],
+    ]);
+    // Deleting a story deletes its chapters.
+    svc.deleteChapter('ch4');
+    expect(svc.getChapters('v1').map((r) => r.id)).toEqual(['ch1', 'ch2', 'ch3']);
   });
 });

@@ -64,7 +64,7 @@ describe('progress bands', () => {
   const all = { engine: true, summaries: true, flags: true, metadata: true };
 
   it('with every stage running, the bands the pipeline always had', () => {
-    expect(analysisProgressBands(all)).toEqual({ engine: [3, 70], summaries: [71, 80], flags: [80, 92], metadata: [92, 98] });
+    expect(analysisProgressBands(all)).toEqual({ stories: null, engine: [3, 70], summaries: [71, 80], flags: [80, 92], metadata: [92, 98] });
   });
 
   it('a skipped stage takes no share: the stages that run fill 3-98 in order, without gaps', () => {
@@ -96,12 +96,19 @@ describe('progress bands', () => {
   it('metadata alone is the whole bar; flags alone keeps the engine most of it', () => {
     expect(analysisProgressBands({ engine: false, summaries: false, flags: false, metadata: true }).metadata).toEqual([3, 98]);
     const flags = analysisProgressBands({ engine: true, summaries: false, flags: true, metadata: false });
-    expect(flags).toEqual({ engine: [3, 84], summaries: null, flags: [84, 98], metadata: null });
+    expect(flags).toEqual({ stories: null, engine: [3, 84], summaries: null, flags: [84, 98], metadata: null });
+  });
+
+  it('finding the stories comes first, before the scorer stage', () => {
+    const b = analysisProgressBands({ stories: true, engine: true, summaries: true, flags: false, metadata: false });
+    expect(b.stories![0]).toBe(3);
+    expect(b.engine![0]).toBe(b.stories![1]);
+    expect(b.summaries![1]).toBe(98);
   });
 
   it('nothing to run is no bands', () => {
     expect(analysisProgressBands({ engine: false, summaries: false, flags: false, metadata: false })).toEqual({
-      engine: null, summaries: null, flags: null, metadata: null,
+      stories: null, engine: null, summaries: null, flags: null, metadata: null,
     });
   });
 });

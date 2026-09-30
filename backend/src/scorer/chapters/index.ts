@@ -8,3 +8,4 @@ export * from './segmenter';
 export * from './chunks';
 export * from './chapter-tree';
 export * from './snap-chapter.service';
+export * from './story-chapters';

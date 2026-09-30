@@ -50,6 +50,21 @@ export function formatYouTubeTimestamp(seconds: number): string {
 export interface ComposerChapter {
   start_time: string;
   title: string;
+  /** On an outline (stories, then chapters): the row's sequence and its parent's. */
+  sequence?: number;
+  parent_sequence?: number;
+}
+
+/**
+ * The chapters of an outline: every row no other row names as its parent. The
+ * stories of a two-level outline are parents and are left out, so the block
+ * lists the chapters inside them, which tile the video. A flat list is
+ * returned as it is.
+ */
+export function leafComposerChapters<C extends ComposerChapter>(chapters: C[]): C[] {
+  const parents = new Set((chapters || []).map((c) => c.parent_sequence).filter((s): s is number => s !== undefined));
+  if (parents.size === 0) return chapters || [];
+  return chapters.filter((c) => c.sequence === undefined || !parents.has(c.sequence));
 }
 
 /**
@@ -65,7 +80,7 @@ export interface ComposerChapter {
  *    rounding artifact can never cost the video its key-moments surfacing.
  */
 export function buildChapterLines(chapters: ComposerChapter[]): string[] {
-  const usable = (chapters || []).filter((ch) => ch && ch.title && ch.title.trim());
+  const usable = leafComposerChapters(chapters || []).filter((ch) => ch && ch.title && ch.title.trim());
   if (usable.length < 2) return [];
 
   return usable.map((ch, index) => {

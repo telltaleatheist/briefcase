@@ -37,7 +37,7 @@ import {
 } from '../common/interfaces/task.interface';
 import * as fs from 'fs';
 import * as path from 'path';
-import { chapterPlace } from '../database/chapter-outline';
+import { chapterPlace, leafChapterRows } from '../database/chapter-outline';
 
 @Injectable()
 export class MediaOperationsService {
@@ -968,11 +968,7 @@ export class MediaOperationsService {
    * order, with their summaries. Empty when the video has none.
    */
   private storedChaptersForMetadata(videoId: string): Chapter[] {
-    const rows = this.databaseService.getChapters(videoId);
-    const parents = new Set(rows.map((r) => r.parent_id).filter((id): id is string => !!id));
-    return rows
-      .filter((r) => !parents.has(r.id))
-      .sort((a, b) => a.start_seconds - b.start_seconds)
+    return leafChapterRows(this.databaseService.getChapters(videoId))
       .map((r, i) => ({
         sequence: i + 1,
         start_time: formatHms(r.start_seconds),

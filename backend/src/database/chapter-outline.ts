@@ -43,6 +43,17 @@ export function deleteChapterSubtree(db: Database.Database, chapterId: string): 
     .run(chapterId).changes;
 }
 
+/**
+ * The outline's LEAVES among stored chapter rows, in time order: every row no
+ * other row names as its parent. On a stories outline these are the chapters
+ * inside the stories (they tile the video and carry the summaries); on a flat
+ * one, every row.
+ */
+export function leafChapterRows<R extends { id: string; parent_id?: string | null; start_seconds: number }>(rows: R[]): R[] {
+  const parents = new Set(rows.map((r) => r.parent_id).filter((id): id is string => !!id));
+  return rows.filter((r) => !parents.has(r.id)).sort((a, b) => a.start_seconds - b.start_seconds);
+}
+
 /** An analysis chapter row as the analysis pipeline returns it (ai-analysis `Chapter`). */
 export interface AnalysisChapterLike {
   sequence: number;
