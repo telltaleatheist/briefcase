@@ -37,8 +37,8 @@ describe('chunkSentences', () => {
       expect(text.length).toBe(chunk.chars);
       expect(chunk.chars).toBeLessThanOrEqual(GENERATE_CHUNK_CHARS);
     }
-    // 100-char sentences, one per line: 79 of them are 7,978 characters, 80 would be 8,079.
-    expect(chunks[0]).toEqual({ from: 0, to: 78, chars: 7978 });
+    // 100-char sentences, one per line: 39 of them are 3,938 characters, 40 would be 4,039.
+    expect(chunks[0]).toEqual({ from: 0, to: 38, chars: 3938 });
     for (let k = 1; k < chunks.length; k++) {
       expect(chunks[k].from).toBe(chunks[k - 1].to + 1 - GENERATE_CHUNK_OVERLAP_SENTENCES);
     }

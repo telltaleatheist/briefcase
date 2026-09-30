@@ -71,14 +71,18 @@ export const GENERATE_RANKER = 'generate-v1' as const;
 // =============================================================================
 
 /**
- * About how much transcript one call reads, in characters (the user: "maybe we
- * should take it in chunks of like 8,000 characters or something"). This is the
- * lever against a mid-size model listing only the first few matches of a long
- * input (docs/chapter-pipeline-handoff.md): smaller chunks, fewer items each.
- * A model whose context is smaller than this reads smaller chunks (the run
- * caps it at the flags model's limit).
+ * About how much transcript one call reads, in characters. First 8,000 (the
+ * user: "maybe we should take it in chunks of like 8,000 characters or
+ * something"); 4,000 since the first real run (2026-09-29, a 28.6-minute
+ * video on the 9B): one 8,000-character chunk's answer ran into the output
+ * ceiling (73 passages, the last 32 unplaceable, the rest never written), and
+ * the user chose smaller chunks. It is also the lever against a mid-size model
+ * listing only the first few matches of a long input
+ * (docs/chapter-pipeline-handoff.md): smaller chunks, fewer items each. A
+ * model whose context is smaller than this reads smaller chunks (the run caps
+ * it at the flags model's limit).
  */
-export const GENERATE_CHUNK_CHARS = 8000;
+export const GENERATE_CHUNK_CHARS = 4000;
 
 /** Sentences each chunk repeats from the end of the one before, so a passage cut at a seam is seen whole. */
 export const GENERATE_CHUNK_OVERLAP_SENTENCES = 2;
@@ -139,9 +143,12 @@ export function chunkSentences(
  * (SNAP_OPTION_TEXTS via buildFlagPlan; a custom category's own description),
  * never with DEFAULT_CATEGORIES' LLM instructions.
  *
- * It asks for EVERY passage where a category may apply, reported and quoted
- * ones included: whether the speaker asserts it (the report-vs-assert judgment)
- * is the verifier's question, asked of each passage afterwards. Per the
+ * It asks for every passage where a category may apply, the uncertain ones
+ * too; whether the speaker asserts it (the report-vs-assert judgment) is the
+ * verifier's question, asked of each passage afterwards. It no longer asks
+ * for passages that only quote, report or discuss such content: on the first
+ * real run (2026-09-29, a commentary show) that made the 9B return 169
+ * passages for 243 sentences, and the user dropped it. Per the
  * prompt-hygiene ruling (analysis-prompts.ts): correct forms only, no incorrect
  * examples and no ban lists.
  */
@@ -152,7 +159,7 @@ export function buildGenerateFlagsPrompt(plan: Array<Pick<FlagOptionPlan, 'categ
 Categories:
 ${categories}
 
-Mark generously. Include every passage where a category may apply, the ones you are unsure about too, and passages where the speaker quotes, reports or discusses such content. Each passage you mark is checked closely afterwards, one at a time.
+Mark generously. Include every passage where a category may apply, the ones you are unsure about too. Each passage you mark is checked closely afterwards, one at a time.
 
 A passage is one sentence or a few consecutive sentences about one point. For each passage give:
 - first_words: the first 5 to 10 words of the passage, copied exactly from the transcript
