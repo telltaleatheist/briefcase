@@ -202,6 +202,28 @@ function retryAfterMsOf(err: CrucibleServerError): number {
   return secs !== null && Number.isFinite(secs) ? Math.min(60_000, Math.max(250, secs * 1000)) : DEFAULT_QUEUE_FULL_WAIT_MS;
 }
 
+/**
+ * One decide's costs, as Briefcase and Crucible clocked them, for the log:
+ * where the time goes (2026-10-01: about 2 s a question with 90 s windows,
+ * against ~100 ms with one-sentence questions). Briefcase's wall clock, then
+ * Crucible's total, the shared prime (and how much of it was already cached),
+ * and the mean question: its wall time and the tokens it read fresh.
+ */
+export function decideTimingLine(res: Pick<DecideResponse, 'timingMs' | 'tokens'>, wallMs: number): string {
+  const per = Object.values(res.timingMs.perQuestion);
+  const n = per.length;
+  const mean = (xs: number[]): number | null => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+  const fmt = (v: number | null, unit = ''): string => (v === null ? '?' : `${Math.round(v)}${unit}`);
+  const qMs = mean(per.map((t) => t.promptMs).filter((v): v is number => v !== null));
+  const fresh = mean(per.filter((t) => t.promptTokens !== null && t.cachedTokens !== null).map((t) => t.promptTokens! - t.cachedTokens!));
+  const prime = res.timingMs.prime;
+  return (
+    `decide: ${n} question(s), ${wallMs} ms here, ${fmt(res.timingMs.total, ' ms')} on Crucible` +
+    (prime ? `; prime ${fmt(prime.promptMs, ' ms')} (${fmt(prime.promptTokens)} tokens, ${fmt(prime.cachedTokens)} cached)` : '') +
+    `; per question ${fmt(qMs, ' ms')}, ${fmt(fresh)} fresh tokens`
+  );
+}
+
 @Injectable()
 export class CrucibleScorerService {
   private readonly logger = new Logger('CrucibleScorer');
@@ -322,9 +344,12 @@ export class CrucibleScorerService {
       let client: CrucibleClient;
       try {
         client = await this.servers.clientFor(server);
+        const sentAt = Date.now();
         const res = await client.decide(wire, { act: DECIDE_ACT, signal: combined });
+        const wallMs = Date.now() - sentAt;
         this.chat.noteActivity();
         const out = fromWireResponse(req, res);
+        this.logger.log(`[${server}] ${decideTimingLine(out, wallMs)}`);
         if (out.gated) this.logger.warn(`[${server}] ${out.gated}/${req.questions.length} answer(s) under the label-mass gate were read as no evidence`);
         const { gated: _gated, ...response } = out;
         return response;
