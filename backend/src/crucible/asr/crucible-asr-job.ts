@@ -50,7 +50,7 @@ import type { CrucibleClient, JobEvent, UploadResult } from '@crucible/client';
 import { EngineResolveError } from '../engine-resolve';
 import { CrucibleRegistryError } from '../errors';
 import { QUEUE_HEARTBEAT_MS } from '../crucible-queue';
-import { CrucibleParkedError } from '../llm/errors';
+import { BUSY_REFUSAL_CODES, CrucibleParkedError } from '../llm/errors';
 import { crucibleUnavailableCause } from '../transport-failure';
 
 /** Crucible could not take or finish the job for an infrastructure reason. The queue parks the task. */
@@ -103,6 +103,7 @@ export function classifyAsrRefusal(err: unknown, server: string, verb: string): 
   if (err instanceof CrucibleProtocolError) {
     return new CrucibleAsrUnavailable('crucible_protocol', server, `${at} answered ${verb} with something API v1 does not describe: ${err.detail}.`);
   }
+  if (err instanceof CrucibleRefused && BUSY_REFUSAL_CODES.has(err.code)) return new CrucibleParkedError(server, err.serverMessage);
   if (err instanceof CrucibleRefused) {
     return new CrucibleAsrUnavailable(err.code, server, `${at} refused ${verb} (${err.code}): ${err.serverMessage}`);
   }
@@ -567,6 +568,9 @@ export async function runAsrJob(options: RunAsrJobOptions): Promise<AsrJobOutcom
       : `Crucible on ${server} cancelled the transcription (job ${admitted}).`);
   }
   if (ended.event === 'failed') {
+    // Failed at the front of the line because the card is busy after all
+    // (another process holds its memory): not run, so the task parks.
+    if (BUSY_REFUSAL_CODES.has(ended.data.error.code)) throw new CrucibleParkedError(server, ended.data.error.message);
     throw new CrucibleAsrJobFailed(server, admitted, ended.data.error.code, ended.data.error.message);
   }
 

@@ -75,6 +75,7 @@ import {
   CrucibleChatCancelled,
   CrucibleChatError,
   CrucibleNoVenueError,
+  BUSY_REFUSAL_CODES,
   parseRetryAfter,
 } from './errors';
 import { RETIRED_LOCAL_MODELS, buildChatBody, crucibleTargetOf, type ChatBodyInput, type CrucibleTarget, type UpstreamName } from './target';
@@ -281,14 +282,8 @@ function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new CrucibleChatCancelled();
 }
 
-/**
- * The refusal codes that mean "the card is briefly someone else's", never "no":
- * a job on the lane, a lease, and `engine_in_use` (the engine is claimed: a
- * streaming session, or Crucible's own settlement clearing the card after a
- * lapsed lease). Each is designed busy-handling: parked in a queue run, waited
- * out (bounded) otherwise. None may fail an analysis.
- */
-export const BUSY_REFUSAL_CODES: ReadonlySet<string> = new Set(['server_busy', 'leased', 'engine_in_use']);
+/** The "card is briefly someone else's" codes live in ./errors (shared with asr); re-exported for this file's callers. */
+export { BUSY_REFUSAL_CODES };
 
 function busyLineOfRefusal(err: unknown): string | null {
   if (err instanceof CrucibleBusy) return err.busyLine;
@@ -549,7 +544,7 @@ export class CrucibleChatService {
       }
       // The chat door refusing because the card is someone else's right now
       // (a claim, a lease): busy, the same as at the load. Never a failure.
-      if (failure.status === 409 && BUSY_REFUSAL_CODES.has(failure.code)) throw new CrucibleBusyError(server, failure.message);
+      if (BUSY_REFUSAL_CODES.has(failure.code)) throw new CrucibleBusyError(server, failure.message);
       throw failure;
     }
   }
@@ -1129,6 +1124,9 @@ export class CrucibleChatService {
       if (settled) this.ledger?.settle(server, 'job', loadId);
     }
     if (terminal.event === 'failed') {
+      // Failed at the front of the line because the card is busy after all
+      // (another process holds its memory): busy, not a failure.
+      if (BUSY_REFUSAL_CODES.has(terminal.data.error.code)) throw new CrucibleBusyError(server, terminal.data.error.message);
       throw new CrucibleChatError(500, terminal.data.error.code, `Loading ${model} on "${server}" failed: ${terminal.data.error.message}`, server);
     }
     // Taken out of Crucible's queue before it ran (it waited past its limit,

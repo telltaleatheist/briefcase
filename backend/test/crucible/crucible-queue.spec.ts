@@ -165,3 +165,27 @@ describe('a transcription in Crucible\'s line', () => {
     expect((err as Error).message).toContain("took the transcription out of its queue (expired)");
   });
 });
+
+describe('the card busy with something Crucible cannot evict (accelerator_busy)', () => {
+  it('a load that fails at the front of the line for it is busy, never a failure: the run parks', async () => {
+    const { fake, chat } = await rig();
+    fake.inject({ failLoadWith: { code: 'accelerator_busy', message: "cannot load 'qwen3.5-9b': 19.5 GiB of the 24.0 GiB card is in use" } });
+    const err = await chat.withRun(() => chat.withModel('mac', 'qwen3.5-9b', async () => 'ran'), { parkOnBusy: true }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(CrucibleBusyError);
+    expect((err as CrucibleBusyError).busyLine).toContain('19.5 GiB of the 24.0 GiB card is in use');
+  });
+
+  it('a transcription that fails for it parks the task, never fails it', async () => {
+    const { h } = await rig({ asr: { failWith: { code: 'accelerator_busy', message: "cannot load 'qwen3-asr-0.6b': 19.5 GiB of the 24.0 GiB card is in use" } } });
+    const ledger = InFlightLedger.inDir(h.dir, () => undefined);
+    const svc = new CrucibleTranscriptionService(new CrucibleServersService(h.registry, h.factory), h.probes, h.factory, ledger);
+    svc.jobTiming = { doorDelaysMs: [5], streamDelaysMs: [5, 5, 5] };
+    const video = path.join(tempDir('queue-video-'), 'clip.mp4');
+    fs.writeFileSync(video, Buffer.alloc(16 * 1024, 3));
+    const err = await svc.transcribe({
+      server: 'mac', model: 'qwen3-asr-0.6b-mlx', videoFile: video, outputDir: tempDir('queue-out-'), baseName: 'a', localId: 'a',
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(CrucibleParkedError);
+    expect((err as Error).message).toContain('19.5 GiB of the 24.0 GiB card is in use');
+  });
+});

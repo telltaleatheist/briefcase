@@ -24,6 +24,18 @@ export class CrucibleChatError extends Error {
  * The card is held by someone else (a `409 server_busy` / `leased` on a load or
  * a lease). P3's minimal admission waits this out; P4 parks the task on it.
  */
+/**
+ * The refusal (or failure) codes that mean "the card is briefly someone
+ * else's", never "no": a job on the lane, a lease, `engine_in_use` (the
+ * engine is claimed: a streaming session, or Crucible's own settlement after a
+ * lapsed lease), and `accelerator_busy` (another process holds the card's
+ * memory; Crucible never evicts it, so it frees when that process ends: seen
+ * 2026-10-01 under WSL, 19.5 of 24 GiB taken by a process the driver would
+ * not name). Parked in a queue run, waited out (bounded) otherwise. None may
+ * fail a task.
+ */
+export const BUSY_REFUSAL_CODES: ReadonlySet<string> = new Set(['server_busy', 'leased', 'engine_in_use', 'accelerator_busy']);
+
 export class CrucibleBusyError extends Error {
   readonly code = 'crucible_busy';
   constructor(readonly server: string, readonly busyLine: string) {
