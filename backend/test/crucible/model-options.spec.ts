@@ -23,7 +23,7 @@ import { startFakeCrucible, type FakeCrucible } from '../fake-crucible/fake-cruc
 import { harness } from './harness';
 import { pairingHost, pairingLineFor } from './helpers';
 
-function row(id: string, paramsB: number | null, extra: Partial<OptionModel> = {}): OptionModel {
+function row(id: string, paramsB: number, extra: Partial<OptionModel> = {}): OptionModel {
   return {
     id, family: id.split('-')[0], paramsB, modalities: ['text'], backendSupported: true, installed: true,
     contextDefault: 16384, maxModelLen: 16384, resident: false, loadable: true, reason: null, weightsOf: null, ...extra,
@@ -135,15 +135,11 @@ describe('the analysis options a server offers', () => {
     expect(built.groups.map((g) => g.kind)).toEqual(['server', 'anthropic']);
   });
 
-  it('a server that states no candidates: its loadable text models that are not page readers, with unstated sizes left null', () => {
-    const built = buildAnalysisOptions(macFacts({
-      classCandidates: null,
-      models: MAC_MODELS.map((m) => ({ ...m, paramsB: null })),
-    }));
+  it('a server that states no candidates: its loadable text models that are not page readers', () => {
+    const built = buildAnalysisOptions(macFacts({ classCandidates: null }));
     expect(built.groups[0].options.map((o) => o.value)).toEqual([
       'local:qwen3.5-0.8b', 'local:qwen3.5-2b', 'local:qwen3.5-4b', 'local:qwen3.5-9b', 'local:qwen3.8-27b-4bit', 'local:qwen3.8-27b-8bit',
     ]);
-    expect(built.groups[0].options[0].sizeB).toBeNull();
   });
 
   it('labels, values and the upstream filter', () => {

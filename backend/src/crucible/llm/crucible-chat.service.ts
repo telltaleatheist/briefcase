@@ -65,6 +65,7 @@ import { crucibleUnavailableCause } from '../transport-failure';
 import { CrucibleClientFactory } from '../client-factory';
 import { CrucibleServersService } from '../crucible-servers.service';
 import { CrucibleProbeService, compareVersions } from '../probe';
+import { QUEUE_HEARTBEAT_MS } from '../crucible-queue';
 import type { InFlightLedger } from '../in-flight-ledger';
 import { CRUCIBLE_IN_FLIGHT_LEDGER } from '../crucible.constants';
 import {
@@ -231,6 +232,8 @@ export interface RunOptions {
   parkOnBusy?: boolean;
   /** Told whenever the run makes headway (a chat answered, a load moved): the stall watchdog's heartbeat. */
   onActivity?: () => void;
+  /** A line for the task while a load waits in Crucible's queue ("Waiting in Crucible's queue on mac (2 of 3)"). */
+  onWaiting?: (message: string) => void;
   /** Briefcase's id for the work, written on every ledger row. */
   localId?: string;
 }
@@ -1038,6 +1041,9 @@ export class CrucibleChatService {
         ...(lease ? { lease: { act: BRIEFCASE_ACT, ttlSeconds: LEASE_TTL_SECONDS } } : {}),
         ...(context === undefined ? {} : { context }),
       };
+      // 1.0.71+: the SDK submits a load with `queue`, so a busy card puts it
+      // in Crucible's line instead of refusing it (QUEUE.md); an older server
+      // is sent it again without, and refuses busy as before.
       loadId = await client.loadModel(model, Object.keys(options).length > 0 ? options : undefined);
     } catch (err) {
       throw this.mapRefusal(err, server);
@@ -1062,6 +1068,13 @@ export class CrucibleChatService {
     }
     if (terminal.event === 'failed') {
       throw new CrucibleChatError(500, terminal.data.error.code, `Loading ${model} on "${server}" failed: ${terminal.data.error.message}`, server);
+    }
+    // Taken out of Crucible's queue before it ran (it waited past its limit,
+    // the operator removed it, the server restarted): not run, not failed.
+    // Busy, so a queue run parks and asks again later.
+    if (terminal.event === 'removed') {
+      if (signal?.aborted) throw new CrucibleChatCancelled();
+      throw new CrucibleBusyError(server, `the load of ${model} was taken out of Crucible's queue (${terminal.data.reason}): ${terminal.data.message}`);
     }
     if (terminal.event === 'cancelled') {
       if (signal?.aborted) throw new CrucibleChatCancelled();
@@ -1110,31 +1123,60 @@ export class CrucibleChatService {
     let lastEventId = 0;
     let droppedAt: number | null = null;
     let wait = firstMs;
-    for (;;) {
-      try {
-        for await (const event of client.events(loadId, lastEventId > 0 ? { lastEventId } : {})) {
-          this.touch();
-          lastEventId = event.id;
-          droppedAt = null;
-          wait = firstMs;
-          if (event.event === 'failed' || event.event === 'cancelled' || event.event === 'done') return event;
+    // While the load waits in Crucible's queue the stream is quiet between
+    // moves. Waiting in line is headway: the stall watchdog is told so.
+    let inLine: NodeJS.Timeout | null = null;
+    const leaveLine = (): void => {
+      if (inLine !== null) clearInterval(inLine);
+      inLine = null;
+    };
+    try {
+      for (;;) {
+        try {
+          for await (const event of client.events(loadId, lastEventId > 0 ? { lastEventId } : {})) {
+            this.touch();
+            lastEventId = event.id;
+            droppedAt = null;
+            wait = firstMs;
+            // Position 0 is "not waiting" (every job's first frame before 1.0.71).
+            if (event.event === 'queued' && event.data.position > 0) {
+              const of = event.data.of;
+              this.waiting(`Waiting in Crucible's queue on ${server} (${event.data.position}${of !== null ? ` of ${of}` : ''})`);
+              inLine ??= setInterval(() => this.touch(), QUEUE_HEARTBEAT_MS);
+            } else if (inLine !== null) {
+              leaveLine();
+              this.waiting(`Loading ${model} on ${server}...`);
+            }
+            if (event.event === 'failed' || event.event === 'cancelled' || event.event === 'done' || event.event === 'removed') return event;
+          }
+          throw new CrucibleUnreachable('', `the event stream for load ${loadId} ended with no terminal event`);
+        } catch (err) {
+          if (signal?.aborted) throw new CrucibleChatCancelled();
+          const wire = crucibleUnavailableCause(err);
+          if (wire === null) throw this.mapRefusal(err, server);
+          const now = this.now();
+          droppedAt ??= now;
+          if (now - droppedAt + wait > budgetMs) {
+            void client.cancel(loadId).then(() => this.ledger?.settle(server, 'job', loadId), () => undefined);
+            throw new CrucibleChatError(0, 'unreachable',
+              `Crucible "${server}" isn't answering (lost the load of ${model} for ${Math.round((now - droppedAt) / 1000)} s: ${wire}).`, server);
+          }
+          this.logger.warn(`[${server}] the event stream of load ${loadId} dropped (${wire}); following it again after event ${lastEventId} in ${Math.round(wait / 100) / 10} s`);
+          await sleep(wait, signal);
+          wait = Math.min(wait * 2, maxMs);
         }
-        throw new CrucibleUnreachable('', `the event stream for load ${loadId} ended with no terminal event`);
-      } catch (err) {
-        if (signal?.aborted) throw new CrucibleChatCancelled();
-        const wire = crucibleUnavailableCause(err);
-        if (wire === null) throw this.mapRefusal(err, server);
-        const now = this.now();
-        droppedAt ??= now;
-        if (now - droppedAt + wait > budgetMs) {
-          void client.cancel(loadId).then(() => this.ledger?.settle(server, 'job', loadId), () => undefined);
-          throw new CrucibleChatError(0, 'unreachable',
-            `Crucible "${server}" isn't answering (lost the load of ${model} for ${Math.round((now - droppedAt) / 1000)} s: ${wire}).`, server);
-        }
-        this.logger.warn(`[${server}] the event stream of load ${loadId} dropped (${wire}); following it again after event ${lastEventId} in ${Math.round(wait / 100) / 10} s`);
-        await sleep(wait, signal);
-        wait = Math.min(wait * 2, maxMs);
       }
+    } finally {
+      leaveLine();
+    }
+  }
+
+  /** Tell the run's task what it is waiting for. Never breaks a call. */
+  private waiting(message: string): void {
+    try {
+      this.runs.getStore()?.options.onWaiting?.(message);
+    } catch {
+      // A display line never breaks a load.
     }
   }
 

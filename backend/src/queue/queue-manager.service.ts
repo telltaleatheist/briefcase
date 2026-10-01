@@ -992,6 +992,8 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
             signal: activeTask.abort!.signal,
             localId: job.id,
             onActivity: () => { activeTask.lastProgressAt = new Date(); },
+            // A load waiting in Crucible's queue says so on the task.
+            onWaiting: (message) => this.updateTaskProgress(job.id, activeTask.progress ?? 0, message, task.type),
           }, run);
 
       // If the watchdog force-failed this task while we were awaiting, it has

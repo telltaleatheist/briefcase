@@ -55,6 +55,7 @@ import { CrucibleChatService } from '../crucible/llm/crucible-chat.service';
 import { CrucibleBusyError, CrucibleChatError, CrucibleParkedError } from '../crucible/llm/errors';
 import { crucibleTargetOf, type CrucibleTarget } from '../crucible/llm/target';
 import { CrucibleProbeService } from '../crucible/probe';
+import { queuesWork } from '../crucible/crucible-queue';
 import { CrucibleRegistryService } from '../crucible/registry.service';
 import { decideVenue, type VenueAnswer } from '../crucible/venue-decision';
 import type { ServerReach } from '../crucible/wire/settings-wire';
@@ -307,10 +308,14 @@ export class CrucibleLanesService implements OnModuleInit, BeforeApplicationShut
     return { kind: 'lane', placement: { lane: gpuLaneOf(route.server), server: route.server, target: asrTarget(route.model) } };
   }
 
-  /** The holder's sentence when another client has `server`'s job lane, else null (the asr preflight). */
+  /**
+   * The holder's sentence when another client has `server`'s job lane, else
+   * null (the asr preflight). A server with a queue (1.0.71+) is never busy
+   * here: the submit waits in its line instead.
+   */
   async preflightJob(server: string): Promise<string | null> {
     const activity = await this.activity(server);
-    if (activity === null) return null;
+    if (activity === null || queuesWork(activity)) return null;
     return busyLineForJob(activity, this.ledger?.idsOn(server) ?? new Set());
   }
 
@@ -334,10 +339,15 @@ export class CrucibleLanesService implements OnModuleInit, BeforeApplicationShut
     else this.activityCache.delete(server);
   }
 
-  /** The holder's sentence when another client holds the card, else null (§7.2 step 2). */
+  /**
+   * The holder's sentence when another client holds the card, else null (§7.2
+   * step 2). A server with a queue (1.0.71+) is never busy here: the task's
+   * load waits in Crucible's line, and only a refusal the queue does not take
+   * (a lease on a resident model) parks it at the reservation.
+   */
   async preflight(server: string, target: CrucibleTarget): Promise<string | null> {
     const activity = await this.activity(server);
-    if (activity === null) return null;
+    if (activity === null || queuesWork(activity)) return null;
     return busyLineFor(activity, this.ledger?.idsOn(server) ?? new Set(), target);
   }
 
@@ -355,7 +365,7 @@ export class CrucibleLanesService implements OnModuleInit, BeforeApplicationShut
    * results).
    */
   async runAdmitted<T>(
-    admission: LanePlacement & { signal: AbortSignal; localId: string; onActivity: () => void },
+    admission: LanePlacement & { signal: AbortSignal; localId: string; onActivity: () => void; onWaiting?: (message: string) => void },
     fn: () => Promise<T>,
   ): Promise<T> {
     const { server, target, signal } = admission;
@@ -386,7 +396,7 @@ export class CrucibleLanesService implements OnModuleInit, BeforeApplicationShut
       } finally {
         this.activityCache.delete(server);
       }
-    }, { parkOnBusy: true, onActivity: admission.onActivity, localId: admission.localId });
+    }, { parkOnBusy: true, onActivity: admission.onActivity, onWaiting: admission.onWaiting, localId: admission.localId });
   }
 
   /** Give back what the ledger lists. Never throws. */

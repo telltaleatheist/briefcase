@@ -49,6 +49,7 @@ import {
 import type { CrucibleClient, JobEvent, UploadResult } from '@crucible/client';
 import { EngineResolveError } from '../engine-resolve';
 import { CrucibleRegistryError } from '../errors';
+import { QUEUE_HEARTBEAT_MS } from '../crucible-queue';
 import { CrucibleParkedError } from '../llm/errors';
 import { crucibleUnavailableCause } from '../transport-failure';
 
@@ -410,6 +411,10 @@ export async function runAsrJob(options: RunAsrJobOptions): Promise<AsrJobOutcom
         params: { ...options.params },
         inputs: { [options.filename]: { blobId } },
         ...(clientRef === undefined ? {} : { clientRef }),
+        // 1.0.71+: a busy card holds the job in Crucible's line instead of
+        // refusing it (QUEUE.md); an older server is sent it again without,
+        // and refuses busy as before.
+        queue: true,
       });
     } catch (err) {
       if (signal?.aborted) throw cancelledBeforeSubmit();
@@ -480,6 +485,13 @@ export async function runAsrJob(options: RunAsrJobOptions): Promise<AsrJobOutcom
   let lastEventId = 0;
   let lastFraction = 0;
   let failures = 0;
+  // In Crucible's line the stream is quiet between moves: the place is said
+  // again every QUEUE_HEARTBEAT_MS, so the task never reads as stalled.
+  let inLine: NodeJS.Timeout | null = null;
+  const leaveLine = (): void => {
+    if (inLine !== null) clearInterval(inLine);
+    inLine = null;
+  };
   try {
     while (terminal === null) {
       try {
@@ -487,8 +499,13 @@ export async function runAsrJob(options: RunAsrJobOptions): Promise<AsrJobOutcom
         for await (const event of client.events(admitted, resume)) {
           failures = 0;
           if (event.id > lastEventId) lastEventId = event.id;
+          if (event.event !== 'queued') leaveLine();
           if (event.event === 'queued') {
-            options.onProgress?.({ kind: 'queued', position: event.data.position });
+            const place = { kind: 'queued' as const, position: event.data.position };
+            options.onProgress?.(place);
+            // Position 0 is "not waiting" (every job's first frame before 1.0.71).
+            if (inLine !== null) clearInterval(inLine);
+            if (event.data.position > 0) inLine = setInterval(() => options.onProgress?.(place), QUEUE_HEARTBEAT_MS);
           } else if (event.event === 'warming') {
             options.onProgress?.({ kind: 'warming', message: warmingHeadline(event.data.message) });
           } else if (event.event === 'progress') {
@@ -502,7 +519,7 @@ export async function runAsrJob(options: RunAsrJobOptions): Promise<AsrJobOutcom
               if (event.data.fraction !== null) lastFraction = event.data.fraction;
               options.onProgress?.({ kind: 'transcribing', fraction: lastFraction, processedS, totalS, message: event.data.message });
             }
-          } else if (event.event === 'done' || event.event === 'failed' || event.event === 'cancelled') {
+          } else if (event.event === 'done' || event.event === 'failed' || event.event === 'cancelled' || event.event === 'removed') {
             terminal = event;
           }
         }
@@ -531,12 +548,19 @@ export async function runAsrJob(options: RunAsrJobOptions): Promise<AsrJobOutcom
       }
     }
   } finally {
+    leaveLine();
     signal?.removeEventListener('abort', onAbort);
     // A job that reached a terminal event, or whose DELETE the server took, holds nothing.
     if (terminal !== null || cancelAccepted) options.ledger?.settle(admitted);
   }
 
   const ended = terminal as JobEvent;
+  // Taken out of Crucible's queue before it ran (waited past its limit, the
+  // operator removed it, a restart): not run, not failed. The task parks.
+  if (ended.event === 'removed') {
+    if (cancelAsked) throw new CrucibleAsrCancelled(server, admitted, `The transcription was cancelled (Crucible job ${admitted} on ${server}).`);
+    throw new CrucibleParkedError(server, `Crucible on ${server} took the transcription out of its queue (${ended.data.reason}): ${ended.data.message}`);
+  }
   if (ended.event === 'cancelled') {
     throw new CrucibleAsrCancelled(server, admitted, cancelAsked
       ? `The transcription was cancelled (Crucible job ${admitted} on ${server}).`

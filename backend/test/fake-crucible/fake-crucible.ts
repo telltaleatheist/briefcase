@@ -144,6 +144,13 @@ export interface NamedFaults {
   failLoadWith?: { code: string; message: string };
   /** Load jobs stay `running` until DELETEd (a kill mid-load, for the sweep specs). */
   holdLoads?: boolean;
+  /**
+   * 1.0.71's queue: a job submitted WITH `queue` (load-model, asr) waits in
+   * line, a `queued` event per position (`of` the first), then `started` and
+   * runs, or is taken out (`removed` with that reason). Without `queue` the
+   * submit runs as before. `stepMs` apart (default 5).
+   */
+  queueLine?: { positions: number[]; then: 'start' | { removed: 'expired' | 'operator' | 'server_restart' }; stepMs?: number };
 }
 
 /** One `GET /v1/models` row, in the SDK's camelCase; served snake_case. */
@@ -175,7 +182,7 @@ export interface FakeJob {
   type: string;
   model: string | null;
   params: Record<string, unknown>;
-  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
+  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled' | 'removed';
   leaseId: string | null;
   events: Array<{ id: number; event: string; data: Record<string, unknown> }>;
   client: string | null;
@@ -279,40 +286,21 @@ export interface FakeTask {
 export type FieldOmissions = Readonly<Record<string, readonly string[]>>;
 
 /**
- * Every field `@crucible/client` 1.0.25 reads as INFORMATIONAL (null when
- * absent) on the routes Briefcase calls — what a leaner or older server may
- * leave out without the SDK refusing it. Load-bearing fields (ids, states,
- * decide answers, resident/loadable/modalities, capability enabled/selected,
- * chat content) are never here. Some are load-bearing to one of Briefcase's
- * paths ("informational to the read, load-bearing to YOUR path"): `host.backend`
- * / `backend_kind` (the module is filtered to them), chat
- * `usage.prompt_tokens` (countTokens) and a model's context (analysis sizing)
- * are refused by name there; decide `logprobs` is read from `probabilities`.
+ * Every field `@crucible/client` 1.0.72 still reads as INFORMATIONAL (absent
+ * is accepted) on the routes Briefcase calls. 1.0.72 is strict: version, host
+ * and GPU facts, model family/size/context, capability sizing, upload digests,
+ * decide timings and logprobs are all required now, and a server that leaves
+ * one out is a protocol error in the SDK, before Briefcase sees it. What
+ * remains optional is listed here (measured against the SDK, 2026-09-30).
+ * Chat `usage` stays load-bearing to countTokens, refused by name there.
  * Keep any back with {@link informationalExcept}.
  */
 export const INFORMATIONAL_FIELDS: FieldOmissions = {
-  'GET /v1/info': ['server.version', 'host.platform', 'host.arch', 'host.backend', 'host.gpu',
-    'capabilities[].models[].revision', 'capabilities[].models[].source', 'capabilities[].models[].vram_bytes'],
-  'GET /v1/activity': ['server.version', 'server.api_version', 'server.backend', 'server.uptime_s',
-    'resident.since', 'resident.memory_bytes_estimate', 'chat', 'slots.accelerated.busy', 'slots.accelerated.of',
-    'slots.accelerated.queue_depth', 'running[].progress', 'running[].created', 'queued[].progress', 'queued[].created',
-    'lease.since', 'lease.expires_at'],
-  'GET /v1/models': ['[].family', '[].params_b', '[].revision', '[].fingerprint', '[].backend_supported', '[].installed',
-    '[].reason', '[].memory_bytes_estimate', '[].context_default', '[].max_model_len'],
-  'GET /v1/capability': ['backend_kind', 'total_bytes', 'desktop_allowance_bytes', 'classes[].reason',
-    'classes[].shortfall_bytes', 'classes[].work', 'classes[].context_ceilings'],
-  'GET /v1/settings': ['local_models', 'local_model_choices', 'desktop_allowance_bytes', 'backend_kind'],
-  'POST /v1/uploads': ['bytes', 'sha256'],
-  'GET /v1/jobs/:id': ['progress', 'created'],
-  'GET /v1/tasks/:id': ['request', 'created', 'started', 'finished'],
-  'POST /v1/decide': ['model', 'engine', 'timing_ms', 'tokens', 'answers.*.confidence', 'answers.*.logprobs'],
+  'GET /v1/info': ['capabilities[].models[].revision', 'capabilities[].models[].source', 'capabilities[].models[].vram_bytes'],
+  'GET /v1/activity': ['running[].progress', 'running[].created', 'queued[].progress', 'queued[].created', 'lease.since', 'lease.expires_at'],
+  'GET /v1/models': ['[].reason'],
   'POST /v1/openai/chat/completions': ['id', 'model', 'usage'],
-  'job-event:queued': ['position'],
-  'job-event:warming': ['message'],
-  'job-event:progress': ['fraction', 'message'],
-  'task-event:step': ['name', 'index', 'total'],
-  'task-event:progress': ['bytes_total', 'file'],
-  'task-event:skipped': ['reason'],
+  'task-event:progress': ['bytes_total'],
 };
 
 /** {@link INFORMATIONAL_FIELDS} less the paths in `keep` (route → paths still sent). */
@@ -694,7 +682,19 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
     server: { name, version: options.version ?? '1.0.24', api_version: apiVersion() },
     role,
     ...(role === 'engine'
-      ? { managed_by: null }
+      ? {
+          managed_by: null,
+          // 1.0.72: which engine reads a page here. Briefcase reads no pages; the
+          // SDK requires the block on an engine.
+          pages_engine: {
+            engine: null, installed: false, detail: 'no pages engine on this fake',
+            request: {
+              model: 'dots-ocr', dpi: 200, max_pixels: 11289600, max_tokens: 8192, temperature: 0.0,
+              prompt: 'Please output the layout information from the PDF image.', dialect: 'dots-json',
+              concurrency: 1, truncated_finish_reason: 'length',
+            },
+          },
+        }
       : {
           engine: options.engine === undefined || options.engine === null
             ? null
@@ -738,12 +738,13 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
     return {
       server: { name, version: options.version ?? '1.0.24', api_version: apiVersion(), backend, uptime_s: Math.round((Date.now() - startedAt) / 1000) },
       resident: resident === null ? null : {
-        kind: 'llm', id: resident, since: '2026-09-23T01:00:00Z', memory_bytes_estimate: null,
+        kind: 'llm', id: resident, since: '2026-09-23T01:00:00Z', memory_bytes_estimate: 0,
         held_by: openLease === null ? null : {
           fact: 'a lease', who: openLease.client ?? 'unknown',
           details: { lease_id: openLease.leaseId, kind: 'llm', client: openLease.client, act: openLease.act, since: '2026-09-23T01:00:00+00:00', expires_at: '2026-09-23T01:02:00+00:00' },
         },
         unclaimed_since: openLease === null ? '2026-09-23T01:00:00Z' : null,
+        engine_exit_code: null,
       },
       stopping: null,
       warming: null,
@@ -888,6 +889,7 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
     started: '2026-09-23T01:00:00Z',
     finished: task.state === 'running' ? null : '2026-09-23T01:05:00Z',
     unmet: task.unmet,
+    message: null,
   });
 
   const pushTaskEvent = (task: FakeTask, event: string, data: Record<string, unknown>): void => {
@@ -1057,9 +1059,13 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
     lease_id: job.leaseId,
     client_ref: job.clientRef ?? null,
     interrupted_at: null,
+    held_by: null,
+    held_since: null,
     chunks_done: [],
     chunks_total: null,
     chunk_at: null,
+    resume_id: null,
+    resumed: false,
   });
 
   const pushJobEvent = (job: FakeJob, event: string, data: Record<string, unknown>): void => {
@@ -1155,6 +1161,41 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
     jobs.push(job);
     send(res, 202, { job_id: job.jobId });
     pushJobEvent(job, 'queued', { position: 0 });
+    throughLine(job, body, () => runLoad(job, type, model, params));
+  }
+
+  /**
+   * A job submitted with `queue` while `queueLine` is injected waits in line
+   * (see NamedFaults.queueLine), then `go` runs it; else `go` runs at once.
+   */
+  function throughLine(job: FakeJob, body: Record<string, unknown>, go: () => void): void {
+    const line = named.queueLine;
+    if (line === undefined || body['queue'] === undefined) {
+      go();
+      return;
+    }
+    const step = line.stepMs ?? 5;
+    line.positions.forEach((position, i) => {
+      setTimeout(() => {
+        if (job.status === 'queued') pushJobEvent(job, 'queued', { position, of: line.positions[0], max_wait_s: 3600, expires_at: '2026-09-30T13:00:00Z' });
+      }, step * (i + 1)).unref?.();
+    });
+    setTimeout(() => {
+      if (job.status !== 'queued') return;
+      if (line.then === 'start') {
+        pushJobEvent(job, 'started', { waited_s: 1 });
+        go();
+        return;
+      }
+      job.status = 'removed';
+      pushJobEvent(job, 'removed', {
+        reason: line.then.removed, message: `taken out of the queue (${line.then.removed})`, waited_s: 1, at: '2026-09-30T12:00:00Z',
+      });
+    }, step * (line.positions.length + 1)).unref?.();
+  }
+
+  function runLoad(job: FakeJob, type: string, model: string | null, params: Record<string, unknown>): void {
+    const client = job.client;
     const finish = (): void => {
       if (job.status === 'cancelled') return;
       if (type === 'load-model' && named.failLoadWith !== undefined) {
@@ -1286,7 +1327,7 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
     jobs.push(job);
     send(res, 202, { job_id: job.jobId });
     pushJobEvent(job, 'queued', { position: 0 });
-    runAsr(job, { ...asrScript });
+    throughLine(job, body, () => runAsr(job, { ...asrScript }));
   }
 
   function runAsr(job: FakeJob, script: FakeAsrScript): void {
@@ -1428,7 +1469,8 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
       refusal(res, 400, 'unknown_act', `'${act}' is not a capability class`, { known: [...ACTS] });
       return;
     }
-    const known = new Set(['model', 'state', 'images', 'questions', 'missing']);
+    // 1.0.72: `queue` lets a decide wait in line (QUEUE.md); this fake is never busy for it.
+    const known = new Set(['model', 'state', 'images', 'questions', 'missing', 'queue']);
     const extra = Object.keys(body).filter((k) => !known.has(k));
     if (extra.length) {
       refusal(res, 400, 'invalid_request', `unknown field(s): ${extra.join(', ')}`, { fields: extra });

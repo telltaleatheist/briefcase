@@ -31,8 +31,8 @@ import {
 
 export interface StreamUploadResult {
   readonly blobId: string;
-  readonly bytes: number | null;
-  readonly sha256: string | null;
+  readonly bytes: number;
+  readonly sha256: string;
 }
 
 export interface StreamUploadRequest {
@@ -142,14 +142,11 @@ function readAnswer(status: number, text: string, url: string): StreamUploadResu
   }
   const obj = (body !== null && typeof body === 'object' ? body : {}) as Record<string, unknown>;
   if (status >= 200 && status < 300) {
-    if (typeof obj['blob_id'] !== 'string') {
-      throw new CrucibleProtocolError(`upload did not return a blob_id: ${text.slice(0, 200)}`);
+    // As the SDK's own upload reads it (1.0.72): all three are required.
+    if (typeof obj['blob_id'] !== 'string' || typeof obj['bytes'] !== 'number' || typeof obj['sha256'] !== 'string') {
+      throw new CrucibleProtocolError(`upload did not return blob_id, bytes and sha256: ${text.slice(0, 200)}`);
     }
-    return {
-      blobId: obj['blob_id'],
-      bytes: typeof obj['bytes'] === 'number' ? obj['bytes'] : null,
-      sha256: typeof obj['sha256'] === 'string' ? obj['sha256'] : null,
-    };
+    return { blobId: obj['blob_id'], bytes: obj['bytes'], sha256: obj['sha256'] };
   }
   const envelope = obj['error'] as Record<string, unknown> | undefined;
   if (!envelope || typeof envelope !== 'object' || typeof envelope['code'] !== 'string' || typeof envelope['message'] !== 'string') {

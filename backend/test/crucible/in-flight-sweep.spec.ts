@@ -178,7 +178,7 @@ describe('the sweep', () => {
     expect(cardHeldBy(activity, new Set([activity.lease!.leaseId]))).toBeNull();
   });
 
-  it('a server that does not count its open chats (1.0.25: activity.chat is informational) is not read as free: nothing is unloaded', async () => {
+  it('a server whose activity cannot be read (1.0.72 requires activity.chat) is not read as free: nothing is unloaded', async () => {
     fake.setOmit({ 'GET /v1/activity': ['chat'] });
     const client = await h.factory.clientFor('mac');
     fake.setResident('qwen3.5-9b');
@@ -188,7 +188,7 @@ describe('the sweep', () => {
     expect(report.rows.map((r) => r.outcome)).toEqual(['released']);
     expect(fake.resident()).toBe('qwen3.5-9b');
     expect(fake.jobs.some((j) => j.type === 'unload-model')).toBe(false);
-    expect(report.servers[0].note).toMatch(/does not count/);
+    expect(report.servers[0].note).toMatch(/could not report its activity/);
     fake.setOmit({});
   });
 });
