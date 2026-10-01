@@ -1517,7 +1517,8 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
       return;
     }
     // 1.0.72: `queue` lets a decide wait in line (QUEUE.md); this fake is never busy for it.
-    const known = new Set(['model', 'state', 'images', 'questions', 'missing', 'queue']);
+    // 1.0.55's items form: choice questions about one state, answered as a list.
+    const known = new Set(['model', 'state', 'images', 'questions', 'missing', 'queue', 'items', 'options', 'instructions']);
     const extra = Object.keys(body).filter((k) => !known.has(k));
     if (extra.length) {
       refusal(res, 400, 'invalid_request', `unknown field(s): ${extra.join(', ')}`, { fields: extra });
@@ -1536,6 +1537,21 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
     if (missing !== 'refuse' && missing !== 'report') {
       refusal(res, 400, 'invalid_request', `missing must be 'refuse' or 'report', got ${JSON.stringify(missing)}`, { field: 'missing' });
       return;
+    }
+    // The items form, read as the questions it is: item i is the lone choice
+    // question `text` (+ "\n" + the shared instructions) with its own options
+    // or the shared ones.
+    const itemsBody = body['items'];
+    const asItems = Array.isArray(itemsBody);
+    if (asItems) {
+      const shared = body['options'] as Record<string, string> | undefined;
+      const tail = typeof body['instructions'] === 'string' ? `\n${body['instructions']}` : '';
+      body = {
+        ...body,
+        questions: Object.fromEntries((itemsBody as Array<{ text: string; options?: Record<string, string> }>).map((item, i) => [
+          `item${i}`, { type: 'choice', instructions: `${item.text}${tail}`, options: item.options ?? shared },
+        ])),
+      };
     }
     const questionsBody = body['questions'];
     if (questionsBody === null || typeof questionsBody !== 'object' || Array.isArray(questionsBody) || Object.keys(questionsBody).length === 0) {
@@ -1622,6 +1638,17 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
       }
       perQuestion[q.name] = { wall_ms: 12.5, prompt_tokens: 140, cached_tokens: null };
       tokensPer[q.name] = 140;
+    }
+    if (asItems) {
+      const vllm = backend === 'cuda-linux';
+      send(res, 200, {
+        model: { id: model, revision: 'abc1234', fingerprint: `${model}@abc1234` },
+        engine: vllm ? 'vllm' : 'mlx-lm',
+        answers: questions.map((q) => answers[q.name]),
+        timing_ms: { total: 4 * questions.length + 30, engine_requests: vllm ? questions.length + 1 : 1 },
+        tokens: { shared: vllm ? null : 100, per_item: questions.map(() => 40), images: 0 },
+      });
+      return;
     }
     send(res, 200, {
       model: { id: model, revision: 'abc1234', fingerprint: `${model}@abc1234` },

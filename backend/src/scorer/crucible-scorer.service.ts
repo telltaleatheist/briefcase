@@ -57,7 +57,7 @@ import { crucibleTargetOf } from '../crucible/llm/target';
 import { compareVersions } from '../crucible/probe';
 import { isVisionAlias } from '../crucible/llm/ollama-map';
 import { crucibleUnavailableCause } from '../crucible/transport-failure';
-import { fromWireResponse, toWireRequest } from './crucible-decide';
+import { fromWireItemsResponse, fromWireResponse, itemsFormFits, toWireItemsRequest, toWireRequest } from './crucible-decide';
 import type { ScorerHandle } from './scorer-handle';
 import {
   ChatMessage,
@@ -73,6 +73,12 @@ import {
 export const SCORER_PREFERRED_MODEL = 'qwen3.5-9b';
 /** The first Crucible with the decision door (and `generate`, and load-time context). */
 export const DECIDE_MIN_VERSION = '1.0.24';
+
+/** The items form of the decision door (crucible-decide.ts): one engine call for a chunk's choice questions. */
+export const DECIDE_ITEMS_MIN_VERSION = '1.0.55';
+
+/** How long a server's "has the items form" answer is kept before it is read again. */
+const ITEMS_FORM_KNOWN_MS = 10 * 60_000;
 /**
  * The window the scorer's model is loaded with: a 16K-token chunk state (the
  * chunk planner's single-chunk ceiling, chunks.ts) plus the flag legend, a
@@ -217,6 +223,15 @@ export function decideTimingLine(res: Pick<DecideResponse, 'timingMs' | 'tokens'
   const qMs = mean(per.map((t) => t.promptMs).filter((v): v is number => v !== null));
   const fresh = mean(per.filter((t) => t.promptTokens !== null && t.cachedTokens !== null).map((t) => t.promptTokens! - t.cachedTokens!));
   const prime = res.timingMs.prime;
+  if (res.timingMs.engineRequests !== undefined) {
+    const items = Object.values(res.tokens.perQuestion);
+    return (
+      `decide (items): ${items.length} item(s), ${wallMs} ms here, ${fmt(res.timingMs.total, ' ms')} on Crucible ` +
+      `in ${res.timingMs.engineRequests} engine request(s); shared state ${fmt(res.tokens.shared ?? null)} tokens, ` +
+      `per item ${fmt(res.timingMs.total !== null && items.length ? res.timingMs.total / items.length : null, ' ms')}, ` +
+      `${fmt(mean(items))} tokens`
+    );
+  }
   return (
     `decide: ${n} question(s), ${wallMs} ms here, ${fmt(res.timingMs.total, ' ms')} on Crucible` +
     (prime ? `; prime ${fmt(prime.promptMs, ' ms')} (${fmt(prime.promptTokens)} tokens, ${fmt(prime.cachedTokens)} cached)` : '') +
@@ -231,6 +246,8 @@ export class CrucibleScorerService {
   private readonly sessionForm = new Map<string, string>();
   /** `server\nmodel` → the chat template's own prompt tokens (countTokens' offset). */
   private readonly templateTokens = new Map<string, number>();
+  /** Per server: does it take the items form, and when that was read. */
+  private readonly itemsForm = new Map<string, { at: number; yes: boolean }>();
 
   constructor(
     private readonly chat: CrucibleChatService,
@@ -331,9 +348,22 @@ export class CrucibleScorerService {
     };
   }
 
+  /** Does `server` take the items form (1.0.55+)? Read once per {@link ITEMS_FORM_KNOWN_MS}. */
+  private async takesItems(server: string): Promise<boolean> {
+    const known = this.itemsForm.get(server);
+    if (known !== undefined && Date.now() - known.at < ITEMS_FORM_KNOWN_MS) return known.yes;
+    const yes = await this.chat.serverAtLeast(server, DECIDE_ITEMS_MIN_VERSION);
+    this.itemsForm.set(server, { at: Date.now(), yes });
+    return yes;
+  }
+
   private async decide(server: string, model: string, req: DecideRequest, options: DecideOptions): Promise<DecideResponse> {
     const signal = options.signal;
-    const wire = toWireRequest(model, req);
+    // Choice questions go as the items form where the server has it: one
+    // engine call reads the state once and every question off its cache.
+    const asItems = itemsFormFits(req) && await this.takesItems(server);
+    const wireItems = asItems ? toWireItemsRequest(model, req) : null;
+    const wire = wireItems === null ? toWireRequest(model, req) : null;
     const stateChars = typeof req.state === 'string' ? req.state.length : JSON.stringify(req.state).length;
     const timeoutMs = localTimeoutMs(stateChars + req.questions.reduce((n, q) => n + q.instructions.length, 0));
     let reacquired = false;
@@ -345,10 +375,11 @@ export class CrucibleScorerService {
       try {
         client = await this.servers.clientFor(server);
         const sentAt = Date.now();
-        const res = await client.decide(wire, { act: DECIDE_ACT, signal: combined });
+        const out = wireItems !== null
+          ? fromWireItemsResponse(req, await client.decideItems(wireItems, { act: DECIDE_ACT, signal: combined }))
+          : fromWireResponse(req, await client.decide(wire!, { act: DECIDE_ACT, signal: combined }));
         const wallMs = Date.now() - sentAt;
         this.chat.noteActivity();
-        const out = fromWireResponse(req, res);
         this.logger.log(`[${server}] ${decideTimingLine(out, wallMs)}`);
         if (out.gated) this.logger.warn(`[${server}] ${out.gated}/${req.questions.length} answer(s) under the label-mass gate were read as no evidence`);
         const { gated: _gated, ...response } = out;

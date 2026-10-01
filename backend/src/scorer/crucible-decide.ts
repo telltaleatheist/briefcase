@@ -17,6 +17,14 @@
  *             applied HERE, client-side (see {@link floorAnswer}).
  *   answers   the renormalised `logprobs` feed Viterbi; `labelMass` is the
  *             returned letters' raw mass.
+ *   items     a request of choice questions only goes as the ITEMS form
+ *             (Crucible 1.0.55+): one engine call on the Mac reads the shared
+ *             state once and every item off its cache, instead of one request
+ *             per question (measured by Crucible, 2026-10-01: 0.33 s an item
+ *             against 0.69 s a question). Each item is its question's own
+ *             text, so it is answered exactly as that question alone would be
+ *             (249 of 250 argmax equal on the Mac); the answers are the same
+ *             choice answers, floored here the same way.
  *
  * PURE: no I/O, so the mapping is pinned by unit tests.
  */
@@ -24,6 +32,8 @@
 import type {
   DecideCallTiming,
   DecideAnswer as WireAnswer,
+  DecideItemsRequest as WireItemsRequest,
+  DecideItemsResponse as WireItemsResponse,
   DecideQuestion as WireQuestion,
   DecideRequest as WireRequest,
   DecideResponse as WireResponse,
@@ -288,6 +298,80 @@ export function fromWireResponse(req: DecideRequest, res: WireResponse): DecideR
       ...(prime !== null ? { prime: timingOf(prime) } : {}),
     },
     tokens: { perQuestion: perQuestionTokens, images: res.tokens?.images ?? null },
+    gated,
+  };
+}
+
+
+// =============================================================================
+// THE ITEMS FORM
+// =============================================================================
+
+/** The items form takes at most this many items in one request. */
+export const MAX_DECIDE_ITEMS = 512;
+
+/**
+ * Can this request go as the items form? Choice questions only (an item IS a
+ * choice question), more than one (one alone gains nothing), within the cap,
+ * and text only (the form carries images too, but no pipeline here sends any).
+ */
+export function itemsFormFits(req: DecideRequest): boolean {
+  return req.questions.length > 1
+    && req.questions.length <= MAX_DECIDE_ITEMS
+    && (req.images ?? []).length === 0
+    && req.questions.every((q) => q.type === 'choice');
+}
+
+/**
+ * Briefcase's request as the items form: each question's own text is its
+ * item, with its options. Options shared by every question are sent once, at
+ * the request level; any that differ go on their item. The questions form's
+ * validation runs first, so a bad request is refused the same way.
+ */
+export function toWireItemsRequest(model: string, req: DecideRequest): WireItemsRequest {
+  const wire = toWireRequest(model, req);
+  const optionsOf = (name: string): Record<string, string> => {
+    const q = wire.questions[name];
+    if (q.type !== 'choice') throw new ScorerError('bad_request', `question '${name}' is a ${q.type}; the items form takes choice questions only`);
+    return q.options as Record<string, string>;
+  };
+  const names = req.questions.map((q) => q.name);
+  const same = (a: Record<string, string>, b: Record<string, string>): boolean => {
+    const ka = Object.keys(a);
+    const kb = Object.keys(b);
+    return ka.length === kb.length && ka.every((k, i) => k === kb[i] && a[k] === b[k]);
+  };
+  const shared = optionsOf(names[0]);
+  const allShared = names.every((n) => same(optionsOf(n), shared));
+  return {
+    model,
+    state: req.state,
+    ...(allShared ? { options: shared } : {}),
+    items: req.questions.map((q) => ({ text: q.instructions, ...(allShared ? {} : { options: optionsOf(q.name) }) })),
+    missing: 'report',
+  };
+}
+
+/** The items form's answers, by position, as Briefcase's {@link DecideResponse} keyed by question name. */
+export function fromWireItemsResponse(req: DecideRequest, res: WireItemsResponse): DecideResponse & { gated: number } {
+  if (res.answers.length !== req.questions.length) {
+    throw new ScorerError('engine_error', `decide answered ${res.answers.length} items for ${req.questions.length} questions`);
+  }
+  const answers: Record<string, ScorerAnswer> = {};
+  const perQuestionTokens: Record<string, number> = {};
+  let gated = 0;
+  req.questions.forEach((q, i) => {
+    const answer = toScorerAnswer(q, res.answers[i]);
+    if (answer.gated) gated++;
+    answers[q.name] = answer;
+    const n = res.tokens.perItem[i];
+    if (typeof n === 'number') perQuestionTokens[q.name] = n;
+  });
+  return {
+    model: res.model?.id ?? null,
+    answers,
+    timingMs: { total: res.timingMs.total, perQuestion: {}, engineRequests: res.timingMs.engineRequests },
+    tokens: { perQuestion: perQuestionTokens, images: res.tokens.images, shared: res.tokens.shared },
     gated,
   };
 }

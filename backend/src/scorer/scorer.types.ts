@@ -195,11 +195,19 @@ export interface DecideResponse {
     perQuestion: Record<string, QuestionTiming>;
     /** Present when the request carried more than one question (the shared prefix was primed) and the server timed it. */
     prime?: QuestionTiming;
+    /**
+     * The items form only (crucible-decide.ts): how many requests the engine
+     * took. 1 on the Mac (mlx reads every item off one cached state); the
+     * prefix plus one per item on vLLM.
+     */
+    engineRequests?: number;
   };
   /** Informational: what the server stated. A question the server gave no count for is absent. */
   tokens: {
-    /** server tokens_evaluated per question (whole prompt length, image tokens included) */
+    /** server tokens_evaluated per question (whole prompt length, image tokens included); the items form: each item's own tokens */
     perQuestion: Record<string, number>;
+    /** The items form only: the shared state's tokens, read once; null where the engine did not say (vLLM). */
+    shared?: number | null;
     images: number | null;
   };
 }
