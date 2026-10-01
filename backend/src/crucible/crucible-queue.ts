@@ -17,6 +17,12 @@ import { compareVersions } from './probe';
 /** The first Crucible that holds a job in its queue while it is busy. */
 export const QUEUE_MIN_VERSION = '1.0.71';
 
+/**
+ * How often a waiting lease reads the line (GET /v1/queue): its own request
+ * is held open with nothing said until its turn, so its place comes from here.
+ */
+export const QUEUE_POLL_MS = 5_000;
+
 /** How often a task waiting in Crucible's line tells the stall watchdog it is alive. */
 export const QUEUE_HEARTBEAT_MS = 60_000;
 

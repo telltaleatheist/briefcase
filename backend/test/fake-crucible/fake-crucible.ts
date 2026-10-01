@@ -148,7 +148,9 @@ export interface NamedFaults {
    * 1.0.71's queue: a job submitted WITH `queue` (load-model, asr) waits in
    * line, a `queued` event per position (`of` the first), then `started` and
    * runs, or is taken out (`removed` with that reason). Without `queue` the
-   * submit runs as before. `stepMs` apart (default 5).
+   * submit runs as before. `stepMs` apart (default 5). 1.0.74: a lease
+   * asked with `queue` is held open the same way, listed in GET /v1/queue
+   * (kind "lease"), then granted, or answered 409 removed_from_queue.
    */
   queueLine?: { positions: number[]; then: 'start' | { removed: 'expired' | 'operator' | 'server_restart' }; stepMs?: number };
 }
@@ -1106,6 +1108,51 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
     };
   }
 
+  /** Leases waiting in line (1.0.74), in order. */
+  const waitingLeases: Array<{ id: string; model: string; client: string | null; position: number; remove: (reason: string) => void }> = [];
+  let nextCall = 1;
+
+  /** A queued lease: held open while the line moves, then granted, or removed. */
+  function leaseInLine(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    model: string,
+    body: Record<string, unknown>,
+    line: NonNullable<NamedFaults['queueLine']>,
+  ): void {
+    const client = (req.headers['x-crucible-client'] as string | undefined) ?? null;
+    const step = line.stepMs ?? 5;
+    const timers: NodeJS.Timeout[] = [];
+    const waiting = {
+      id: `call-${nextCall++}`, model, client, position: line.positions[0] ?? 1,
+      remove: (reason: string): void => {
+        timers.forEach(clearTimeout);
+        waitingLeases.splice(waitingLeases.indexOf(waiting), 1);
+        refusal(res, 409, 'removed_from_queue', `the lease was taken out of the queue (${reason})`, { call_id: waiting.id, reason, waited_s: 1 });
+      },
+    };
+    waitingLeases.push(waiting);
+    line.positions.forEach((position, i) => timers.push(setTimeout(() => { waiting.position = position; }, step * i)));
+    timers.push(setTimeout(() => {
+      if (line.then !== 'start') {
+        waiting.remove(line.then.removed);
+        return;
+      }
+      waitingLeases.splice(waitingLeases.indexOf(waiting), 1);
+      if (resident !== model) {
+        resident = model;
+        residentCtx = null;
+      }
+      const leaseId = `lease-${nextLease++}`;
+      openLease = { leaseId, model, client, act: String(body['act'] ?? '') };
+      leases.taken.push({ leaseId, model, act: body['act'], ttlSeconds: body['ttl_seconds'] });
+      send(res, 201, {
+        lease_id: leaseId, subject: model, kind: 'llm', client, act: body['act'] ?? null,
+        since: '2026-09-23T01:00:00+00:00', expires_at: '2026-09-23T01:02:00+00:00',
+      });
+    }, step * Math.max(1, line.positions.length) * 4));
+  }
+
   function postJob(req: http.IncomingMessage, res: http.ServerResponse, body: Record<string, unknown>): void {
     const type = String(body['type'] ?? '');
     if (named.serverBusy !== undefined) {
@@ -1950,8 +1997,37 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
       return;
     }
 
+    // ── the queue (1.0.71+): waiting leases only, in this fake ─────────────
+    if (path === '/v1/queue' && method === 'GET') {
+      send(res, 200, {
+        items: waitingLeases.map((w) => ({
+          position: w.position, job_id: w.id, type: 'lease', model: w.model, client: w.client, client_ref: null,
+          submitted: '2026-09-30T12:00:00Z', waited_s: 1, max_wait_s: 3600, expires_at: '2026-09-30T13:00:00Z',
+          lease_holder: false, kind: 'lease',
+        })),
+        depth: Math.max(waitingLeases.length, ...waitingLeases.map((w) => w.position)),
+        limits: { per_client: 50, total: 200, max_wait_s: { default: 3600, min: 10, max: 86400 }, abandon_after_s: 300 },
+      });
+      return;
+    }
+    const unqueue = /^\/v1\/queue\/([^/]+)$/.exec(path);
+    if (unqueue && method === 'DELETE') {
+      const waiting = waitingLeases.find((w) => w.id === decodeURIComponent(unqueue[1]));
+      if (waiting === undefined) {
+        refusal(res, 404, 'not_queued', `${unqueue[1]} is not waiting`);
+        return;
+      }
+      waiting.remove('operator');
+      send(res, 200, { job_id: waiting.id, status: 'removed', reason: 'operator' });
+      return;
+    }
+
     // ── leases: one per server ───────────────────────────────────────────
     const take = /^\/v1\/models\/([^/]+)\/lease$/.exec(path);
+    if (take && method === 'POST' && body['queue'] !== undefined && named.queueLine !== undefined) {
+      leaseInLine(req, res, decodeURIComponent(take[1]), body, named.queueLine);
+      return;
+    }
     if (take && method === 'POST') {
       const model = decodeURIComponent(take[1]);
       if (openLease !== null) {

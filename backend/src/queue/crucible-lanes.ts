@@ -342,8 +342,9 @@ export class CrucibleLanesService implements OnModuleInit, BeforeApplicationShut
   /**
    * The holder's sentence when another client holds the card, else null (§7.2
    * step 2). A server with a queue (1.0.71+) is never busy here: the task's
-   * load waits in Crucible's line, and only a refusal the queue does not take
-   * (a lease on a resident model) parks it at the reservation.
+   * load waits in Crucible's line, and on 1.0.74+ so does its lease on a
+   * resident model; an older one refuses that lease busy at the reservation,
+   * which parks the task.
    */
   async preflight(server: string, target: CrucibleTarget): Promise<string | null> {
     const activity = await this.activity(server);

@@ -59,13 +59,15 @@ import {
   CrucibleUnreachable,
   type CrucibleClient,
   type JobEvent,
+  type Lease,
   type ModelInfo,
 } from '@crucible/client';
 import { crucibleUnavailableCause } from '../transport-failure';
 import { CrucibleClientFactory } from '../client-factory';
 import { CrucibleServersService } from '../crucible-servers.service';
 import { CrucibleProbeService, compareVersions } from '../probe';
-import { QUEUE_HEARTBEAT_MS } from '../crucible-queue';
+import { QUEUE_HEARTBEAT_MS, QUEUE_POLL_MS } from '../crucible-queue';
+import { CRUCIBLE_CLIENT_NAME } from '../client-factory';
 import type { InFlightLedger } from '../in-flight-ledger';
 import { CRUCIBLE_IN_FLIGHT_LEDGER } from '../crucible.constants';
 import {
@@ -319,6 +321,8 @@ export class CrucibleChatService {
   /** The clock and the sleeper, replaceable by a spec. */
   now: () => number = Date.now;
   heartbeatMs = HEARTBEAT_MS;
+  /** How often a waiting lease reads Crucible's line (specs shorten it). */
+  queuePollMs = QUEUE_POLL_MS;
   /** How soon a heartbeat that failed for weather is tried again. */
   heartbeatRetryMs = HEARTBEAT_RETRY_MS;
   /** How long the server keeps a lease nobody renews: the retry budget. */
@@ -999,7 +1003,7 @@ export class CrucibleChatService {
     if (info.resident) {
       if (!lease) return null;
       try {
-        const held = await client.lease(model, { act: BRIEFCASE_ACT, ttlSeconds: LEASE_TTL_SECONDS });
+        const held = await this.leaseInLine(client, server, model, signal);
         this.recordLease(server, model, held.leaseId);
         this.staleLeases.delete(server);
         this.logger.log(`[${server}] leased resident ${model} (${held.leaseId})`);
@@ -1013,7 +1017,8 @@ export class CrucibleChatService {
           this.logger.log(`[${server}] ${model}: our earlier lease ${err.leaseId} is still open; holding it again`);
           return err.leaseId;
         }
-        // Another client already holds a lease on the card. If it holds OUR
+        // Another client already holds a lease on the card (a server before
+        // 1.0.74, where a lease does not wait in line). If it holds OUR
         // model, the card is pinned where we need it; chat without our own.
         if (err instanceof CrucibleLeased) {
           this.logger.log(`[${server}] ${model} is resident and leased by ${err.holder ?? 'another app'}; chatting under their lease`);
@@ -1032,6 +1037,63 @@ export class CrucibleChatService {
           + `${info.reason ? ` (${info.reason})` : ''}. Pick another model, or download it in Settings › AI.`, server);
     }
     return this.load(client, server, model, signal, lease, loadContext);
+  }
+
+  /**
+   * A lease on the resident `model`, waiting in Crucible's line when the card
+   * is busy (1.0.74: the SDK sends the lease with `queue`, and the request is
+   * held open until its turn; an older server is asked again without it and
+   * refuses busy as before). The request itself says nothing while it waits,
+   * so the line is read beside it: the task is told its place, and the stall
+   * watchdog that it is alive. The SDK's lease takes no signal, so a cancel
+   * takes our row out of the line (and a lease granted as the cancel landed
+   * is given back). Taken out by anyone else (expired, the operator, a
+   * restart): busy, so a queue run parks.
+   */
+  private async leaseInLine(client: CrucibleClient, server: string, model: string, signal: AbortSignal | undefined): Promise<Lease> {
+    throwIfAborted(signal);
+    let waitingId: string | null = null;
+    let told: string | null = null;
+    const look = async (): Promise<void> => {
+      try {
+        const line = await client.queue();
+        const ours = line.items.find((item) => item.kind === 'lease' && item.model === model && item.client === CRUCIBLE_CLIENT_NAME);
+        this.touch();
+        if (ours === undefined) return;
+        waitingId = ours.jobId;
+        const place = `Waiting in Crucible's queue on ${server} (${ours.position} of ${line.depth})`;
+        if (place !== told) this.waiting(place);
+        told = place;
+        if (signal?.aborted) await client.removeFromQueue(ours.jobId).catch(() => undefined);
+      } catch {
+        // The line is a display; the lease answers for itself.
+      }
+    };
+    const poll = setInterval(() => void look(), this.queuePollMs);
+    const onAbort = (): void => {
+      if (waitingId !== null) void client.removeFromQueue(waitingId).catch(() => undefined);
+      else void look();
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    try {
+      const held = await client.lease(model, { act: BRIEFCASE_ACT, ttlSeconds: LEASE_TTL_SECONDS });
+      if (told !== null) this.waiting(`Starting on ${server}...`);
+      if (signal?.aborted) {
+        await this.releaseLeaseQuietly(client, server, held.leaseId);
+        throw new CrucibleChatCancelled();
+      }
+      return held;
+    } catch (err) {
+      if (err instanceof CrucibleRefused && err.code === 'removed_from_queue') {
+        if (signal?.aborted) throw new CrucibleChatCancelled();
+        const reason = (err.details as { reason?: unknown } | null)?.reason;
+        throw new CrucibleBusyError(server, `the lease on ${model} was taken out of Crucible's queue (${typeof reason === 'string' ? reason : 'removed'}): ${err.serverMessage}`);
+      }
+      throw err;
+    } finally {
+      clearInterval(poll);
+      signal?.removeEventListener('abort', onAbort);
+    }
   }
 
   private async load(client: CrucibleClient, server: string, model: string, signal: AbortSignal | undefined, lease: boolean, context?: number): Promise<string | null> {
