@@ -90,6 +90,8 @@ export interface BuildChaptersOptions {
    * windows' answers. Absent or null: per sentence (the measured setup).
    */
   windows?: TimeWindows | null;
+  /** Chunks chaptered at once. Default {@link CHUNKS_IN_FLIGHT}; 1 is strictly one after another. */
+  chunksInFlight?: number;
 }
 
 export interface ChunkResult {
@@ -118,6 +120,28 @@ export interface BuildChaptersResult {
 }
 
 const DEFAULT_SWITCH_COST = 20;
+/** Chunks chaptered at once (their decides and outlines overlap; see runSnapChapters). */
+export const CHUNKS_IN_FLIGHT = 3;
+
+/** Run `tasks` with at most `limit` at once; results in task order. The first failure rejects (the rest are not started). */
+export async function inFlight<T>(tasks: Array<() => Promise<T>>, limit: number): Promise<T[]> {
+  const out = new Array<T>(tasks.length);
+  let next = 0;
+  let failed = false;
+  const worker = async (): Promise<void> => {
+    while (!failed && next < tasks.length) {
+      const i = next++;
+      try {
+        out[i] = await tasks[i]();
+      } catch (err) {
+        failed = true;
+        throw err;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, tasks.length)) }, worker));
+  return out;
+}
 /** Share of a chunk's progress per phase. */
 const W_OUTLINE = 0.1;
 const W_ASSIGN = 0.85;
@@ -148,10 +172,13 @@ export async function runSnapChapters(
   const chunks = opts.chunkPlan ?? planChunks(await unitTokens(scorer, texts, signal), opts.chunking);
   const unitsTotal = chunks.reduce((n, c) => n + (c.end - c.start), 0);
   let unitsDone = 0;
-  let doneWeight = 0;
-  const report = (phase: ChapterPhase, chunk: number, within: number) => {
-    const w = (chunks[chunk].end - chunks[chunk].start) / unitsTotal;
-    const fraction = phase === 'done' ? 1 : Math.min(1, doneWeight + w * within);
+  // Each chunk's share done (0..1): chunks run side by side, so the fraction
+  // is the sum of every chunk's own, and never goes back.
+  const within = chunks.map(() => 0);
+  const report = (phase: ChapterPhase, chunk: number, at: number) => {
+    within[chunk] = Math.max(within[chunk], at);
+    const fraction = phase === 'done' ? 1
+      : Math.min(1, chunks.reduce((sum, c, i) => sum + ((c.end - c.start) / unitsTotal) * within[i], 0));
     opts.onProgress?.({ phase, chunk, chunks: chunks.length, unitsDone, unitsTotal, fraction });
   };
 
@@ -160,9 +187,13 @@ export async function runSnapChapters(
     (async (prompt: string, sig?: AbortSignal) =>
       (await scorer.generate(prompt, { maxTokens: OUTLINE_MAX_TOKENS, signal: sig })).text);
 
-  const results: ChunkResult[] = [];
-  const paths: ChunkPath[] = [];
-  for (let k = 0; k < chunks.length; k++) {
+  // The chunks are independent until they are stitched (each has its own
+  // outline, assignment and ad check), so CHUNKS_IN_FLIGHT of them run at
+  // once: on the Mac the engine still computes one call after another, but the
+  // gaps between calls (our prep, the network, the server's per-call work)
+  // overlap; on vLLM the calls are batched together (crucible-pc-1,
+  // 2026-10-01). Results are kept in chunk order.
+  const chunkPass = async (k: number): Promise<{ result: ChunkResult; path: ChunkPath }> => {
     const chunk = chunks[k];
     const sents = texts.slice(chunk.start, chunk.end);
     const text = sents.join('\n');
@@ -181,10 +212,11 @@ export async function runSnapChapters(
       logger?.log(`[snap-chapters] chunk ${k}: one-item outline ("${items[0]}"): one chapter spanning it`);
       const path = sents.map(() => 0);
       unitsDone += sents.length;
-      doneWeight += (chunk.end - chunk.start) / unitsTotal;
-      results.push({ ...chunk, items, logProbs: sents.map(() => [0]), path, plugVerdicts: [], flooredUnits: 0 });
-      paths.push({ chunk, path, items, plug: -1 });
-      continue;
+      within[k] = 1;
+      return {
+        result: { ...chunk, items, logProbs: sents.map(() => [0]), path, plugVerdicts: [], flooredUnits: 0 },
+        path: { chunk, path, items, plug: -1 },
+      };
     }
 
     if (detectAds) items = [...items, PLUG];
@@ -265,11 +297,16 @@ export async function runSnapChapters(
       path = viterbi(L, switchCost);
     }
     timings.adsMs += Date.now() - t;
-    doneWeight += (chunk.end - chunk.start) / unitsTotal;
+    within[k] = 1;
 
-    results.push({ ...chunk, items, logProbs: L, path, plugVerdicts: verdicts, flooredUnits: floored });
-    paths.push({ chunk, path, items, plug });
-  }
+    return {
+      result: { ...chunk, items, logProbs: L, path, plugVerdicts: verdicts, flooredUnits: floored },
+      path: { chunk, path, items, plug },
+    };
+  };
+  const passes = await inFlight(chunks.map((_, k) => () => chunkPass(k)), opts.chunksInFlight ?? CHUNKS_IN_FLIGHT);
+  const results: ChunkResult[] = passes.map((p) => p.result);
+  const paths: ChunkPath[] = passes.map((p) => p.path);
 
   const { pieces, seams } = stitchChunks(paths);
   const chapters = piecesToChapters(pieces, units, opts.totalSeconds);
