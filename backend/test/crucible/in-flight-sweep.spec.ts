@@ -97,7 +97,8 @@ describe('the chat service writes the ledger', () => {
     const service = chat();
     const controller = new AbortController();
     const run = service.withRun(() => service.withModel('mac', 'qwen3.5-9b', async () => undefined, { signal: controller.signal })).catch((e) => e);
-    for (let i = 0; i < 100 && ledger.read().length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+    // The session's row comes first; wait for the load's.
+    for (let i = 0; i < 100 && !ledger.read().some((r) => r.kind === 'job'); i++) await new Promise((r) => setTimeout(r, 10));
     expect(ledger.read()).toMatchObject([
       { server: 'mac', kind: 'session', id: 'ses-1' },
       { server: 'mac', kind: 'job', id: 'job-1', jobType: 'load-model', model: 'qwen3.5-9b' },
@@ -124,6 +125,8 @@ describe('the sweep', () => {
     expect(report.rows.map((r) => r.outcome).sort()).toEqual(['cancelled', 'released']);
     expect(fake.jobs.find((j) => j.jobId === loadId)?.status).toBe('cancelled');
     expect(fake.openSession()).toBeNull();
+    // closeSession (1.0.77): ended by us, not recorded as the operator's doing.
+    expect(fake.sessions.closed).toEqual([{ sessionId: session.id, reason: 'client' }]);
     expect(report.servers[0]).toMatchObject({ server: 'mac', unloaded: 'qwen3.5-9b' });
     expect(fake.jobs.some((j) => j.type === 'unload-model' && j.model === 'qwen3.5-9b')).toBe(true);
     expect(report.kept).toEqual([]);

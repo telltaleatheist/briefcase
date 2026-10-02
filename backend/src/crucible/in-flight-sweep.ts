@@ -120,9 +120,9 @@ export function cardHeldBy(activity: Activity, ours: ReadonlySet<string>): strin
 async function giveBack(client: CrucibleClient, row: CrucibleInFlightEntry): Promise<Omit<SweptRow, 'entry'>> {
   try {
     if (row.kind === 'session') {
-      // DELETE /v1/queue/{id} given a session's id ends it (open) or takes it out of the line (waiting).
-      const removed = await client.removeFromQueue(row.id);
-      return { outcome: 'released', detail: `${removed.status} session ${row.id}` };
+      // 1.0.77's closeSession: recorded as ended by the client (removeFromQueue would say the operator).
+      const state = await client.closeSession(row.id);
+      return { outcome: 'released', detail: `closed session ${row.id} (${state.reason ?? state.status})` };
     }
     const result = await client.cancel(row.id);
     return { outcome: 'cancelled', detail: `job ${row.id} is ${result.status}` };
