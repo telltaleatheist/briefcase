@@ -1,9 +1,10 @@
 /**
- * CrucibleChatService against the fake Crucible: venue by rank, load-model +
- * lease + heartbeat + release, model_not_resident recovery, chat_queue_full
+ * CrucibleChatService against the fake Crucible: venue by rank, load-model,
+ * the run's queue session (open, touch, close), model_not_resident recovery, chat_queue_full
  * with Retry-After, the typed busy error on 409, cancel mid-request and
  * mid-load, and exactly what each body carried.
  */
+import { CRUCIBLE_CLIENT_NAME } from '../../src/crucible/client-factory';
 import { CrucibleServersService } from '../../src/crucible/crucible-servers.service';
 import { CrucibleChatService } from '../../src/crucible/llm/crucible-chat.service';
 import { CrucibleBusyError, CrucibleChatCancelled, CrucibleChatError, CrucibleNoVenueError } from '../../src/crucible/llm/errors';
@@ -37,7 +38,7 @@ describe('CrucibleChatService: one server', () => {
   }
   afterEach(() => fake.close());
 
-  it('an upstream is forwarded as is: no load, no lease, the act header, usage and the sampling audit', async () => {
+  it('an upstream is forwarded as is: no load, no session, the act header, usage and the sampling audit', async () => {
     await start();
     const result = await chat.chat({ model: 'claude:claude-sonnet-5', prompt: 'hello', temperature: 0.4, maxTokens: 50, responseFormat: 'json' });
     expect(result).toMatchObject({ text: '{"ok":true}', server: 'mac', model: 'anthropic/claude-sonnet-5', finishReason: 'stop' });
@@ -48,7 +49,7 @@ describe('CrucibleChatService: one server', () => {
     expect(body).not.toHaveProperty('response_format');
     expect(fake.requestsTo('/v1/openai/chat/completions')[0].headers['x-crucible-act']).toBe('analysis');
     expect(fake.jobs).toHaveLength(0);
-    expect(fake.leases.taken).toHaveLength(0);
+    expect(fake.sessions.opened).toHaveLength(0);
   });
 
   it('an unconfigured upstream is a clear error naming the fix', async () => {
@@ -59,7 +60,7 @@ describe('CrucibleChatService: one server', () => {
     expect(failure.message).toMatch(/Settings › AI/);
   });
 
-  it('a local model that is not resident is loaded first (outside a run: no lease)', async () => {
+  it('a local model that is not resident is loaded first (outside a run: no session)', async () => {
     await start();
     const result = await chat.chat({ model: 'local:qwen3.5-9b', prompt: 'x', temperature: 0.15, responseFormat: 'json' });
     expect(result.text).toBe('{"ok":true}');
@@ -81,46 +82,48 @@ describe('CrucibleChatService: one server', () => {
     expect(fake.chatBodies()[0]).toMatchObject({ model: 'qwen3.8-27b-4bit' });
   });
 
-  it('withModel: load with a lease, heartbeat it, release it when the run ends', async () => {
+  it('withModel: opens one queue session, loads in it, touches it, closes it when the run ends', async () => {
     await start();
     await chat.withModel(undefined, 'qwen3.5-9b', async (held) => {
       expect(held).toMatchObject({ server: 'mac', model: 'qwen3.5-9b' });
       await chat.chat({ model: 'qwen3.5-9b', prompt: 'one' });
       await new Promise((r) => setTimeout(r, 130));
       await chat.chat({ model: 'qwen3.5-9b', prompt: 'two' });
-      expect(chat.heldInRun()).toEqual([{ server: 'mac', model: 'qwen3.5-9b', leaseId: 'lease-1' }]);
+      expect(chat.heldInRun()).toEqual([{ server: 'mac', model: 'qwen3.5-9b', sessionId: 'ses-1' }]);
     });
+    expect(fake.sessions.opened).toEqual([{ sessionId: 'ses-1', client: CRUCIBLE_CLIENT_NAME, act: 'analysis' }]);
+    expect(fake.requestsTo('/v1/queue/sessions', 'POST')[0].body).toEqual({ act: 'analysis' });
     expect(fake.jobs).toHaveLength(1);
-    expect(fake.jobs[0].params).toEqual({ lease: { act: 'analysis', ttl_seconds: 120 } });
-    expect(fake.leases.taken).toEqual([{ leaseId: 'lease-1', model: 'qwen3.5-9b', act: 'analysis', ttlSeconds: 120 }]);
-    expect(fake.requestsTo('/v1/leases/lease-1/heartbeat').length).toBeGreaterThanOrEqual(2);
-    expect(fake.leases.released).toEqual(['lease-1']);
-    expect(fake.openLease()).toBeNull();
+    expect(fake.jobs[0].params).toEqual({});
+    expect(fake.sessions.touches.length).toBeGreaterThanOrEqual(2);
+    expect(fake.sessions.closed).toEqual([{ sessionId: 'ses-1', reason: 'client' }]);
+    expect(fake.openSession()).toBeNull();
   });
 
-  it('an already-resident model is leased without a load', async () => {
+  it('an already-resident model is used in the session without a load', async () => {
     await start({ resident: 'qwen3.5-9b' });
     await chat.withRun(() => chat.chat({ model: 'qwen3.5-9b', prompt: 'x' }));
     expect(fake.jobs).toHaveLength(0);
-    expect(fake.leases.taken.map((l) => l.model)).toEqual(['qwen3.5-9b']);
-    expect(fake.leases.released).toEqual(['lease-1']);
+    expect(fake.sessions.opened.map((x) => x.sessionId)).toEqual(['ses-1']);
+    expect(fake.sessions.closed).toEqual([{ sessionId: 'ses-1', reason: 'client' }]);
   });
 
-  it('a run that switches models releases the first lease before loading the second', async () => {
+  it('a run that switches models loads the second in the same session', async () => {
     await start();
     await chat.withRun(async () => {
       await chat.chat({ model: 'qwen3.5-9b', prompt: 'a' });
       await chat.chat({ model: 'qwen3.5-4b', prompt: 'b' });
     });
     expect(fake.jobs.map((j) => j.model)).toEqual(['qwen3.5-9b', 'qwen3.5-4b']);
-    expect(fake.leases.released).toEqual(['lease-1', 'lease-2']);
+    expect(fake.sessions.opened).toHaveLength(1);
+    expect(fake.sessions.closed).toEqual([{ sessionId: 'ses-1', reason: 'client' }]);
   });
 
   it('model_not_resident mid-run (another load evicted it): re-load once, retry, and carry on', async () => {
     await start();
     await chat.withRun(async () => {
       await chat.chat({ model: 'qwen3.5-9b', prompt: 'a' });
-      fake.setResident('qwen3.5-4b'); // someone else's load; drops our lease
+      fake.setResident('qwen3.5-4b'); // someone else's load
       const again = await chat.chat({ model: 'qwen3.5-9b', prompt: 'b' });
       expect(again.text).toBe('{"ok":true}');
     });
@@ -128,72 +131,41 @@ describe('CrucibleChatService: one server', () => {
     expect(fake.requestsTo('/v1/openai/chat/completions').map((r) => r.fault ?? 'ok')).toHaveLength(3);
   });
 
-  it('a lost lease (heartbeat unknown_lease) is re-taken before the next chat', async () => {
+  it('a session the server ends mid-run (idle, the operator) is opened again by the next call, and the model checked in it', async () => {
     await start();
     await chat.withRun(async () => {
       await chat.chat({ model: 'qwen3.5-9b', prompt: 'a' });
-      fake.expireLease();
-      await new Promise((r) => setTimeout(r, 100));
+      fake.endSession('operator');
+      await new Promise((r) => setTimeout(r, 50));
       await chat.chat({ model: 'qwen3.5-9b', prompt: 'b' });
+      expect(chat.heldInRun()).toEqual([{ server: 'mac', model: 'qwen3.5-9b', sessionId: 'ses-2' }]);
     });
-    expect(fake.leases.taken.map((l) => l.leaseId)).toEqual(['lease-1', 'lease-2']);
-    expect(fake.leases.released).toEqual(['lease-2']);
+    expect(fake.sessions.opened.map((x) => x.sessionId)).toEqual(['ses-1', 'ses-2']);
+    expect(fake.sessions.closed).toEqual([{ sessionId: 'ses-1', reason: 'operator' }, { sessionId: 'ses-2', reason: 'client' }]);
+    // Still resident: no second load.
+    expect(fake.jobs).toHaveLength(1);
   });
 
-  it('REGRESSION: one failed heartbeat (a 503) keeps the lease: the next beat renews it and the run ends by releasing it', async () => {
-    await start({ faults: { refuse: [{ match: { method: 'POST', path: /\/heartbeat$/ }, status: 503, code: 'engine_unavailable', times: 1 }] } });
-    chat.heartbeatRetryMs = 10;
+  it('a touch that fails for weather keeps the session: the run carries on and closes it at the end', async () => {
+    await start({ faults: { refuse: [{ match: { method: 'POST', path: /\/touch$/ }, status: 503, code: 'engine_unavailable', times: 1 }] } });
     await chat.withRun(async () => {
       await chat.chat({ model: 'qwen3.5-9b', prompt: 'a' });
       await new Promise((r) => setTimeout(r, 120));
       await chat.chat({ model: 'qwen3.5-9b', prompt: 'b' });
-      expect(chat.heldInRun()).toEqual([{ server: 'mac', model: 'qwen3.5-9b', leaseId: 'lease-1' }]);
+      expect(chat.heldInRun()).toEqual([{ server: 'mac', model: 'qwen3.5-9b', sessionId: 'ses-1' }]);
     });
-    const beats = fake.requestsTo('/v1/leases/lease-1/heartbeat').map((r) => r.fault ?? 'ok');
-    expect(beats[0]).toBe('503 engine_unavailable');
-    expect(beats.slice(1)).toContain('ok');
-    expect(fake.leases.taken.map((l) => l.leaseId)).toEqual(['lease-1']);
-    expect(fake.leases.released).toEqual(['lease-1']);
-    expect(fake.openLease()).toBeNull();
+    expect(fake.requestsTo('/v1/queue/sessions/ses-1/touch').map((r) => r.fault ?? 'ok')[0]).toBe('503 engine_unavailable');
+    expect(fake.sessions.opened).toHaveLength(1);
+    expect(fake.sessions.closed).toEqual([{ sessionId: 'ses-1', reason: 'client' }]);
   });
 
-  it('REGRESSION: heartbeats failing past the TTL budget: the lease is released best-effort and re-taken before the next call', async () => {
-    await start({ faults: { refuse: [{ match: { method: 'POST', path: /\/heartbeat$/ }, status: 503, code: 'engine_unavailable', times: 1_000 }] } });
-    chat.heartbeatRetryMs = 10;
-    chat.leaseTtlMs = 150;
-    await chat.withRun(async () => {
-      await chat.chat({ model: 'qwen3.5-9b', prompt: 'a' });
-      await new Promise((r) => setTimeout(r, 300));
-      // Given up by now: the old lease was handed back, not left open unheartbeaten.
-      expect(fake.leases.released).toContain('lease-1');
-      fake.faults.refuse = [];
-      await chat.chat({ model: 'qwen3.5-9b', prompt: 'b' });
-      // Never chatting knowingly unleased: the call re-took one first.
-      expect(chat.heldInRun()).toEqual([{ server: 'mac', model: 'qwen3.5-9b', leaseId: 'lease-2' }]);
-    });
-    expect(fake.leases.taken.map((l) => l.leaseId)).toEqual(['lease-1', 'lease-2']);
-    expect(fake.leases.released).toEqual(['lease-1', 'lease-2']);
-    expect(fake.openLease()).toBeNull();
-  });
-
-  it('REGRESSION: a given-up lease the server still holds (its release failed) is taken back, not chatted "under another app"', async () => {
-    await start({ faults: { refuse: [
-      { match: { method: 'POST', path: /\/heartbeat$/ }, status: 503, code: 'engine_unavailable', times: 1_000 },
-      { match: { method: 'DELETE', path: /^\/v1\/leases\// }, status: 503, code: 'engine_unavailable', times: 1 },
-    ] } });
-    chat.heartbeatRetryMs = 10;
-    chat.leaseTtlMs = 150;
-    await chat.withRun(async () => {
-      await chat.chat({ model: 'qwen3.5-9b', prompt: 'a' });
-      await new Promise((r) => setTimeout(r, 300));
-      expect(fake.openLease()?.leaseId).toBe('lease-1');
-      // Heartbeats answer again; the release before re-taking still can't be sent.
-      fake.faults.refuse = [{ match: { method: 'DELETE', path: /^\/v1\/leases\// }, status: 503, code: 'engine_unavailable', times: 1 }];
-      await chat.chat({ model: 'qwen3.5-9b', prompt: 'b' });
-      expect(chat.heldInRun()).toEqual([{ server: 'mac', model: 'qwen3.5-9b', leaseId: 'lease-1' }]);
-    });
-    expect(fake.leases.taken.map((l) => l.leaseId)).toEqual(['lease-1']);
-    expect(fake.openLease()).toBeNull();
+  it('another app\'s open session: ours waits in line until theirs closes, then the run goes on', async () => {
+    await start({ resident: 'qwen3.5-9b' });
+    fake.sessionAsOther('bookforge', 'translate');
+    setTimeout(() => fake.endSession('client'), 60);
+    await chat.withRun(() => chat.chat({ model: 'qwen3.5-9b', prompt: 'x' }));
+    expect(fake.sessions.opened.map((x) => x.client)).toEqual(['bookforge', CRUCIBLE_CLIENT_NAME]);
+    expect(fake.chatBodies()).toHaveLength(1);
   });
 
   it('503 chat_queue_full is retried after the server\'s Retry-After, read from the raw response', async () => {
@@ -230,14 +202,11 @@ describe('CrucibleChatService: one server', () => {
     expect(waits.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('another app\'s lease on a DIFFERENT model is busy; on OUR model we chat under it', async () => {
-    await start();
-    fake.leaseAsOther('qwen3.5-4b', 'bookforge');
-    const failure = await chat.withRun(() => chat.chat({ model: 'qwen3.5-9b', prompt: 'x' })).catch((e) => e);
+  it('outside a run, another app\'s open session refuses a local chat busy (session_open), never a failure', async () => {
+    await start({ resident: 'qwen3.5-9b' });
+    fake.sessionAsOther('bookforge');
+    const failure = await chat.chat({ model: 'qwen3.5-9b', prompt: 'x' }).catch((e) => e);
     expect(failure).toBeInstanceOf(CrucibleBusyError);
-    fake.leaseAsOther('qwen3.5-9b', 'bookforge');
-    const ok = await chat.withRun(() => chat.chat({ model: 'qwen3.5-9b', prompt: 'x' }));
-    expect(ok.text).toBe('{"ok":true}');
   });
 
   it('a model not downloaded on the server fails by name, without a load', async () => {
@@ -253,7 +222,7 @@ describe('CrucibleChatService: one server', () => {
     await expect(chat.chat({ model: 'qwen3.5-9b', prompt: 'x' })).rejects.toThrow(/out of memory/);
   });
 
-  it('cancel mid-request aborts the open chat at once, and the run still releases its lease', async () => {
+  it('cancel mid-request aborts the open chat at once, and the run still closes its session', async () => {
     await start();
     const controller = new AbortController();
     const began = Date.now();
@@ -265,7 +234,7 @@ describe('CrucibleChatService: one server', () => {
     });
     await expect(run).rejects.toBeInstanceOf(CrucibleChatCancelled);
     expect(Date.now() - began).toBeLessThan(2_000);
-    expect(fake.leases.released).toEqual(['lease-1']);
+    expect(fake.sessions.closed).toEqual([{ sessionId: 'ses-1', reason: 'client' }]);
   });
 
   it('cancel mid-load cancels the load job on the server', async () => {
@@ -278,7 +247,7 @@ describe('CrucibleChatService: one server', () => {
     expect(fake.chatBodies()).toHaveLength(0);
   });
 
-  it('REGRESSION: a cancel landing as a leased load finishes releases the lease the load took', async () => {
+  it('REGRESSION: a cancel landing as a load finishes in a run unloads the model and closes the session', async () => {
     await start({ loadMs: 100 });
     const controller = new AbortController();
     const touch = (chat as unknown as { touch: () => void }).touch.bind(chat);
@@ -288,12 +257,12 @@ describe('CrucibleChatService: one server', () => {
     };
     const run = chat.withRun(() => chat.chat({ model: 'qwen3.5-9b', prompt: 'x', signal: controller.signal }));
     await expect(run).rejects.toBeInstanceOf(CrucibleChatCancelled);
-    expect(fake.leases.taken.map((l) => l.leaseId)).toEqual(['lease-1']);
-    expect(fake.leases.released).toEqual(['lease-1']);
+    expect(fake.jobs.map((j) => j.type)).toEqual(['load-model', 'unload-model']);
+    expect(fake.sessions.closed).toEqual([{ sessionId: 'ses-1', reason: 'client' }]);
     expect(fake.chatBodies()).toHaveLength(0);
   });
 
-  it('REGRESSION: a cancel landing as an unleased load finishes unloads the model it put on the card', async () => {
+  it('REGRESSION: a cancel landing as a load finishes outside a run unloads the model it put on the card', async () => {
     await start({ loadMs: 100 });
     const controller = new AbortController();
     const touch = (chat as unknown as { touch: () => void }).touch.bind(chat);
@@ -303,7 +272,7 @@ describe('CrucibleChatService: one server', () => {
     };
     await expect(chat.chat({ model: 'qwen3.5-9b', prompt: 'x', signal: controller.signal })).rejects.toBeInstanceOf(CrucibleChatCancelled);
     expect(fake.jobs.map((j) => j.type)).toEqual(['load-model', 'unload-model']);
-    expect(fake.leases.taken).toHaveLength(0);
+    expect(fake.sessions.opened).toHaveLength(0);
     expect(fake.chatBodies()).toHaveLength(0);
   });
 
@@ -387,7 +356,7 @@ describe('CrucibleChatService: one server', () => {
     const loads = fake.jobs.filter((j) => j.type === 'load-model');
     expect(loads.map((j) => j.params['context'])).toEqual([32768]);
     expect(fake.residentContext()).toBe(32768);
-    expect(fake.leases.released).toEqual(fake.leases.taken.map((l) => l.leaseId));
+    expect(fake.sessions.closed.map((x) => x.sessionId)).toEqual(fake.sessions.opened.map((x) => x.sessionId));
   });
 
   it('P6: a load context over the host ceiling is refused by name before anything is evicted', async () => {

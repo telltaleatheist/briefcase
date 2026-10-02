@@ -8,6 +8,7 @@
  * the run, lets it unwind, sweeps its own ledger with the app's quit sweep
  * (bounded), and exits 128+signal; a second signal exits at once.
  */
+import { CRUCIBLE_CLIENT_NAME } from '../../src/crucible/client-factory';
 import { spawn } from 'child_process';
 import { EventEmitter } from 'events';
 import * as path from 'path';
@@ -73,46 +74,47 @@ function interrupt(s: StandaloneCrucible, extra: { unwindMs?: number; releaseMs?
   return { it, proc, exit, lines };
 }
 
-describe('REGRESSION: an interrupted standalone scorer run releases its lease', () => {
-  it('SIGINT mid-decide: the run is aborted, the lease released, the process exits 130', async () => {
+describe('REGRESSION: an interrupted standalone scorer run closes its session', () => {
+  it('SIGINT mid-decide: the run is aborted, the session closed, the process exits 130', async () => {
     decideNeverAnswers();
     const s = crucibleServices('mac');
     const { it: stop, proc, exit } = interrupt(s);
     const run = heldRun(s, stop.signal);
     run.catch(() => undefined);
     await until(() => fake.requestsTo('/v1/decide').length > 0);
-    const lease = fake.openLease();
-    expect(lease).toMatchObject({ model: 'qwen3.5-9b', client: 'briefcase' });
-    expect(s.ledger.read().map((r) => r.id)).toContain(lease!.leaseId);
+    const session = fake.openSession();
+    expect(session).toMatchObject({ client: CRUCIBLE_CLIENT_NAME });
+    expect(fake.resident()).toBe('qwen3.5-9b');
+    expect(s.ledger.read().map((r) => r.id)).toContain(session!.sessionId);
 
     proc.emit('SIGINT');
     await until(() => exit.mock.calls.length > 0);
     expect(exit).toHaveBeenCalledWith(130);
     expect(stop.signal.aborted).toBe(true);
     await expect(run).rejects.toMatchObject({ code: 'cancelled' });
-    expect(fake.leases.released).toContain(lease!.leaseId);
-    expect(fake.openLease()).toBeNull();
+    expect(fake.sessions.closed.map((x) => x.sessionId)).toContain(session!.sessionId);
+    expect(fake.openSession()).toBeNull();
     expect(s.ledger.read()).toEqual([]);
     stop.dispose();
   });
 
-  it('SIGTERM when the run cannot unwind by itself: the sweep of its own ledger gives the lease back', async () => {
+  it('SIGTERM when the run cannot unwind by itself: the sweep of its own ledger closes the session', async () => {
     const s = crucibleServices('mac');
     const { it: stop, exit, lines } = interrupt(s, { unwindMs: 50 });
-    // A run that ignores its signal (the worst case): only the sweep can release.
+    // A run that ignores its signal (the worst case): only the sweep can close it.
     let held!: () => void;
     const stuck = new Promise<void>((r) => { held = r; });
     const run = s.chat.withRun(() => s.scorer.withScorer(async () => { held(); await new Promise(() => undefined); }));
     run.catch(() => undefined);
     await stuck;
-    const lease = fake.openLease();
-    expect(lease).not.toBeNull();
+    const session = fake.openSession();
+    expect(session).not.toBeNull();
 
     await stop.handle('SIGTERM');
     expect(exit).toHaveBeenCalledWith(143);
-    expect(fake.leases.released).toContain(lease!.leaseId);
-    expect(fake.openLease()).toBeNull();
-    expect(lines.join('\n')).toMatch(/released lease/);
+    expect(fake.sessions.closed.map((x) => x.sessionId)).toContain(session!.sessionId);
+    expect(fake.openSession()).toBeNull();
+    expect(lines.join('\n')).toMatch(/closed session/);
     stop.dispose();
   });
 
@@ -144,11 +146,11 @@ describe('REGRESSION: an interrupted standalone scorer run releases its lease', 
     await stop.handle('SIGINT');
     expect(Date.now() - t0).toBeLessThan(1_500);
     expect(exit).toHaveBeenCalledWith(130);
-    expect(s.ledger.read().filter((r) => r.kind === 'lease')).toHaveLength(1);
+    expect(s.ledger.read().filter((r) => r.kind === 'session')).toHaveLength(1);
     stop.dispose();
   });
 
-  it('a real process: `kill -INT` mid-run releases the lease and exits 130', async () => {
+  it('a real process: `kill -INT` mid-run closes the session and exits 130', async () => {
     decideNeverAnswers();
     const child = spawn(process.execPath, [
       require.resolve('ts-node/dist/bin-transpile.js'),
@@ -161,15 +163,15 @@ describe('REGRESSION: an interrupted standalone scorer run releases its lease', 
     child.stderr.on('data', (d) => { err += String(d); });
     const exited = new Promise<number | null>((resolve) => child.on('exit', (code) => resolve(code)));
     await until(() => /HELD \S+/.test(out) || child.exitCode !== null, 30_000);
-    const leaseId = /HELD (\S+)/.exec(out)?.[1];
-    expect(leaseId).toBeDefined();
+    const sessionId = /HELD (\S+)/.exec(out)?.[1];
+    expect(sessionId).toBeDefined();
     await until(() => fake.requestsTo('/v1/decide').length > 0);
-    expect(fake.openLease()?.leaseId).toBe(leaseId);
+    expect(fake.openSession()?.sessionId).toBe(sessionId);
 
     child.kill('SIGINT');
     const code = await exited;
     expect({ code, err: code === 130 ? '' : err }).toEqual({ code: 130, err: '' });
-    expect(fake.leases.released).toContain(leaseId);
-    expect(fake.openLease()).toBeNull();
+    expect(fake.sessions.closed.map((x) => x.sessionId)).toContain(sessionId);
+    expect(fake.openSession()).toBeNull();
   }, 45_000);
 });

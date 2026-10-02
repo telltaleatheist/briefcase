@@ -107,7 +107,7 @@ export function cardHeldBy(activity: Activity, ours: ReadonlySet<string>): strin
   const queued = activity.queued.filter((job) => !ours.has(job.jobId));
   if (queued.length > 0) return `a queued ${queued[0]!.type} job from ${queued[0]!.client ?? 'another app'}`;
   if (activity.claim !== null) return `a claim held by ${activity.claim.heldBy}`;
-  if (activity.lease !== null && !ours.has(activity.lease.leaseId)) return `a lease held by ${activity.lease.client ?? 'another app'} for ${activity.lease.act}`;
+  if (activity.session !== null && !ours.has(activity.session.sessionId)) return `a session held by ${activity.session.client ?? 'another app'} for ${activity.session.act}`;
   if (activity.streaming !== null) return 'a streaming session';
   // Unstated is not free: the unload is asked for only when the server says no chat is open.
   const chats = chatsInFlight(activity);
@@ -119,16 +119,17 @@ export function cardHeldBy(activity: Activity, ours: ReadonlySet<string>): strin
 
 async function giveBack(client: CrucibleClient, row: CrucibleInFlightEntry): Promise<Omit<SweptRow, 'entry'>> {
   try {
-    if (row.kind === 'lease') {
-      await client.release(row.id);
-      return { outcome: 'released', detail: `released lease ${row.id}` };
+    if (row.kind === 'session') {
+      // DELETE /v1/queue/{id} given a session's id ends it (open) or takes it out of the line (waiting).
+      const removed = await client.removeFromQueue(row.id);
+      return { outcome: 'released', detail: `${removed.status} session ${row.id}` };
     }
     const result = await client.cancel(row.id);
     return { outcome: 'cancelled', detail: `job ${row.id} is ${result.status}` };
   } catch (err) {
     if (err instanceof CrucibleUnreachable) return { outcome: 'unreachable', detail: `nothing answered at ${err.url}` };
     if (err instanceof CrucibleRefused
-      && (err.status === 404 || ['unknown_lease', 'unknown_job', 'not_found', 'job_not_cancellable'].includes(err.code))) {
+      && (err.status === 404 || ['unknown_queue_session', 'session_closed', 'unknown_job', 'not_found', 'job_not_cancellable'].includes(err.code))) {
       return { outcome: 'gone', detail: `the server no longer has ${row.kind} ${row.id} (${err.code})` };
     }
     const message = err instanceof Error ? err.message : String(err);

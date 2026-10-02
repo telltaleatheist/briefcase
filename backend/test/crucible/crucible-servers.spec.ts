@@ -3,6 +3,7 @@
  * build on: list() with no token, get() with one, clientFor() named
  * 'briefcase' and bound to the engine.
  */
+import { CRUCIBLE_CLIENT_NAME } from '../../src/crucible/client-factory';
 import * as fs from 'fs';
 import * as path from 'path';
 import { CrucibleClient } from '@crucible/client';
@@ -42,7 +43,7 @@ describe('CrucibleServersService', () => {
     const client = await servers.clientFor('mac');
     expect(client).toBeInstanceOf(CrucibleClient);
     await client.health();
-    expect(fake.requestsTo('/v1/health')[0]!.headers['x-crucible-client']).toBe('briefcase');
+    expect(fake.requestsTo('/v1/health')[0]!.headers['x-crucible-client']).toBe(CRUCIBLE_CLIENT_NAME);
   });
 
   it('keeps BookForge\'s file: <userData>/crucible-servers.json, {servers: [{name, url, token, added}]}', () => {

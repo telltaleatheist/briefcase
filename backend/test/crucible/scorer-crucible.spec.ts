@@ -321,10 +321,10 @@ describe('one lease across the pass, and every "can\'t" by name', () => {
   const segments = () => unitsOf(VIDEO).map((u) => ({ start: u.start, end: u.end, text: u.text }));
   const CATEGORIES = [{ name: 'political-demonization' }, { name: 'conspiracy' }];
 
-  it('chapters + flags hold ONE lease on the 9B, loaded at the scorer\'s window, released at the end; every decide rides it', async () => {
+  it('chapters + flags hold ONE session with the 9B, loaded at the scorer\'s window, closed at the end; every decide rides it', async () => {
     const { fake, scorer } = await started();
     const underLease: boolean[] = [];
-    fake.setDecideProbs((q) => (underLease.push(fake.openLease()?.model === 'qwen3.5-9b'), rawProbs(q)));
+    fake.setDecideProbs((q) => (underLease.push(fake.openSession() !== null && fake.resident() === 'qwen3.5-9b'), rawProbs(q)));
     const { service } = snap(scorer);
     const asked = jest.spyOn(crucibleDecide, 'toWireRequest');
     const res = await service.run({ segments: segments(), categories: CATEGORIES, chapters: true, flags: true });
@@ -338,15 +338,15 @@ describe('one lease across the pass, and every "can\'t" by name', () => {
     expect(res.flags).not.toBeNull();
     expect(res.model).toBe('qwen3.5-9b');
     expect(fake.jobs.filter((j) => j.type === 'load-model').map((j) => [j.model, j.params['context']])).toEqual([['qwen3.5-9b', SCORER_LOAD_CONTEXT]]);
-    expect(fake.leases.taken).toHaveLength(1);
-    expect(fake.leases.released).toEqual([fake.leases.taken[0].leaseId]);
+    expect(fake.sessions.opened).toHaveLength(1);
+    expect(fake.sessions.closed.map((x) => x.sessionId)).toEqual(fake.sessions.opened.map((x) => x.sessionId));
     expect(underLease.length).toBeGreaterThan(2);
     expect(underLease.every(Boolean)).toBe(true);
   });
 
-  it('409 on the load inside a queue run PARKS the task (never waited out, never a fallback)', async () => {
+  it('a session taken out of the line inside a queue run PARKS the task (never waited out, never a fallback)', async () => {
     const { fake, chat, scorer } = await started();
-    fake.leaseAsOther('qwen3.8-27b-4bit', 'bookforge');
+    fake.inject({ queueLine: { positions: [1], then: { removed: 'expired' } } });
     const { service } = snap(scorer);
     const err = await chat.withRun(() => service.run({ segments: segments(), categories: CATEGORIES, chapters: true, flags: true }), { parkOnBusy: true })
       .catch((e: unknown) => e);
@@ -372,10 +372,10 @@ describe('one lease across the pass, and every "can\'t" by name', () => {
     }, { parkOnBusy: true }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(CrucibleParkedError);
     expect(parked).toMatchObject({ server: 'mac' });
-    expect(fake.leases.released).toEqual(fake.leases.taken.map((l) => l.leaseId));
+    expect(fake.sessions.closed.map((x) => x.sessionId)).toEqual(fake.sessions.opened.map((x) => x.sessionId));
   });
 
-  it('cancel mid-pass stops at once, as a cancellation, and the lease is given back', async () => {
+  it('cancel mid-pass stops at once, as a cancellation, and the session is closed', async () => {
     const { fake, scorer } = await started();
     const controller = new AbortController();
     let n = 0;
@@ -391,8 +391,8 @@ describe('one lease across the pass, and every "can\'t" by name', () => {
     const err = await service.run({ segments: segments(), categories: CATEGORIES, chapters: true, flags: true, signal: controller.signal }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(AnalysisCancelledError);
     expect(Date.now() - t).toBeLessThan(3_000);
-    expect(fake.leases.taken).toHaveLength(1);
-    expect(fake.leases.released).toEqual([fake.leases.taken[0].leaseId]);
+    expect(fake.sessions.opened).toHaveLength(1);
+    expect(fake.sessions.closed.map((x) => x.sessionId)).toEqual(fake.sessions.opened.map((x) => x.sessionId));
   });
 
   it('decide_not_served (more options than the engine\'s cap) fails the stage BY NAME: there is no other engine', async () => {

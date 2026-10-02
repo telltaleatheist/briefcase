@@ -705,9 +705,9 @@ export class AIAnalysisService {
    * verification) and the metadata, all on Crucible (see the file header).
    */
   async analyzeTranscript(options: AnalysisOptions): Promise<AnalysisResult> {
-    // ONE Crucible run per analysis: each local model the run uses is loaded
-    // once, leased and heartbeaten until the analysis settles (done, failed or
-    // cancelled), then released.
+    // ONE Crucible run per analysis: one queue session per server it uses,
+    // each local model loaded once in it, closed when the analysis settles
+    // (done, failed or cancelled).
     return this.aiProviderService.withRun(() => this.analyzeTranscriptRun(options));
   }
 

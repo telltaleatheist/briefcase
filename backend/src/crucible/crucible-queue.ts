@@ -1,9 +1,9 @@
 /**
  * CRUCIBLE'S QUEUE (crucible docs/QUEUE.md, 1.0.71+): a job submitted with
  * `queue` waits in the server's line while the card is busy, instead of being
- * refused `server_busy`. Briefcase's loads (the SDK queues `loadModel` by
- * default) and its asr jobs go in line; a lease does not queue, so a lease
- * refused on a resident model still parks the task.
+ * refused `server_busy`. Briefcase's asr jobs go in line, and (1.0.76) an
+ * analysis run's queue session waits in the same line before it opens
+ * (crucible-chat.service.ts); the loads and calls inside it then go ahead.
  *
  * A job in line is followed on its event stream, which keeps it there (the
  * server drops a waiting job nobody follows after 300 s). The stream is quiet
@@ -16,12 +16,6 @@ import { compareVersions } from './probe';
 
 /** The first Crucible that holds a job in its queue while it is busy. */
 export const QUEUE_MIN_VERSION = '1.0.71';
-
-/**
- * How often a waiting lease reads the line (GET /v1/queue): its own request
- * is held open with nothing said until its turn, so its place comes from here.
- */
-export const QUEUE_POLL_MS = 5_000;
 
 /** How often a task waiting in Crucible's line tells the stall watchdog it is alive. */
 export const QUEUE_HEARTBEAT_MS = 60_000;

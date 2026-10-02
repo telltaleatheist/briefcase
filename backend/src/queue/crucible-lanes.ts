@@ -6,8 +6,8 @@
  *
  *   gpu:<server>   one per ENABLED registered server, width 1: an analysis
  *                  whose model is a local model on that server. The card holds
- *                  one resident model, so one task at a time, holding one lease
- *                  for its whole run (a video is atomic on its card).
+ *                  one resident model, so one task at a time, holding one queue
+ *                  session for its whole run (a video is atomic on its card).
  *   cloud          one, width 2: an analysis whose model is an upstream
  *                  (`anthropic/…`, `openai/…`, `ollama/…`). It holds no card;
  *                  rate limits come back as 429 + Retry-After.
@@ -27,10 +27,11 @@
  *                            reservation parks the task too).
  *   residentOn(server)       what is on the card, for the same-model preference
  *   runAdmitted(...)         the reservation: one Crucible run (withRun) that
- *                            loads and leases the task's model on the chosen
- *                            server BEFORE the task's own work starts, holds it
- *                            (heartbeaten) across every call, and releases it
- *                            when the task settles. A busy card, a silent
+ *                            opens a queue session on the chosen server (its
+ *                            turn in Crucible's line) and loads the task's model
+ *                            in it BEFORE the task's own work starts, holds it
+ *                            (touched) across every call, and closes it when
+ *                            the task settles. A busy card, a silent
  *                            server or no server anywhere in the run throws
  *                            `CrucibleParkedError`, which the queue parks on.
  *   sweep(...)               in-flight-sweep.ts over the ledger, at startup
@@ -39,7 +40,7 @@
  */
 import { BeforeApplicationShutdown, Inject, Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import type { Activity } from '@crucible/client';
-import { CrucibleClientFactory } from '../crucible/client-factory';
+import { CRUCIBLE_CLIENT_NAME, CrucibleClientFactory } from '../crucible/client-factory';
 import { CRUCIBLE_IN_FLIGHT_LEDGER } from '../crucible/crucible.constants';
 import { CrucibleServersService } from '../crucible/crucible-servers.service';
 import { InFlightLedger } from '../crucible/in-flight-ledger';
@@ -163,9 +164,8 @@ function percentDone(progress: number | null): string {
  * The holder's sentence when someone OTHER than us has the server's JOB lane
  * (a job running or queued, a claim, a streaming session), else null. PURE.
  *
- * For an `asr` job. A lease is NOT in the way of one: Crucible refuses a lease
- * only to jobs that would change the card's contents, and asr is not one of
- * them (SDK `CrucibleLeased`). The door still decides: a 409 at the submit parks.
+ * For an `asr` job. The door still decides: a 409 at the submit parks (on a
+ * server with a queue, the job waits in line instead).
  */
 export function busyLineForJob(activity: Activity, ours: ReadonlySet<string>): string | null {
   const job = [...activity.running, ...activity.queued].find((j) => !ours.has(j.jobId));
@@ -193,12 +193,9 @@ export function busyLineFor(activity: Activity, ours: ReadonlySet<string>, targe
   const claimed = claimBusyLine(activity);
   if (claimed !== null) return claimed;
   if (activity.streaming !== null) return 'Crucible is busy: a streaming session holds the card';
-  const lease = activity.lease;
-  if (lease !== null && !ours.has(lease.leaseId)) {
-    const sameModel = target.route === 'local' && activity.resident?.id === target.model;
-    if (!sameModel) {
-      return `Crucible is busy: ${shortClient(lease.client)} has ${activity.resident?.id ?? 'the card'} leased for ${lease.act}`;
-    }
+  const session = activity.session;
+  if (session !== null && session.status === 'open' && !ours.has(session.sessionId) && session.client !== CRUCIBLE_CLIENT_NAME) {
+    return `Crucible is busy: ${shortClient(session.client)} holds the machine for ${session.act}`;
   }
   return null;
 }

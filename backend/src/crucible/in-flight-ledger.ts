@@ -2,17 +2,17 @@
  * WHAT BRIEFCASE HOLDS ON A CRUCIBLE'S CARD, WRITTEN DOWN THE MOMENT IT HOLDS IT.
  *
  * Ported from BookForge's electron/crucible/in-flight-ledger.ts (migration plan
- * §7.4, crucible docs/INTEGRATING-AN-APP.md §7.5). A Crucible job or lease is
+ * §7.4, crucible docs/INTEGRATING-AN-APP.md §7.5). A Crucible job or session is
  * not a process: nothing this machine does to itself reaches it. A hard kill
  * (ctrl-C, a crash, Windows' SIGTERM, which is a kill) loses the handle, and
  * the card stays held for an app that no longer exists. So:
  *
- *   one row per load job this app submitted and per lease it took,
+ *   one row per load job this app submitted and per queue session it opened,
  *   written synchronously IMMEDIATELY AFTER the server admitted it,
  *   removed when it settles.
  *
  *   <Briefcase config dir>/crucible-in-flight.json
- *   { "rows": [{ server, kind: 'job'|'lease', id, jobType, model, localId, at }] }
+ *   { "rows": [{ server, kind: 'job'|'session', id, jobType, model, localId, at }] }
  *
  * The quit sweep and the startup sweep (in-flight-sweep.ts) read it and give
  * back whatever is still listed. They touch ONLY what is listed here: a shared
@@ -36,16 +36,16 @@ import * as path from 'path';
 
 export const CRUCIBLE_IN_FLIGHT_FILE = 'crucible-in-flight.json';
 
-export type InFlightKind = 'job' | 'lease';
+export type InFlightKind = 'job' | 'session';
 
 export interface CrucibleInFlightEntry {
   /** The registry NAME, never a URL: the sweep resolves it as the door did. */
   readonly server: string;
-  /** `job` is cancelled with `DELETE /v1/jobs/{id}`; `lease` is released. */
+  /** `job` is cancelled with `DELETE /v1/jobs/{id}`; `session` is closed. */
   readonly kind: InFlightKind;
-  /** Crucible's own id: the job id or the lease id. */
+  /** Crucible's own id: the job id or the session id. */
   readonly id: string;
-  /** The job type (`load-model`, `asr`, …) or `lease`. */
+  /** The job type (`load-model`, `asr`, …) or `session`. */
   readonly jobType: string;
   /** The model the row is about, or null. An unload may only ever name one of these. */
   readonly model: string | null;
@@ -71,8 +71,14 @@ export function parseInFlightLedger(text: string, onWarn: (line: string) => void
   const kept: CrucibleInFlightEntry[] = [];
   for (const row of rows) {
     const entry = row as Partial<CrucibleInFlightEntry> | null;
+    // A lease from before Crucible 1.0.76: leases are gone from the server,
+    // and nothing is left to give back.
+    if ((entry as { kind?: unknown } | null)?.kind === 'lease') {
+      onWarn(`dropping a lease row from before Crucible 1.0.76 (leases are gone): ${JSON.stringify(row)}`);
+      continue;
+    }
     if (typeof entry?.server !== 'string' || entry.server === ''
-      || (entry.kind !== 'job' && entry.kind !== 'lease')
+      || (entry.kind !== 'job' && entry.kind !== 'session')
       || typeof entry.id !== 'string' || entry.id === '') {
       onWarn(`dropping a Crucible in-flight row with no server/kind/id: ${JSON.stringify(row)}`);
       continue;

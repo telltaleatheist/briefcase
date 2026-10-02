@@ -6,6 +6,7 @@
  * lane strip and the Running/Paused switch, and the download regression:
  * twenty downloads with Crucible unreachable run exactly as before.
  */
+import { CRUCIBLE_CLIENT_NAME } from '../../src/crucible/client-factory';
 import { AIProviderService } from '../../src/analysis/ai-provider.service';
 import { isCancellation } from '../../src/analysis/cancellation';
 import { CrucibleServersService } from '../../src/crucible/crucible-servers.service';
@@ -77,23 +78,24 @@ function reask(rig: Rig): void {
 }
 
 describe('the reservation', () => {
-  it('loads and leases the model on its server before the task starts, holds it across the run, releases it after', async () => {
+  it('opens a session and loads the model on its server before the task starts, holds it across the run, closes it after', async () => {
     await wire();
     const rig = makeRig(lanes);
     const seen: string[][] = [];
     rig.media.analyze = analysisThatCalls(['qwen3.5-9b', 'qwen3.5-9b'], { seen });
     const id = rig.qm.addJob(analyzeJob('v1', 'local:qwen3.5-9b'));
     await until(() => rig.qm.getJob(id)?.status === 'completed');
-    // The load (with its lease) happened before the task started, once.
+    // The load (in the run's session) happened before the task started, once.
     // At the analysis engine's window: the engine reads its decisions from this
     // same model, and a reservation at the default window would load it twice.
-    expect(fake.jobs.map((j) => [j.type, j.model, (j.params as any).lease?.act, (j.params as any).context])).toEqual([['load-model', 'qwen3.5-9b', 'analysis', 32768]]);
+    expect(fake.jobs.map((j) => [j.type, j.model, (j.params as any).context])).toEqual([['load-model', 'qwen3.5-9b', 32768]]);
+    expect(fake.sessions.opened).toEqual([{ sessionId: 'ses-1', client: CRUCIBLE_CLIENT_NAME, act: 'analysis' }]);
     const startedAt = rig.events.findIndex((e) => e.name === 'task.started');
     expect(rig.events[startedAt].data).toMatchObject({ jobId: id, pool: 'lane', lane: 'gpu:mac', venue: 'mac' });
-    // Inside the run the lease was on the ledger; after it, released and gone.
-    expect(seen).toEqual([['lease:qwen3.5-9b'], ['lease:qwen3.5-9b']]);
-    expect(fake.leases.released).toEqual(['lease-1']);
-    expect(fake.openLease()).toBeNull();
+    // Inside the run the session was on the ledger, naming its model; after it, closed and gone.
+    expect(seen).toEqual([['session:qwen3.5-9b'], ['session:qwen3.5-9b']]);
+    expect(fake.sessions.closed).toEqual([{ sessionId: 'ses-1', reason: 'client' }]);
+    expect(fake.openSession()).toBeNull();
     expect(ledger.read()).toEqual([]);
     expect(rig.qm.getJob(id)).toMatchObject({ lane: 'gpu:mac', venue: 'mac' });
   });
@@ -111,7 +113,7 @@ describe('the reservation of a model the analysis engine does not read from', ()
 });
 
 describe('an ollama: choice the server has a model of its own for', () => {
-  it('is placed on the GPU lane as that local model, loaded and leased before the task, and every call runs on it', async () => {
+  it('is placed on the GPU lane as that local model, loaded in a session before the task, and every call runs on it', async () => {
     await wire();
     const rig = makeRig(lanes);
     rig.media.analyze = async (): Promise<TaskResult> => {
@@ -124,8 +126,8 @@ describe('an ollama: choice the server has a model of its own for', () => {
     expect(rig.qm.getJob(id)).toMatchObject({ lane: 'gpu:mac', venue: 'mac' });
     expect(fake.jobs.map((j) => [j.type, j.model])).toEqual([['load-model', 'qwen3.5-9b']]);
     expect(fake.chatBodies().map((b) => b['model'])).toEqual(['qwen3.5-9b', 'qwen3.5-9b']);
-    expect(fake.leases.taken).toHaveLength(1);
-    expect(fake.leases.released).toEqual([fake.leases.taken[0].leaseId]);
+    expect(fake.sessions.opened).toHaveLength(1);
+    expect(fake.sessions.closed.map((x) => x.sessionId)).toEqual(fake.sessions.opened.map((x) => x.sessionId));
   });
 });
 
@@ -147,20 +149,19 @@ describe('parking against the fake', () => {
     expect(rig.events.some((e) => e.name === 'task.failed')).toBe(false);
   });
 
-  it("a 409 leased at the door parks with the lease holder's line", async () => {
+  it("a session taken out of Crucible's line parks with the reason", async () => {
     await wire();
-    fake.leaseAsOther('qwen3.5-4b', 'foundry');
+    fake.inject({ queueLine: { positions: [1], then: { removed: 'expired' } } });
     const rig = makeRig(lanes);
-    jest.spyOn(lanes, 'preflight').mockResolvedValue(null); // the door is the one that says no
     const id = rig.qm.addJob(analyzeJob('v1', 'local:qwen3.5-9b'));
     await until(() => rig.qm.getJob(id)?.parkedReason !== undefined);
-    expect(rig.qm.getJob(id)?.parkedReason).toMatch(/leased|foundry/);
+    expect(rig.qm.getJob(id)?.parkedReason).toMatch(/Crucible ended the wait for a session \(expired\)/);
     expect(rig.qm.getLanePool().size).toBe(0);
     expect(rig.media.started('analyze')).toHaveLength(0);
     rig.qm.onModuleDestroy();
   });
 
-  it('a busy card met INSIDE the run (a second model) parks the task, releases its lease, and keeps nothing', async () => {
+  it('a busy card met INSIDE the run (a second model) parks the task, closes its session, and keeps nothing', async () => {
     await wire();
     const rig = makeRig(lanes);
     let runs = 0;
@@ -175,7 +176,7 @@ describe('parking against the fake', () => {
     // The door's own sentence (the SDK's busyLine for the 409 on the second load).
     expect(rig.qm.getJob(id)).toMatchObject({ status: 'pending', parkedReason: expect.stringMatching(/bookforge.*tts.*40% done/) });
     expect(rig.events.some((e) => e.name === 'task.failed')).toBe(false);
-    expect(fake.openLease()).toBeNull();
+    expect(fake.openSession()).toBeNull();
     expect(ledger.read()).toEqual([]);
     fake.inject({});
     lanes.forgetActivity();
@@ -208,7 +209,7 @@ describe('REGRESSION: a load whose event stream is lost', () => {
 });
 
 describe('cancel against the fake', () => {
-  it('cancelling a running lane task aborts its chat, releases its lease and empties the ledger', async () => {
+  it('cancelling a running lane task aborts its chat, closes its session and empties the ledger', async () => {
     await wire();
     fake.inject({ chatDelayMs: 5_000 });
     const rig = makeRig(lanes);
@@ -227,7 +228,7 @@ describe('cancel against the fake', () => {
     const active = rig.qm.getLanePool().get(id)!;
     rig.qm.cancelJob(id);
     expect(active.abort!.signal.aborted).toBe(true);
-    await until(() => fake.openLease() === null, 2_000, 'the lease to be released');
+    await until(() => fake.openSession() === null, 2_000, 'the session to be closed');
     expect(rig.qm.getJob(id)?.status).toBe('cancelled');
     await cancelled.promise;
     await until(() => ledger.read().length === 0);
@@ -275,19 +276,18 @@ describe('startup and quit sweeps through the lanes service', () => {
     await wire();
     const client = await h.factory.clientFor('mac');
     fake.setResident('qwen3.5-9b');
-    const left = await client.lease('qwen3.5-9b', { act: 'analysis', ttlSeconds: 120 });
-    ledger.record({ server: 'mac', kind: 'lease', id: left.leaseId, jobType: 'lease', model: 'qwen3.5-9b', localId: 'old' });
+    const left = await client.session({ act: 'analysis' });
+    ledger.record({ server: 'mac', kind: 'session', id: left.id, jobType: 'session', model: 'qwen3.5-9b', localId: 'old' });
     lanes.onModuleInit();
     await lanes.ready;
-    expect(fake.openLease()).toBeNull();
+    expect(fake.openSession()).toBeNull();
     expect(ledger.read()).toEqual([]);
 
-    const again = await client.lease('qwen3.5-4b', { act: 'analysis', ttlSeconds: 120 }).catch(() => null);
     fake.setResident('qwen3.5-4b');
-    const held = again ?? await client.lease('qwen3.5-4b', { act: 'analysis', ttlSeconds: 120 });
-    ledger.record({ server: 'mac', kind: 'lease', id: held.leaseId, jobType: 'lease', model: 'qwen3.5-4b', localId: 'q' });
+    const held = await (await h.factory.clientFor('mac')).session({ act: 'analysis' });
+    ledger.record({ server: 'mac', kind: 'session', id: held.id, jobType: 'session', model: 'qwen3.5-4b', localId: 'q' });
     await lanes.beforeApplicationShutdown();
-    expect(fake.openLease()).toBeNull();
+    expect(fake.openSession()).toBeNull();
     expect(ledger.read()).toEqual([]);
   });
 });

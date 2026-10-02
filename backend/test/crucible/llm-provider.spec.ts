@@ -174,7 +174,7 @@ describe('a whole analysis through Crucible', () => {
     return { provider: 'local' as const, model, transcript: LINES.join(' '), segments: SEGMENTS, outputFile: out, categories: [{ name: 'misinformation' } as never] };
   }
 
-  it('loads once, holds one lease for the whole run, and releases it at the end', async () => {
+  it('loads once, holds one session for the whole run, and closes it at the end', async () => {
     await fake.close();
     fake = await startFakeCrucible({
       models: [{ id: 'qwen3.5-9b', paramsB: 9 }],
@@ -185,8 +185,8 @@ describe('a whole analysis through Crucible', () => {
     const result = await analysis().analyzeTranscript(options());
     expect(result.chapters.length).toBeGreaterThan(0);
     expect(fake.jobs.filter((j) => j.type === 'load-model')).toHaveLength(1);
-    expect(fake.leases.taken).toHaveLength(1);
-    expect(fake.leases.released).toEqual([fake.leases.taken[0].leaseId]);
+    expect(fake.sessions.opened).toHaveLength(1);
+    expect(fake.sessions.closed.map((x) => x.sessionId)).toEqual(fake.sessions.opened.map((x) => x.sessionId));
     expect(fake.chatBodies().length).toBeGreaterThan(1);
     expect(fake.chatBodies().every((b) => b['model'] === 'qwen3.5-9b')).toBe(true);
   });
@@ -253,10 +253,10 @@ describe('a whole analysis through Crucible', () => {
     // 1.0.24: the host's ceiling says the 8-bit serves 32K when loaded at it, so
     // precision wins (ollama-map.ts rule 4) and the load states the context.
     expect(fake.chatBodies().every((b) => b['model'] === 'qwen3.8-27b-8bit')).toBe(true);
-    // Loaded once (the second run finds it resident at 32K), leased and released per run.
+    // Loaded once (the second run finds it resident at 32K), one session opened and closed per run.
     expect(fake.jobs.filter((j) => j.type === 'load-model').map((j) => [j.model, j.params['context']])).toEqual([['qwen3.8-27b-8bit', 32768]]);
-    expect(fake.leases.taken).toHaveLength(2);
-    expect(fake.leases.released).toEqual(fake.leases.taken.map((l) => l.leaseId));
+    expect(fake.sessions.opened).toHaveLength(2);
+    expect(fake.sessions.closed.map((x) => x.sessionId)).toEqual(fake.sessions.opened.map((x) => x.sessionId));
     // Sized at the local model's context (capped at the 32K analysis window), not Ollama's 4K.
     const limits = logged.filter((m) => m.startsWith('[Model Limits] effective ctx='));
     expect(limits).toHaveLength(2);
@@ -328,11 +328,11 @@ describe('a whole analysis through Crucible', () => {
     expect(logged.filter((m) => /the selected Crucible server has no model of its own for it/.test(m))).toHaveLength(1);
   });
 
-  it('zero successful chapters throws, never completes empty, and still releases the lease', async () => {
+  it('zero successful chapters throws, never completes empty, and still closes the session', async () => {
     fake.faults.refuse = [{ match: { path: '/v1/openai/chat/completions' }, status: 500, code: 'engine_failed' }];
     await expect(analysis().analyzeTranscript(options())).rejects.toThrow(/engine_failed/);
-    expect(fake.leases.taken.length).toBeGreaterThan(0);
-    expect(fake.leases.released).toEqual(fake.leases.taken.map((l) => l.leaseId));
+    expect(fake.sessions.opened.length).toBeGreaterThan(0);
+    expect(fake.sessions.closed.map((x) => x.sessionId)).toEqual(fake.sessions.opened.map((x) => x.sessionId));
     expect(fs.existsSync(path.join(process.env.APPDATA!, 'briefcase', 'api-keys.json'))).toBe(false);
   }, 30_000);
 });

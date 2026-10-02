@@ -124,7 +124,7 @@ describe('flags found by the model reading the transcript, through Crucible', ()
     expect(result.sections[0].description).toBe('The speaker says it as their own view.');
     expect(result.warnings).toBeUndefined();
     // The one lease is released at the end, as for every analysis.
-    expect(fake.leases.released).toEqual(fake.leases.taken.map((l) => l.leaseId));
+    expect(fake.sessions.closed.map((x) => x.sessionId)).toEqual(fake.sessions.opened.map((x) => x.sessionId));
   });
 
   it('Claude: nothing but the prompt crosses, and its prose-wrapped answer is read without a schema', async () => {
@@ -154,12 +154,12 @@ describe('flags found by the model reading the transcript, through Crucible', ()
     ]);
   });
 
-  it('the reading call failing everywhere fails the analysis with the server\'s error, and still releases the lease', async () => {
+  it('the reading call failing everywhere fails the analysis with the server\'s error, and still closes the session', async () => {
     await start('{}');
     fake.faults.refuse = [{ match: { path: '/v1/openai/chat/completions' }, status: 500, code: 'engine_failed' }];
     await expect(analysis().analyzeTranscript(options('local', 'qwen3.5-9b'))).rejects.toThrow(
       /no part of the transcript could be read for flags — all 1 chunk\(s\) failed\. Last failure: chunk 1 .*engine_failed/,
     );
-    expect(fake.leases.released).toEqual(fake.leases.taken.map((l) => l.leaseId));
+    expect(fake.sessions.closed.map((x) => x.sessionId)).toEqual(fake.sessions.opened.map((x) => x.sessionId));
   }, 30_000);
 });

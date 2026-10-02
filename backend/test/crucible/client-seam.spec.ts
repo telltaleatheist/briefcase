@@ -8,7 +8,7 @@ import { CrucibleClient, CrucibleServerError, CrucibleUnreachable } from '@cruci
 import { startFakeCrucible, type FakeCrucible } from '../fake-crucible/fake-crucible';
 import { EngineResolver, RESOLVE_TTL_MS, EngineResolveError } from '../../src/crucible/engine-resolve';
 import { crucibleUnavailableCause, isTransportFailure, transportFailureCause } from '../../src/crucible/transport-failure';
-import { CRUCIBLE_CLIENT_NAME } from '../../src/crucible/client-factory';
+import { CRUCIBLE_CLIENT_NAME, installSuffix } from '../../src/crucible/client-factory';
 import { harness } from './harness';
 
 const SRC = path.resolve(__dirname, '..', '..', 'src');
@@ -27,8 +27,14 @@ describe('the client factory seam', () => {
     expect(constructing.map((file) => path.relative(SRC, file))).toEqual([path.join('crucible', 'client-factory.ts')]);
   });
 
-  it('names itself briefcase to every server', async () => {
-    expect(CRUCIBLE_CLIENT_NAME).toBe('briefcase');
+  it('a client name per install: briefcase@<this computer>, lower case, only [a-z0-9-]', () => {
+    expect(installSuffix('Owens-Mac-Studio.local')).toBe('owens-mac-studio');
+    expect(installSuffix('OWENS PC_1')).toBe('owens-pc-1');
+    expect(installSuffix('')).toBe('unknown');
+    expect(CRUCIBLE_CLIENT_NAME).toMatch(/^briefcase@[a-z0-9-]+$/);
+  });
+
+  it('names itself briefcase@<this computer> to every server (1.0.76 sessions match on it)', async () => {
     const fake = await startFakeCrucible();
     try {
       const h = harness();
@@ -36,7 +42,7 @@ describe('the client factory seam', () => {
       const client = await h.factory.clientFor('mac');
       await client.health();
       const health = fake.requestsTo('/v1/health')[0]!;
-      expect(health.headers['x-crucible-client']).toBe('briefcase');
+      expect(health.headers['x-crucible-client']).toBe(CRUCIBLE_CLIENT_NAME);
       expect(String(health.headers['user-agent'])).toContain('briefcase');
     } finally {
       await fake.close();

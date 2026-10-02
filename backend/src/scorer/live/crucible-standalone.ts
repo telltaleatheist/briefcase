@@ -6,13 +6,13 @@
  * INTERRUPTED, A TOOL GIVES BACK WHAT IT HOLDS. A standalone tool has no Nest
  * app and so no quit path of its own: before {@link releaseOnInterrupt}, ctrl-C
  * (or `pkill -INT`) killed it on Node's default action, no `finally` ran, and
- * the scorer's lease stayed held on the server until its TTL ran out, blocking
+ * the scorer's hold stayed open on the server until it timed out, blocking
  * the card for everyone else. Now the tool's chat service records every load
- * and lease in a PRIVATE in-flight ledger (never the app's: a sweep of the
- * app's ledger would release the running app's own leases), and a signal
- * aborts the run, lets it unwind (its own `finally` releases; the app's quit
- * does the same, crucible-lanes.ts), sweeps that
- * ledger with the app's own quit sweep (in-flight-sweep.ts: release, and
+ * and queue session in a PRIVATE in-flight ledger (never the app's: a sweep of
+ * the app's ledger would close the running app's own sessions), and a signal
+ * aborts the run, lets it unwind (its own `finally` closes its session; the
+ * app's quit does the same, crucible-lanes.ts), sweeps that
+ * ledger with the app's own quit sweep (in-flight-sweep.ts: close, and
  * unload only a model our rows name and nobody else is using), bounded, then
  * exits non-zero. A second signal exits at once.
  */
@@ -20,7 +20,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { getBriefcaseConfigDir } from '../../bridges/runtime-paths';
-import { CrucibleClientFactory } from '../../crucible/client-factory';
+import { CrucibleClientFactory, CRUCIBLE_CLIENT_NAME } from '../../crucible/client-factory';
 import { CrucibleServersService } from '../../crucible/crucible-servers.service';
 import type { CrucibleClient } from '@crucible/client';
 import { InFlightLedger } from '../../crucible/in-flight-ledger';
@@ -202,8 +202,8 @@ export function exitStandalone(main: Promise<number | void>): void {
 /** /v1/activity's answer to "is the card someone else's?": null when free, else the sentence. */
 export async function cardHeldByOther(factory: CrucibleClientFactory, server: string): Promise<string | null> {
   const activity = await (await factory.clientFor(server)).activity();
-  const mine = (client: string | null | undefined) => client === 'briefcase';
-  if (activity.lease && !mine(activity.lease.client)) return `a lease by ${activity.lease.client ?? 'another client'} (${activity.lease.act})`;
+  const mine = (client: string | null | undefined) => client === CRUCIBLE_CLIENT_NAME;
+  if (activity.session && !mine(activity.session.client)) return `a session by ${activity.session.client ?? 'another client'} (${activity.session.act})`;
   const running = activity.running.filter((j) => !mine(j.client));
   if (running.length) return `running ${running.map((j) => `${j.client ?? '?'}'s ${j.type}`).join(', ')}`;
   const queued = activity.queued.filter((j) => !mine(j.client));

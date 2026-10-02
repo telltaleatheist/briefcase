@@ -1,3 +1,4 @@
+import { CRUCIBLE_CLIENT_NAME } from '../../src/crucible/client-factory';
 import { startFakeCrucible, startNotCrucible, unusedLoopbackUrl, type FakeCrucible } from '../fake-crucible/fake-crucible';
 import { compareVersions, reachOf, PROBE_CACHE_MS } from '../../src/crucible/probe';
 import { harness, type Harness } from './harness';
@@ -32,7 +33,7 @@ describe('probe: the four outcomes, told apart', () => {
     const info = fake.requestsTo('/v1/info')[0]!;
     expect(info.headers['authorization']).toBe(`Bearer ${fake.token}`);
     expect(info.headers['x-crucible-api']).toBe('1');
-    expect(info.headers['x-crucible-client']).toBe('briefcase');
+    expect(info.headers['x-crucible-client']).toBe(CRUCIBLE_CLIENT_NAME);
   });
 
   it('bad token: a Crucible that refuses the token is wrong_token, not unreachable', async () => {

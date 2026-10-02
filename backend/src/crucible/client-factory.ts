@@ -7,18 +7,28 @@
  * sits in a service field, a cache or a log line, and nothing that answers the
  * renderer can reach it.
  *
- * `clientName` is 'briefcase' on every client. It lands in the User-Agent and
- * `X-Crucible-Client`, which is what `/v1/activity` reports as a job's
- * `client`, so a Crucible shared with BookForge and Foundry can say whose work
- * is on the card. One name, declared once.
+ * `clientName` is `briefcase@<this computer>` on every client. It lands in
+ * the User-Agent and `X-Crucible-Client`, which is what `/v1/activity`
+ * reports as a job's `client`, so a Crucible shared with BookForge and Foundry
+ * can say whose work is on the card. Since 1.0.76 it is also what makes a
+ * request an item of this install's queue session: two installs under one
+ * name (the Mac's and the PC's Briefcase) would ride each other's sessions
+ * (crucible-pc-1, 2026-10-01). One name per install, declared once.
  */
+import * as os from 'os';
 import { Injectable } from '@nestjs/common';
 import { CrucibleClient } from '@crucible/client';
 import { CrucibleRegistryService } from './registry.service';
 import { EngineResolver, type ClientMaker, type ResolvedEngine } from './engine-resolve';
 import { streamUpload, type StreamUploadResult } from './stream-upload';
 
-export const CRUCIBLE_CLIENT_NAME = 'briefcase';
+/** This computer's name as a client-name suffix: lower case, `.local` dropped, only [a-z0-9-]. */
+export function installSuffix(hostname: string): string {
+  const host = hostname.toLowerCase().replace(/\.local$/, '').replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
+  return host || 'unknown';
+}
+
+export const CRUCIBLE_CLIENT_NAME = `briefcase@${installSuffix(os.hostname())}`;
 
 export interface ClientOptions {
   /**

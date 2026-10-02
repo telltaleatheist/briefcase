@@ -13,10 +13,10 @@
  *   tokens     the chat door again, one token of answer: prompt_tokens of the
  *              text less the template's own, measured once per model (exact
  *              to within the template seam).
- *   the lease  ONE hold across the whole chapters + flags pass: the run's
+ *   the hold   ONE hold across the whole chapters + flags pass: the run's
  *              `withModel` (P3), loaded at {@link SCORER_LOAD_CONTEXT} (the
- *              largest chunk state plus its questions), heartbeaten, released
- *              when the pass settles. Inside a queue-admitted run (P4 lanes) a
+ *              largest chunk state plus its questions) inside the run's queue
+ *              session, which is closed when the run settles. Inside a queue-admitted run (P4 lanes) a
  *              busy card, a silent server or no server at all PARKS the task.
  *
  * WHICH MODEL. The server's `decide` class must be enabled, and the model a

@@ -64,7 +64,7 @@ function crucibleRig(): { rig: Rig; lanes: StubLanes; t: ReturnType<typeof gated
 }
 
 describe('Crucible venue: a GPU lane, reserved by the asr submit', () => {
-  it('takes its server’s lane with a crucible route, and never loads or leases a model', async () => {
+  it('takes its server’s lane with a crucible route, and never loads a model or opens a session', async () => {
     const { rig, lanes, t } = crucibleRig();
     const a = rig.qm.addJob(transcribeJob('v1'));
     const b = rig.qm.addJob(transcribeJob('v2'));
@@ -266,10 +266,10 @@ describe('the real lanes against the fake Crucible', () => {
     }
   });
 
-  it('the asr preflight: another client’s LEASE is not in the way (asr leaves the card alone); its running job is', async () => {
+  it('the asr preflight: another client’s open SESSION is not a busy line (the job waits in line behind it); its running job is', async () => {
     const { fake, lanes } = await realLanes(undefined, { models: [{ id: 'qwen3.5-9b', paramsB: 9 }] });
     try {
-      fake.leaseAsOther('qwen3.5-9b', 'bookforge crucible-client/1.0.6');
+      fake.sessionAsOther('bookforge crucible-client/1.0.6');
       expect(await lanes.preflightJob('mac')).toBeNull();
       lanes.forgetActivity('mac');
       fake.inject({ serverBusy: { client: 'foundry crucible-client/1.0.2', type: 'rvc', progress: 0.25 } });

@@ -2,7 +2,7 @@
  * EVERY LLM CALL BRIEFCASE MAKES THROUGH CRUCIBLE (migration plan §6.1, P3).
  *
  *   chat({server?, model, messages | prompt, responseFormat?, maxTokens?, temperature?, signal})
- *   withModel(server | undefined, model, fn)   hold one model, leased, for a multi-call run
+ *   withModel(server | undefined, model, fn)   hold one model, in a session, for a multi-call run
  *   withRun(fn)                                 the same, with the model(s) taken lazily per call
  *
  * VENUE. An explicit `server`, else the server a surrounding run already holds
@@ -12,15 +12,19 @@
  * a guess. Work never moves to another server on its own.
  *
  * LOCAL MODELS are made resident with a `load-model` job (its events followed
- * to the end) and, inside a run, held with a lease heartbeaten every 40 s
- * against a 120 s TTL. A heartbeat that fails for weather is retried every 5 s
- * while the TTL still covers it; only `unknown_lease`, or the TTL running out
- * unrenewed, loses the lease. A lease given up on that way is released
- * best-effort, and the next local call re-takes one before it is sent (a local
- * call is never sent knowingly unleased). A chat that meets `409 model_not_resident` (someone
- * else's load evicted it) re-ensures once and retries. A load or lease refused
- * `409 server_busy` / `leased` is a typed {@link CrucibleBusyError} carrying
- * the holder's sentence; the caller may ask to wait it out (`busyWait`).
+ * to the end). Inside a run, the server is held with a QUEUE SESSION
+ * (Crucible 1.0.76, docs/QUEUE.md; leases are gone): one per server per run,
+ * opened before the first local call. It waits its turn in Crucible's line
+ * (the task told its place), and once open nothing from another app runs on
+ * that server until it closes. Every request this client sends is an item of
+ * it (Crucible matches on the client name), so loads, chats and decides need
+ * no change. It is touched every 30 s, so a run waiting on a cloud model is
+ * not closed as idle, and closed when the run settles. A session the server
+ * ends (idle, the operator, a restart) is opened again by the next call. A
+ * chat that meets `409 model_not_resident` re-ensures once and retries. A
+ * load refused busy, or a session taken out of the line, is a typed
+ * {@link CrucibleBusyError} carrying the reason; the caller may ask to wait it
+ * out (`busyWait`), and a queue run parks on it.
  *
  * `503 chat_queue_full` is retried after the server's `Retry-After`, which is
  * read from the raw response: SDK `chat()` drops it, so the chat door is
@@ -28,13 +32,13 @@
  * raw door, and the token stays in the factory.
  *
  * UPSTREAMS (`anthropic/`, `openai/`, `ollama/`) are forwarded by the server
- * with no load and no lease. The body rules (no sampling to cloud, ever) live
+ * with no load and no session. The body rules (no sampling to cloud, ever) live
  * in target.ts.
  *
  * AN OLLAMA CHOICE runs on the server's own model when it has one
  * ({@link CrucibleChatService.effectiveTarget}, rule in ollama-map.ts): the
  * first ranked server that answers and has a match serves it as a local model
- * (loaded and leased like any other); only with no match anywhere does it go to
+ * (loaded in the run's session like any other); only with no match anywhere does it go to
  * the `ollama/` upstream. Decided per call, fixed for the rest of a run, and
  * said in the log once per model.
  *
@@ -46,28 +50,28 @@
  * run PARKS on rather than failing the analysis (P4).
  *
  * CANCEL. The caller's `signal` aborts the open fetch, cancels an in-flight
- * load job, and ends any busy or queue-full wait at once. A run's lease is
- * released in its `finally`.
+ * load job, takes a waiting session out of the line, and ends any busy or
+ * queue-full wait at once. A run's session is closed in its `finally`.
  */
 import { AsyncLocalStorage } from 'async_hooks';
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import {
   CrucibleBusy,
   CrucibleCardHeld,
-  CrucibleLeased,
   CrucibleRefused,
+  CrucibleSessionClosed,
+  CrucibleSessionHeld,
   CrucibleUnreachable,
   type CrucibleClient,
+  type CrucibleSession,
   type JobEvent,
-  type Lease,
   type ModelInfo,
 } from '@crucible/client';
 import { crucibleUnavailableCause } from '../transport-failure';
 import { CrucibleClientFactory } from '../client-factory';
 import { CrucibleServersService } from '../crucible-servers.service';
 import { CrucibleProbeService, compareVersions } from '../probe';
-import { QUEUE_HEARTBEAT_MS, QUEUE_POLL_MS } from '../crucible-queue';
-import { CRUCIBLE_CLIENT_NAME } from '../client-factory';
+import { QUEUE_HEARTBEAT_MS } from '../crucible-queue';
 import type { InFlightLedger } from '../in-flight-ledger';
 import { CRUCIBLE_IN_FLIGHT_LEDGER } from '../crucible.constants';
 import {
@@ -81,12 +85,16 @@ import {
 import { RETIRED_LOCAL_MODELS, buildChatBody, crucibleTargetOf, type ChatBodyInput, type CrucibleTarget, type UpstreamName } from './target';
 import { CRUCIBLE_ANALYSIS_CONTEXT, crucibleChoiceForOllama, isPageReader, servedContextOf, type MappableModel } from './ollama-map';
 
-/** Capability class sent as `X-Crucible-Act` and as every lease's act. */
+/** Capability class sent as `X-Crucible-Act` and as every session's act. */
 export const BRIEFCASE_ACT = 'analysis';
-export const LEASE_TTL_SECONDS = 120;
-export const HEARTBEAT_MS = 40_000;
-/** A heartbeat that failed for weather is tried again this soon, while the TTL still covers it. */
-export const HEARTBEAT_RETRY_MS = 5_000;
+/**
+ * How often an open session is touched. Crucible closes a session after its
+ * idleS (default 300 s) with nothing in flight; work on this side (a cloud
+ * model call, an ffmpeg step) is invisible to it, so the run says it is here.
+ */
+export const HEARTBEAT_MS = 30_000;
+/** How long a cancelled run waits for the server's answer to its session open, so it can close what it opened. */
+export const OPEN_ANSWER_GRACE_MS = 2_000;
 export const LOAD_STREAM_RETRY: Readonly<{ firstMs: number; maxMs: number; budgetMs: number }> = { firstMs: 5_000, maxMs: 30_000, budgetMs: 5 * 60_000 };
 /** Queue-full retries before the call gives up. */
 export const MAX_QUEUE_FULL_RETRIES = 30;
@@ -193,22 +201,28 @@ export interface CrucibleChatResult {
   context: Record<string, unknown> | null;
 }
 
+/** A model made resident on a server inside a run's session. */
 interface Held {
   server: string;
   model: string;
   /** The context it was loaded with when a caller asked for one; null: whatever was resident. */
   context: number | null;
-  leaseId: string | null;
-  beat: NodeJS.Timeout | null;
+  /** The session it was made resident in: a later session checks it again. */
+  sessionId: string;
+  /** Said not resident since (someone's load evicted it): made resident again by the next call. */
   lost: boolean;
-  /** Lost by this side giving up (heartbeats unanswered), not by the server saying so: it may still be open there. */
-  mayStillHold: boolean;
-  /** Released: a heartbeat in flight must not reschedule itself. */
-  stopped: boolean;
 }
 
-function isUnknownLease(err: unknown): boolean {
-  return err instanceof CrucibleRefused && (err.code === 'unknown_lease' || err.status === 404);
+/** A run's queue session on one server. */
+interface OpenSession {
+  server: string;
+  session: CrucibleSession;
+  /** The touch timer. */
+  beat: NodeJS.Timeout | null;
+  /** The server ended it (idle, the operator, a restart): the next call opens another. */
+  ended: boolean;
+  /** Closed by the run: the touch stops. */
+  stopped: boolean;
 }
 
 /** What a Briefcase model choice runs as on Crucible, and where (see effectiveTarget). */
@@ -242,8 +256,10 @@ export interface RunOptions {
 }
 
 interface RunScope {
-  /** One hold per server: Crucible allows one lease per client per server. */
+  /** One resident model per server (one card each). */
   held: Map<string, Held>;
+  /** The run's queue session on each server it touched. */
+  sessions: Map<string, OpenSession>;
   options: RunOptions;
   /** Set when a call inside the run chose to park: the queue reads it after the task returns. */
   parked: { server: string | null; reason: string } | null;
@@ -287,7 +303,7 @@ export { BUSY_REFUSAL_CODES };
 
 function busyLineOfRefusal(err: unknown): string | null {
   if (err instanceof CrucibleBusy) return err.busyLine;
-  if (err instanceof CrucibleLeased) return err.leasedLine;
+  if (err instanceof CrucibleSessionHeld) return err.serverMessage;
   if (err instanceof CrucibleCardHeld) return `held by ${err.who}: ${err.fact}`;
   if (err instanceof CrucibleRefused && BUSY_REFUSAL_CODES.has(err.code)) return err.serverMessage;
   return null;
@@ -315,13 +331,8 @@ export class CrucibleChatService {
 
   /** The clock and the sleeper, replaceable by a spec. */
   now: () => number = Date.now;
+  /** How often an open session is touched ({@link HEARTBEAT_MS}). */
   heartbeatMs = HEARTBEAT_MS;
-  /** How often a waiting lease reads Crucible's line (specs shorten it). */
-  queuePollMs = QUEUE_POLL_MS;
-  /** How soon a heartbeat that failed for weather is tried again. */
-  heartbeatRetryMs = HEARTBEAT_RETRY_MS;
-  /** How long the server keeps a lease nobody renews: the retry budget. */
-  leaseTtlMs = LEASE_TTL_SECONDS * 1000;
   /**
    * Re-following a load's dropped event stream (BookForge's stream-reconnect):
    * the first wait, the cap the waits double up to, and the budget from the
@@ -330,31 +341,26 @@ export class CrucibleChatService {
   loadStreamRetry = { ...LOAD_STREAM_RETRY };
   /** The bounded wait of a reload after `model_not_resident` ({@link RELOAD_BUSY_WAIT}). */
   reloadBusyWait: BusyWait = { ...RELOAD_BUSY_WAIT };
-  /**
-   * Leases this side gave up on but could not hand back, per server. Crucible
-   * allows one lease per client per server, so re-leasing is refused `leased`
-   * naming this id; it is then ours to take back, not "another app's".
-   */
-  private readonly staleLeases = new Map<string, string>();
 
   constructor(
     private readonly servers: CrucibleServersService,
     private readonly factory: CrucibleClientFactory,
     private readonly probes: CrucibleProbeService,
-    /** P4: every load job and lease is written here the moment the server admits it. */
+    /** P4: every load job and session is written here the moment the server admits it. */
     @Optional() @Inject(CRUCIBLE_IN_FLIGHT_LEDGER) private readonly ledger?: InFlightLedger,
   ) {}
 
   // ── the run scope ──────────────────────────────────────────────────────
 
   /**
-   * Run `fn` as ONE run: every local model a chat inside it needs is loaded
-   * once, leased, heartbeaten, and released when `fn` settles (success,
-   * failure or cancel). Nested calls join the outer run.
+   * Run `fn` as ONE run: every server a local call inside it needs is held
+   * with one queue session (opened in Crucible's line, touched, closed when
+   * `fn` settles: success, failure or cancel), and each local model is loaded
+   * once in it. Nested calls join the outer run.
    */
   async withRun<T>(fn: () => Promise<T>, options: RunOptions = {}): Promise<T> {
     if (this.runs.getStore() !== undefined) return fn();
-    const scope: RunScope = { held: new Map(), placed: new Map(), mapped: new Map(), lock: Promise.resolve(), options, parked: null };
+    const scope: RunScope = { held: new Map(), sessions: new Map(), placed: new Map(), mapped: new Map(), lock: Promise.resolve(), options, parked: null };
     const run = (async () => {
       try {
         return await this.runs.run(scope, fn);
@@ -374,8 +380,8 @@ export class CrucibleChatService {
   /**
    * Wait, at most `ms`, for every open run to settle, its own release
    * included. The quit path aborts the runs first and then calls this, so a
-   * lease the server grants AFTER the quit began (a request already in flight)
-   * is handed back by its run before the process exits. True when all settled.
+   * session the server opens AFTER the quit began (a request already in
+   * flight) is closed by its run before the process exits. True when all settled.
    */
   async runsSettled(ms: number): Promise<boolean> {
     if (this.openRuns.size === 0) return true;
@@ -389,7 +395,7 @@ export class CrucibleChatService {
   }
 
   /**
-   * Hold `model` (leased, if local) for the whole of `fn`. `server` pins the
+   * Hold `model` (in the run's session, if local) for the whole of `fn`. `server` pins the
    * venue; undefined picks one. `fn` is told where it landed.
    */
   async withModel<T>(
@@ -469,11 +475,12 @@ export class CrucibleChatService {
   }
 
   /** What the current run holds, for a log line or a spec. */
-  heldInRun(): Array<{ server: string; model: string; leaseId: string | null }> {
+  heldInRun(): Array<{ server: string; model: string; sessionId: string | null }> {
     const scope = this.runs.getStore();
     if (scope === undefined) return [];
-    return [...scope.held.values()].map(({ server, model, leaseId }) => ({ server, model, leaseId }));
+    return [...scope.held.values()].map(({ server, model }) => ({ server, model, sessionId: scope.sessions.get(server)?.session.id ?? null }));
   }
+
 
   // ── chat ───────────────────────────────────────────────────────────────
 
@@ -543,7 +550,7 @@ export class CrucibleChatService {
         continue;
       }
       // The chat door refusing because the card is someone else's right now
-      // (a claim, a lease): busy, the same as at the load. Never a failure.
+      // (a claim, another app's session): busy, the same as at the load. Never a failure.
       if (BUSY_REFUSAL_CODES.has(failure.code)) throw new CrucibleBusyError(server, failure.message);
       throw failure;
     }
@@ -916,12 +923,12 @@ export class CrucibleChatService {
     this.pagesCache.delete(server);
   }
 
-  // ── residency and leases ──────────────────────────────────────────────
+  // ── residency and sessions ─────────────────────────────────────────────
 
   /**
-   * Make `model` resident on `server`. Inside a run it is also leased (and the
-   * run's previous hold on that server released first, since a lease pins the
-   * card to one model). Outside a run it is only loaded.
+   * Make `model` resident on `server`. Inside a run, in the run's queue
+   * session on that server (opened first), so nothing else evicts it until
+   * the run ends. Outside a run it is only loaded.
    */
   private async ensureLocal(server: string, model: string, signal?: AbortSignal, busyWait?: BusyWait, loadContext?: number): Promise<void> {
     const started = this.now();
@@ -942,12 +949,13 @@ export class CrucibleChatService {
   private async ensureLocalOnce(server: string, model: string, signal?: AbortSignal, loadContext?: number): Promise<void> {
     const scope = this.runs.getStore();
     if (scope === undefined) {
-      await this.makeResident(server, model, signal, false, loadContext).catch((err: unknown) => { throw this.asUnreachable(err, server); });
+      await this.makeResident(server, model, signal, loadContext).catch((err: unknown) => { throw this.asUnreachable(err, server); });
       return;
     }
     const run = scope.lock.then(async () => {
+      const open = await this.sessionFor(scope, server, signal);
       const held = scope.held.get(server);
-      if (held !== undefined && held.model === model && !held.lost) {
+      if (held !== undefined && held.model === model && !held.lost && held.sessionId === open.session.id) {
         // Held already; a caller that needs a bigger window than it was taken at gets a reload.
         if (loadContext === undefined || (held.context !== null && held.context >= loadContext)) return;
         if (!(await this.residentTooSmall(server, model, loadContext))) {
@@ -955,21 +963,110 @@ export class CrucibleChatService {
           return;
         }
       }
-      if (held !== undefined) await this.releaseHold(scope, held);
-      const leaseId = await this.makeResident(server, model, signal, true, loadContext).catch((err: unknown) => { throw this.asUnreachable(err, server); });
-      const hold: Held = { server, model, context: loadContext ?? null, leaseId, beat: null, lost: false, mayStillHold: false, stopped: false };
-      if (leaseId !== null) this.startHeartbeat(hold);
-      scope.held.set(server, hold);
+      scope.held.delete(server);
+      await this.makeResident(server, model, signal, loadContext).catch((err: unknown) => { throw this.asUnreachable(err, server); });
+      scope.held.set(server, { server, model, context: loadContext ?? null, sessionId: open.session.id, lost: false });
+      // The session's row names the model it now holds: a sweep after a kill
+      // may unload only a model one of our rows names.
+      this.ledger?.record({ server, kind: 'session', id: open.session.id, jobType: 'session', model, localId: this.localId() });
     });
     scope.lock = run.catch(() => undefined);
     await run;
   }
 
   /**
-   * Resident, by a `load-model` job when it is not. With `lease`, returns the
-   * lease id that holds it (taken on the load, or separately when it was
-   * already resident), or null when another client's lease already pins it.
+   * The run's open session on `server`, opened (waiting its turn in Crucible's
+   * line) when it has none or the server ended it. The open itself answers at
+   * once (queued or open), so a quit that lands in it leaves at most a session
+   * the server opened after we stopped listening; with nothing in it, the
+   * server closes it on its own after its idleS (300 s). While it waits, the task is
+   * told its place and the stall watchdog that it is alive. A cancel takes it
+   * out of the line. Taken out by anyone else (expired, the operator, a
+   * restart), or refused because another app's session holds the server: busy,
+   * so a queue run parks.
    */
+  private async sessionFor(scope: RunScope, server: string, signal?: AbortSignal): Promise<OpenSession> {
+    const existing = scope.sessions.get(server);
+    if (existing !== undefined && !existing.ended) return existing;
+    if (existing !== undefined) this.stopSession(existing);
+    throwIfAborted(signal);
+    const client = await this.servers.clientFor(server);
+    let waited = false;
+    // The open is not aborted mid-request: a session the server opened after we
+    // stopped listening could not be closed (its id never reaches us). A cancel
+    // before the server has answered lets the answer come (bounded), then the
+    // session is closed; one already in the line leaves it at once.
+    const wait = new AbortController();
+    let cancelledEarly = false;
+    const onAbort = (): void => {
+      if (waited) {
+        wait.abort(signal?.reason);
+        return;
+      }
+      cancelledEarly = true;
+      setTimeout(() => wait.abort(signal?.reason), OPEN_ANSWER_GRACE_MS).unref?.();
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    const alive = setInterval(() => this.touch(), QUEUE_HEARTBEAT_MS);
+    let session: CrucibleSession;
+    try {
+      session = await client.session({
+        act: BRIEFCASE_ACT,
+        onQueue: ({ position, of }) => {
+          waited = true;
+          if (cancelledEarly) {
+            wait.abort(signal?.reason);
+            return;
+          }
+          this.touch();
+          this.waiting(`Waiting in Crucible's queue on ${server} (${position} of ${of})`);
+        },
+        signal: wait.signal,
+      });
+    } catch (err) {
+      if (signal?.aborted) throw new CrucibleChatCancelled();
+      if (err instanceof CrucibleSessionClosed) {
+        throw new CrucibleBusyError(server, `Crucible ended the wait for a session (${err.reason}): ${err.serverMessage}`);
+      }
+      throw this.asUnreachable(this.mapRefusal(err, server), server);
+    } finally {
+      clearInterval(alive);
+      signal?.removeEventListener('abort', onAbort);
+    }
+    if (signal?.aborted) {
+      await session.close().catch(() => undefined);
+      this.logger.log(`[${server}] session ${session.id} opened as the run was cancelled; closed it`);
+      throw new CrucibleChatCancelled();
+    }
+    this.ledger?.record({ server, kind: 'session', id: session.id, jobType: 'session', model: null, localId: this.localId() });
+    if (waited) this.waiting(`Starting on ${server}...`);
+    this.logger.log(`[${server}] session ${session.id} open`);
+    const open: OpenSession = { server, session, beat: null, ended: false, stopped: false };
+    void session.closed.then((end) => {
+      open.ended = true;
+      if (open.stopped) return;
+      this.stopSession(open);
+      this.ledger?.settle(server, 'session', session.id);
+      this.modelsCache.delete(server);
+      this.logger.warn(`[${server}] Crucible ended session ${session.id} (${end.reason}): ${end.message}; the next call opens another`);
+    });
+    open.beat = setInterval(() => {
+      void session.touch().catch((err: unknown) => {
+        if (err instanceof CrucibleSessionClosed) open.ended = true;
+        else this.logger.warn(`[${server}] touching session ${session.id} failed: ${(err as Error).message}`);
+      });
+    }, this.heartbeatMs);
+    open.beat.unref?.();
+    scope.sessions.set(server, open);
+    return open;
+  }
+
+  private stopSession(open: OpenSession): void {
+    open.stopped = true;
+    if (open.beat !== null) clearInterval(open.beat);
+    open.beat = null;
+  }
+
   /** True when `model` is resident on `server` at a context under `loadContext` (a reload would be needed). */
   private async residentTooSmall(server: string, model: string, loadContext: number): Promise<boolean> {
     try {
@@ -980,7 +1077,8 @@ export class CrucibleChatService {
     }
   }
 
-  private async makeResident(server: string, model: string, signal: AbortSignal | undefined, lease: boolean, loadContext?: number): Promise<string | null> {
+  /** Resident, by a `load-model` job when it is not (inside a run's session, nothing else then evicts it). */
+  private async makeResident(server: string, model: string, signal: AbortSignal | undefined, loadContext?: number): Promise<void> {
     throwIfAborted(signal);
     const client = await this.servers.clientFor(server);
     const models = await this.modelsOn(server, true);
@@ -993,36 +1091,10 @@ export class CrucibleChatService {
     // `context` (1.0.24 load-time context), never a request past its window.
     if (info.resident && loadContext !== undefined && (info.maxModelLen ?? 0) < loadContext) {
       this.logger.log(`[${server}] ${model} is resident at ${info.maxModelLen ?? '?'} tokens; reloading it at ${loadContext}`);
-      return this.load(client, server, model, signal, lease, loadContext);
+      await this.load(client, server, model, signal, loadContext);
+      return;
     }
-    if (info.resident) {
-      if (!lease) return null;
-      try {
-        const held = await this.leaseInLine(client, server, model, signal);
-        this.recordLease(server, model, held.leaseId);
-        this.staleLeases.delete(server);
-        this.logger.log(`[${server}] leased resident ${model} (${held.leaseId})`);
-        return held.leaseId;
-      } catch (err) {
-        // Our own lease, given up on earlier but never handed back: it is
-        // still open, so it is still ours. Take it back and heartbeat it.
-        if (err instanceof CrucibleLeased && this.staleLeases.get(server) === err.leaseId) {
-          this.staleLeases.delete(server);
-          this.recordLease(server, model, err.leaseId);
-          this.logger.log(`[${server}] ${model}: our earlier lease ${err.leaseId} is still open; holding it again`);
-          return err.leaseId;
-        }
-        // Another client already holds a lease on the card (a server before
-        // 1.0.74, where a lease does not wait in line). If it holds OUR
-        // model, the card is pinned where we need it; chat without our own.
-        if (err instanceof CrucibleLeased) {
-          this.logger.log(`[${server}] ${model} is resident and leased by ${err.holder ?? 'another app'}; chatting under their lease`);
-          return null;
-        }
-        if (err instanceof CrucibleRefused && err.code === 'not_resident') return this.load(client, server, model, signal, lease, loadContext);
-        throw this.mapRefusal(err, server);
-      }
-    }
+    if (info.resident) return;
     // Refused here only on what the server STATED (false). Unstated (null,
     // 1.0.25+) goes to the load, and the server's own refusal names the cause.
     if (info.backendSupported === false || info.installed === false) {
@@ -1031,77 +1103,15 @@ export class CrucibleChatService {
         `"${model}" ${unsupported ? `can't run on "${server}"` : `isn't downloaded on "${server}"`}`
           + `${info.reason ? ` (${info.reason})` : ''}. Pick another model, or download it in Settings › AI.`, server);
     }
-    return this.load(client, server, model, signal, lease, loadContext);
+    await this.load(client, server, model, signal, loadContext);
   }
 
-  /**
-   * A lease on the resident `model`, waiting in Crucible's line when the card
-   * is busy (1.0.74: the SDK sends the lease with `queue`, and the request is
-   * held open until its turn; an older server is asked again without it and
-   * refuses busy as before). The request itself says nothing while it waits,
-   * so the line is read beside it: the task is told its place, and the stall
-   * watchdog that it is alive. The SDK's lease takes no signal, so a cancel
-   * takes our row out of the line (and a lease granted as the cancel landed
-   * is given back). Taken out by anyone else (expired, the operator, a
-   * restart): busy, so a queue run parks.
-   */
-  private async leaseInLine(client: CrucibleClient, server: string, model: string, signal: AbortSignal | undefined): Promise<Lease> {
-    throwIfAborted(signal);
-    let waitingId: string | null = null;
-    let told: string | null = null;
-    const look = async (): Promise<void> => {
-      try {
-        const line = await client.queue();
-        const ours = line.items.find((item) => item.kind === 'lease' && item.model === model && item.client === CRUCIBLE_CLIENT_NAME);
-        this.touch();
-        if (ours === undefined) return;
-        waitingId = ours.jobId;
-        const place = `Waiting in Crucible's queue on ${server} (${ours.position} of ${line.depth})`;
-        if (place !== told) this.waiting(place);
-        told = place;
-        if (signal?.aborted) await client.removeFromQueue(ours.jobId).catch(() => undefined);
-      } catch {
-        // The line is a display; the lease answers for itself.
-      }
-    };
-    const poll = setInterval(() => void look(), this.queuePollMs);
-    const onAbort = (): void => {
-      if (waitingId !== null) void client.removeFromQueue(waitingId).catch(() => undefined);
-      else void look();
-    };
-    signal?.addEventListener('abort', onAbort, { once: true });
-    try {
-      const held = await client.lease(model, { act: BRIEFCASE_ACT, ttlSeconds: LEASE_TTL_SECONDS });
-      if (told !== null) this.waiting(`Starting on ${server}...`);
-      if (signal?.aborted) {
-        await this.releaseLeaseQuietly(client, server, held.leaseId);
-        throw new CrucibleChatCancelled();
-      }
-      return held;
-    } catch (err) {
-      if (err instanceof CrucibleRefused && err.code === 'removed_from_queue') {
-        if (signal?.aborted) throw new CrucibleChatCancelled();
-        const reason = (err.details as { reason?: unknown } | null)?.reason;
-        throw new CrucibleBusyError(server, `the lease on ${model} was taken out of Crucible's queue (${typeof reason === 'string' ? reason : 'removed'}): ${err.serverMessage}`);
-      }
-      throw err;
-    } finally {
-      clearInterval(poll);
-      signal?.removeEventListener('abort', onAbort);
-    }
-  }
-
-  private async load(client: CrucibleClient, server: string, model: string, signal: AbortSignal | undefined, lease: boolean, context?: number): Promise<string | null> {
+  private async load(client: CrucibleClient, server: string, model: string, signal: AbortSignal | undefined, context?: number): Promise<void> {
     let loadId: string;
     try {
-      const options = {
-        ...(lease ? { lease: { act: BRIEFCASE_ACT, ttlSeconds: LEASE_TTL_SECONDS } } : {}),
-        ...(context === undefined ? {} : { context }),
-      };
-      // 1.0.71+: the SDK submits a load with `queue`, so a busy card puts it
-      // in Crucible's line instead of refusing it (QUEUE.md); an older server
-      // is sent it again without, and refuses busy as before.
-      loadId = await client.loadModel(model, Object.keys(options).length > 0 ? options : undefined);
+      // The SDK submits a load with `queue`: inside our session it runs ahead
+      // of the line; outside one, a busy card puts it in the line (QUEUE.md).
+      loadId = await client.loadModel(model, context === undefined ? undefined : { context });
     } catch (err) {
       throw this.mapRefusal(err, server);
     }
@@ -1141,35 +1151,13 @@ export class CrucibleChatService {
       throw new CrucibleChatError(409, 'load_cancelled', `Loading ${model} on "${server}" was cancelled on the server.`, server);
     }
     this.modelsCache.delete(server);
-    if (!lease) {
-      // A cancel that lands as an unleased load finishes leaves the model on the
-      // card with nothing holding it: no lease to release, and no chat whose
-      // end would settle it. Crucible never clears a load's own result, so this
-      // side asks for the unload it would otherwise never get.
-      if (signal?.aborted) {
-        await this.unloadOrphanLoad(client, server, model);
-        throw new CrucibleChatCancelled();
-      }
-      return null;
-    }
-    // A cancel that lands as the load finishes must still give back the lease
-    // the load took: it is in no hold yet, so nothing else would release it
-    // and the card stays pinned for another app until its TTL runs out.
+    // A cancel that lands as the load finishes leaves the model on the card
+    // with nothing using it: Crucible never clears a load's own result, so this
+    // side asks for the unload it would otherwise never get.
     if (signal?.aborted) {
-      await this.releaseOrphanLease(client, server, model, loadId);
+      await this.unloadOrphanLoad(client, server, model);
       throw new CrucibleChatCancelled();
     }
-    const status = await client.job(loadId);
-    if (status.leaseId === null) {
-      this.logger.warn(`[${server}] load of ${model} finished without the lease it was asked for; chatting unprotected`);
-    } else {
-      this.recordLease(server, model, status.leaseId);
-    }
-    if (signal?.aborted) {
-      if (status.leaseId !== null) await this.releaseLeaseQuietly(client, server, status.leaseId);
-      throw new CrucibleChatCancelled();
-    }
-    return status.leaseId;
   }
 
   /**
@@ -1248,18 +1236,7 @@ export class CrucibleChatService {
     return new CrucibleChatError(0, 'unreachable', `Crucible "${server}" isn't answering (${wire}).`, server);
   }
 
-  private async releaseOrphanLease(client: CrucibleClient, server: string, model: string, loadId: string): Promise<void> {
-    try {
-      const status = await client.job(loadId);
-      if (status.leaseId === null) return;
-      this.recordLease(server, model, status.leaseId);
-      await this.releaseLeaseQuietly(client, server, status.leaseId);
-    } catch (err) {
-      this.logger.warn(`[${server}] could not look up the lease of cancelled load ${loadId}: ${(err as Error).message} (it expires on its own)`);
-    }
-  }
-
-  /** Unload what a cancelled, unleased load put on the card. Refused (someone else leased or is using it): theirs now, left alone. */
+  /** Unload what a cancelled load put on the card. Refused (someone else is using it): theirs now, left alone. */
   private async unloadOrphanLoad(client: CrucibleClient, server: string, model: string): Promise<void> {
     try {
       const jobId = await client.unloadModel(model);
@@ -1270,99 +1247,11 @@ export class CrucibleChatService {
     }
   }
 
-  /** Release a lease no hold owns; kept in the ledger for a sweep when the server can't be told. */
-  private async releaseLeaseQuietly(client: CrucibleClient, server: string, leaseId: string): Promise<void> {
-    try {
-      await client.release(leaseId);
-      this.ledger?.settle(server, 'lease', leaseId);
-    } catch (err) {
-      if (err instanceof CrucibleRefused && (err.code === 'unknown_lease' || err.status === 404)) {
-        this.ledger?.settle(server, 'lease', leaseId);
-        return;
-      }
-      this.logger.warn(`[${server}] releasing ${leaseId} after a cancel failed: ${(err as Error).message} (it expires on its own)`);
-    }
-  }
-
-  private recordLease(server: string, model: string, leaseId: string): void {
-    this.ledger?.record({ server, kind: 'lease', id: leaseId, jobType: 'lease', model, localId: this.localId() });
-  }
-
   private mapRefusal(err: unknown, server: string): Error {
     const line = busyLineOfRefusal(err);
     if (line !== null) return new CrucibleBusyError(server, line);
     if (err instanceof CrucibleRefused) return new CrucibleChatError(err.status, err.code, err.serverMessage, server, null, err.details);
     return err instanceof Error ? err : new Error(String(err));
-  }
-
-  /**
-   * Renew `hold`'s lease every {@link heartbeatMs}. A beat that fails for
-   * weather is not a lost lease: it is tried again every
-   * {@link heartbeatRetryMs} for as long as the last renewal still covers it.
-   * `unknown_lease` is the server saying it is gone. Running out of TTL
-   * unrenewed is this side giving up: the lease is released best-effort (it may
-   * still be open there) and the next call re-takes one.
-   */
-  private startHeartbeat(hold: Held): void {
-    let renewedAt = this.now();
-    const schedule = (ms: number): void => {
-      if (hold.stopped) return;
-      hold.beat = setTimeout(() => void tick(), ms);
-      hold.beat.unref?.();
-    };
-    const tick = async (): Promise<void> => {
-      if (hold.stopped) return;
-      try {
-        const client = await this.servers.clientFor(hold.server);
-        await client.heartbeat(hold.leaseId!);
-        renewedAt = this.now();
-        schedule(this.heartbeatMs);
-      } catch (err) {
-        if (hold.stopped) return;
-        const why = (err as Error).message;
-        if (isUnknownLease(err)) {
-          hold.lost = true;
-          // The server no longer holds it for us: nothing left for a sweep to release.
-          this.ledger?.settle(hold.server, 'lease', hold.leaseId!);
-          this.logger.warn(`[${hold.server}] lease on ${hold.model} is gone (${why}); the next call re-takes it`);
-          return;
-        }
-        if (this.now() + this.heartbeatRetryMs < renewedAt + this.leaseTtlMs) {
-          this.logger.warn(`[${hold.server}] heartbeat of ${hold.leaseId} failed (${why}); trying again in ${Math.round(this.heartbeatRetryMs / 100) / 10} s`);
-          schedule(this.heartbeatRetryMs);
-          return;
-        }
-        hold.lost = true;
-        hold.mayStillHold = true;
-        this.logger.warn(`[${hold.server}] lease on ${hold.model} could not be renewed within its TTL (${why}); releasing it, and the next call re-takes one`);
-        await this.releaseGivenUp(hold);
-      }
-    };
-    schedule(this.heartbeatMs);
-  }
-
-  /**
-   * Best-effort release of a lease this side gave up on. When it can't be
-   * told, the ledger keeps the row for the sweep and the id is remembered, so
-   * a re-lease refused `leased` naming it is recognised as ours.
-   */
-  private async releaseGivenUp(hold: Held): Promise<void> {
-    if (!hold.mayStillHold || hold.leaseId === null) return;
-    try {
-      const client = await this.servers.clientFor(hold.server);
-      await client.release(hold.leaseId);
-      hold.mayStillHold = false;
-      this.ledger?.settle(hold.server, 'lease', hold.leaseId);
-      this.logger.log(`[${hold.server}] released given-up lease ${hold.leaseId}`);
-    } catch (err) {
-      if (isUnknownLease(err)) {
-        hold.mayStillHold = false;
-        this.ledger?.settle(hold.server, 'lease', hold.leaseId);
-        return;
-      }
-      this.staleLeases.set(hold.server, hold.leaseId);
-      this.logger.warn(`[${hold.server}] releasing given-up lease ${hold.leaseId} failed: ${(err as Error).message} (kept for the sweep; it expires on its own)`);
-    }
   }
 
   private forgetHold(server: string, model: string): void {
@@ -1371,33 +1260,22 @@ export class CrucibleChatService {
     if (held !== undefined && held.model === model) held.lost = true;
   }
 
-  private async releaseHold(scope: RunScope, hold: Held): Promise<void> {
-    hold.stopped = true;
-    if (hold.beat !== null) clearTimeout(hold.beat);
-    scope.held.delete(hold.server);
-    if (hold.lost) {
-      // Given up on but maybe still open there: one more try, before it is re-taken.
-      await this.releaseGivenUp(hold);
-      return;
-    }
-    if (hold.leaseId === null) return;
-    try {
-      const client = await this.servers.clientFor(hold.server);
-      await client.release(hold.leaseId);
-      this.ledger?.settle(hold.server, 'lease', hold.leaseId);
-      this.logger.log(`[${hold.server}] released ${hold.model} (${hold.leaseId})`);
-    } catch (err) {
-      if (err instanceof CrucibleRefused && (err.code === 'unknown_lease' || err.status === 404)) {
-        this.ledger?.settle(hold.server, 'lease', hold.leaseId);
-        return;
+  /** Close every session the run opened (the server forgets a session it already ended). */
+  private async releaseScope(scope: RunScope): Promise<void> {
+    await scope.lock.catch(() => undefined);
+    scope.held.clear();
+    for (const open of [...scope.sessions.values()]) {
+      this.stopSession(open);
+      scope.sessions.delete(open.server);
+      try {
+        const end = await open.session.close();
+        this.ledger?.settle(open.server, 'session', open.session.id);
+        this.logger.log(`[${open.server}] closed session ${open.session.id} (${end.reason}, ${end.itemsRun ?? '?'} item(s))`);
+      } catch (err) {
+        // Kept in the ledger: the quit or startup sweep closes it (or it idles out on its own).
+        this.logger.warn(`[${open.server}] closing session ${open.session.id} failed: ${(err as Error).message} (it closes itself when idle)`);
       }
-      // Kept in the ledger: the quit or startup sweep releases it (or it expires on its own).
-      this.logger.warn(`[${hold.server}] releasing ${hold.leaseId} failed: ${(err as Error).message} (it expires on its own)`);
     }
   }
 
-  private async releaseScope(scope: RunScope): Promise<void> {
-    await scope.lock.catch(() => undefined);
-    for (const hold of [...scope.held.values()]) await this.releaseHold(scope, hold);
-  }
 }

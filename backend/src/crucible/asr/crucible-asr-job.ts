@@ -39,7 +39,7 @@ import * as fs from 'fs';
 import {
   CrucibleAuthError,
   CrucibleBusy,
-  CrucibleLeased,
+  CrucibleSessionHeld,
   CrucibleNotACrucible,
   CrucibleProtocolError,
   CrucibleRefused,
@@ -90,7 +90,7 @@ export function isAsrUnavailable(err: unknown): err is CrucibleAsrUnavailable {
 export function classifyAsrRefusal(err: unknown, server: string, verb: string): unknown {
   const at = `Crucible on ${server}`;
   if (err instanceof CrucibleBusy) return new CrucibleParkedError(server, err.busyLine);
-  if (err instanceof CrucibleLeased) return new CrucibleParkedError(server, err.leasedLine);
+  if (err instanceof CrucibleSessionHeld) return new CrucibleParkedError(server, err.serverMessage);
   const down = crucibleUnavailableCause(err);
   if (down !== null) return new CrucibleAsrUnavailable('crucible_unreachable', server, `${at} could not be reached for ${verb} (${down}).`);
   if (err instanceof CrucibleAuthError) {

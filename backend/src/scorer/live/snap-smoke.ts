@@ -492,7 +492,7 @@ async function main(): Promise<number> {
       if (!interrupt.interrupted()) interrupt.dispose();
     }
     const after = await (await factory.clientFor(server!)).activity();
-    console.log(`# after the run: lease ${after.lease ? `${after.lease.client}/${after.lease.act}` : 'none'}, resident ${after.resident?.id ?? 'none'}`);
+    console.log(`# after the run: session ${after.session ? `${after.session.client}/${after.session.act} (${after.session.status})` : 'none'}, resident ${after.resident?.id ?? 'none'}`);
   }
 
   // ---- summary

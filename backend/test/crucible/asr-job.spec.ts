@@ -5,6 +5,7 @@
  * job, a busy card, and WhisperService: Crucible is the only transcriber (P7),
  * so an unreachable or busy server is a reason to park, never a fallback.
  */
+import { CRUCIBLE_CLIENT_NAME } from '../../src/crucible/client-factory';
 import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -70,7 +71,7 @@ describe('the job flow', () => {
     });
     // The submit: model named, exactly {language, vad_filter, word_timestamps}, vad false on mlx.
     const job = fake.jobs[0];
-    expect(job).toMatchObject({ type: 'asr', model: 'qwen3-asr-0.6b-mlx', client: 'briefcase', status: 'done' });
+    expect(job).toMatchObject({ type: 'asr', model: 'qwen3-asr-0.6b-mlx', client: CRUCIBLE_CLIENT_NAME, status: 'done' });
     // Qwen: a stated language (it cannot detect), no VAD, and words (they cut its pieces into cues).
     expect(job.params).toEqual({ language: 'en', vad_filter: false, word_timestamps: true });
     expect(job.inputs).toEqual({ 'My_Video_1080p_.mp4': fake.uploads[0].blobId });

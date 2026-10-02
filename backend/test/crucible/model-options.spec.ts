@@ -276,7 +276,7 @@ describe('CrucibleAiService.models, end to end against the fake', () => {
     expect(body).not.toHaveProperty('temperature');
     // No local model was loaded or leased for it.
     expect(fake.jobs).toHaveLength(0);
-    expect(fake.leases.taken).toHaveLength(0);
+    expect(fake.sessions.opened).toHaveLength(0);
   });
 
   it('every upstream configured, on a server that is not this computer\'s: every group, named for it; no key crosses', async () => {
