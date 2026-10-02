@@ -111,7 +111,7 @@ export function asrProgressToTask(server: string, p: AsrJobProgress): { percent:
     case 'queued':
       return { percent: 7, message: `Queued on Crucible on ${server}${p.position !== null && p.position > 0 ? ` (position ${p.position})` : ''}...` };
     case 'waiting-card':
-      return { percent: 7, message: `Waiting for the GPU on ${server}: ${p.holder}` };
+      return { percent: 7, message: p.line };
     case 'warming':
       return { percent: 9, message: `Crucible on ${server}: ${p.message ?? 'loading the model...'}` };
     case 'decoding': {

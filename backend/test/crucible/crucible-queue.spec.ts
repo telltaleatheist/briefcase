@@ -177,8 +177,9 @@ describe('the card busy with something Crucible cannot evict (accelerator_busy)'
   });
 });
 
-describe('first in line, waiting for a process Crucible does not own to free the card (1.0.82)', () => {
+describe('first in line, waiting for a process Crucible does not own to free the card (1.0.82+)', () => {
   const HOLDER = 'pid 4242 python (19.5 GiB) holds the card';
+  const LINE = `Crucible on mac is waiting for the accelerator, checked again every 5 s until 13:00:00: ${HOLDER}`;
 
   it('a load says what it waits for, keeps the run alive, then loads and the chat runs', async () => {
     const { fake, chat } = await rig();
@@ -190,7 +191,7 @@ describe('first in line, waiting for a process Crucible does not own to free the
       { onWaiting: (line) => lines.push(line), onActivity: () => { beats += 1; } },
     );
     expect(response.text).toContain('Cooking');
-    expect(lines).toContain(`Waiting for the GPU on mac: ${HOLDER}`);
+    expect(lines).toContain(LINE);
     expect(lines[lines.length - 1]).toBe('Loading qwen3.5-9b on mac...');
     expect(beats).toBeGreaterThan(0);
   });
@@ -209,7 +210,7 @@ describe('first in line, waiting for a process Crucible does not own to free the
       onProgress: (_percent, message) => seen.push(message),
     });
     expect(outcome.cues).toBe(3);
-    expect(seen).toContain(`Waiting for the GPU on mac: ${HOLDER}`);
+    expect(seen).toContain(LINE);
   });
 
   it('a wait that runs out is removed expired: the task parks', async () => {
@@ -224,5 +225,15 @@ describe('first in line, waiting for a process Crucible does not own to free the
       server: 'mac', model: 'qwen3-asr-0.6b-mlx', videoFile: video, outputDir: tempDir('queue-out-'), baseName: 'a', localId: 'a',
     }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(CrucibleParkedError);
+  });
+
+  it('a session opening while the card is held says what it waits for, then the run goes on (1.0.83 onWaiting)', async () => {
+    const { fake, chat } = await rig({ resident: 'qwen3.5-9b' });
+    fake.inject({ queueLine: { positions: [1], then: 'start', waitingFor: HOLDER, stepMs: 20 } });
+    const lines: string[] = [];
+    const ran = await chat.withRun(() => chat.withModel('mac', 'qwen3.5-9b', async () => 'ran'), { parkOnBusy: true, onWaiting: (line) => lines.push(line) });
+    expect(ran).toBe('ran');
+    expect(lines).toContain(LINE);
+    expect(lines[lines.length - 1]).toBe('Starting on mac...');
   });
 });

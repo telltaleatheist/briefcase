@@ -158,7 +158,7 @@ export interface NamedFaults {
     positions: number[];
     then: 'start' | { removed: 'expired' | 'operator' | 'server_restart' };
     stepMs?: number;
-    /** 1.0.82: at the front, a job's `waiting` event naming a foreign holder of the card (jobs only). */
+    /** 1.0.82+: at the front, a `waiting` event naming a foreign holder of the card (a job's stream, or an opening session's). */
     waitingFor?: string;
   };
 }
@@ -1135,6 +1135,14 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
     };
   }
 
+  /** A card wait as 1.0.83 sends it (flat): the server's sentence ends with the holder. */
+  function cardWaitEvent(holder: string): Record<string, unknown> {
+    return {
+      code: 'accelerator_busy', message: `waiting for the accelerator, checked again every 5 s until 13:00:00: ${holder}`,
+      details: null, since: '2026-10-02T12:00:00Z', next_check_at: '2026-10-02T12:00:05Z',
+    };
+  }
+
   // ── queue sessions (1.0.76) ──────────────────────────────────────────
   function newSession(client: string | null, act: string, model: string | null): FakeSession {
     const row: FakeSession = {
@@ -1213,6 +1221,12 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
           pushSessionEvent(row, i === 0 ? 'queued' : 'moved', { position, of: line.positions[0] });
         }, step * i).unref?.();
       });
+      if (line.waitingFor !== undefined) {
+        const holder = line.waitingFor;
+        setTimeout(() => {
+          if (row.status === 'queued') pushSessionEvent(row, 'waiting', cardWaitEvent(holder));
+        }, step * line.positions.length).unref?.();
+      }
       setTimeout(() => {
         if (row.status !== 'queued') return;
         row.heldBack = false;
@@ -1330,9 +1344,7 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
       const holder = line.waitingFor;
       setTimeout(() => {
         if (job.status === 'queued') {
-          pushJobEvent(job, 'waiting', {
-            code: 'accelerator_busy', message: holder, details: null, since: '2026-10-02T12:00:00Z', next_check_at: '2026-10-02T12:00:05Z',
-          });
+          pushJobEvent(job, 'waiting', cardWaitEvent(holder));
         }
       }, step * line.positions.length + 1).unref?.();
     }

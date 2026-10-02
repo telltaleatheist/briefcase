@@ -21,19 +21,20 @@ export const QUEUE_MIN_VERSION = '1.0.71';
 export const QUEUE_HEARTBEAT_MS = 60_000;
 
 /**
- * 1.0.82: a job first in line whose load finds the card held by a process
+ * 1.0.82+: a job first in line whose load finds the card held by a process
  * Crucible does not own WAITS for it (checked every 5 s, bounded by its max
  * wait) instead of failing `accelerator_busy`, and says so with a `waiting`
- * event naming the holder: once, and again only when the holder changes. The
- * SDK does not type the event yet. The holder's sentence, or null for any
+ * event (typed since 1.0.83), repeated every 60 s while the holder stays: each
+ * repeat is the stall watchdog's heartbeat. The task's line, or null for any
  * other event.
  */
-export function cardWaitOf(event: JobEvent): string | null {
-  if (event.event !== 'unknown' || event.kind !== 'waiting') return null;
-  const data = event.data as { message?: unknown; waiting_for?: { message?: unknown } };
-  const message = typeof data.message === 'string' ? data.message
-    : typeof data.waiting_for?.message === 'string' ? data.waiting_for.message : null;
-  return message ?? 'another process holds its memory';
+export function cardWaitOf(event: JobEvent, server: string): string | null {
+  return event.event === 'waiting' ? cardWaitLine(server, event.data.message) : null;
+}
+
+/** The task's line for a card wait: the server's own sentence names how long and who holds it. */
+export function cardWaitLine(server: string, message: string): string {
+  return `Crucible on ${server} is ${message}`;
 }
 
 /** Does this server queue work (a load, an asr job) instead of refusing it busy? */

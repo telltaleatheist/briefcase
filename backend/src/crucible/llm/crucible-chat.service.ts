@@ -71,7 +71,7 @@ import { crucibleUnavailableCause } from '../transport-failure';
 import { CrucibleClientFactory } from '../client-factory';
 import { CrucibleServersService } from '../crucible-servers.service';
 import { CrucibleProbeService, compareVersions } from '../probe';
-import { QUEUE_HEARTBEAT_MS, cardWaitOf } from '../crucible-queue';
+import { QUEUE_HEARTBEAT_MS, cardWaitLine, cardWaitOf } from '../crucible-queue';
 import type { InFlightLedger } from '../in-flight-ledger';
 import { CRUCIBLE_IN_FLIGHT_LEDGER } from '../crucible.constants';
 import {
@@ -1027,6 +1027,12 @@ export class CrucibleChatService {
     try {
       session = await client.session({
         act: BRIEFCASE_ACT,
+        // 1.0.83: opening, but the card is held by a process Crucible does not own.
+        onWaiting: (wait) => {
+          waited = true;
+          this.touch();
+          this.waiting(cardWaitLine(server, wait.message));
+        },
         onQueue: ({ position, of }) => {
           waited = true;
           if (cancelledEarly) {
@@ -1189,6 +1195,8 @@ export class CrucibleChatService {
     // While the load waits in Crucible's queue the stream is quiet between
     // moves. Waiting in line is headway: the stall watchdog is told so.
     let inLine: NodeJS.Timeout | null = null;
+    /** The task was told it waits (its place, or the card): the next event says the load goes on. */
+    let shownWait = false;
     const leaveLine = (): void => {
       if (inLine !== null) clearInterval(inLine);
       inLine = null;
@@ -1201,20 +1209,22 @@ export class CrucibleChatService {
             lastEventId = event.id;
             droppedAt = null;
             wait = firstMs;
-            const card = cardWaitOf(event);
+            const card = cardWaitOf(event, server);
             // Position 0 is "not waiting" (every job's first frame before 1.0.71).
             if (event.event === 'queued' && event.data.position > 0) {
               const of = event.data.of;
               this.waiting(`Waiting in Crucible's queue on ${server} (${event.data.position}${of !== null ? ` of ${of}` : ''})`);
               inLine ??= setInterval(() => this.touch(), QUEUE_HEARTBEAT_MS);
+              shownWait = true;
             } else if (card !== null) {
-              // 1.0.82: first in line, waiting for a process Crucible does not
-              // own to let go of the card. Said once per holder: the run says
-              // it is alive meanwhile.
-              this.waiting(`Waiting for the GPU on ${server}: ${card}`);
-              inLine ??= setInterval(() => this.touch(), QUEUE_HEARTBEAT_MS);
-            } else if (inLine !== null) {
+              // First in line, waiting for a process Crucible does not own to
+              // let go of the card; repeated every 60 s (each one touched above).
+              this.waiting(card);
               leaveLine();
+              shownWait = true;
+            } else if (shownWait) {
+              leaveLine();
+              shownWait = false;
               this.waiting(`Loading ${model} on ${server}...`);
             }
             if (event.event === 'failed' || event.event === 'cancelled' || event.event === 'done' || event.event === 'removed') return event;
