@@ -154,7 +154,13 @@ export interface NamedFaults {
    * session waits the same way (its own stream says `queued`/`moved`, GET
    * /v1/queue lists it as kind "session"), then opens, or is `removed`.
    */
-  queueLine?: { positions: number[]; then: 'start' | { removed: 'expired' | 'operator' | 'server_restart' }; stepMs?: number };
+  queueLine?: {
+    positions: number[];
+    then: 'start' | { removed: 'expired' | 'operator' | 'server_restart' };
+    stepMs?: number;
+    /** 1.0.82: at the front, a job's `waiting` event naming a foreign holder of the card (jobs only). */
+    waitingFor?: string;
+  };
 }
 
 /** One `GET /v1/models` row, in the SDK's camelCase; served snake_case. */
@@ -1320,6 +1326,16 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
         if (job.status === 'queued') pushJobEvent(job, 'queued', { position, of: line.positions[0], max_wait_s: 3600, expires_at: '2026-09-30T13:00:00Z' });
       }, step * (i + 1)).unref?.();
     });
+    if (line.waitingFor !== undefined) {
+      const holder = line.waitingFor;
+      setTimeout(() => {
+        if (job.status === 'queued') {
+          pushJobEvent(job, 'waiting', {
+            code: 'accelerator_busy', message: holder, details: null, since: '2026-10-02T12:00:00Z', next_check_at: '2026-10-02T12:00:05Z',
+          });
+        }
+      }, step * line.positions.length + 1).unref?.();
+    }
     setTimeout(() => {
       if (job.status !== 'queued') return;
       if (line.then === 'start') {

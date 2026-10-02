@@ -49,7 +49,7 @@ import {
 import type { CrucibleClient, JobEvent, UploadResult } from '@crucible/client';
 import { EngineResolveError } from '../engine-resolve';
 import { CrucibleRegistryError } from '../errors';
-import { QUEUE_HEARTBEAT_MS } from '../crucible-queue';
+import { QUEUE_HEARTBEAT_MS, cardWaitOf } from '../crucible-queue';
 import { BUSY_REFUSAL_CODES, CrucibleParkedError } from '../llm/errors';
 import { crucibleUnavailableCause } from '../transport-failure';
 
@@ -140,6 +140,8 @@ export type AsrJobProgress =
   /** `sentBytes` is null when this runtime can't count them (the beat still comes). */
   | { readonly kind: 'uploading'; readonly sentBytes: number | null; readonly totalBytes: number }
   | { readonly kind: 'queued'; readonly position: number | null }
+  /** 1.0.82: first in line, waiting for a process Crucible does not own to free the card (its sentence names it). */
+  | { readonly kind: 'waiting-card'; readonly holder: string }
   /** `message`: the engine's readiness line, or null when the frame carried none. */
   | { readonly kind: 'warming'; readonly message: string | null }
   | { readonly kind: 'decoding'; readonly processedS: number | null; readonly totalS: number | null; readonly message: string | null }
@@ -498,8 +500,15 @@ export async function runAsrJob(options: RunAsrJobOptions): Promise<AsrJobOutcom
         for await (const event of client.events(admitted, resume)) {
           failures = 0;
           if (event.id > lastEventId) lastEventId = event.id;
-          if (event.event !== 'queued') leaveLine();
-          if (event.event === 'queued') {
+          const card = cardWaitOf(event);
+          if (event.event !== 'queued' && card === null) leaveLine();
+          if (card !== null) {
+            // Said once per holder: said again every QUEUE_HEARTBEAT_MS, so the task never reads as stalled.
+            const place = { kind: 'waiting-card' as const, holder: card };
+            options.onProgress?.(place);
+            if (inLine !== null) clearInterval(inLine);
+            inLine = setInterval(() => options.onProgress?.(place), QUEUE_HEARTBEAT_MS);
+          } else if (event.event === 'queued') {
             const place = { kind: 'queued' as const, position: event.data.position };
             options.onProgress?.(place);
             // Position 0 is "not waiting" (every job's first frame before 1.0.71).

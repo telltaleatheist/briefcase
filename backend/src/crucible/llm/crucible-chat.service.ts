@@ -71,7 +71,7 @@ import { crucibleUnavailableCause } from '../transport-failure';
 import { CrucibleClientFactory } from '../client-factory';
 import { CrucibleServersService } from '../crucible-servers.service';
 import { CrucibleProbeService, compareVersions } from '../probe';
-import { QUEUE_HEARTBEAT_MS } from '../crucible-queue';
+import { QUEUE_HEARTBEAT_MS, cardWaitOf } from '../crucible-queue';
 import type { InFlightLedger } from '../in-flight-ledger';
 import { CRUCIBLE_IN_FLIGHT_LEDGER } from '../crucible.constants';
 import {
@@ -1201,10 +1201,17 @@ export class CrucibleChatService {
             lastEventId = event.id;
             droppedAt = null;
             wait = firstMs;
+            const card = cardWaitOf(event);
             // Position 0 is "not waiting" (every job's first frame before 1.0.71).
             if (event.event === 'queued' && event.data.position > 0) {
               const of = event.data.of;
               this.waiting(`Waiting in Crucible's queue on ${server} (${event.data.position}${of !== null ? ` of ${of}` : ''})`);
+              inLine ??= setInterval(() => this.touch(), QUEUE_HEARTBEAT_MS);
+            } else if (card !== null) {
+              // 1.0.82: first in line, waiting for a process Crucible does not
+              // own to let go of the card. Said once per holder: the run says
+              // it is alive meanwhile.
+              this.waiting(`Waiting for the GPU on ${server}: ${card}`);
               inLine ??= setInterval(() => this.touch(), QUEUE_HEARTBEAT_MS);
             } else if (inLine !== null) {
               leaveLine();

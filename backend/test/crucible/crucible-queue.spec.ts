@@ -176,3 +176,53 @@ describe('the card busy with something Crucible cannot evict (accelerator_busy)'
     expect((err as Error).message).toContain('19.5 GiB of the 24.0 GiB card is in use');
   });
 });
+
+describe('first in line, waiting for a process Crucible does not own to free the card (1.0.82)', () => {
+  const HOLDER = 'pid 4242 python (19.5 GiB) holds the card';
+
+  it('a load says what it waits for, keeps the run alive, then loads and the chat runs', async () => {
+    const { fake, chat } = await rig();
+    fake.inject({ queueLine: { positions: [1], then: 'start', waitingFor: HOLDER, stepMs: 10 } });
+    const lines: string[] = [];
+    let beats = 0;
+    const response = await chat.withRun(
+      () => new AIProviderService(chat).generateText('prompt', { provider: 'local', model: 'qwen3.5-9b' }, 'chapter'),
+      { onWaiting: (line) => lines.push(line), onActivity: () => { beats += 1; } },
+    );
+    expect(response.text).toContain('Cooking');
+    expect(lines).toContain(`Waiting for the GPU on mac: ${HOLDER}`);
+    expect(lines[lines.length - 1]).toBe('Loading qwen3.5-9b on mac...');
+    expect(beats).toBeGreaterThan(0);
+  });
+
+  it('a transcription says what it waits for, then transcribes', async () => {
+    const { fake, h } = await rig();
+    fake.inject({ queueLine: { positions: [1], then: 'start', waitingFor: HOLDER, stepMs: 10 } });
+    const ledger = InFlightLedger.inDir(h.dir, () => undefined);
+    const svc = new CrucibleTranscriptionService(new CrucibleServersService(h.registry, h.factory), h.probes, h.factory, ledger);
+    svc.jobTiming = { doorDelaysMs: [5], streamDelaysMs: [5, 5, 5] };
+    const video = path.join(tempDir('queue-video-'), 'clip.mp4');
+    fs.writeFileSync(video, Buffer.alloc(16 * 1024, 3));
+    const seen: string[] = [];
+    const outcome = await svc.transcribe({
+      server: 'mac', model: 'qwen3-asr-0.6b-mlx', videoFile: video, outputDir: tempDir('queue-out-'), baseName: 'a', localId: 'a',
+      onProgress: (_percent, message) => seen.push(message),
+    });
+    expect(outcome.cues).toBe(3);
+    expect(seen).toContain(`Waiting for the GPU on mac: ${HOLDER}`);
+  });
+
+  it('a wait that runs out is removed expired: the task parks', async () => {
+    const { fake, h } = await rig();
+    fake.inject({ queueLine: { positions: [1], then: { removed: 'expired' }, waitingFor: HOLDER, stepMs: 10 } });
+    const ledger = InFlightLedger.inDir(h.dir, () => undefined);
+    const svc = new CrucibleTranscriptionService(new CrucibleServersService(h.registry, h.factory), h.probes, h.factory, ledger);
+    svc.jobTiming = { doorDelaysMs: [5], streamDelaysMs: [5, 5, 5] };
+    const video = path.join(tempDir('queue-video-'), 'clip.mp4');
+    fs.writeFileSync(video, Buffer.alloc(16 * 1024, 3));
+    const err = await svc.transcribe({
+      server: 'mac', model: 'qwen3-asr-0.6b-mlx', videoFile: video, outputDir: tempDir('queue-out-'), baseName: 'a', localId: 'a',
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(CrucibleParkedError);
+  });
+});
