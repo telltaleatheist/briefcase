@@ -146,7 +146,8 @@ export interface NamedFaults {
   /** Load jobs stay `running` until DELETEd (a kill mid-load, for the sweep specs). */
   holdLoads?: boolean;
   /**
-   * 1.0.71's queue: a job submitted WITH `queue` (load-model, asr) waits in
+   * 1.0.71's queue: a job submitted without `queue: false` (load-model, asr;
+   * waiting is the default since 1.0.79) waits in
    * line, a `queued` event per position (`of` the first), then `started` and
    * runs, or is taken out (`removed` with that reason). Without `queue` the
    * submit runs as before. `stepMs` apart (default 5). 1.0.76: a queue
@@ -1307,8 +1308,9 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
    * (see NamedFaults.queueLine), then `go` runs it; else `go` runs at once.
    */
   function throughLine(job: FakeJob, body: Record<string, unknown>, go: () => void): void {
+    // 1.0.79: waiting is the default; only `queue: false` refuses instead.
     const line = named.queueLine;
-    if (line === undefined || body['queue'] === undefined) {
+    if (line === undefined || body['queue'] === false) {
       go();
       return;
     }
@@ -1549,9 +1551,19 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
       }
     } else {
       const held = heldByOtherSession(req);
-      if (held !== null && body['queue'] === undefined) {
+      // 1.0.79: a chat waits for another app's session to close unless it says `queue: false`.
+      if (held !== null && body['queue'] === false) {
         refusal(res, 409, 'session_open', held, { session_id: openSession!.id });
         return;
+      }
+      if (held !== null) {
+        const freed = await new Promise<boolean>((resolve) => {
+          const poll = setInterval(() => {
+            if (heldByOtherSession(req) === null) { clearInterval(poll); resolve(true); }
+          }, 5);
+          res.on('close', () => { clearInterval(poll); resolve(false); });
+        });
+        if (!freed || res.destroyed) return;
       }
       if (resident !== model) {
         refusal(res, 409, 'model_not_resident', `'${model}' is not resident${resident ? `; '${resident}' is` : '; nothing is'}`, { resident });

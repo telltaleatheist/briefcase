@@ -53,12 +53,13 @@ describe('which servers queue', () => {
 });
 
 describe('a load in Crucible\'s line, outside a run', () => {
-  it('is submitted with the queue, waits its turn, and the chat runs', async () => {
+  it('waits its turn (waiting is the default, no queue field sent), and the chat runs', async () => {
     const { fake, chat } = await rig();
     fake.inject({ queueLine: { positions: [2, 1], then: 'start' } });
     const response = await new AIProviderService(chat).generateText('prompt', { provider: 'local', model: 'qwen3.5-9b' }, 'chapter');
     expect(response.text).toContain('Cooking');
-    expect(fake.requestsTo('/v1/jobs', 'POST')[0].body).toMatchObject({ type: 'load-model', queue: {} });
+    expect(fake.requestsTo('/v1/jobs', 'POST')[0].body).toMatchObject({ type: 'load-model' });
+    expect(fake.requestsTo('/v1/jobs', 'POST')[0].body).not.toHaveProperty('queue');
     expect(fake.sessions.opened).toHaveLength(0);
     expect(fake.resident()).toBe('qwen3.5-9b');
   });
@@ -129,13 +130,14 @@ describe('a transcription in Crucible\'s line', () => {
     });
   }
 
-  it('is submitted with the queue and says its place while it waits, then transcribes', async () => {
+  it('waits its turn (the default), saying its place, then transcribes', async () => {
     const { fake, h } = await rig();
     fake.inject({ queueLine: { positions: [3, 2, 1], then: 'start' } });
     const seen: string[] = [];
     const outcome = await transcribe(fake, h, (_percent, message) => seen.push(message));
     expect(outcome.cues).toBe(3);
-    expect(fake.requestsTo('/v1/jobs', 'POST')[0].body).toMatchObject({ type: 'asr', queue: {} });
+    expect(fake.requestsTo('/v1/jobs', 'POST')[0].body).toMatchObject({ type: 'asr' });
+    expect(fake.requestsTo('/v1/jobs', 'POST')[0].body).not.toHaveProperty('queue');
     expect(seen).toEqual(expect.arrayContaining([
       'Queued on Crucible on mac (position 3)...',
       'Queued on Crucible on mac (position 1)...',

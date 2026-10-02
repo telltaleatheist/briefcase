@@ -202,11 +202,13 @@ describe('CrucibleChatService: one server', () => {
     expect(waits.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('outside a run, another app\'s open session refuses a local chat busy (session_open), never a failure', async () => {
+  it('outside a run, a local chat waits for another app\'s open session to close (1.0.79: waiting is the default)', async () => {
     await start({ resident: 'qwen3.5-9b' });
     fake.sessionAsOther('bookforge');
-    const failure = await chat.chat({ model: 'qwen3.5-9b', prompt: 'x' }).catch((e) => e);
-    expect(failure).toBeInstanceOf(CrucibleBusyError);
+    setTimeout(() => fake.endSession('client'), 60);
+    const result = await chat.chat({ model: 'qwen3.5-9b', prompt: 'x' });
+    expect(result.text).toBe('{"ok":true}');
+    expect(fake.chatBodies()[0]).not.toHaveProperty('queue');
   });
 
   it('a model not downloaded on the server fails by name, without a load', async () => {

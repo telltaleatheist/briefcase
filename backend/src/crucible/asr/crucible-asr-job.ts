@@ -412,10 +412,8 @@ export async function runAsrJob(options: RunAsrJobOptions): Promise<AsrJobOutcom
         params: { ...options.params },
         inputs: { [options.filename]: { blobId } },
         ...(clientRef === undefined ? {} : { clientRef }),
-        // 1.0.71+: a busy card holds the job in Crucible's line instead of
-        // refusing it (QUEUE.md); an older server is sent it again without,
-        // and refuses busy as before.
-        queue: true,
+        // No `queue`: since 1.0.79 waiting in Crucible's line is the default
+        // (a busy card holds the job instead of refusing it, QUEUE.md).
       });
     } catch (err) {
       if (signal?.aborted) throw cancelledBeforeSubmit();
