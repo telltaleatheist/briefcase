@@ -18,8 +18,15 @@ export const PLUG =
 /** segment.py:24 — 25 outline items + the plug item = 26 letters. */
 export const MAX_ITEMS = MAX_OPTIONS - 1;
 
-/** segment.py:25 — sentences per decide request (each request primes the shared transcript once). */
-export const BATCH = 64;
+/**
+ * Questions per decide request (segment.py:25 had 64). Each request reads the
+ * shared transcript once; on Crucible 1.0.78+ the Mac answers a request's
+ * items as rows of one batched forward off that held state, so a bigger
+ * request saves round trips and the state's reuse check (crucible-pc-1,
+ * 2026-10-02: 256-512 is fine, ~85 ms an item on a held state; the door's cap
+ * is 512 items).
+ */
+export const BATCH = 256;
 
 /** segment.py:65 — the previous-sentence stand-in for the very first sentence of the video. */
 export const START_OF_VIDEO = '(start of the video)';

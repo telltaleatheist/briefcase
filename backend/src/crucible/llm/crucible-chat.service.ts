@@ -93,6 +93,8 @@ export const BRIEFCASE_ACT = 'analysis';
  * model call, an ffmpeg step) is invisible to it, so the run says it is here.
  */
 export const HEARTBEAT_MS = 30_000;
+/** How long a local chat may wait in Crucible's line before the server ends it as `removed_from_queue`. */
+export const CHAT_QUEUE_WAIT_S = 600;
 /** How long a cancelled run waits for the server's answer to its session open, so it can close what it opened. */
 export const OPEN_ANSWER_GRACE_MS = 2_000;
 export const LOAD_STREAM_RETRY: Readonly<{ firstMs: number; maxMs: number; budgetMs: number }> = { firstMs: 5_000, maxMs: 30_000, budgetMs: 5 * 60_000 };
@@ -510,7 +512,15 @@ export class CrucibleChatService {
       contextTokens,
     } satisfies ChatBodyInput);
     const promptChars = messages.reduce((sum, m) => sum + m.content.length, 0);
-    const timeoutMs = request.timeoutMs ?? (target.route === 'local' ? localTimeoutMs(promptChars) : UPSTREAM_TIMEOUT_MS);
+    // A local chat may wait in Crucible's line (the default since 1.0.79):
+    // behind another app's session when it is outside ours. Its wait is
+    // bounded on the server, so a long one ends as a clean
+    // `removed_from_queue` (busy) rather than as our read timeout, which is
+    // then sized for the wait AND the answer. Inside our session it waits for
+    // nobody, so the bound costs nothing there.
+    if (target.route === 'local') body['queue'] = { max_wait_s: CHAT_QUEUE_WAIT_S };
+    const timeoutMs = request.timeoutMs
+      ?? (target.route === 'local' ? localTimeoutMs(promptChars) + CHAT_QUEUE_WAIT_S * 1000 : UPSTREAM_TIMEOUT_MS);
 
     // A row that states no served context is loaded at the host's stated
     // ceiling (statedLocalContext), so the window it was sized for is real. A
@@ -541,6 +551,11 @@ export class CrucibleChatService {
         this.logger.log(`[${server}] chat queue full; retrying in ${Math.round(wait / 100) / 10}s (attempt ${attempts})`);
         await sleep(wait, signal);
         continue;
+      }
+      // Its bounded wait ran out (or the operator took it out of the line):
+      // nothing reached the engine. Busy, never a failure.
+      if (failure.code === 'removed_from_queue') {
+        throw new CrucibleBusyError(server, `the chat waited past ${CHAT_QUEUE_WAIT_S} s in Crucible's line: ${failure.message}`);
       }
       if (failure.code === 'model_not_resident' && target.route === 'local' && !reloaded) {
         reloaded = true;

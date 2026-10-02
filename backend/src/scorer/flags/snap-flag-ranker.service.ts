@@ -157,7 +157,8 @@ export const DEFAULT_LAYOUT: FlagLayout = 'prefix';
 /** Units per group, and the step between groups: consecutive groups share GROUP_SIZE - GROUP_STRIDE units. */
 export const GROUP_SIZE = 3;
 export const GROUP_STRIDE = 2;
-export const DEFAULT_BATCH_SIZE = 64;
+/** Group questions per decide request (see the chapters' BATCH: 256 rows of one forward on the Mac). */
+export const DEFAULT_BATCH_SIZE = 256;
 export const DEFAULT_N_PROBS = 100;
 
 @Injectable()

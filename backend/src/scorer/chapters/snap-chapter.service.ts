@@ -92,6 +92,8 @@ export interface BuildChaptersOptions {
   windows?: TimeWindows | null;
   /** Chunks chaptered at once. Default {@link CHUNKS_IN_FLIGHT}; 1 is strictly one after another. */
   chunksInFlight?: number;
+  /** Assign questions per decide request. Default {@link BATCH}. */
+  batch?: number;
 }
 
 export interface ChunkResult {
@@ -163,6 +165,7 @@ export async function runSnapChapters(
   const t0 = Date.now();
   const switchCost = opts.switchCost ?? DEFAULT_SWITCH_COST;
   const detectAds = opts.detectAds ?? true;
+  const batch = Math.max(1, opts.batch ?? BATCH);
   const signal = opts.signal;
   const timings = { outlineMs: 0, assignMs: 0, adsMs: 0, totalMs: 0 };
   if (units.length === 0) return { chapters: [], outline: [], chunks: [], seams: [], timings };
@@ -233,9 +236,9 @@ export async function runSnapChapters(
       // One question per window; every unit's row is the mean of its windows'.
       const spans = timeWindows(units, chunk.start, chunk.end, opts.windows);
       const probs: number[][] = [];
-      for (let b = 0; b < spans.length; b += BATCH) {
+      for (let b = 0; b < spans.length; b += batch) {
         throwIfAborted(signal);
-        const end = Math.min(spans.length, b + BATCH);
+        const end = Math.min(spans.length, b + batch);
         const questions: ChoiceQuestion[] = [];
         for (let w = b; w < end; w++) {
           const [first, last] = spans[w];
@@ -254,9 +257,9 @@ export async function runSnapChapters(
       for (const row of unitMeans(chunk.start, chunk.end, spans, probs)) L.push(logRow(row.map((p) => Math.log(p))));
       logger?.log(`[snap-chapters] chunk ${k}: ${spans.length} window questions for ${sents.length} sentences`);
     } else {
-      for (let b = 0; b < sents.length; b += BATCH) {
+      for (let b = 0; b < sents.length; b += batch) {
         throwIfAborted(signal);
-        const end = Math.min(sents.length, b + BATCH);
+        const end = Math.min(sents.length, b + batch);
         const questions = assignQuestions(sents, b, end, options, prevBefore);
         const resp = await scorer.decide({ state: text, questions, missingLabels: 'floor' }, { signal });
         for (let i = b; i < end; i++) {

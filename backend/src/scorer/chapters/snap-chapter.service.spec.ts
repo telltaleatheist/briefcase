@@ -89,7 +89,7 @@ describe('runSnapChapters (fake scorer)', () => {
   it('outlines, assigns in batches of 64, confirms the ad and builds chapters', async () => {
     const fake = new FakeScorer();
     const units = unitsOf(video);
-    const res = await runSnapChapters(fake, units);
+    const res = await runSnapChapters(fake, units, { batch: 64 });
 
     expect(fake.prompts).toHaveLength(1);
     expect(fake.prompts[0]).toContain(units.map((u) => u.text).join('\n'));
@@ -155,7 +155,7 @@ describe('runSnapChapters (fake scorer)', () => {
 
   it('reports monotone progress through outline, assign and ads, ending at 1', async () => {
     const seen: ChapterProgress[] = [];
-    await runSnapChapters(new FakeScorer(), unitsOf(video), { onProgress: (p) => seen.push({ ...p }) });
+    await runSnapChapters(new FakeScorer(), unitsOf(video), { batch: 64, onProgress: (p) => seen.push({ ...p }) });
     expect(seen.map((p) => p.phase)).toEqual(['outline', 'assign', 'assign', 'assign', 'ads', 'done']);
     for (let i = 1; i < seen.length; i++) expect(seen[i].fraction).toBeGreaterThanOrEqual(seen[i - 1].fraction);
     expect(seen[seen.length - 1]).toMatchObject({ fraction: 1, unitsDone: 70, unitsTotal: 70 });
@@ -166,6 +166,7 @@ describe('runSnapChapters (fake scorer)', () => {
     const fake = new FakeScorer();
     const ac = new AbortController();
     const run = runSnapChapters(fake, unitsOf(video), {
+      batch: 64,
       signal: ac.signal,
       onProgress: (p) => {
         if (p.phase === 'assign' && p.unitsDone === 64) ac.abort();

@@ -208,6 +208,20 @@ describe('CrucibleChatService: one server', () => {
     setTimeout(() => fake.endSession('client'), 60);
     const result = await chat.chat({ model: 'qwen3.5-9b', prompt: 'x' });
     expect(result.text).toBe('{"ok":true}');
+    // Its wait is bounded on the server, so a long one ends cleanly (removed_from_queue), not on our timeout.
+    expect(fake.chatBodies()[0]).toMatchObject({ queue: { max_wait_s: 600 } });
+  });
+
+  it('a local chat whose bounded wait ran out (removed_from_queue) is busy, never a failure', async () => {
+    await start({ resident: 'qwen3.5-9b', faults: { refuse: [{ match: { method: 'POST', path: '/v1/openai/chat/completions' }, status: 409, code: 'removed_from_queue', times: 1 }] } });
+    const failure = await chat.chat({ model: 'qwen3.5-9b', prompt: 'x' }).catch((e) => e);
+    expect(failure).toBeInstanceOf(CrucibleBusyError);
+    expect((failure as CrucibleBusyError).busyLine).toMatch(/waited past 600 s in Crucible's line/);
+  });
+
+  it('an upstream chat carries no queue bound (it never waits for the card)', async () => {
+    await start();
+    await chat.chat({ model: 'claude:claude-sonnet-5', prompt: 'x' });
     expect(fake.chatBodies()[0]).not.toHaveProperty('queue');
   });
 
