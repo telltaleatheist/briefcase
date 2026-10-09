@@ -171,7 +171,7 @@ export class WindowService {
   /**
    * Add a video as a new tab to an existing editor window
    */
-  addTabToEditorWindow(editorWindow: BrowserWindow, videoData: { videoId: string; videoPath?: string; videoTitle: string }): void {
+  addTabToEditorWindow(editorWindow: BrowserWindow, videoData: { videoId: string; videoPath?: string; videoTitle: string; startSeconds?: number }): void {
     log.info('Adding video as new tab:', videoData.videoId);
     editorWindow.webContents.send('add-editor-tab', videoData);
     // Focus the window
@@ -185,7 +185,7 @@ export class WindowService {
    * Create a new editor window for video editing
    * If an editor window already exists, adds the video as a new tab instead
    */
-  createEditorWindow(videoData: { videoId: string; videoPath?: string; videoTitle: string }): BrowserWindow {
+  createEditorWindow(videoData: { videoId: string; videoPath?: string; videoTitle: string; startSeconds?: number }): BrowserWindow {
     // Defense in depth: refuse to pass transient Chromium temp paths to the
     // editor. These come from webUtils.getPathForFile() for non-filesystem
     // File objects (clipboard, webpage drags) and disappear by the time the
@@ -231,6 +231,7 @@ export class WindowService {
       videoId: videoData.videoId,
       videoTitle: videoData.videoTitle || '',
       ...(videoData.videoPath && { videoPath: videoData.videoPath }),
+      ...(videoData.startSeconds && videoData.startSeconds > 0 && { t: String(videoData.startSeconds) }),
       popout: 'true'
     });
     const editorUrl = `http://${host}:${this.frontendPort}/editor?${params.toString()}`;

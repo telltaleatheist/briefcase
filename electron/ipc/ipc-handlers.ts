@@ -487,7 +487,7 @@ function setupSettingsHandlers(): void {
  */
 function setupWindowHandlers(): void {
   // Open video editor in a new window
-  ipcMain.handle('open-editor-window', async (_, videoData: { videoId: string; videoPath?: string; videoTitle: string }) => {
+  ipcMain.handle('open-editor-window', async (_, videoData: { videoId: string; videoPath?: string; videoTitle: string; startSeconds?: number }) => {
     try {
       log.info('Opening editor window for video:', videoData.videoId);
       windowServiceRef.createEditorWindow(videoData);

@@ -13,7 +13,7 @@ interface ElectronAPI {
   openExternal: (url: string) => Promise<void>;
   getAppVersion: () => Promise<string>;
   saveConsoleLogs: (filename: string, content: string) => Promise<string>;
-  openEditorWindow: (videoData: { videoId: string; videoPath?: string; videoTitle: string }) => Promise<{ success: boolean; error?: string }>;
+  openEditorWindow: (videoData: { videoId: string; videoPath?: string; videoTitle: string; startSeconds?: number }) => Promise<{ success: boolean; error?: string }>;
   captureWebPage: (options: { url: string; savePath: string; timeout?: number }) => Promise<{
     success: boolean;
     filePath?: string;
@@ -246,7 +246,7 @@ export class ElectronService {
   /**
    * Open video editor in a new window
    */
-  async openEditorWindow(videoData: { videoId: string; videoPath?: string; videoTitle: string }): Promise<boolean> {
+  async openEditorWindow(videoData: { videoId: string; videoPath?: string; videoTitle: string; startSeconds?: number }): Promise<boolean> {
     if (!this.isElectron) {
       console.warn('openEditorWindow: Not running in Electron');
       return false;

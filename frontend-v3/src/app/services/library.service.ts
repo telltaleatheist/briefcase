@@ -4,6 +4,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable, of, firstValueFrom } from 'rxjs';
 import { map, catchError } from 'rxjs/operators';
 import { VideoWeek, VideoItem } from '../models/video.model';
+import { LibrarySearchResponse } from '../models/library-search.model';
 import { JobRequest } from '../models/task.model';
 import { Library, NewLibrary } from '../models/library.model';
 import { getApiBase } from '../core/runtime-url';
@@ -198,52 +199,14 @@ export class LibraryService {
   }
 
   /**
-   * Search videos
-   * GET /api/database/search?q=query&searchIn=filename,transcript,analysis&useSoundex=true&usePhraseSearch=true
+   * The library search: titles and transcript moments.
+   * GET /api/database/search?q=
    */
-  searchVideos(
-    query: string,
-    searchIn?: { filename: boolean; transcript: boolean; analysis: boolean },
-    searchOptions?: { useSoundex: boolean; usePhraseSearch: boolean }
-  ): Observable<ApiResponse<VideoItem[]>> {
-    const params: any = { q: query };
-
-    // Build comma-separated list of selected fields
-    if (searchIn) {
-      const fields: string[] = [];
-      if (searchIn.filename) fields.push('filename');
-      if (searchIn.transcript) fields.push('transcript');
-      if (searchIn.analysis) fields.push('analysis');
-
-      console.log('[searchVideos] searchIn received:', searchIn, 'fields:', fields);
-
-      // Only pass searchIn if not all fields are selected
-      if (fields.length > 0 && fields.length < 3) {
-        params.searchIn = fields.join(',');
-      }
-    } else {
-      console.log('[searchVideos] searchIn is undefined, searching all fields');
-    }
-
-    // Add search options
-    if (searchOptions) {
-      if (searchOptions.useSoundex) {
-        params.useSoundex = 'true';
-      }
-      if (searchOptions.usePhraseSearch) {
-        params.usePhraseSearch = 'true';
-      }
-    }
-
-    console.log('[searchVideos] Final params:', params);
-
-    return this.http.get<any>(
-      `${this.API_BASE}/database/search`,
-      { params }
-    ).pipe(
+  search(query: string): Observable<LibrarySearchResponse> {
+    return this.http.get<any>(`${this.API_BASE}/database/search`, { params: { q: query } }).pipe(
       map(response => ({
-        success: true,
-        data: this.transformVideos(response.results || [])
+        ...response,
+        hits: (response.hits || []).map((hit: any) => ({ ...hit, video: this.transformVideo(hit.video) })),
       }))
     );
   }

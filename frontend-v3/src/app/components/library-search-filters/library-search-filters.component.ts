@@ -3,10 +3,9 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Subject } from 'rxjs';
 import { debounceTime } from 'rxjs/operators';
-import { LibraryFilterService, LibraryFilters, SearchInFields } from '../../services/library-filter.service';
+import { LibraryFilterService, LibraryFilters } from '../../services/library-filter.service';
 
-// Re-export for backward compatibility
-export { LibraryFilters, SearchInFields, SearchOptions } from '../../services/library-filter.service';
+export { LibraryFilters } from '../../services/library-filter.service';
 
 @Component({
   selector: 'app-library-search-filters',

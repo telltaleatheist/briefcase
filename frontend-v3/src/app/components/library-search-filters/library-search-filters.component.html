@@ -12,14 +12,14 @@
         [(ngModel)]="filters.searchQuery"
         (ngModelChange)="onSearchChange()"
         (focus)="onSearchFocus()"
-        placeholder="Search filenames: all words must match"
+        placeholder="Search titles and transcripts"
         title="Search tips:
-• Multiple words: all must match
+• Words: all must be in the title, or said within about 30 seconds
 • Exact phrase: &quot;hello world&quot;
-• Exclude: -unwanted (removes results with that word)
-• Wildcards: test* matches testing, tests
-• OR operator: word1 OR word2
-• Enable Transcript/Analysis in filters for deeper search"
+• Exclude: -unwanted
+• Prefix: test* matches testing, tests
+• Either: word1 OR word2
+• A word the transcripts rarely hold also matches near spellings (Somalies finds Somalis)"
         class="search-input"
       />
     </div>
@@ -35,62 +35,6 @@
 
   <!-- Advanced Filters (Accordion Content) -->
   <div class="accordion-content" [class.expanded]="expanded()">
-    <!-- Search In Checkboxes -->
-    <div class="filter-section">
-      <label class="section-label">Search In</label>
-      <div class="checkbox-row">
-        <label class="checkbox-label">
-          <input
-            type="checkbox"
-            [(ngModel)]="filters.searchIn.filename"
-            (ngModelChange)="onFilterChange()"
-          />
-          Filename
-        </label>
-        <label class="checkbox-label">
-          <input
-            type="checkbox"
-            [(ngModel)]="filters.searchIn.transcript"
-            (ngModelChange)="onFilterChange()"
-          />
-          Transcript
-        </label>
-        <label class="checkbox-label">
-          <input
-            type="checkbox"
-            [(ngModel)]="filters.searchIn.analysis"
-            (ngModelChange)="onFilterChange()"
-          />
-          AI Analysis
-        </label>
-      </div>
-    </div>
-
-    <!-- Search Options -->
-    <div class="filter-section">
-      <label class="section-label">Options</label>
-      <div class="checkbox-row">
-        <label class="checkbox-label" title="All words must match (AND logic). Uncheck for any word matches (OR logic).">
-          <input
-            type="checkbox"
-            [(ngModel)]="filters.searchOptions.usePhraseSearch"
-            (ngModelChange)="onFilterChange()"
-          />
-          All Words
-        </label>
-        <label class="checkbox-label" title="Match similar-sounding words (e.g., 'Somalies' matches 'Somalis')">
-          <input
-            type="checkbox"
-            [(ngModel)]="filters.searchOptions.useSoundex"
-            (ngModelChange)="onFilterChange()"
-          />
-          Phonetic
-        </label>
-      </div>
-    </div>
-
-    <div class="filter-divider"></div>
-
     <!-- Filter Row: Date, Type, Status -->
     <div class="filter-row">
       <div class="filter-group">

@@ -813,7 +813,8 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
         videoEditorData = {
           videoId: queryParams['videoId'],
           videoPath: queryParams['videoPath'] || null,
-          videoTitle: queryParams['videoTitle'] ? decodeURIComponent(queryParams['videoTitle']) : 'Untitled Video'
+          videoTitle: queryParams['videoTitle'] ? decodeURIComponent(queryParams['videoTitle']) : 'Untitled Video',
+          startSeconds: queryParams['t'] ? Number(queryParams['t']) : undefined
         };
         // Mark as popout mode for potential UI adjustments
         this.isPopoutMode = queryParams['popout'] === 'true';
@@ -825,7 +826,8 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
       this.openTab(
         videoEditorData.videoId,
         videoEditorData.videoPath || null,
-        videoEditorData.videoTitle || 'Untitled Video'
+        videoEditorData.videoTitle || 'Untitled Video',
+        videoEditorData.startSeconds
       );
     } else {
       this.isLoading.set(false);
@@ -941,11 +943,10 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
 
   // Handler for add-editor-tab events from Electron
   private handleAddEditorTabEvent = (event: Event) => {
-    const customEvent = event as CustomEvent<{ videoId: string; videoPath?: string; videoTitle: string }>;
+    const customEvent = event as CustomEvent<{ videoId: string; videoPath?: string; videoTitle: string; startSeconds?: number }>;
     const videoData = customEvent.detail;
     if (videoData) {
-      console.log('Received add-editor-tab event:', videoData);
-      this.openTab(videoData.videoId, videoData.videoPath || null, videoData.videoTitle || 'Untitled Video');
+      this.openTab(videoData.videoId, videoData.videoPath || null, videoData.videoTitle || 'Untitled Video', videoData.startSeconds);
     }
   };
 
@@ -3130,11 +3131,18 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
   /**
    * Open a video in a new tab or focus existing tab
    */
-  openTab(videoId: string, videoPath: string | null, videoTitle: string): void {
-    // Check if video is already open in a tab
+  openTab(videoId: string, videoPath: string | null, videoTitle: string, startSeconds?: number): void {
+    const startAt = startSeconds !== undefined && Number.isFinite(startSeconds) && startSeconds > 0 ? startSeconds : null;
+
+    // Already open: show it, and go to the asked-for moment (a search hit).
     const existingTab = this.tabs().find(t => t.videoId === videoId);
     if (existingTab) {
+      if (startAt !== null && this.activeTabId() !== existingTab.id) {
+        // Restoring the tab seeks to its saved playhead once its video loads.
+        this.tabs.update(tabs => tabs.map(t => t.id === existingTab.id ? { ...t, editorState: { ...t.editorState, currentTime: startAt } } : t));
+      }
       this.switchTab(existingTab.id);
+      if (startAt !== null && this.activeTabId() === existingTab.id && existingTab.isLoaded) this.seekTo(startAt);
       return;
     }
 
@@ -3149,7 +3157,9 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
 
     // Create new tab
     const videoUrl = `${this.API_BASE}/database/videos/${videoId}/stream`;
-    const newTab = createEditorTab(videoId, videoPath, videoTitle, videoUrl);
+    const created = createEditorTab(videoId, videoPath, videoTitle, videoUrl);
+    // A search hit opens at its moment: the restore below seeks there once the video loads.
+    const newTab = startAt === null ? created : { ...created, editorState: { ...created.editorState, currentTime: startAt } };
 
     // Add tab and make it active
     this.tabs.update(tabs => [...tabs, newTab]);

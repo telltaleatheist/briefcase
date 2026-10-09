@@ -6,6 +6,8 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom } from 'rxjs';
 import { LibrarySearchFiltersComponent, LibraryFilters } from '../../components/library-search-filters/library-search-filters.component';
 import { CascadeComponent, CascadeEmptyAction, CascadeEmptyState } from '../../components/cascade/cascade.component';
+import { SearchResultsComponent, OpenAt } from '../../components/search-results/search-results.component';
+import { LibrarySearchResponse, SearchHit } from '../../models/library-search.model';
 import { LibraryManagerModalComponent } from '../../components/library-manager-modal/library-manager-modal.component';
 import { QueueItemConfigModalComponent } from '../../components/queue-item-config-modal/queue-item-config-modal.component';
 import { VideoPreviewModalComponent, PreviewItem } from '../../components/video-preview-modal/video-preview-modal.component';
@@ -76,6 +78,7 @@ export interface ProcessingTask {
   imports: [
     CommonModule,
     LibrarySearchFiltersComponent,
+    SearchResultsComponent,
     CascadeComponent,
     LibraryManagerModalComponent,
     QueueItemConfigModalComponent,
@@ -286,6 +289,25 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     return classifyItemKind(video) === filter;
   }
 
+  // The library search: the query, its answer, and its hits after the
+  // library filters and the type filter (search results replace the cascade).
+  searchQuery = signal('');
+  searchResponse = signal<LibrarySearchResponse | null>(null);
+  searchLoading = signal(false);
+  searchError = signal<string | null>(null);
+  private searchSeq = 0;
+  searchHits = computed<SearchHit[]>(() => {
+    const hits = this.searchResponse()?.hits ?? [];
+    const filters = this.currentFiltersSignal();
+    const type = this.typeFilter();
+    let kept = new Set(hits.map(h => h.video.id));
+    if (filters) {
+      const narrowed = this.filterService.applyFilters([{ weekLabel: '', videos: hits.map(h => h.video) }], filters);
+      kept = new Set((narrowed[0]?.videos ?? []).map(v => v.id));
+    }
+    return hits.filter(h => kept.has(h.video.id) && (type === 'all' || this.matchesTypeFilter(h.video, type)));
+  });
+
   // Total video count for library toolbar
   totalVideoCount = computed(() => {
     return this.filteredWeeks().reduce((sum, week) => sum + week.videos.length, 0);
@@ -408,6 +430,8 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
 
   // Filters
   currentFilters: LibraryFilters | null = null;
+  /** The same filters as a signal, for the search hits' computed view. */
+  private currentFiltersSignal = signal<LibraryFilters | null>(null);
 
   // Tab State — set by the route.data subscription (URL is the source of truth)
   activeTab = signal<'library' | 'queue' | 'tabs' | 'archives'>('library');
@@ -1653,113 +1677,71 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
 
   onFiltersChanged(filters: LibraryFilters) {
     this.currentFilters = filters;
+    this.currentFiltersSignal.set(filters);
     this.applyFilters();
   }
 
   applyFilters() {
+    const query = this.currentFilters?.searchQuery.trim() ?? '';
+    this.searchQuery.set(query);
+    if (query) {
+      this.runSearch(query);
+    } else {
+      this.searchSeq++;
+      this.searchResponse.set(null);
+      this.searchError.set(null);
+      this.searchLoading.set(false);
+    }
+
     if (!this.currentFilters) {
       this.filteredWeeks.set(this.videoWeeks());
       return;
     }
-
-    // Use backend FTS search for search queries
-    if (this.currentFilters.searchQuery) {
-      const query = this.currentFilters.searchQuery.trim();
-
-      if (query) {
-        // Call backend FTS search with searchIn filter and search options
-        this.libraryService.searchVideos(query, this.currentFilters.searchIn, this.currentFilters.searchOptions).subscribe({
-          next: (response) => {
-            if (response.success && response.data) {
-              // Group search results by date (same as library grouping)
-              const searchResults = response.data;
-              const weekMap = new Map<string, VideoItem[]>();
-              const now = new Date();
-
-              // Helper to get date key in YYYY-MM-DD format
-              const getDateKey = (date: Date): string => {
-                const year = date.getFullYear();
-                const month = (date.getMonth() + 1).toString().padStart(2, '0');
-                const day = date.getDate().toString().padStart(2, '0');
-                return `${year}-${month}-${day}`;
-              };
-
-              // Group search results by their date
-              searchResults.forEach(video => {
-                let weekLabel: string;
-
-                // Check if video should be in "New" section (recently processed or added)
-                const processedDate = video.lastProcessedDate ? new Date(video.lastProcessedDate) : null;
-                const processedHoursDiff = processedDate ? (now.getTime() - processedDate.getTime()) / (1000 * 60 * 60) : Infinity;
-                const recentlyProcessed = processedHoursDiff <= 24;
-
-                const addedDate = video.addedAt ? new Date(video.addedAt) : null;
-                const addedHoursDiff = addedDate ? (now.getTime() - addedDate.getTime()) / (1000 * 60 * 60) : Infinity;
-                const recentlyAdded = addedHoursDiff <= 24;
-
-                if (recentlyProcessed || recentlyAdded) {
-                  weekLabel = 'New';
-                } else if (video.downloadDate) {
-                  weekLabel = getDateKey(new Date(video.downloadDate));
-                } else {
-                  weekLabel = 'Unknown';
-                }
-
-                if (!weekMap.has(weekLabel)) {
-                  weekMap.set(weekLabel, []);
-                }
-                weekMap.get(weekLabel)!.push(video);
-              });
-
-              // Convert map to VideoWeek array
-              let filtered: VideoWeek[] = [];
-              weekMap.forEach((videos, weekLabel) => {
-                filtered.push({ weekLabel, videos });
-              });
-
-              // Sort by week label (New first, Unknown last, dates descending)
-              filtered.sort((a, b) => {
-                if (a.weekLabel === 'New') return -1;
-                if (b.weekLabel === 'New') return 1;
-                if (a.weekLabel === 'Unknown') return 1;
-                if (b.weekLabel === 'Unknown') return -1;
-                return b.weekLabel.localeCompare(a.weekLabel);
-              });
-
-              // Apply non-search filters to search results too
-              filtered = this.filterService.applyFilters(filtered, this.currentFilters!);
-
-              // Apply sorting
-              this.filterService.sortVideos(filtered, this.currentFilters!);
-              this.filteredWeeks.set(filtered);
-            } else {
-              this.filteredWeeks.set([]);
-            }
-          },
-          error: (error) => {
-            // A failed search must not present the whole library as if it
-            // matched the query (fallback-audit critical #2). Empty results
-            // + a surfaced error; the user can retry or clear the search.
-            this.filteredWeeks.set([]);
-            this.errorSurface.surfaceError('Search failed', error);
-          }
-        });
-        return;
-      }
-    }
-
-    // No search query - apply filters and sorting to all videos
     let weeks = this.videoWeeks().map(week => ({
       weekLabel: week.weekLabel,
       videos: [...week.videos]
     }));
-
-    // Apply all filters via service
     weeks = this.filterService.applyFilters(weeks, this.currentFilters);
-
-    // Apply sorting via service
     this.filterService.sortVideos(weeks, this.currentFilters);
     this.filteredWeeks.set(weeks);
+  }
+
+  /**
+   * The library search (GET /api/database/search). Only the latest query's
+   * answer is kept: typing fast must not let an older, slower answer replace
+   * a newer one. The same query is asked again when the library reloads, so
+   * the results follow new videos and transcripts, without a loading state.
+   * A failed search shows its error in the results, never the whole library
+   * as if it matched.
+   */
+  private runSearch(query: string): void {
+    const seq = ++this.searchSeq;
+    if (this.searchResponse()?.query !== query) this.searchLoading.set(true);
+    this.libraryService.search(query).subscribe({
+      next: (response) => {
+        if (seq !== this.searchSeq) return;
+        this.searchResponse.set(response);
+        this.searchError.set(null);
+        this.searchLoading.set(false);
+      },
+      error: (error) => {
+        if (seq !== this.searchSeq) return;
+        this.searchResponse.set(null);
+        this.searchLoading.set(false);
+        this.searchError.set(`Search failed: ${error?.error?.message || error?.message || 'unknown error'}`);
+      }
+    });
+  }
+
+  /** Open a search hit in the editor, at a moment or from the start. */
+  onOpenSearchHit({ video, seconds }: OpenAt): void {
+    if (this.electronService.isElectron) {
+      this.electronService.openEditorWindow({ videoId: video.id, videoPath: video.filePath, videoTitle: video.name, startSeconds: seconds });
+    } else {
+      this.router.navigate(['/editor'], {
+        state: { videoEditorData: { videoId: video.id, videoPath: video.filePath, videoTitle: video.name, startSeconds: seconds } }
+      });
+    }
   }
 
   onSelectionChanged(event: { count: number; ids: Set<string> }) {

@@ -1,0 +1,71 @@
+<div class="search-results">
+  <div class="results-header">
+    @if (loading()) {
+      <span class="summary">Searching…</span>
+    } @else if (response()) {
+      <span class="summary">{{ summary() }}</span>
+    }
+    @if (response()?.indexing; as indexing) {
+      @if (indexing.error) {
+        <span class="notice error">Transcript indexing stopped ({{ indexing.error }}); {{ indexing.pending }} transcripts are not searched.</span>
+      } @else {
+        <span class="notice">Indexing transcripts: {{ indexing.total - indexing.pending }} of {{ indexing.total }} done. The rest are not searched yet.</span>
+      }
+    }
+    @for (note of spellingNotes(); track note) {
+      <span class="notice">{{ note }}</span>
+    }
+  </div>
+
+  @if (error()) {
+    <div class="empty error">{{ error() }}</div>
+  } @else if (!loading() && response() && hits().length === 0) {
+    <div class="empty">Nothing in the titles or transcripts matches “{{ response()!.query }}”.</div>
+  }
+
+  <ul class="hits">
+    @for (hit of hits(); track hit.video.id) {
+      <li class="hit">
+        <button type="button" class="hit-head" (click)="open.emit({ video: hit.video, seconds: 0 })">
+          @if (hit.video.thumbnailUrl) {
+            <img class="thumb" [src]="hit.video.thumbnailUrl" alt="" loading="lazy" (error)="$any($event.target).classList.add('thumb-error')" />
+          } @else {
+            <span class="thumb"></span>
+          }
+          <span class="hit-text">
+            <span class="title">@for (piece of pieces(hit.title, hit.titleHighlights); track $index) {<span [class.match]="piece.hit">{{ piece.text }}</span>}</span>
+            <span class="meta">
+              @if (hit.video.duration) { {{ hit.video.duration }} · }
+              @if (hit.momentCount > 0) {
+                {{ hit.momentCount }} {{ hit.momentCount === 1 ? 'moment' : 'moments' }}
+              } @else {
+                title match
+              }
+            </span>
+          </span>
+        </button>
+
+        @if (hit.moments.length > 0) {
+          <ul class="moments">
+            @for (moment of momentsShown(hit); track moment.start) {
+              <li>
+                <button type="button" class="moment" (click)="open.emit({ video: hit.video, seconds: moment.start })">
+                  <span class="time">{{ formatTime(moment.start) }}</span>
+                  <span class="text">@for (piece of pieces(moment.text, moment.highlights); track $index) {<span [class.match]="piece.hit">{{ piece.text }}</span>}</span>
+                </button>
+              </li>
+            }
+          </ul>
+          @if (hiddenCount(hit) > 0) {
+            <button type="button" class="show-all" (click)="showAll(hit)">
+              Show {{ hiddenCount(hit) }} more
+            </button>
+          }
+          @if (hit.momentCount > hit.moments.length) {
+            <span class="more-note">{{ hit.momentCount - hit.moments.length }} more moments in this video are not listed.</span>
+          }
+        }
+      </li>
+    }
+  </ul>
+</div>
