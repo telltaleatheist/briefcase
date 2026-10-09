@@ -28,7 +28,7 @@ import {
   matchExpression,
   matcherOf,
   nearSpellings,
-  parseMomentQuery,
+  type ParsedMomentQuery,
   type Vocabulary,
 } from './moment-query';
 
@@ -245,23 +245,54 @@ export interface VideoMoments {
   momentCount: number;
 }
 
-export interface MomentSearchOptions {
-  /** Widen plain words to near spellings (default true). */
-  fuzzy?: boolean;
-  /** Most videos returned (default 200). */
-  maxVideos?: number;
-  /** Most moments returned per video (default 25). */
-  maxMomentsPerVideo?: number;
-  /** Most windows read from the index before grouping (default 4000). */
-  maxWindows?: number;
+/** A matching window, as read from the index. */
+export interface MomentWindow {
+  videoId: string;
+  firstIdx: number;
+  lastIdx: number;
+  start: number;
+  end: number;
+  score: number;
+}
+
+/** The windows a query matched, per video: the best of each overlapping run, best first. */
+export interface MomentWindows {
+  /** Videos ranked by their best window (then by how many they have). */
+  ranked: Array<{ videoId: string; windows: MomentWindow[] }>;
+  /** Windows kept across all videos (one per moment). */
+  momentCount: number;
+  /** The index held more matching windows than were read: counts are a floor. */
+  capped: boolean;
 }
 
 export interface MomentSearchResult {
   videos: VideoMoments[];
   /** Moments across all videos, before the per-video cap. */
   momentCount: number;
-  /** The words each plain query word matched, when widened. */
+  /** The index held more matching windows than were read: counts are a floor. */
+  capped: boolean;
+}
+
+/** Most windows read from the index for one query. */
+export const MAX_WINDOWS = 4000;
+/** Most moments shown per video. */
+export const MAX_MOMENTS_PER_VIDEO = 25;
+
+/** How a query's plain words are spelled for matching, and what each was widened to. */
+export interface Speller {
+  spell: (term: string) => string[];
+  /** Each widened word's spellings, filled as `spell` is called. */
   spellings: Record<string, string[]>;
+}
+
+/** Near spellings from the transcript index's vocabulary, or exact words when `fuzzy` is false. */
+export function spellerFor(db: Database, fuzzy: boolean): Speller {
+  const spellings: Record<string, string[]> = {};
+  const vocab = fuzzy ? vocabularyOf(db) : null;
+  return {
+    spellings,
+    spell: (term) => (vocab ? (spellings[term] ??= nearSpellings(term, vocab)) : [term]),
+  };
 }
 
 /** The longest stretch a moment shows, in seconds (segments run from ~1 s to ~10 s). */
@@ -302,51 +333,45 @@ export function snippetRange(groupHits: boolean[][], segments: ReadonlyArray<{ s
   return [anyHit, last];
 }
 
-export function searchMoments(db: Database, query: string, options: MomentSearchOptions = {}): MomentSearchResult {
-  const parsed = parseMomentQuery(query);
-  const empty: MomentSearchResult = { videos: [], momentCount: 0, spellings: {} };
-  if (parsed.groups.length === 0) return empty;
-
-  const fuzzy = options.fuzzy ?? true;
-  const spellings: Record<string, string[]> = {};
-  const vocab = fuzzy ? vocabularyOf(db) : null;
-  const spell = (term: string): string[] => {
-    if (!vocab) return [term];
-    return (spellings[term] ??= nearSpellings(term, vocab));
-  };
-  const expression = matchExpression(parsed, spell);
-  const matcher = matcherOf(parsed, spell);
-  const groupMatchers = parsed.groups.map((group) => matcherOf({ groups: [group], excluded: [] }, spell));
-
+/** Step 1, cheap: the windows a query matches, grouped and ranked by video (no text read). */
+export function findMomentWindows(db: Database, parsed: ParsedMomentQuery, spell: (term: string) => string[]): MomentWindows {
+  if (parsed.groups.length === 0) return { ranked: [], momentCount: 0, capped: false };
   const hits = db.prepare(`
-    SELECT w.id, w.video_id AS videoId, w.first_idx AS firstIdx, w.last_idx AS lastIdx, w.start_s AS start, w.end_s AS end, -f.rank AS score
+    SELECT w.video_id AS videoId, w.first_idx AS firstIdx, w.last_idx AS lastIdx, w.start_s AS start, w.end_s AS end, -f.rank AS score
     FROM transcript_windows_fts f JOIN transcript_windows w ON w.id = f.rowid
     WHERE transcript_windows_fts MATCH ?
     ORDER BY f.rank
     LIMIT ?
-  `).all(expression, options.maxWindows ?? 4000) as Array<{ id: number; videoId: string; firstIdx: number; lastIdx: number; start: number; end: number; score: number }>;
+  `).all(matchExpression(parsed, spell), MAX_WINDOWS) as MomentWindow[];
 
-  // Per video: the best window of each overlapping run, best first.
-  const byVideo = new Map<string, typeof hits>();
+  const byVideo = new Map<string, MomentWindow[]>();
   for (const hit of hits) {
-    const kept = byVideo.get(hit.videoId) ?? [];
-    if (!byVideo.has(hit.videoId)) byVideo.set(hit.videoId, kept);
+    let kept = byVideo.get(hit.videoId);
+    if (!kept) byVideo.set(hit.videoId, (kept = []));
     if (kept.some((k) => hit.start < k.end && k.start < hit.end)) continue;
     kept.push(hit);
   }
-
-  const maxMoments = options.maxMomentsPerVideo ?? 25;
-  const segmentsOf = db.prepare('SELECT idx, start_s AS start, end_s AS end, text FROM transcript_segments WHERE video_id = ? AND idx BETWEEN ? AND ? ORDER BY idx');
   let momentCount = 0;
-  const videos: VideoMoments[] = [];
-  for (const [videoId, windows] of byVideo) {
-    momentCount += windows.length;
-    const moments = windows.slice(0, maxMoments).map((w): Moment => {
-      const segments = segmentsOf.all(videoId, w.firstIdx, w.lastIdx) as Array<{ idx: number; start: number; end: number; text: string }>;
-      const hits = segments.map((s) => groupMatchers.map((m) => highlightRanges(s.text, m).length > 0));
-      const range = snippetRange(hits, segments);
+  for (const windows of byVideo.values()) momentCount += windows.length;
+  const ranked = [...byVideo.entries()]
+    .map(([videoId, windows]) => ({ videoId, windows }))
+    .sort((a, b) => b.windows[0].score - a.windows[0].score || b.windows.length - a.windows.length);
+  return { ranked, momentCount, capped: hits.length === MAX_WINDOWS };
+}
+
+/** Step 2, for the videos shown: each window's matching sentences, in time order. */
+export function momentsOf(db: Database, windows: MomentWindow[], parsed: ParsedMomentQuery, spell: (term: string) => string[]): Moment[] {
+  const matcher = matcherOf(parsed, spell);
+  const groupMatchers = parsed.groups.map((group) => matcherOf({ groups: [group], excluded: [] }, spell));
+  const segmentsOf = db.prepare('SELECT idx, start_s AS start, end_s AS end, text FROM transcript_segments WHERE video_id = ? AND idx BETWEEN ? AND ? ORDER BY idx');
+  return windows
+    .slice(0, MAX_MOMENTS_PER_VIDEO)
+    .map((w): Moment => {
+      const segments = segmentsOf.all(w.videoId, w.firstIdx, w.lastIdx) as Array<{ idx: number; start: number; end: number; text: string }>;
+      const segmentHits = segments.map((seg) => groupMatchers.map((m) => highlightRanges(seg.text, m).length > 0));
+      const range = snippetRange(segmentHits, segments);
       const shown = range ? segments.slice(range[0], range[1] + 1) : segments.slice(0, SNIPPET_FALLBACK_SEGMENTS);
-      const text = shown.map((s) => s.text).join(' ');
+      const text = shown.map((seg) => seg.text).join(' ');
       return {
         start: shown[0]?.start ?? w.start,
         end: shown[shown.length - 1]?.end ?? w.end,
@@ -354,10 +379,21 @@ export function searchMoments(db: Database, query: string, options: MomentSearch
         highlights: highlightRanges(text, matcher),
         score: w.score,
       };
-    });
-    moments.sort((a, b) => a.start - b.start);
-    videos.push({ videoId, score: windows[0].score, moments, momentCount: windows.length });
-  }
-  videos.sort((a, b) => b.score - a.score || b.momentCount - a.momentCount);
-  return { videos: videos.slice(0, options.maxVideos ?? 200), momentCount, spellings: fuzzy ? spellings : {} };
+    })
+    .sort((a, b) => a.start - b.start);
+}
+
+/** Both steps, for the best `maxVideos` videos. */
+export function searchMoments(db: Database, parsed: ParsedMomentQuery, spell: (term: string) => string[], maxVideos = 200): MomentSearchResult {
+  const found = findMomentWindows(db, parsed, spell);
+  return {
+    videos: found.ranked.slice(0, maxVideos).map(({ videoId, windows }) => ({
+      videoId,
+      score: windows[0].score,
+      moments: momentsOf(db, windows, parsed, spell),
+      momentCount: windows.length,
+    })),
+    momentCount: found.momentCount,
+    capped: found.capped,
+  };
 }

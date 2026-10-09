@@ -14,13 +14,18 @@ import {
   indexVideoMoments,
   pendingTranscriptCount,
   removeVideoMoments,
-  searchMoments,
-  type MomentSearchOptions,
-  type MomentSearchResult,
 } from '../search/transcript-moments';
+import { ensureTitleIndex, searchLibrary, type LibrarySearchOptions, type LibrarySearchResult } from '../search/library-search';
 
 /** Transcripts indexed per background tick (the whole clips library took ~9 s). */
 const MOMENT_INDEX_BATCH = 50;
+
+/** Background moment indexing: transcripts left to read, of all, and why it stopped if it did. */
+export interface MomentIndexing {
+  pending: number;
+  total: number;
+  error?: string;
+}
 
 // Type definitions for database records
 export interface VideoRecord {
@@ -250,33 +255,10 @@ export interface LibraryAnalyticsRecord {
   generation_time_seconds: number | null;
 }
 
-export interface SearchResultRecord {
-  id: string;
-  score: number;
-  matchType: string;
-}
-
-export interface TranscriptSearchRecord {
-  video_id: string;
-  snippet: string;
-}
-
-export interface AnalysisSearchRecord {
-  video_id: string;
-  snippet: string;
-}
-
 export interface TagWithCountRecord {
   tag_name: string;
   tag_type: string;
   count: number;
-}
-
-export interface TextContentSearchRecord {
-  media_id: string;
-  extracted_text: string;
-  filename: string;
-  media_type: string;
 }
 
 export interface StatsRecord {
@@ -300,14 +282,16 @@ export interface PruneResult {
  * - Database initialization and schema management
  * - CRUD operations for videos, transcripts, analyses, tags
  * - File hashing for video identification
- * - Full-text search capabilities with FTS5
  *
- * Using better-sqlite3 for full SQLite support including FTS5
+ * Search lives in search/ (library-search.ts over transcript-moments.ts), on
+ * tables this service creates on open.
  */
 @Injectable()
 export class DatabaseService {
   private readonly logger = new Logger(DatabaseService.name);
   private db: Database.Database | null = null;
+  /** The open library's background moment indexing, while it has work left. */
+  private momentIndexing: MomentIndexing | null = null;
   private dbPath: string | null = null;
   private readonly appDataPath: string;
 
@@ -398,6 +382,7 @@ export class DatabaseService {
 
     this.initializeSchema();
     ensureMomentSchema(this.db);
+    ensureTitleIndex(this.db);
     const swept = sweepOrphans(this.db);
     if (Object.keys(swept).length > 0) {
       this.logger.warn(`Removed rows whose video is gone: ${Object.entries(swept).map(([table, n]) => `${table} ${n}`).join(', ')}`);
@@ -407,51 +392,58 @@ export class DatabaseService {
     // Set the library path for thumbnail service
     this.thumbnailService.setLibraryPath(this.dbPath);
 
-    // After initialization is complete, check if FTS5 needs population
-    this.checkAndPopulateFTS5();
-
     this.indexMomentsInBackground();
   }
 
   /**
    * Fill the transcript moment index (search/transcript-moments.ts) with the
    * transcripts it has not seen, a batch per tick so the server stays
-   * responsive. Stops when the library is switched: a batch only ever writes
-   * to the handle it started on.
+   * responsive, keeping its progress for the search to report. Stops when
+   * the library is switched: a batch only ever writes to the handle it
+   * started on.
    */
   private indexMomentsInBackground(): void {
     const db = this.db;
+    this.momentIndexing = null;
     if (!db) return;
-    const { pending } = pendingTranscriptCount(db);
-    if (pending === 0) return;
-    this.logger.log(`[Search] Indexing ${pending} transcripts for moment search`);
+    const counts = pendingTranscriptCount(db);
+    if (counts.pending === 0) return;
+    const progress: MomentIndexing = { pending: counts.pending, total: counts.total };
+    this.momentIndexing = progress;
+    this.logger.log(`[Search] Indexing ${counts.pending} transcripts for moment search`);
     const started = Date.now();
-    let done = 0;
     const step = () => {
       if (this.db !== db || !db.open) {
-        this.logger.log(`[Search] Library changed; moment indexing stopped after ${done} transcripts`);
+        this.logger.log(`[Search] Library changed; moment indexing stopped with ${progress.pending} transcripts left`);
         return;
       }
       try {
         const n = indexPendingTranscripts(db, MOMENT_INDEX_BATCH);
-        done += n;
+        progress.pending = n > 0 ? Math.max(0, progress.pending - n) : 0;
         if (n > 0) {
           setTimeout(step, 0);
           return;
         }
-        this.logger.log(`[Search] Indexed ${done} transcripts for moment search in ${((Date.now() - started) / 1000).toFixed(1)} s`);
+        this.logger.log(`[Search] Indexed ${counts.pending} transcripts for moment search in ${((Date.now() - started) / 1000).toFixed(1)} s`);
       } catch (error) {
-        this.logger.error(`[Search] Moment indexing stopped: ${(error as Error).message}`);
+        progress.error = (error as Error).message;
+        this.logger.error(`[Search] Moment indexing stopped with ${progress.pending} transcripts left: ${progress.error}`);
       }
     };
     setTimeout(step, 0);
   }
 
-  /** Where in the library's transcripts a query is said (search/transcript-moments.ts). */
-  searchTranscriptMoments(query: string, options?: MomentSearchOptions): MomentSearchResult & { indexing: { pending: number; total: number } } {
+  /**
+   * The library search: titles and transcript moments
+   * (search/library-search.ts), with the background indexing's progress
+   * while it runs (transcripts not yet read are not searched).
+   */
+  searchLibrary(query: string, options?: LibrarySearchOptions): LibrarySearchResult & { indexing: MomentIndexing | null } {
     const db = this.ensureInitialized();
-    return { ...searchMoments(db, query, options), indexing: pendingTranscriptCount(db) };
+    const indexing = this.momentIndexing && this.momentIndexing.pending > 0 ? { ...this.momentIndexing } : null;
+    return { ...searchLibrary(db, query, options), indexing };
   }
+
 
   /**
    * Close database connection
@@ -635,7 +627,6 @@ export class DatabaseService {
         language TEXT,
         transcribed_at TEXT NOT NULL,
         transcription_time_seconds REAL,
-        soundex_content TEXT,
         FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
       );
 
@@ -787,40 +778,6 @@ export class DatabaseService {
         metadata TEXT,
         CHECK (status IN ('pending', 'downloading', 'completed', 'failed')),
         FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE SET NULL
-      );
-
-      -- Full-text search virtual tables using FTS5 for fast search
-      CREATE VIRTUAL TABLE IF NOT EXISTS transcripts_fts USING fts5(
-        video_id UNINDEXED,
-        content,
-        tokenize='porter unicode61'
-      );
-
-      -- Soundex FTS for phonetic search (catches transcription errors like "Somalies" vs "Somalis")
-      CREATE VIRTUAL TABLE IF NOT EXISTS transcripts_soundex_fts USING fts5(
-        video_id UNINDEXED,
-        soundex_content,
-        tokenize='unicode61'
-      );
-
-      CREATE VIRTUAL TABLE IF NOT EXISTS analyses_fts USING fts5(
-        video_id UNINDEXED,
-        content,
-        tokenize='porter unicode61'
-      );
-
-      CREATE VIRTUAL TABLE IF NOT EXISTS videos_fts USING fts5(
-        video_id UNINDEXED,
-        filename,
-        current_path,
-        ai_description,
-        tokenize='porter unicode61'
-      );
-
-      CREATE VIRTUAL TABLE IF NOT EXISTS tags_fts USING fts5(
-        video_id UNINDEXED,
-        tag_name,
-        tokenize='porter unicode61'
       );
 
       -- Media relationships: Link multiple files together (e.g. PDF + audiobook)
@@ -1841,29 +1798,30 @@ export class DatabaseService {
       }
     }
 
-    // Migration: Add soundex_content column to transcripts for phonetic search
+    // Migration: the old video-level search is gone (2026-10-09; search/ replaced
+    // it). Its hand-kept FTS5 mirrors and the transcripts' soundex column held a
+    // second copy of every transcript; drop them. Idempotent, so it runs on
+    // every open and costs nothing once done. A failure aborts the load, as
+    // every migration here does.
     try {
-      db.prepare('SELECT soundex_content FROM transcripts LIMIT 1').get();
-    } catch (error: any) {
-      if (error.message && error.message.includes('no such column: soundex_content')) {
-        this.logger.log('Running migration: Adding soundex_content column to transcripts table');
-        try {
-          db.exec(`
-            ALTER TABLE transcripts ADD COLUMN soundex_content TEXT;
-          `);
-          this.saveDatabase();
-          this.logger.log('Migration complete: soundex_content column added to transcripts table');
-        } catch (migrationError: any) {
-          // Fallback audit #6: a half-migrated schema corrupts every later
-          // write to the missing column. Abort the library load loudly —
-          // the log line above names the migration that failed.
-          throw new Error(
-            `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
-            `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
-            `Check that the library volume is mounted and writable, then reopen the library.`,
-          );
-        }
+      db.exec(`
+        DROP TABLE IF EXISTS videos_fts;
+        DROP TABLE IF EXISTS transcripts_fts;
+        DROP TABLE IF EXISTS transcripts_soundex_fts;
+        DROP TABLE IF EXISTS analyses_fts;
+        DROP TABLE IF EXISTS tags_fts;
+      `);
+      const hasSoundex = (db.prepare(`SELECT COUNT(*) AS n FROM pragma_table_info('transcripts') WHERE name = 'soundex_content'`).get() as { n: number }).n > 0;
+      if (hasSoundex) {
+        this.logger.log('Running migration: removing the old search index (FTS mirrors, transcripts.soundex_content)');
+        db.exec(`ALTER TABLE transcripts DROP COLUMN soundex_content`);
       }
+    } catch (migrationError: any) {
+      throw new Error(
+        `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
+        `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
+        `Check that the library volume is mounted and writable, then reopen the library.`,
+      );
     }
 
     // Migration 23: Create web_archives table for archived web pages
@@ -2015,939 +1973,6 @@ export class DatabaseService {
       );
     }
 
-    // Migration: Create transcripts_soundex_fts FTS5 table for phonetic search
-    try {
-      const ftsCheck = db.prepare(`
-        SELECT COUNT(*) as count FROM sqlite_master
-        WHERE type='table' AND name='transcripts_soundex_fts'
-      `).get() as { count: number };
-
-      if (ftsCheck.count === 0) {
-        this.logger.log('Running migration: Creating transcripts_soundex_fts FTS5 table');
-        try {
-          db.exec(`
-            CREATE VIRTUAL TABLE IF NOT EXISTS transcripts_soundex_fts USING fts5(
-              video_id UNINDEXED,
-              soundex_content,
-              tokenize='unicode61'
-            );
-          `);
-          this.saveDatabase();
-          this.logger.log('Migration complete: transcripts_soundex_fts FTS5 table created');
-
-          // Backfill soundex data for existing transcripts
-          this.backfillSoundexData();
-        } catch (migrationError: any) {
-          // Fallback audit #6: a half-migrated schema corrupts every later
-          // write to the missing column. Abort the library load loudly —
-          // the log line above names the migration that failed.
-          throw new Error(
-            `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
-            `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
-            `Check that the library volume is mounted and writable, then reopen the library.`,
-          );
-        }
-      }
-    } catch (error: any) {
-      this.logger.error(`Error checking transcripts_soundex_fts: ${error?.message || 'Unknown error'}`);
-    }
-
-  }
-
-  /**
-   * Backfill soundex data for existing transcripts
-   * Called during migration when soundex FTS table is created
-   */
-  private backfillSoundexData(): void {
-    const db = this.ensureInitialized();
-
-    try {
-      // Get all transcripts that need soundex data
-      const transcripts = db.prepare(`
-        SELECT video_id, plain_text FROM transcripts
-      `).all() as Array<{ video_id: string; plain_text: string }>;
-
-      if (transcripts.length === 0) {
-        this.logger.log('[Soundex Backfill] No transcripts to process');
-        return;
-      }
-
-      this.logger.log(`[Soundex Backfill] Processing ${transcripts.length} transcripts...`);
-
-      const updateStmt = db.prepare(`
-        UPDATE transcripts SET soundex_content = ? WHERE video_id = ?
-      `);
-      const insertFtsStmt = db.prepare(`
-        INSERT INTO transcripts_soundex_fts (video_id, soundex_content) VALUES (?, ?)
-      `);
-
-      let processed = 0;
-      for (const transcript of transcripts) {
-        const soundexContent = this.textToSoundex(transcript.plain_text);
-
-        // Update the transcripts table
-        updateStmt.run(soundexContent, transcript.video_id);
-
-        // Insert into FTS table
-        insertFtsStmt.run(transcript.video_id, soundexContent);
-
-        processed++;
-        if (processed % 100 === 0) {
-          this.logger.log(`[Soundex Backfill] Processed ${processed}/${transcripts.length} transcripts`);
-        }
-      }
-
-      this.saveDatabase();
-      this.logger.log(`[Soundex Backfill] Complete: ${processed} transcripts processed`);
-    } catch (error: any) {
-      this.logger.error(`[Soundex Backfill] Error: ${error?.message || 'Unknown error'}`);
-    }
-  }
-
-  /**
-   * Check if FTS5 tables need population and populate them if needed
-   * Called after database initialization is complete
-   */
-  private checkAndPopulateFTS5(): void {
-    try {
-      const db = this.ensureInitialized();
-
-      // First, check if FTS5 tables exist by querying sqlite_master
-      const tableCheckStmt = db.prepare(`
-        SELECT COUNT(*) as count
-        FROM sqlite_master
-        WHERE type='table' AND name IN ('videos_fts', 'transcripts_fts', 'analyses_fts', 'tags_fts')
-      `);
-      const tableCheck = tableCheckStmt.get() as any;
-
-      // If not all 4 FTS5 tables exist, create them
-      if (tableCheck.count < 4) {
-        this.logger.log('[Migration] Creating missing FTS5 search tables...');
-        this.createFTS5Tables();
-        this.logger.log('[Migration] FTS5 tables created');
-      }
-
-      // Check if FTS5 tables need to be populated by checking if they're empty
-      const stmt = db.prepare("SELECT COUNT(*) as count FROM videos_fts");
-      const result = stmt.get() as any;
-
-      if (result.count === 0) {
-        // Count total videos to populate
-        const countStmt = db.prepare("SELECT COUNT(*) as count FROM videos");
-        const countResult = countStmt.get() as any;
-
-        if (countResult.count > 0) {
-          this.logger.log(`[Migration] Populating FTS5 search indexes for ${countResult.count} existing videos...`);
-          this.rebuildFTS5Indexes();
-          this.logger.log('[Migration] FTS5 search indexes populated successfully');
-        }
-      }
-    } catch (error: any) {
-      this.logger.error(`[Migration] FTS5 setup failed: ${error?.message || 'Unknown error'}`);
-      this.logger.error(error?.stack || error);
-    }
-  }
-
-  /**
-   * Create FTS5 virtual tables
-   */
-  private createFTS5Tables(): void {
-    const db = this.ensureInitialized();
-
-    const fts5Schema = `
-      -- Drop existing FTS5 tables if they exist (in case of corruption)
-      DROP TABLE IF EXISTS transcripts_fts;
-      DROP TABLE IF EXISTS analyses_fts;
-      DROP TABLE IF EXISTS videos_fts;
-      DROP TABLE IF EXISTS tags_fts;
-
-      -- Full-text search virtual tables using FTS5 for fast search
-      CREATE VIRTUAL TABLE transcripts_fts USING fts5(
-        video_id UNINDEXED,
-        content,
-        tokenize='porter unicode61'
-      );
-
-      CREATE VIRTUAL TABLE analyses_fts USING fts5(
-        video_id UNINDEXED,
-        content,
-        tokenize='porter unicode61'
-      );
-
-      CREATE VIRTUAL TABLE videos_fts USING fts5(
-        video_id UNINDEXED,
-        filename,
-        current_path,
-        ai_description,
-        tokenize='porter unicode61'
-      );
-
-      CREATE VIRTUAL TABLE tags_fts USING fts5(
-        video_id UNINDEXED,
-        tag_name,
-        tokenize='porter unicode61'
-      );
-    `;
-
-    db.exec(fts5Schema);
-    this.saveDatabase();
-  }
-
-  /**
-   * Rebuild FTS5 full-text search indexes from existing data
-   * Call this after importing data or if search isn't working properly
-   */
-  rebuildFTS5Indexes(): void {
-    const db = this.ensureInitialized();
-
-    this.logger.log('[FTS5 Rebuild] Starting rebuild of FTS5 search indexes...');
-    const startTime = Date.now();
-
-    try {
-      // Clear existing FTS5 data
-      this.logger.log('[FTS5 Rebuild] Clearing existing FTS5 tables...');
-      db.prepare('DELETE FROM videos_fts').run();
-      db.prepare('DELETE FROM transcripts_fts').run();
-      db.prepare('DELETE FROM analyses_fts').run();
-      db.prepare('DELETE FROM tags_fts').run();
-
-      // Populate videos_fts
-      this.logger.log('[FTS5 Rebuild] Populating videos_fts...');
-      const videosStmt = db.prepare('SELECT id, filename, current_path, ai_description FROM videos');
-      const videos = videosStmt.all() as any[];
-
-      const videoInsertStmt = db.prepare('INSERT INTO videos_fts (video_id, filename, current_path, ai_description) VALUES (?, ?, ?, ?)');
-      for (const row of videos) {
-        videoInsertStmt.run(row.id, row.filename, row.current_path || '', row.ai_description || '');
-      }
-      this.logger.log(`[FTS5 Rebuild] Populated ${videos.length} videos`);
-
-      // Populate transcripts_fts
-      this.logger.log('[FTS5 Rebuild] Populating transcripts_fts...');
-      const transcriptsStmt = db.prepare('SELECT video_id, plain_text FROM transcripts');
-      const transcripts = transcriptsStmt.all() as any[];
-
-      const transcriptInsertStmt = db.prepare('INSERT INTO transcripts_fts (video_id, content) VALUES (?, ?)');
-      for (const row of transcripts) {
-        transcriptInsertStmt.run(row.video_id, row.plain_text);
-      }
-      this.logger.log(`[FTS5 Rebuild] Populated ${transcripts.length} transcripts`);
-
-      // Populate analyses_fts
-      this.logger.log('[FTS5 Rebuild] Populating analyses_fts...');
-      const analysesStmt = db.prepare('SELECT video_id, ai_analysis, summary FROM analyses');
-      const analyses = analysesStmt.all() as any[];
-
-      const analysisInsertStmt = db.prepare('INSERT INTO analyses_fts (video_id, content) VALUES (?, ?)');
-      for (const row of analyses) {
-        const contentForSearch = [row.ai_analysis, row.summary].filter(Boolean).join(' ');
-        analysisInsertStmt.run(row.video_id, contentForSearch);
-      }
-      this.logger.log(`[FTS5 Rebuild] Populated ${analyses.length} analyses`);
-
-      // Populate tags_fts
-      this.logger.log('[FTS5 Rebuild] Populating tags_fts...');
-      const tagsStmt = db.prepare('SELECT video_id, tag_name FROM tags');
-      const tags = tagsStmt.all() as any[];
-
-      const tagInsertStmt = db.prepare('INSERT INTO tags_fts (video_id, tag_name) VALUES (?, ?)');
-      for (const row of tags) {
-        tagInsertStmt.run(row.video_id, row.tag_name);
-      }
-      this.logger.log(`[FTS5 Rebuild] Populated ${tags.length} tags`);
-
-      this.saveDatabase();
-
-      const duration = Date.now() - startTime;
-      this.logger.log(`[FTS5 Rebuild] Rebuild complete in ${duration}ms (${videos.length} videos, ${transcripts.length} transcripts, ${analyses.length} analyses, ${tags.length} tags)`);
-    } catch (error: any) {
-      this.logger.error(`[FTS5 Rebuild] Failed to rebuild FTS5 indexes: ${error?.message || 'Unknown error'}`);
-      throw error;
-    }
-  }
-
-  /**
-   * Full-text search across all content using FTS5
-   * Searches: filenames, transcripts, analyses, tags, descriptions
-   *
-   * Search features:
-   * - Multiple words: ALL words must match (AND logic), but can be in different fields
-   *   e.g., "foo bar" matches if "foo" is in filename and "bar" is in transcript
-   * - Wildcards: * for prefix matching (e.g., "test*" matches "testing", "tests")
-   *              ? for single character (converted to * for FTS5)
-   * - Quoted phrases: "exact phrase" for consecutive word matching
-   * - Special operators: OR, NOT (must be uppercase)
-   *
-   * @param query - Search query
-   * @param limit - Maximum results to return
-   * @param searchIn - Filter which fields to search: 'all' (default), 'filename', 'transcript', 'analysis'
-   * @param options - Search options: useSoundex (phonetic matching), usePhraseSearch (AND logic for consecutive words)
-   * @returns Array of video IDs with match info, sorted by relevance
-   */
-  searchFTS(
-    query: string,
-    limit: number = 100,
-    searchIn?: string,
-    options?: { useSoundex?: boolean; usePhraseSearch?: boolean }
-  ): { videoId: string; score: number; matches: string[] }[] {
-    const db = this.ensureInitialized();
-
-
-    if (!query || query.trim().length === 0) {
-      return [];
-    }
-
-    const trimmedQuery = query.trim();
-
-    // Check if transcript/analysis search needs phrase matching
-    // Transcript uses phonetic phrase matching (catches transcription errors)
-    // Analysis uses exact phrase matching (AI-written text is accurate)
-    const searchInFields = searchIn ? searchIn.split(',').map(s => s.trim()) : [];
-    const searchAll = !searchIn || searchInFields.length === 0;
-    const searchingTranscript = searchAll || searchInFields.includes('transcript');
-    const searchingAnalysis = searchAll || searchInFields.includes('analysis');
-    const hasQuotes = trimmedQuery.includes('"');
-    const hasBooleanOps = /\s+(AND|OR|NOT)\s+/i.test(trimmedQuery);
-    const usePhoneticMatching = searchingTranscript && !hasQuotes && !hasBooleanOps;
-    const useAnalysisPhraseMatching = searchingAnalysis && !hasQuotes && !hasBooleanOps;
-
-    this.logger.log(`[searchFTS] query="${trimmedQuery}", searchIn="${searchIn}", searchingTranscript=${searchingTranscript}, usePhoneticMatching=${usePhoneticMatching}`);
-
-    // Parse the query into tokens (words, phrases, operators)
-    const tokens = this.parseSearchQuery(trimmedQuery);
-
-    if (tokens.length === 0) {
-      return [];
-    }
-
-    // Separate positive and exclusion tokens
-    const positiveTokens: string[] = [];
-    const exclusionTokens: string[] = [];
-
-    for (const token of tokens) {
-      const cleanToken = token.endsWith(' OR') ? token.slice(0, -3) : token;
-      if (cleanToken.startsWith('-') && cleanToken.length > 1) {
-        exclusionTokens.push(cleanToken.substring(1)); // Remove the - prefix
-      } else {
-        positiveTokens.push(token);
-      }
-    }
-
-
-    // If there are only exclusion tokens, return empty results
-    // (FTS5 can't search for "everything except X" without a positive term)
-    if (positiveTokens.length === 0) {
-      return [];
-    }
-
-    // Group tokens by OR connectivity
-    // Tokens ending with " OR" are connected to the next token
-    // Example: "trans OR woke communist" -> [["trans", "woke"], ["communist"]]
-    const tokenGroups: string[][] = [];
-    let currentGroup: string[] = [];
-
-    for (const token of positiveTokens) {
-      const hasOr = token.endsWith(' OR');
-      const cleanToken = hasOr ? token.slice(0, -3) : token;
-
-      // Skip reserved keywords that would return null from FTS5 query
-      // (AND, NOT, NEAR when uppercase - these are operators, not search terms)
-      if (DatabaseService.FTS5_OPERATORS.has(cleanToken)) {
-        continue;
-      }
-
-      currentGroup.push(cleanToken);
-
-      if (!hasOr) {
-        // End of OR chain, start new group
-        if (currentGroup.length > 0) {
-          tokenGroups.push(currentGroup);
-        }
-        currentGroup = [];
-      }
-    }
-
-    // Don't forget trailing group if last token had OR
-    if (currentGroup.length > 0) {
-      tokenGroups.push(currentGroup);
-    }
-
-
-    // For each group, search and UNION results within group
-    // Then INTERSECT across groups
-    const groupResults: Map<string, { score: number; matches: Set<string> }>[] = [];
-
-    for (const group of tokenGroups) {
-      // Union all tokens in the group
-      const groupMap = new Map<string, { score: number; matches: Set<string> }>();
-
-      for (const token of group) {
-        const tokenResults = this.searchSingleToken(db, token, limit * 3, searchIn, options);
-
-        // Union: add all results, combining scores if already present
-        for (const [videoId, data] of tokenResults) {
-          if (groupMap.has(videoId)) {
-            const existing = groupMap.get(videoId)!;
-            existing.score += data.score;
-            for (const m of data.matches) {
-              existing.matches.add(m);
-            }
-          } else {
-            groupMap.set(videoId, {
-              score: data.score,
-              matches: new Set(data.matches)
-            });
-          }
-        }
-      }
-
-      groupResults.push(groupMap);
-    }
-
-    // Combine group results: UNION (OR) by default, INTERSECT (AND) if usePhraseSearch is enabled
-    let finalResults: Map<string, { score: number; matches: Set<string> }>;
-    const usePhraseSearch = options?.usePhraseSearch ?? false;
-
-    if (groupResults.length === 0) {
-      finalResults = new Map();
-    } else if (groupResults.length === 1) {
-      finalResults = groupResults[0];
-    } else if (usePhraseSearch) {
-      // INTERSECT: all words must match (AND logic - phrase search)
-      // Start with first group's results
-      finalResults = new Map(groupResults[0]);
-
-      // Intersect with each subsequent group
-      for (let i = 1; i < groupResults.length; i++) {
-        const currentGroup = groupResults[i];
-        const newResults = new Map<string, { score: number; matches: Set<string> }>();
-
-        // Only keep videos that exist in both sets
-        for (const [videoId, data] of finalResults) {
-          if (currentGroup.has(videoId)) {
-            const otherData = currentGroup.get(videoId)!;
-            // Combine scores and matches
-            newResults.set(videoId, {
-              score: data.score + otherData.score,
-              matches: new Set([...data.matches, ...otherData.matches])
-            });
-          }
-        }
-
-        finalResults = newResults;
-
-        // Early exit if no matches
-        if (finalResults.size === 0) {
-          break;
-        }
-      }
-    } else {
-      // UNION: any word matches (OR logic - default word search)
-      finalResults = new Map();
-      for (const groupMap of groupResults) {
-        for (const [videoId, data] of groupMap) {
-          if (finalResults.has(videoId)) {
-            const existing = finalResults.get(videoId)!;
-            existing.score += data.score;
-            for (const m of data.matches) {
-              existing.matches.add(m);
-            }
-          } else {
-            finalResults.set(videoId, {
-              score: data.score,
-              matches: new Set(data.matches)
-            });
-          }
-        }
-      }
-    }
-
-    // Apply exclusion filtering - remove videos that match any exclusion term
-    if (exclusionTokens.length > 0 && finalResults.size > 0) {
-      for (const exclusionTerm of exclusionTokens) {
-        // Find videos matching the exclusion term
-        const excludedVideos = this.searchSingleTokenForExclusion(db, exclusionTerm, limit * 3, searchIn);
-
-        // Remove excluded videos from results
-        for (const videoId of excludedVideos) {
-          finalResults.delete(videoId);
-        }
-      }
-    }
-
-    // For searches that include transcript, apply phonetic phrase matching
-    // This filters out false positive transcript matches where words appear separately
-    if (usePhoneticMatching && finalResults.size > 0) {
-      this.logger.log(`[searchFTS] Applying phonetic matching to ${finalResults.size} results`);
-      const videosToRemove: string[] = [];
-
-      for (const [videoId, data] of finalResults.entries()) {
-        // Only check videos that matched on transcript
-        if (!data.matches.has('transcript')) {
-          continue;
-        }
-
-        // Fetch the actual transcript text
-        try {
-          const transcriptRow = db.prepare(
-            'SELECT plain_text FROM transcripts WHERE video_id = ?'
-          ).get(videoId) as { plain_text: string } | undefined;
-
-          let passesPhoneticMatch = false;
-          if (transcriptRow && transcriptRow.plain_text) {
-            passesPhoneticMatch = this.matchesPhonetically(trimmedQuery, transcriptRow.plain_text);
-          }
-
-          if (!passesPhoneticMatch) {
-            // Remove 'transcript' from match types since it's a false positive
-            data.matches.delete('transcript');
-
-            // If no other match types remain, remove the video entirely
-            if (data.matches.size === 0) {
-              videosToRemove.push(videoId);
-            }
-          }
-        } catch (error) {
-          this.logger.error(`Error fetching transcript for video ${videoId}:`, error);
-          // On error, remove transcript match type but keep video if other matches exist
-          data.matches.delete('transcript');
-          if (data.matches.size === 0) {
-            videosToRemove.push(videoId);
-          }
-        }
-      }
-
-      // Remove videos that have no remaining match types
-      this.logger.log(`[searchFTS] Removing ${videosToRemove.length} videos with no valid matches`);
-      for (const videoId of videosToRemove) {
-        finalResults.delete(videoId);
-      }
-    }
-
-    // For searches that include analysis, apply exact phrase matching
-    // This filters out false positive analysis matches where words appear separately
-    if (useAnalysisPhraseMatching && finalResults.size > 0) {
-      this.logger.log(`[searchFTS] Applying analysis phrase matching to ${finalResults.size} results`);
-      const videosToRemove: string[] = [];
-      const phraseToMatch = trimmedQuery.toLowerCase();
-
-      for (const [videoId, data] of finalResults.entries()) {
-        // Only check videos that matched on analysis
-        if (!data.matches.has('analysis')) {
-          continue;
-        }
-
-        // Fetch the actual analysis text
-        try {
-          const analysisRow = db.prepare(
-            'SELECT ai_analysis, summary FROM analyses WHERE video_id = ?'
-          ).get(videoId) as { ai_analysis: string; summary: string } | undefined;
-
-          let passesExactPhraseMatch = false;
-          if (analysisRow) {
-            const analysisText = ((analysisRow.ai_analysis || '') + ' ' + (analysisRow.summary || '')).toLowerCase();
-            passesExactPhraseMatch = analysisText.includes(phraseToMatch);
-          }
-
-          if (!passesExactPhraseMatch) {
-            // Remove 'analysis' from match types since it's a false positive
-            data.matches.delete('analysis');
-
-            // If no other match types remain, remove the video entirely
-            if (data.matches.size === 0) {
-              videosToRemove.push(videoId);
-            }
-          }
-        } catch (error) {
-          this.logger.error(`Error fetching analysis for video ${videoId}:`, error);
-          data.matches.delete('analysis');
-          if (data.matches.size === 0) {
-            videosToRemove.push(videoId);
-          }
-        }
-      }
-
-      // Remove videos that have no remaining match types
-      this.logger.log(`[searchFTS] Removing ${videosToRemove.length} videos with no valid analysis matches`);
-      for (const videoId of videosToRemove) {
-        finalResults.delete(videoId);
-      }
-    }
-
-    // Convert to array and sort by score
-    const sortedResults = Array.from(finalResults.entries())
-      .map(([videoId, data]) => ({
-        videoId,
-        score: data.score,
-        matches: Array.from(data.matches)
-      }))
-      .sort((a, b) => b.score - a.score)
-      .slice(0, limit);
-
-    return sortedResults;
-  }
-
-  /**
-   * Parse search query into tokens
-   * Handles: quoted phrases, wildcards, operators
-   */
-  private parseSearchQuery(query: string): string[] {
-    const tokens: string[] = [];
-
-    // Match quoted phrases or individual words
-    const regex = /"([^"]+)"|(\S+)/g;
-    let match;
-
-    while ((match = regex.exec(query)) !== null) {
-      const token = match[1] || match[2]; // match[1] is quoted content, match[2] is word
-
-      // Only UPPERCASE "OR" is treated as operator
-      // Lowercase "or" is a regular search term
-      if (token === 'OR') {
-        // If previous token exists, mark it for OR logic
-        if (tokens.length > 0) {
-          tokens[tokens.length - 1] += ' OR';
-        }
-        continue;
-      }
-
-      if (token && token.trim().length > 0) {
-        tokens.push(token.trim());
-      }
-    }
-
-    return tokens;
-  }
-
-  /**
-   * Search for a single token across FTS tables
-   * @param searchIn - Filter which fields to search: 'all' (default), 'filename', 'transcript', 'analysis'
-   * @param options - Search options: useSoundex (phonetic matching), usePhraseSearch (AND logic)
-   */
-  private searchSingleToken(
-    db: any,
-    token: string,
-    limit: number,
-    searchIn?: string,
-    options?: { useSoundex?: boolean; usePhraseSearch?: boolean }
-  ): Map<string, { score: number; matches: Set<string> }> {
-    const results = new Map<string, { score: number; matches: Set<string> }>();
-
-    // Check if token has OR suffix (from parseSearchQuery)
-    const hasOr = token.endsWith(' OR');
-    const cleanToken = hasOr ? token.slice(0, -3) : token;
-
-    // Check if this is an exclusion term (starts with -)
-    // If so, we can't use FTS5 for exclusion-only queries
-    // Return empty results - exclusion will be handled at a higher level
-    if (cleanToken.startsWith('-') && cleanToken.length > 1) {
-      // Return empty map - the searchFTS method will handle exclusion filtering
-      return results;
-    }
-
-    // Convert token to FTS5 query
-    let ftsQuery = this.tokenToFTS5Query(cleanToken);
-
-    // If tokenToFTS5Query returns null (e.g., for exclusion terms), skip FTS search
-    if (!ftsQuery) {
-      return results;
-    }
-
-    // Determine which tables to search based on searchIn filter
-    // searchIn can be comma-separated like "filename,transcript" or a single value
-    const searchInFields = searchIn ? searchIn.split(',').map(s => s.trim()) : [];
-    const searchAll = !searchIn || searchInFields.length === 0;
-    const searchFilename = searchAll || searchInFields.includes('filename');
-    const searchTranscript = searchAll || searchInFields.includes('transcript');
-    const searchAnalysis = searchAll || searchInFields.includes('analysis');
-
-
-    // Search videos_fts (filename, path, and optionally ai_description)
-    if (searchFilename) {
-      // When searching filename only, restrict to filename and path columns
-      // ai_description is analysis data, not filename data
-      // FTS5 column filter syntax: {column1 column2}: term
-      let videoFtsQuery = ftsQuery;
-      if (!searchAll && !searchAnalysis) {
-        // Only search filename and path, not ai_description
-        videoFtsQuery = `{filename current_path}: ${ftsQuery}`;
-      }
-
-      try {
-        const videosResults = db.prepare(`
-          SELECT video_id, rank
-          FROM videos_fts
-          WHERE videos_fts MATCH ?
-          ORDER BY rank
-          LIMIT ?
-        `).all(videoFtsQuery, limit) as any[];
-
-        for (const row of videosResults) {
-          if (!results.has(row.video_id)) {
-            results.set(row.video_id, { score: 0, matches: new Set() });
-          }
-          const entry = results.get(row.video_id)!;
-          entry.score += Math.abs(row.rank) * 2; // Videos weighted higher
-          entry.matches.add('filename');
-        }
-      } catch (e) {
-        this.logger.error(`FTS5 videos search error for "${videoFtsQuery}":`, e);
-        throw e;
-      }
-    }
-
-    // Search transcripts_fts
-    if (searchTranscript) {
-      // Track which videos matched via exact FTS
-      const exactFtsMatches = new Set<string>();
-
-      const transcriptResults = db.prepare(`
-        SELECT video_id, rank
-        FROM transcripts_fts
-        WHERE transcripts_fts MATCH ?
-        ORDER BY rank
-        LIMIT ?
-      `).all(ftsQuery, limit) as any[];
-
-      for (const row of transcriptResults) {
-        exactFtsMatches.add(row.video_id);
-        if (!results.has(row.video_id)) {
-          results.set(row.video_id, { score: 0, matches: new Set() });
-        }
-        const entry = results.get(row.video_id)!;
-        entry.score += Math.abs(row.rank);
-        entry.matches.add('transcript');
-      }
-
-      // Soundex (phonetic) search - only enabled when user opts in
-      // This catches transcription errors like "Somalies" vs "Somalis"
-      // but can also match unrelated words that share a soundex code (e.g., "hovind" matches "haven't")
-      if (options?.useSoundex) {
-        try {
-          const cleanWord = cleanToken.replace(/\*/g, '');
-          const soundexCode = this.soundex(cleanWord);
-
-          if (soundexCode && soundexCode !== '0000') {
-            const soundexResults = db.prepare(`
-              SELECT video_id, rank
-              FROM transcripts_soundex_fts
-              WHERE transcripts_soundex_fts MATCH ?
-              ORDER BY rank
-              LIMIT ?
-            `).all(soundexCode, limit) as any[];
-
-            for (const row of soundexResults) {
-              // Skip if this video already matched via exact FTS
-              if (exactFtsMatches.has(row.video_id)) {
-                continue;
-              }
-
-              if (!results.has(row.video_id)) {
-                results.set(row.video_id, { score: 0, matches: new Set() });
-              }
-              const entry = results.get(row.video_id)!;
-              // Lower score for phonetic matches (0.5x)
-              entry.score += Math.abs(row.rank) * 0.5;
-              entry.matches.add('transcript-phonetic');
-            }
-          }
-        } catch (e) {
-          // Soundex table might not exist yet, ignore
-        }
-      }
-    }
-
-    // Search analyses_fts
-    if (searchAnalysis) {
-      const analysesResults = db.prepare(`
-        SELECT video_id, rank
-        FROM analyses_fts
-        WHERE analyses_fts MATCH ?
-        ORDER BY rank
-        LIMIT ?
-      `).all(ftsQuery, limit) as any[];
-
-      for (const row of analysesResults) {
-        if (!results.has(row.video_id)) {
-          results.set(row.video_id, { score: 0, matches: new Set() });
-        }
-        const entry = results.get(row.video_id)!;
-        entry.score += Math.abs(row.rank) * 1.5; // Analysis weighted medium
-        entry.matches.add('analysis');
-      }
-    }
-
-    // Search tags_fts (only when searching all fields)
-    if (searchAll) {
-      const tagsResults = db.prepare(`
-        SELECT video_id, rank
-        FROM tags_fts
-        WHERE tags_fts MATCH ?
-        ORDER BY rank
-        LIMIT ?
-      `).all(ftsQuery, limit) as any[];
-
-      for (const row of tagsResults) {
-        if (!results.has(row.video_id)) {
-          results.set(row.video_id, { score: 0, matches: new Set() });
-        }
-        const entry = results.get(row.video_id)!;
-        entry.score += Math.abs(row.rank) * 3; // Tags weighted highest
-        entry.matches.add('tags');
-      }
-    }
-
-    return results;
-  }
-
-  /**
-   * Search for a single token to find videos to exclude
-   * Returns a Set of video IDs that match the exclusion term
-   */
-  private searchSingleTokenForExclusion(
-    db: any,
-    term: string,
-    limit: number,
-    searchIn?: string
-  ): Set<string> {
-    const excludedVideoIds = new Set<string>();
-
-    // Convert term to FTS5 query - use the same logic as positive searches
-    let ftsQuery = term;
-
-    // Add wildcard for prefix matching if not already present
-    if (!ftsQuery.includes('*') && ftsQuery.length >= 2) {
-      ftsQuery = ftsQuery + '*';
-    }
-
-    // Determine which tables to search based on searchIn filter
-    const searchInFields = searchIn ? searchIn.split(',').map(s => s.trim()) : [];
-    const searchAll = !searchIn || searchInFields.length === 0;
-    const searchFilename = searchAll || searchInFields.includes('filename');
-    const searchTranscript = searchAll || searchInFields.includes('transcript');
-    const searchAnalysis = searchAll || searchInFields.includes('analysis');
-
-    // Search videos_fts
-    if (searchFilename) {
-      try {
-        let videoFtsQuery = ftsQuery;
-        if (!searchAll && !searchAnalysis) {
-          videoFtsQuery = `{filename current_path}: ${ftsQuery}`;
-        }
-        const results = db.prepare(`
-          SELECT video_id FROM videos_fts WHERE videos_fts MATCH ? LIMIT ?
-        `).all(videoFtsQuery, limit) as any[];
-        for (const row of results) {
-          excludedVideoIds.add(row.video_id);
-        }
-      } catch (e) {
-        this.logger.debug(`FTS5 exclusion search error for "${ftsQuery}":`, e);
-      }
-    }
-
-    // Search transcripts_fts
-    if (searchTranscript) {
-      try {
-        const results = db.prepare(`
-          SELECT video_id FROM transcripts_fts WHERE transcripts_fts MATCH ? LIMIT ?
-        `).all(ftsQuery, limit) as any[];
-        for (const row of results) {
-          excludedVideoIds.add(row.video_id);
-        }
-      } catch (e) {
-        this.logger.debug(`FTS5 exclusion search error for "${ftsQuery}":`, e);
-      }
-    }
-
-    // Search analyses_fts
-    if (searchAnalysis) {
-      try {
-        const results = db.prepare(`
-          SELECT video_id FROM analyses_fts WHERE analyses_fts MATCH ? LIMIT ?
-        `).all(ftsQuery, limit) as any[];
-        for (const row of results) {
-          excludedVideoIds.add(row.video_id);
-        }
-      } catch (e) {
-        this.logger.debug(`FTS5 exclusion search error for "${ftsQuery}":`, e);
-      }
-    }
-
-    // Search tags_fts (only when searching all)
-    if (searchAll) {
-      try {
-        const results = db.prepare(`
-          SELECT video_id FROM tags_fts WHERE tags_fts MATCH ? LIMIT ?
-        `).all(ftsQuery, limit) as any[];
-        for (const row of results) {
-          excludedVideoIds.add(row.video_id);
-        }
-      } catch (e) {
-        this.logger.debug(`FTS5 exclusion search error for "${ftsQuery}":`, e);
-      }
-    }
-
-    return excludedVideoIds;
-  }
-
-  // FTS5 reserved keywords - only UPPERCASE versions are treated as operators
-  // Lowercase versions (and, or, not) are treated as regular search terms
-  private static readonly FTS5_OPERATORS = new Set(['AND', 'OR', 'NOT', 'NEAR']);
-
-  /**
-   * Convert a token to FTS5 query syntax
-   * Returns null for exclusion-only terms (these must be filtered in post-processing)
-   */
-  private tokenToFTS5Query(token: string): string | null {
-    // Skip empty or invalid tokens (just special chars, single dash, etc.)
-    const alphanumericContent = token.replace(/[^a-zA-Z0-9]/g, '');
-    if (!alphanumericContent || alphanumericContent.length === 0) {
-      return null;
-    }
-
-    // Check if it's a phrase (contains spaces, originally was quoted)
-    if (token.includes(' ')) {
-      // Phrase query - must match consecutively
-      return `"${token}"`;
-    }
-
-    // Handle NOT prefix (explicit, only uppercase)
-    if (token.startsWith('NOT ')) {
-      const term = token.slice(4);
-      const subQuery = this.tokenToFTS5Query(term);
-      if (!subQuery) return null;
-      return `NOT ${subQuery}`;
-    }
-
-    // Handle - prefix for exclusion
-    // FTS5 can't handle "NOT x" alone - it needs "positive_term NOT x"
-    // So we convert "-word" to a special marker that the caller must handle
-    if (token.startsWith('-') && token.length > 1) {
-      // Return null to indicate this is an exclusion-only term
-      // The caller should handle exclusions differently (post-filter results)
-      return null;
-    }
-
-    // Only UPPERCASE reserved keywords are operators
-    // Lowercase "and", "or", "not" are treated as regular search terms
-    if (DatabaseService.FTS5_OPERATORS.has(token)) {
-      // This shouldn't happen often since OR is handled in parseSearchQuery
-      // but if it does, skip it as it's an operator without operands
-      return null;
-    }
-
-    // Handle wildcards
-    // * is already FTS5 compatible for prefix matching
-    // ? is converted to * (FTS5 doesn't support single-char wildcards)
-    let processed = token.replace(/\?/g, '*');
-
-    // If no wildcard at end, add * for prefix matching (more forgiving search)
-    // But not if it already has special characters or is very short
-    if (!processed.includes('*') && processed.length >= 2) {
-      processed = processed + '*';
-    }
-
-    return processed;
   }
 
   /**
@@ -3126,14 +2151,6 @@ export class DatabaseService {
         video.fps || null,
         video.needsMetadata ? 1 : 0
       );
-
-      // Insert/update FTS5 table for video search
-      // Delete existing entry first (if any)
-      db.prepare(`DELETE FROM videos_fts WHERE video_id = ?`).run(video.id);
-      // Insert new entry
-      db.prepare(
-        `INSERT INTO videos_fts (video_id, filename, current_path, ai_description) VALUES (?, ?, ?, ?)`
-      ).run(video.id, video.filename, video.currentPath || '', ''); // ai_description is empty initially, updated later
 
       return { inserted: true };
     });
@@ -3357,27 +2374,11 @@ export class DatabaseService {
          WHERE id = ?`
       ).run(description, id);
 
-      // Update FTS5 table for video search
-      // Get filename and current_path for the FTS5 update
-      const stmt = db.prepare('SELECT filename, current_path FROM videos WHERE id = ?');
-      const row = stmt.get(id) as { filename: string; current_path: string } | undefined;
-      if (row) {
-        db.prepare(`DELETE FROM videos_fts WHERE video_id = ?`).run(id);
-        db.prepare(
-          `INSERT INTO videos_fts (video_id, filename, current_path, ai_description) VALUES (?, ?, ?, ?)`
-        ).run(id, row.filename, row.current_path, description || '');
-      }
-
       this.saveDatabase();
       this.logger.log(`[AI Description] Successfully updated description for video ${id}`);
     } catch (error: any) {
-      // If column doesn't exist yet (pre-migration), just log and continue
-      if (error.message && error.message.includes('no such column: ai_description')) {
-        this.logger.warn('ai_description column does not exist yet - skipping description update');
-      } else {
-        this.logger.error(`[AI Description] Failed to update description: ${error.message}`);
-        throw error;
-      }
+      this.logger.error(`[AI Description] Failed to update description: ${error.message}`);
+      throw error;
     }
   }
 
@@ -3396,13 +2397,8 @@ export class DatabaseService {
       this.saveDatabase();
       this.logger.log(`[Suggested Title] Successfully updated suggested title for video ${id}`);
     } catch (error: any) {
-      // If column doesn't exist yet (pre-migration), just log and continue
-      if (error.message && error.message.includes('no such column: suggested_title')) {
-        this.logger.warn('suggested_title column does not exist yet - skipping suggested title update');
-      } else {
-        this.logger.error(`[Suggested Title] Failed to update suggested title: ${error.message}`);
-        throw error;
-      }
+      this.logger.error(`[Suggested Title] Failed to update suggested title: ${error.message}`);
+      throw error;
     }
   }
 
@@ -3418,17 +2414,6 @@ export class DatabaseService {
          SET filename = ?
          WHERE id = ?`
       ).run(filename, id);
-
-      // Update FTS5 table for video search
-      // Get current_path and ai_description for the FTS5 update
-      const stmt = db.prepare('SELECT current_path, ai_description FROM videos WHERE id = ?');
-      const row = stmt.get(id) as { current_path: string; ai_description: string | null } | undefined;
-      if (row) {
-        db.prepare(`DELETE FROM videos_fts WHERE video_id = ?`).run(id);
-        db.prepare(
-          `INSERT INTO videos_fts (video_id, filename, current_path, ai_description) VALUES (?, ?, ?, ?)`
-        ).run(id, filename, row.current_path, row.ai_description || '');
-      }
 
       this.saveDatabase();
     } catch (error) {
@@ -3542,20 +2527,9 @@ export class DatabaseService {
 
     this.logger.log(`Deleting video ${id} and all related data`);
 
-    // Deleting the video row cascades to transcripts/analyses/tags/sections via
-    // FK ON DELETE CASCADE, but the FTS5 mirror tables are hand-maintained (no
-    // triggers) so their rows would be left orphaned. Delete every FTS row this
-    // video fed, then the video row, all in one transaction so we can never end
-    // up with a half-cleaned index.
-    const deleteVideoTxn = db.transaction((videoId: string) => {
-      db.prepare('DELETE FROM videos_fts WHERE video_id = ?').run(videoId);
-      db.prepare('DELETE FROM transcripts_fts WHERE video_id = ?').run(videoId);
-      db.prepare('DELETE FROM transcripts_soundex_fts WHERE video_id = ?').run(videoId);
-      db.prepare('DELETE FROM analyses_fts WHERE video_id = ?').run(videoId);
-      db.prepare('DELETE FROM tags_fts WHERE video_id = ?').run(videoId);
-      db.prepare('DELETE FROM videos WHERE id = ?').run(videoId);
-    });
-    deleteVideoTxn(id);
+    // The row's children (transcript, analyses, tags, sections, the search
+    // index) go with it through ON DELETE CASCADE.
+    db.prepare('DELETE FROM videos WHERE id = ?').run(id);
 
     this.saveDatabase();
 
@@ -3586,32 +2560,13 @@ export class DatabaseService {
 
     this.logger.log(`Pruning ${unlinkedVideos.length} orphaned videos from database`);
 
-    const videoIds = unlinkedVideos.map(v => v.id);
-
-    // Delete all unlinked videos (CASCADE will handle related base-table records)
-    // plus their hand-maintained FTS5 mirror rows, in one transaction so the
-    // index can never drift from the videos table.
-    const pruneTxn = db.transaction((ids: string[]) => {
-      const ftsDeletes = [
-        db.prepare('DELETE FROM videos_fts WHERE video_id = ?'),
-        db.prepare('DELETE FROM transcripts_fts WHERE video_id = ?'),
-        db.prepare('DELETE FROM transcripts_soundex_fts WHERE video_id = ?'),
-        db.prepare('DELETE FROM analyses_fts WHERE video_id = ?'),
-        db.prepare('DELETE FROM tags_fts WHERE video_id = ?'),
-      ];
-      for (const id of ids) {
-        for (const stmt of ftsDeletes) {
-          stmt.run(id);
-        }
-      }
-      db.prepare('DELETE FROM videos WHERE is_linked = 0').run();
-    });
-    pruneTxn(videoIds);
+    // Their children go with them through ON DELETE CASCADE.
+    db.prepare('DELETE FROM videos WHERE is_linked = 0').run();
 
     this.saveDatabase();
 
     // Delete thumbnails only after the row deletes have committed.
-    this.thumbnailService.deleteThumbnails(videoIds);
+    this.thumbnailService.deleteThumbnails(unlinkedVideos.map((v) => v.id));
 
     return {
       deletedCount: unlinkedVideos.length,
@@ -3809,15 +2764,13 @@ export class DatabaseService {
   }) {
     const db = this.ensureInitialized();
 
-    // Compute soundex content for phonetic search
-    const soundexContent = this.textToSoundex(transcript.plainText);
     const transcribedAt = new Date().toISOString();
 
     const insertTranscriptTxn = db.transaction(() => {
       db.prepare(
         `INSERT OR REPLACE INTO transcripts (
-          video_id, plain_text, srt_format, whisper_model, language, transcribed_at, transcription_time_seconds, soundex_content
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+          video_id, plain_text, srt_format, whisper_model, language, transcribed_at, transcription_time_seconds
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)`
       ).run(
         transcript.videoId,
         transcript.plainText,
@@ -3826,24 +2779,9 @@ export class DatabaseService {
         transcript.language || null,
         transcribedAt,
         transcript.transcriptionTimeSeconds || null,
-        soundexContent,
       );
 
-      // Update FTS5 table for transcript search
-      // Delete existing entry first (if any)
-      db.prepare(`DELETE FROM transcripts_fts WHERE video_id = ?`).run(transcript.videoId);
-      // Insert new entry
-      db.prepare(
-        `INSERT INTO transcripts_fts (video_id, content) VALUES (?, ?)`
-      ).run(transcript.videoId, transcript.plainText);
-
-      // Update soundex FTS5 table for phonetic search
-      db.prepare(`DELETE FROM transcripts_soundex_fts WHERE video_id = ?`).run(transcript.videoId);
-      db.prepare(
-        `INSERT INTO transcripts_soundex_fts (video_id, soundex_content) VALUES (?, ?)`
-      ).run(transcript.videoId, soundexContent);
-
-      // Moment search: the transcript's segments and windows, in the same transaction.
+      // Search: the transcript's segments and windows, in the same transaction.
       indexVideoMoments(db, transcript.videoId, transcript.srtFormat, transcribedAt);
 
       // Update has_transcript flag in videos table
@@ -3886,9 +2824,6 @@ export class DatabaseService {
   }) {
     const db = this.ensureInitialized();
 
-    // Combine analysis and summary for better search
-    const contentForSearch = [analysis.aiAnalysis, analysis.summary].filter(Boolean).join(' ');
-
     const insertAnalysisTxn = db.transaction(() => {
       db.prepare(
         `INSERT OR REPLACE INTO analyses (
@@ -3910,14 +2845,6 @@ export class DatabaseService {
         analysis.estimatedCost || null,
         analysis.apiCalls || null,
       );
-
-      // Update FTS5 table for analysis search
-      // Delete existing entry first (if any)
-      db.prepare(`DELETE FROM analyses_fts WHERE video_id = ?`).run(analysis.videoId);
-      // Insert new entry
-      db.prepare(
-        `INSERT INTO analyses_fts (video_id, content) VALUES (?, ?)`
-      ).run(analysis.videoId, contentForSearch);
 
       // Update has_analysis flag in videos table
       db.prepare(
@@ -3950,8 +2877,6 @@ export class DatabaseService {
       this.deleteAIAnalysisSections(id);
       // Then delete the analysis record
       db.prepare('DELETE FROM analyses WHERE video_id = ?').run(id);
-      // Remove the hand-maintained FTS mirror row (no trigger keeps it in sync)
-      db.prepare('DELETE FROM analyses_fts WHERE video_id = ?').run(id);
       // Clear the denormalized flag so the videos table stays consistent
       db.prepare('UPDATE videos SET has_analysis = 0 WHERE id = ?').run(id);
     });
@@ -4015,34 +2940,8 @@ export class DatabaseService {
    */
   deleteTagsForVideo(videoId: string) {
     const db = this.ensureInitialized();
-    const txn = db.transaction((id: string) => {
-      db.prepare('DELETE FROM tags WHERE video_id = ?').run(id);
-      // This removes ALL of the video's tags, so its whole tags_fts mirror goes too
-      db.prepare('DELETE FROM tags_fts WHERE video_id = ?').run(id);
-    });
-    txn(videoId);
+    db.prepare('DELETE FROM tags WHERE video_id = ?').run(videoId);
     this.logger.log(`Deleted tags for video ${videoId}`);
-  }
-
-  /**
-   * Rebuild a single video's tags_fts mirror from its remaining tags rows.
-   *
-   * tags_fts is a hand-maintained FTS5 table keyed only on (video_id, tag_name)
-   * — it has no tag id or source column, so a partial tag delete (one tag, or
-   * only AI tags) cannot be mirrored by a targeted `DELETE ... WHERE`. Instead we
-   * clear this video's mirror rows and re-insert one per surviving tag. Must be
-   * called inside a transaction alongside the tags-table delete so search can
-   * never observe a torn state. Caller holds the connection.
-   */
-  private rebuildTagsFtsForVideo(db: Database.Database, videoId: string): void {
-    db.prepare('DELETE FROM tags_fts WHERE video_id = ?').run(videoId);
-    const remaining = db
-      .prepare('SELECT tag_name FROM tags WHERE video_id = ?')
-      .all(videoId) as Array<{ tag_name: string }>;
-    const insert = db.prepare('INSERT INTO tags_fts (video_id, tag_name) VALUES (?, ?)');
-    for (const row of remaining) {
-      insert.run(videoId, row.tag_name);
-    }
   }
 
   /**
@@ -4050,13 +2949,7 @@ export class DatabaseService {
    */
   deleteAITagsForVideo(videoId: string) {
     const db = this.ensureInitialized();
-    const txn = db.transaction((id: string) => {
-      db.prepare('DELETE FROM tags WHERE video_id = ? AND source = ?').run(id, 'ai');
-      // Partial delete → rebuild the FTS mirror from the surviving (user) tags so
-      // deleted AI tags don't linger as orphaned search hits.
-      this.rebuildTagsFtsForVideo(db, id);
-    });
-    txn(videoId);
+    db.prepare('DELETE FROM tags WHERE video_id = ? AND source = ?').run(videoId, 'ai');
     this.saveDatabase();
     this.logger.log(`Deleted AI-generated tags for video ${videoId}`);
   }
@@ -4066,17 +2959,7 @@ export class DatabaseService {
    */
   deleteTag(tagId: string) {
     const db = this.ensureInitialized();
-    const txn = db.transaction((id: string) => {
-      // Capture the owning video BEFORE deleting so we know whose mirror to rebuild.
-      const row = db
-        .prepare('SELECT video_id FROM tags WHERE id = ?')
-        .get(id) as { video_id: string } | undefined;
-      db.prepare('DELETE FROM tags WHERE id = ?').run(id);
-      if (row) {
-        this.rebuildTagsFtsForVideo(db, row.video_id);
-      }
-    });
-    txn(tagId);
+    db.prepare('DELETE FROM tags WHERE id = ?').run(tagId);
     this.saveDatabase();
     this.logger.log(`Deleted tag ${tagId}`);
   }
@@ -4088,9 +2971,6 @@ export class DatabaseService {
     const db = this.ensureInitialized();
     const txn = db.transaction((id: string) => {
       db.prepare('DELETE FROM transcripts WHERE video_id = ?').run(id);
-      // Remove the hand-maintained FTS mirror rows this transcript fed
-      db.prepare('DELETE FROM transcripts_fts WHERE video_id = ?').run(id);
-      db.prepare('DELETE FROM transcripts_soundex_fts WHERE video_id = ?').run(id);
       removeVideoMoments(db, id);
       // Clear the denormalized flag so the videos table stays consistent
       db.prepare('UPDATE videos SET has_transcript = 0 WHERE id = ?').run(id);
@@ -4621,12 +3501,6 @@ export class DatabaseService {
       new Date().toISOString(),
     );
 
-    // Update FTS5 table for tag search
-    // Insert into tags_fts (don't delete first since multiple tags per video)
-    db.prepare(
-      `INSERT INTO tags_fts (video_id, tag_name) VALUES (?, ?)`
-    ).run(tag.videoId, tag.tagName);
-
     this.saveDatabase();
     return tag.id;
   }
@@ -4713,36 +3587,6 @@ export class DatabaseService {
   }
 
   /**
-   * Full-text search in transcripts
-   */
-  searchTranscripts(query: string, limit = 50): TranscriptSearchRecord[] {
-    const db = this.ensureInitialized();
-    const stmt = db.prepare(`
-      SELECT video_id, snippet(transcripts_fts, 1, '<mark>', '</mark>', '...', 32) as snippet
-      FROM transcripts_fts
-      WHERE content MATCH ?
-      LIMIT ?
-    `);
-    const results = stmt.all(query, limit) as TranscriptSearchRecord[];
-    return results;
-  }
-
-  /**
-   * Full-text search in analyses
-   */
-  searchAnalyses(query: string, limit = 50): AnalysisSearchRecord[] {
-    const db = this.ensureInitialized();
-    const stmt = db.prepare(`
-      SELECT video_id, snippet(analyses_fts, 1, '<mark>', '</mark>', '...', 32) as snippet
-      FROM analyses_fts
-      WHERE content MATCH ?
-      LIMIT ?
-    `);
-    const results = stmt.all(query, limit) as AnalysisSearchRecord[];
-    return results;
-  }
-
-  /**
    * Get database statistics
    */
   getStats(): StatsRecord {
@@ -4768,495 +3612,6 @@ export class DatabaseService {
       withAnalyses,
       totalTags,
     };
-  }
-
-  /**
-   * Compute Soundex code for a word (phonetic encoding)
-   * Returns a 4-character code: first letter + 3 digits
-   * Words that sound similar produce the same code
-   */
-  private soundex(word: string): string {
-    if (!word || word.length === 0) return '0000';
-
-    const clean = word.toUpperCase().replace(/[^A-Z]/g, '');
-    if (clean.length === 0) return '0000';
-
-    const firstLetter = clean[0];
-
-    // Soundex encoding map - groups letters by similar sounds
-    const codes: { [key: string]: string } = {
-      'B': '1', 'F': '1', 'P': '1', 'V': '1',
-      'C': '2', 'G': '2', 'J': '2', 'K': '2', 'Q': '2', 'S': '2', 'X': '2', 'Z': '2',
-      'D': '3', 'T': '3',
-      'L': '4',
-      'M': '5', 'N': '5',
-      'R': '6',
-      // A, E, I, O, U, H, W, Y are not coded (vowels/semivowels)
-    };
-
-    let result = firstLetter;
-    let prevCode = codes[firstLetter] || '';
-
-    for (let i = 1; i < clean.length && result.length < 4; i++) {
-      const code = codes[clean[i]];
-      if (code && code !== prevCode) {
-        result += code;
-        prevCode = code;
-      } else if (!code) {
-        prevCode = ''; // Vowels reset the previous code
-      }
-    }
-
-    // Pad with zeros to ensure 4 characters
-    return (result + '000').substring(0, 4);
-  }
-
-  /**
-   * Convert text to soundex-encoded version (each word becomes its soundex code)
-   * Used for phonetic search in transcripts
-   */
-  private textToSoundex(text: string): string {
-    if (!text) return '';
-
-    return text
-      .split(/\s+/)
-      .map(word => {
-        // Clean word of punctuation
-        const clean = word.replace(/[^\w]/g, '');
-        if (clean.length < 2) return ''; // Skip very short words
-        return this.soundex(clean);
-      })
-      .filter(code => code && code !== '0000')
-      .join(' ');
-  }
-
-  /**
-   * Levenshtein distance - minimum edits to transform one string to another
-   */
-  private levenshteinDistance(str1: string, str2: string): number {
-    const m = str1.length;
-    const n = str2.length;
-
-    if (m === 0) return n;
-    if (n === 0) return m;
-
-    let prevRow = Array(n + 1).fill(0).map((_, i) => i);
-    let currRow = Array(n + 1).fill(0);
-
-    for (let i = 1; i <= m; i++) {
-      currRow[0] = i;
-
-      for (let j = 1; j <= n; j++) {
-        const cost = str1[i - 1] === str2[j - 1] ? 0 : 1;
-        currRow[j] = Math.min(
-          prevRow[j] + 1,      // deletion
-          currRow[j - 1] + 1,  // insertion
-          prevRow[j - 1] + cost // substitution
-        );
-      }
-
-      [prevRow, currRow] = [currRow, prevRow];
-    }
-
-    return prevRow[n];
-  }
-
-  /**
-   * Check if two words match phonetically
-   */
-  private wordsMatchPhonetically(search: string, text: string): boolean {
-    // Exact match
-    if (text === search) return true;
-
-    // Very short words (1-2 chars) - require exact match only
-    if (search.length <= 2) {
-      return text === search;
-    }
-
-    // Substring match (only if search is 3+ chars to avoid false positives)
-    if (search.length >= 3 && (text.includes(search) || search.includes(text))) return true;
-
-    // Soundex match (only for 3+ char words)
-    if (search.length >= 3) {
-      const searchSoundex = this.soundex(search);
-      const textSoundex = this.soundex(text);
-      if (searchSoundex && textSoundex && searchSoundex === textSoundex && searchSoundex !== '0000') return true;
-    }
-
-    // Levenshtein distance scaled by word length
-    const maxDistance = Math.max(1, Math.floor(search.length / 3));
-    if (this.levenshteinDistance(search, text) <= maxDistance) return true;
-
-    return false;
-  }
-
-  /**
-   * Phonetic phrase matching - words must appear consecutively in order
-   * - Unquoted: phonetic phrase match (each word matched phonetically)
-   * - Double quotes: exact phrase match
-   */
-  private matchesPhonetically(query: string, text: string): boolean {
-    const textLower = text.toLowerCase();
-    const textWords = textLower.split(/\s+/).filter(w => w.length > 0);
-
-    // Check for exact phrase (double quotes)
-    const exactPhraseMatch = query.match(/^"([^"]+)"$/);
-    if (exactPhraseMatch) {
-      return textLower.includes(exactPhraseMatch[1].toLowerCase());
-    }
-
-    // Unquoted: phonetic phrase match - find words in order
-    const searchWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 0);
-    if (searchWords.length === 0) return false;
-
-    // Find starting positions where all search words match consecutively
-    for (let startIdx = 0; startIdx <= textWords.length - searchWords.length; startIdx++) {
-      let allMatch = true;
-      let textIdx = startIdx;
-
-      for (const searchWord of searchWords) {
-        if (textIdx >= textWords.length) {
-          allMatch = false;
-          break;
-        }
-
-        const textWord = textWords[textIdx];
-        if (!this.wordsMatchPhonetically(searchWord, textWord)) {
-          allMatch = false;
-          break;
-        }
-        textIdx++;
-      }
-
-      if (allMatch) return true;
-    }
-
-    return false;
-  }
-
-  /**
-   * Build FTS5 query from user input with improved search logic
-   *
-   * Features:
-   * - AND by default: "dad vax bribe" → matches videos with ALL terms
-   * - Exclusion: "-full" → excludes videos containing "full"
-   * - Quoted phrases: "exact phrase" → matches exact phrase
-   * - Wildcards: dad* → matches dad, dads, daddy, etc.
-   * - Explicit OR: dad OR vax → matches either term
-   * - Prefix matching: partial terms automatically get * suffix
-   *
-   * Examples:
-   * - "dad vax bribe" → dad AND vax AND bribe
-   * - "vax -full" → vax AND NOT full (has vax, excludes full)
-   * - '"anti vax"' → exact phrase "anti vax"
-   * - "dad* vax*" → dad* AND vax* (prefix matching)
-   * - "dad OR vax" → dad OR vax (explicit OR)
-   * - "vax -full -complete" → vax AND NOT full AND NOT complete
-   *
-   * @param useOrLogic - If true, use OR between terms (for filename search). Default is AND.
-   */
-  private buildFTS5Query(query: string, useOrLogic: boolean = false): string {
-    query = query.trim();
-
-    // Handle quoted phrases first (preserve them)
-    const phrases: string[] = [];
-    let processedQuery = query.replace(/"([^"]+)"/g, (match, phrase) => {
-      const placeholder = `__PHRASE_${phrases.length}__`;
-      phrases.push(`"${phrase}"`);
-      return placeholder;
-    });
-
-    // Check if user explicitly used OR (case insensitive)
-    const hasExplicitOr = /\s+OR\s+/i.test(processedQuery);
-
-    // Split by whitespace and filter empty strings
-    const terms = processedQuery.split(/\s+/).filter(t => t.length > 0);
-
-    // Separate positive and negative terms
-    const positiveTerms: string[] = [];
-    const negativeTerms: string[] = [];
-
-    // Process each term
-    for (let term of terms) {
-      // Restore phrases
-      if (term.startsWith('__PHRASE_')) {
-        const index = parseInt(term.replace('__PHRASE_', '').replace('__', ''));
-        positiveTerms.push(phrases[index]);
-        continue;
-      }
-
-      // Skip OR operator
-      if (term.toUpperCase() === 'OR') {
-        positiveTerms.push('OR');
-        continue;
-      }
-
-      // Handle exclusion (NOT) with - prefix
-      const isExclusion = term.startsWith('-');
-      if (isExclusion) {
-        term = term.substring(1); // Remove the - prefix
-      }
-
-      // Remove special characters except wildcards
-      term = term.replace(/[^\w*]/g, '');
-
-      // Skip empty terms
-      if (!term) {
-        continue;
-      }
-
-      // Add prefix wildcard if term doesn't already have one and is longer than 2 chars
-      // This allows partial matching: "vax" matches "vaccine", "vax", "vaxxed", etc.
-      if (!term.includes('*') && term.length > 2) {
-        term = term + '*';
-      }
-
-      // Add to appropriate array
-      if (isExclusion) {
-        negativeTerms.push(term);
-      } else {
-        positiveTerms.push(term);
-      }
-    }
-
-    // FTS5 requires at least one positive term before using NOT
-    // If only negative terms exist, add a wildcard to match everything
-    if (positiveTerms.length === 0 && negativeTerms.length > 0) {
-      positiveTerms.push('*');
-    }
-
-    // Build the query
-    let result = '';
-
-    if (hasExplicitOr || useOrLogic) {
-      // Use OR between terms (explicit OR or filename search)
-      result = positiveTerms.join(' OR ');
-    } else {
-      // Default to implicit AND (space-separated)
-      result = positiveTerms.join(' ');
-    }
-
-    // Add NOT terms (FTS5 syntax: "positive_term NOT negative_term")
-    for (const negTerm of negativeTerms) {
-      result += ` NOT ${negTerm}`;
-    }
-
-    return result;
-  }
-
-  /**
-   * Build soundex-based FTS5 query for phonetic search
-   * Converts search words to their soundex codes
-   */
-  private buildSoundexSearchQuery(query: string): string {
-    query = query.trim();
-
-    // Remove quoted phrases (soundex doesn't work well with phrases)
-    query = query.replace(/"[^"]+"/g, '');
-
-    // Split into words and filter
-    const words = query.split(/\s+/).filter(w => w.length > 0);
-
-    const soundexTerms: string[] = [];
-
-    for (let word of words) {
-      // Skip OR operator
-      if (word.toUpperCase() === 'OR') continue;
-
-      // Skip exclusion terms (they start with -)
-      if (word.startsWith('-')) continue;
-
-      // Remove wildcards for soundex
-      word = word.replace(/\*/g, '');
-
-      // Clean word of special characters
-      word = word.replace(/[^\w]/g, '');
-
-      // Skip very short words
-      if (word.length < 2) continue;
-
-      // Convert to soundex
-      const code = this.soundex(word);
-      if (code && code !== '0000') {
-        soundexTerms.push(code);
-      }
-    }
-
-    // Return empty if no valid terms
-    if (soundexTerms.length === 0) return '';
-
-    // FTS5 query with all soundex codes (AND logic)
-    return soundexTerms.join(' ');
-  }
-
-  /**
-   * Search videos with full-text search across filename, AI description, transcripts, analyses, and tags
-   * Uses FTS5 for high-performance full-text search
-   * Returns video IDs that match the search query
-   */
-  searchVideos(
-    query: string,
-    limit: number = 1000,
-    filters?: {
-      filename?: boolean;
-      aiDescription?: boolean;
-      transcript?: boolean;
-      analysis?: boolean;
-      tags?: boolean;
-    }
-  ): SearchResultRecord[] {
-    const db = this.ensureInitialized();
-
-    if (!query || query.trim() === '') {
-      return [];
-    }
-
-    // Prepare FTS5 queries - OR logic for filename (word search), AND for others (phrase search)
-    const filenameSearchTerm = this.buildFTS5Query(query, true);  // OR logic for filenames
-    const transcriptSearchTerm = this.buildFTS5Query(query, false); // AND logic for transcripts
-    const results = new Map<string, { id: string; score: number; matchType: string }>();
-
-    // Default all filters to true if not specified
-    const searchFilters = {
-      filename: filters?.filename !== false,
-      aiDescription: filters?.aiDescription !== false,
-      transcript: filters?.transcript !== false,
-      analysis: filters?.analysis !== false,
-      tags: filters?.tags !== false,
-    };
-
-    // Helper to add or update result
-    const addResult = (videoId: string, score: number, matchType: string) => {
-      const existing = results.get(videoId);
-      if (!existing || existing.score < score) {
-        results.set(videoId, { id: videoId, score, matchType });
-      }
-    };
-
-    // 1. Search in video filename and AI description using FTS5 (highest priority)
-    // Uses OR logic - any word match counts (more intuitive for filename search)
-    if (searchFilters.filename || searchFilters.aiDescription) {
-      try {
-        const stmt = db.prepare(`
-          SELECT video_id, bm25(videos_fts) as score
-          FROM videos_fts
-          WHERE videos_fts MATCH ?
-          ORDER BY bm25(videos_fts)
-          LIMIT ?
-        `);
-        const rows = stmt.all(filenameSearchTerm, limit) as Array<{ video_id: string; score: number }>;
-
-        for (const row of rows) {
-          // FTS5 bm25 scores are negative, more negative = better match
-          // Convert to positive score (100 = best, lower = worse)
-          const score = 100 + Math.min(0, row.score);
-          addResult(row.video_id, score, 'filename');
-        }
-      } catch (error) {
-        this.logger.error('Error searching videos FTS5 table:', error);
-        throw error;
-      }
-    }
-
-    // 2. Search in transcripts using FTS5 (high priority)
-    // Uses AND logic - all words must be present (phrase search)
-    if (searchFilters.transcript) {
-      const stmt = db.prepare(`
-        SELECT video_id, bm25(transcripts_fts) as score
-        FROM transcripts_fts
-        WHERE transcripts_fts MATCH ?
-        ORDER BY bm25(transcripts_fts)
-        LIMIT ?
-      `);
-      const rows = stmt.all(transcriptSearchTerm, limit) as Array<{ video_id: string; score: number }>;
-
-      for (const row of rows) {
-        const score = 80 + Math.min(0, row.score);
-        addResult(row.video_id, score, 'transcript');
-      }
-
-      // 2b. Also search soundex FTS for phonetic matches (catches transcription errors)
-      // Convert search terms to soundex and search the phonetic index
-      try {
-        const soundexSearchTerm = this.buildSoundexSearchQuery(query);
-        if (soundexSearchTerm) {
-          const soundexStmt = db.prepare(`
-            SELECT video_id, bm25(transcripts_soundex_fts) as score
-            FROM transcripts_soundex_fts
-            WHERE transcripts_soundex_fts MATCH ?
-            ORDER BY bm25(transcripts_soundex_fts)
-            LIMIT ?
-          `);
-          const soundexRows = soundexStmt.all(soundexSearchTerm, limit) as Array<{ video_id: string; score: number }>;
-
-          for (const row of soundexRows) {
-            // Phonetic matches get slightly lower priority than exact matches
-            const score = 75 + Math.min(0, row.score);
-            addResult(row.video_id, score, 'transcript-phonetic');
-          }
-        }
-      } catch (error) {
-        // Soundex FTS table might not exist yet (pre-migration) - silently skip
-        this.logger.debug('Soundex search skipped (table may not exist yet)');
-      }
-    }
-
-    // 3. Search in analyses using FTS5 (medium priority)
-    // Uses AND logic - all words must be present (phrase search)
-    if (searchFilters.analysis) {
-      const stmt = db.prepare(`
-        SELECT video_id, bm25(analyses_fts) as score
-        FROM analyses_fts
-        WHERE analyses_fts MATCH ?
-        ORDER BY bm25(analyses_fts)
-        LIMIT ?
-      `);
-      const rows = stmt.all(transcriptSearchTerm, limit) as Array<{ video_id: string; score: number }>;
-
-      for (const row of rows) {
-        const score = 70 + Math.min(0, row.score);
-        addResult(row.video_id, score, 'analysis');
-      }
-
-      // Also search in analysis sections (no FTS5 table for sections, LIKE is required here)
-      const searchLike = `%${query.toLowerCase().trim()}%`;
-      const sectionsStmt = db.prepare(`
-        SELECT DISTINCT video_id
-        FROM analysis_sections
-        WHERE lower(title) LIKE ? OR lower(description) LIKE ?
-        LIMIT ?
-      `);
-      const sectionRows = sectionsStmt.all(searchLike, searchLike, limit) as Array<{ video_id: string }>;
-
-      for (const row of sectionRows) {
-        addResult(row.video_id, 65, 'section');
-      }
-    }
-
-    // 4. Search in tags using FTS5 (lower priority)
-    // Uses OR logic - any word match counts (tags are short like filenames)
-    if (searchFilters.tags) {
-      const stmt = db.prepare(`
-        SELECT video_id, bm25(tags_fts) as score
-        FROM tags_fts
-        WHERE tags_fts MATCH ?
-        ORDER BY bm25(tags_fts)
-        LIMIT ?
-      `);
-      const rows = stmt.all(filenameSearchTerm, limit) as Array<{ video_id: string; score: number }>;
-
-      for (const row of rows) {
-        const score = 60 + Math.min(0, row.score);
-        addResult(row.video_id, score, 'tag');
-      }
-    }
-
-    // Convert map to array and sort by score (descending)
-    const sortedResults = Array.from(results.values())
-      .sort((a, b) => b.score - a.score)
-      .slice(0, limit);
-
-    return sortedResults;
   }
 
   // ============================================================================
@@ -5653,24 +4008,6 @@ export class DatabaseService {
     db.prepare('DELETE FROM text_content WHERE media_id = ?').run(mediaId);
     this.saveDatabase();
     this.logger.log(`Deleted text content for ${mediaId}`);
-  }
-
-  /**
-   * Search text content (for documents)
-   */
-  searchTextContent(query: string, limit = 50): TextContentSearchRecord[] {
-    const db = this.ensureInitialized();
-    const searchTerm = query.toLowerCase().trim();
-
-    const stmt = db.prepare(`
-      SELECT tc.media_id, tc.extracted_text, v.filename, v.media_type
-      FROM text_content tc
-      JOIN videos v ON tc.media_id = v.id
-      WHERE lower(tc.extracted_text) LIKE ?
-      LIMIT ?
-    `);
-    const results = stmt.all(`%${searchTerm}%`, limit) as TextContentSearchRecord[];
-    return results;
   }
 
   // ========================================

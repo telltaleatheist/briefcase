@@ -552,103 +552,31 @@ export class DatabaseController {
   }
 
   /**
-   * GET /api/database/search
-   * Search videos across filename, AI description, transcripts, analyses, and tags
-   * Returns empty results if no library/database exists yet (first run)
-   * @param searchIn - Filter which fields to search: 'all' (default), 'filename', 'transcript', 'analysis'
-   * @param useSoundex - Enable phonetic matching for transcripts
-   * @param usePhraseSearch - Use phrase search (consecutive words) instead of word search (OR logic, default)
+   * GET /api/database/search?q=...&fuzzy=false
+   * The library search (search/library-search.ts): videos whose title holds
+   * the query, then videos where the transcript says it, each with its
+   * moments (time, the sentences, highlight ranges). `indexing`, while the
+   * moment index fills in the background after a library opens, says how many
+   * transcripts it has yet to read (null once done). With no library open yet
+   * (first run) the answer is empty.
    */
   @Get('search')
-  searchVideos(
-    @Query('q') query: string,
-    @Query('limit') limit?: string,
-    @Query('searchIn') searchIn?: string,
-    @Query('useSoundex') useSoundex?: string,
-    @Query('usePhraseSearch') usePhraseSearch?: string,
-  ) {
-    if (!query || query.trim() === '') {
-      return {
-        results: [],
-        count: 0,
-        query: query || '',
-      };
-    }
-
-    try {
-      const parsedLimit = limit ? parseInt(limit, 10) : 1000;
-      const limitNum = Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 1000;
-      const searchOptions = {
-        useSoundex: useSoundex === 'true',
-        usePhraseSearch: usePhraseSearch === 'true',
-      };
-
-      // Use FTS5 search for efficient full-text searching
-      const searchResults = this.databaseService.searchFTS(query, limitNum, searchIn, searchOptions);
-
-      // Get full video details for each result
-      const videos = searchResults.map(result => {
-        const video = this.databaseService.getVideoById(result.videoId);
-        if (!video) {
-          return null;
-        }
-        return {
-          ...video,
-          searchScore: result.score,
-          matchTypes: result.matches, // Array of match sources (filename, transcript, etc.)
-        };
-      }).filter((v): v is NonNullable<typeof v> => v !== null); // Filter out any null results
-
-      return {
-        results: videos,
-        count: videos.length,
-        query,
-      };
-    } catch (error) {
-      // On first run, no database exists yet - return empty results
-      if (error instanceof Error && error.message.includes('Database not initialized')) {
-        return { results: [], count: 0, query };
-      }
-      throw error;
-    }
-  }
-
-  /**
-   * GET /api/database/search/moments?q=...&fuzzy=false&maxVideos=200
-   * WHERE in the transcripts a query is said: moments (time, matching words,
-   * highlight ranges) grouped by video, best video first, with each video's
-   * record for the results list. `indexing` says how many transcripts the
-   * moment index has yet to read (it fills in the background after a library
-   * opens). See search/transcript-moments.ts.
-   */
-  @Get('search/moments')
-  searchMoments(
-    @Query('q') query: string,
-    @Query('fuzzy') fuzzy?: string,
-    @Query('maxVideos') maxVideos?: string,
-  ) {
+  search(@Query('q') query: string, @Query('fuzzy') fuzzy?: string) {
     const q = (query ?? '').trim();
-    const none = { query: q, videos: [], momentCount: 0, spellings: {}, indexing: { pending: 0, total: 0 } };
+    const none = { query: q, hits: [], momentCount: 0, capped: false, spellings: {}, indexing: null };
     if (!q) return none;
+    let result: ReturnType<DatabaseService['searchLibrary']>;
     try {
-      const max = maxVideos ? parseInt(maxVideos, 10) : NaN;
-      const result = this.databaseService.searchTranscriptMoments(q, {
-        fuzzy: fuzzy !== 'false',
-        ...(Number.isFinite(max) && max > 0 ? { maxVideos: Math.min(max, 1000) } : {}),
-      });
-      const videos = result.videos.flatMap((v) => {
-        const video = this.databaseService.getVideoById(v.videoId);
-        return video ? [{ ...v, video }] : [];
-      });
-      return { query: q, ...result, videos };
+      result = this.databaseService.searchLibrary(q, { fuzzy: fuzzy !== 'false' });
     } catch (error) {
       if (error instanceof Error && error.message.includes('Database not initialized')) return none;
-      // A query the full-text index cannot read is the caller's to fix, said by name.
-      if (error instanceof Error && /fts5|syntax error/i.test(error.message)) {
-        throw new HttpException(`That search could not be read: ${error.message}`, HttpStatus.BAD_REQUEST);
-      }
       throw error;
     }
+    const hits = result.hits.flatMap((hit) => {
+      const video = this.databaseService.getVideoById(hit.videoId);
+      return video ? [{ ...hit, video }] : [];
+    });
+    return { query: q, ...result, hits };
   }
 
   /**
@@ -4212,28 +4140,6 @@ export class DatabaseController {
       success,
       message: success ? 'Pattern added to ignore file' : 'Failed to add pattern',
     };
-  }
-
-  /**
-   * POST /api/database/rebuild-search-index
-   * Rebuild FTS5 full-text search indexes from existing data
-   */
-  @Post('rebuild-search-index')
-  rebuildSearchIndex() {
-    this.logger.log('Rebuilding FTS5 search indexes');
-    try {
-      this.databaseService.rebuildFTS5Indexes();
-      return {
-        success: true,
-        message: 'FTS5 search indexes rebuilt successfully',
-      };
-    } catch (error: any) {
-      this.logger.error('Failed to rebuild FTS5 search indexes:', error);
-      return {
-        success: false,
-        error: error?.message || 'Unknown error',
-      };
-    }
   }
 
   /**
