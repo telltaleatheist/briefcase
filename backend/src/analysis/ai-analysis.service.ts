@@ -421,6 +421,24 @@ const BODY_SCHEMA: Record<string, unknown> = {
 };
 
 /**
+ * `{"title": string, "summary": string}` — Pass 2's answer for one chapter.
+ *
+ * Pass 2 is mechanical (a title and 2-3 sentences), so it runs with thinking
+ * off, this schema and a small ceiling. Left to its manifest default, a
+ * thinking model (qwen3.8-27b on the Mac, 2026-10-08) reasoned until its
+ * context ran out on most chapters of a 96-minute debate: no answer, or a cut
+ * one, and the job hit TOO_MANY_FAILURES.
+ */
+const CHAPTER_SUMMARY_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  properties: { title: { type: 'string' }, summary: { type: 'string' } },
+  required: ['title', 'summary'],
+};
+
+/** Output ceiling of one Pass 2 call: the JSON is well under 300 tokens. */
+const CHAPTER_SUMMARY_MAX_OUTPUT_TOKENS = 1024;
+
+/**
  * Kill switches for the metadata schemas.
  *
  * Open-ended flag discovery (removed in P7) was a JUDGMENT task: the measured
@@ -1529,7 +1547,12 @@ export class AIAnalysisService {
           customInstructions,
         );
 
-        const response = await this.aiProviderService.generateText(prompt, config, 'chapter', { signal });
+        const response = await this.aiProviderService.generateText(prompt, config, 'chapter', {
+          thinking: false,
+          maxTokens: CHAPTER_SUMMARY_MAX_OUTPUT_TOKENS,
+          format: CHAPTER_SUMMARY_SCHEMA,
+          signal,
+        });
         onTokens?.(response);
 
         if (!response || !response.text) {
