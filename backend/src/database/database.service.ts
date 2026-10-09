@@ -7,6 +7,20 @@ import * as crypto from 'crypto';
 import { ThumbnailService } from './thumbnail.service';
 import { migrateAnalysisSectionsRanker } from './ranker-migration';
 import { deleteChapterSubtree, migrateChaptersOutline } from './chapter-outline';
+import { sweepOrphans } from './orphan-sweep';
+import {
+  ensureMomentSchema,
+  indexPendingTranscripts,
+  indexVideoMoments,
+  pendingTranscriptCount,
+  removeVideoMoments,
+  searchMoments,
+  type MomentSearchOptions,
+  type MomentSearchResult,
+} from '../search/transcript-moments';
+
+/** Transcripts indexed per background tick (the whole clips library took ~9 s). */
+const MOMENT_INDEX_BATCH = 50;
 
 // Type definitions for database records
 export interface VideoRecord {
@@ -372,6 +386,9 @@ export class DatabaseService {
       } catch {}
     }
     this.db = new Database(this.dbPath);
+    // Said, not assumed: every cascade into `videos` depends on it, and a
+    // connection without it is how the library collected orphans (orphan-sweep.ts).
+    this.db.pragma('foreign_keys = ON');
 
     if (isNew) {
       this.logger.log('Created new database');
@@ -380,6 +397,11 @@ export class DatabaseService {
     }
 
     this.initializeSchema();
+    ensureMomentSchema(this.db);
+    const swept = sweepOrphans(this.db);
+    if (Object.keys(swept).length > 0) {
+      this.logger.warn(`Removed rows whose video is gone: ${Object.entries(swept).map(([table, n]) => `${table} ${n}`).join(', ')}`);
+    }
     this.logger.log('Database initialized successfully');
 
     // Set the library path for thumbnail service
@@ -387,6 +409,48 @@ export class DatabaseService {
 
     // After initialization is complete, check if FTS5 needs population
     this.checkAndPopulateFTS5();
+
+    this.indexMomentsInBackground();
+  }
+
+  /**
+   * Fill the transcript moment index (search/transcript-moments.ts) with the
+   * transcripts it has not seen, a batch per tick so the server stays
+   * responsive. Stops when the library is switched: a batch only ever writes
+   * to the handle it started on.
+   */
+  private indexMomentsInBackground(): void {
+    const db = this.db;
+    if (!db) return;
+    const { pending } = pendingTranscriptCount(db);
+    if (pending === 0) return;
+    this.logger.log(`[Search] Indexing ${pending} transcripts for moment search`);
+    const started = Date.now();
+    let done = 0;
+    const step = () => {
+      if (this.db !== db || !db.open) {
+        this.logger.log(`[Search] Library changed; moment indexing stopped after ${done} transcripts`);
+        return;
+      }
+      try {
+        const n = indexPendingTranscripts(db, MOMENT_INDEX_BATCH);
+        done += n;
+        if (n > 0) {
+          setTimeout(step, 0);
+          return;
+        }
+        this.logger.log(`[Search] Indexed ${done} transcripts for moment search in ${((Date.now() - started) / 1000).toFixed(1)} s`);
+      } catch (error) {
+        this.logger.error(`[Search] Moment indexing stopped: ${(error as Error).message}`);
+      }
+    };
+    setTimeout(step, 0);
+  }
+
+  /** Where in the library's transcripts a query is said (search/transcript-moments.ts). */
+  searchTranscriptMoments(query: string, options?: MomentSearchOptions): MomentSearchResult & { indexing: { pending: number; total: number } } {
+    const db = this.ensureInitialized();
+    return { ...searchMoments(db, query, options), indexing: pendingTranscriptCount(db) };
   }
 
   /**
@@ -1158,6 +1222,16 @@ export class DatabaseService {
         // This is DESTRUCTIVE (it DROPs the videos table partway through), so it MUST be
         // atomic: run it inside a transaction. If any statement fails, better-sqlite3 rolls
         // the whole thing back, leaving the original videos table fully intact.
+        //
+        // Foreign keys are OFF around it (SQLite's documented table-rebuild
+        // procedure; the pragma cannot change inside a transaction): with
+        // them on, DROP TABLE videos is an implicit DELETE that CASCADES, and
+        // would empty every transcript, analysis and tag in the library. The
+        // check before commit proves every child still points at a video.
+        db.pragma('foreign_keys = OFF');
+        // Orphans already there are the sweep's to remove (after the schema
+        // is up), not a reason to refuse the migration.
+        const brokenBefore = (db.pragma('foreign_key_check') as unknown[]).length;
         const rebuildVideosTable = db.transaction(() => {
           db.exec(`
           -- Create new table with updated schema
@@ -1202,8 +1276,14 @@ export class DatabaseService {
           -- Rename new table to videos
           ALTER TABLE videos_new RENAME TO videos;
         `);
+          const broken = (db.pragma('foreign_key_check') as unknown[]).length;
+          if (broken > brokenBefore) throw new Error(`the rebuilt videos table leaves ${broken - brokenBefore} more rows pointing at no video`);
         });
-        rebuildVideosTable();
+        try {
+          rebuildVideosTable();
+        } finally {
+          db.pragma('foreign_keys = ON');
+        }
 
         this.saveDatabase();
         this.logger.log('Migration complete: Renamed created_at to upload_date and added download_date');
@@ -3731,6 +3811,7 @@ export class DatabaseService {
 
     // Compute soundex content for phonetic search
     const soundexContent = this.textToSoundex(transcript.plainText);
+    const transcribedAt = new Date().toISOString();
 
     const insertTranscriptTxn = db.transaction(() => {
       db.prepare(
@@ -3743,7 +3824,7 @@ export class DatabaseService {
         transcript.srtFormat,
         transcript.whisperModel || null,
         transcript.language || null,
-        new Date().toISOString(),
+        transcribedAt,
         transcript.transcriptionTimeSeconds || null,
         soundexContent,
       );
@@ -3761,6 +3842,9 @@ export class DatabaseService {
       db.prepare(
         `INSERT INTO transcripts_soundex_fts (video_id, soundex_content) VALUES (?, ?)`
       ).run(transcript.videoId, soundexContent);
+
+      // Moment search: the transcript's segments and windows, in the same transaction.
+      indexVideoMoments(db, transcript.videoId, transcript.srtFormat, transcribedAt);
 
       // Update has_transcript flag in videos table
       db.prepare(
@@ -4007,6 +4091,7 @@ export class DatabaseService {
       // Remove the hand-maintained FTS mirror rows this transcript fed
       db.prepare('DELETE FROM transcripts_fts WHERE video_id = ?').run(id);
       db.prepare('DELETE FROM transcripts_soundex_fts WHERE video_id = ?').run(id);
+      removeVideoMoments(db, id);
       // Clear the denormalized flag so the videos table stays consistent
       db.prepare('UPDATE videos SET has_transcript = 0 WHERE id = ?').run(id);
     });

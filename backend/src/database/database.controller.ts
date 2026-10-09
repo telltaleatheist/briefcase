@@ -614,6 +614,44 @@ export class DatabaseController {
   }
 
   /**
+   * GET /api/database/search/moments?q=...&fuzzy=false&maxVideos=200
+   * WHERE in the transcripts a query is said: moments (time, matching words,
+   * highlight ranges) grouped by video, best video first, with each video's
+   * record for the results list. `indexing` says how many transcripts the
+   * moment index has yet to read (it fills in the background after a library
+   * opens). See search/transcript-moments.ts.
+   */
+  @Get('search/moments')
+  searchMoments(
+    @Query('q') query: string,
+    @Query('fuzzy') fuzzy?: string,
+    @Query('maxVideos') maxVideos?: string,
+  ) {
+    const q = (query ?? '').trim();
+    const none = { query: q, videos: [], momentCount: 0, spellings: {}, indexing: { pending: 0, total: 0 } };
+    if (!q) return none;
+    try {
+      const max = maxVideos ? parseInt(maxVideos, 10) : NaN;
+      const result = this.databaseService.searchTranscriptMoments(q, {
+        fuzzy: fuzzy !== 'false',
+        ...(Number.isFinite(max) && max > 0 ? { maxVideos: Math.min(max, 1000) } : {}),
+      });
+      const videos = result.videos.flatMap((v) => {
+        const video = this.databaseService.getVideoById(v.videoId);
+        return video ? [{ ...v, video }] : [];
+      });
+      return { query: q, ...result, videos };
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('Database not initialized')) return none;
+      // A query the full-text index cannot read is the caller's to fix, said by name.
+      if (error instanceof Error && /fts5|syntax error/i.test(error.message)) {
+        throw new HttpException(`That search could not be read: ${error.message}`, HttpStatus.BAD_REQUEST);
+      }
+      throw error;
+    }
+  }
+
+  /**
    * GET /api/database/tags
    * Get all tags with counts (grouped by type)
    * Returns empty object if no library/database exists yet (first run)
