@@ -6,9 +6,12 @@
         @switch (emptyState().kind) {
           @case ('error') {
             <div class="empty-icon">⚠️</div>
-            <h3>Couldn't load the library</h3>
+            <h3>{{ emptyState().title || "Couldn't load the library" }}</h3>
             <p>{{ emptyState().detail || 'Something went wrong while loading.' }}</p>
             <button type="button" class="empty-action" (click)="emptyAction.emit('retry')">Retry</button>
+          }
+          @case ('searching') {
+            <h3>Searching…</h3>
           }
           @case ('filtered') {
             <div class="empty-icon">🔍</div>
@@ -51,6 +54,23 @@
             <span class="week-label">{{ item.week.weekLabel.toUpperCase() }}</span>
             <span class="week-count">({{ item.week.videos.length }})</span>
           </div>
+        }
+
+        <!-- Search moment: where the query is said in the video above; opens it there -->
+        @if (item.type === 'moment') {
+          <button
+            type="button"
+            class="moment-row"
+            [title]="'Open at ' + formatMomentTime(item.moment.start)"
+            (click)="openMoment(item.video, item.moment.start, $event)">
+            <span class="moment-time">{{ formatMomentTime(item.moment.start) }}</span>
+            <span class="moment-text">@for (piece of momentPieces(item.moment.text, item.moment.highlights); track $index) {<span [class.match]="piece.hit">{{ piece.text }}</span>}</span>
+          </button>
+        }
+        @if (item.type === 'more-moments') {
+          <button type="button" class="moment-row more" (click)="showAllMoments(item.video, $event)">
+            Show {{ item.hidden }} more {{ item.hidden === 1 ? 'moment' : 'moments' }}@if (item.unlisted > 0) {<span class="moment-unlisted"> ({{ item.unlisted }} more in this video are not listed)</span>}
+          </button>
         }
 
         <!-- Video Item -->

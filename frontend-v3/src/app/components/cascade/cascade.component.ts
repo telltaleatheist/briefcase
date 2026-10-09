@@ -5,6 +5,7 @@ import { ScrollingModule, CdkVirtualScrollViewport } from '@angular/cdk/scrollin
 import { DragDropModule, CdkDragDrop, moveItemInArray } from '@angular/cdk/drag-drop';
 import { trigger, transition, style, animate } from '@angular/animations';
 import { VideoWeek, VideoItem, VideoContextMenuAction, ItemProgress, VideoChild, ChildrenConfig, ChildStatus, DeleteMode } from '../../models/video.model';
+import { highlightPieces, TranscriptMoment } from '../../models/library-search.model';
 import { ContextMenuComponent } from '../context-menu/context-menu.component';
 import { ContextMenuPosition } from '../../models/file.model';
 import { FilenameModalComponent } from '../filename-modal/filename-modal.component';
@@ -22,7 +23,10 @@ import { extractTitleFromFilename, extractDateFromFilename, formatDateForDisplay
  * 'filtered' — items exist but every one is hidden; `hiddenCount` says how many
  */
 export interface CascadeEmptyState {
-  kind: 'empty' | 'error' | 'filtered';
+  /** `searching`: a search is on its way and there is nothing to show yet. */
+  kind: 'empty' | 'error' | 'filtered' | 'searching';
+  /** The error's heading (default: the library failed to load). */
+  title?: string;
   detail?: string;
   hiddenCount?: number;
 }
@@ -33,10 +37,24 @@ interface ExpandableVideoWeek extends VideoWeek {
   expanded: boolean;
 }
 
-// Union type for virtual scroll items
+/** A video's search moments (the library search), shown as rows under the video. */
+export interface CascadeMoments {
+  /** In time order. */
+  moments: TranscriptMoment[];
+  /** Moments that matched in all (more than `moments` when the search capped them). */
+  momentCount: number;
+}
+
+/** Moment rows shown under a video before "Show more". */
+const MOMENTS_SHOWN = 3;
+
+// Union type for virtual scroll items. Moment rows sit under their video and
+// are not selectable: they open the video at their time.
 export type VirtualListItem =
   | { type: 'header'; week: ExpandableVideoWeek }
-  | { type: 'video'; video: VideoItem; weekLabel: string; itemId: string };
+  | { type: 'video'; video: VideoItem; weekLabel: string; itemId: string }
+  | { type: 'moment'; video: VideoItem; weekLabel: string; itemId: string; moment: TranscriptMoment }
+  | { type: 'more-moments'; video: VideoItem; weekLabel: string; itemId: string; hidden: number; unlisted: number };
 
 @Component({
   selector: 'app-cascade',
@@ -71,6 +89,14 @@ export class CascadeComponent implements OnDestroy {
   /** Which empty state to render when there are no rows (dumb: parent decides). */
   emptyState = input<CascadeEmptyState>({ kind: 'empty' });
   readonly emptyAction = output<CascadeEmptyAction>();
+
+  /** Search moments per video id: shown as rows under each video (null: none). */
+  moments = input<ReadonlyMap<string, CascadeMoments> | null>(null);
+  /** A moment row was clicked: open the video at that time. */
+  readonly momentOpened = output<{ video: VideoItem; seconds: number }>();
+  /** Videos whose moments are all shown. */
+  private readonly momentsExpanded = signal<ReadonlySet<string>>(new Set());
+  readonly momentPieces = highlightPieces;
 
   @Input() set weeks(value: VideoWeek[]) {
     // Preserve the user's prior expand/collapse state across re-emissions
@@ -238,6 +264,7 @@ export class CascadeComponent implements OnDestroy {
     // Find previous video item
     for (let i = index - 1; i >= 0; i--) {
       const prevRow = items[i];
+      if (prevRow.type === 'moment' || prevRow.type === 'more-moments') return true;
       if (prevRow.type === 'video') {
         const isPrevActive = this.selectedVideos().has(prevRow.itemId) || this.highlightedItemId() === prevRow.itemId;
         return !isPrevActive;
@@ -261,6 +288,7 @@ export class CascadeComponent implements OnDestroy {
     // Find next video item
     for (let i = index + 1; i < items.length; i++) {
       const nextRow = items[i];
+      if (nextRow.type === 'moment' || nextRow.type === 'more-moments') return true;
       if (nextRow.type === 'video') {
         const isNextActive = this.selectedVideos().has(nextRow.itemId) || this.highlightedItemId() === nextRow.itemId;
         return !isNextActive;
@@ -273,6 +301,8 @@ export class CascadeComponent implements OnDestroy {
   virtualItems = computed<VirtualListItem[]>(() => {
     const items: VirtualListItem[] = [];
     const weeks = this.videoWeeks();
+    const moments = this.moments();
+    const expanded = this.momentsExpanded();
 
     for (const week of weeks) {
       // Add week header
@@ -283,11 +313,44 @@ export class CascadeComponent implements OnDestroy {
           // Create unique itemId combining section and video ID
           const itemId = `${week.weekLabel}|${video.id}`;
           items.push({ type: 'video', video, weekLabel: week.weekLabel, itemId });
+          const found = moments?.get(video.id);
+          if (found && found.moments.length > 0) {
+            const all = expanded.has(video.id);
+            const shown = all ? found.moments : found.moments.slice(0, MOMENTS_SHOWN);
+            for (const moment of shown) {
+              items.push({ type: 'moment', video, weekLabel: week.weekLabel, itemId: `${itemId}@${moment.start}`, moment });
+            }
+            const hidden = found.moments.length - shown.length;
+            const unlisted = Math.max(0, found.momentCount - found.moments.length);
+            if (hidden > 0) {
+              items.push({ type: 'more-moments', video, weekLabel: week.weekLabel, itemId: `${itemId}@more`, hidden, unlisted });
+            }
+          }
         }
       }
     }
     return items;
   });
+
+  /** Show every listed moment of a video. */
+  showAllMoments(video: VideoItem, event: Event): void {
+    event.stopPropagation();
+    this.momentsExpanded.update(set => new Set([...set, video.id]));
+  }
+
+  openMoment(video: VideoItem, seconds: number, event: Event): void {
+    event.stopPropagation();
+    this.momentOpened.emit({ video, seconds });
+  }
+
+  /** A moment's time, HH:MM:SS. */
+  formatMomentTime(seconds: number): string {
+    const s = Math.max(0, Math.floor(seconds));
+    const hours = Math.floor(s / 3600);
+    const mins = Math.floor((s % 3600) / 60);
+    const secs = s % 60;
+    return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  }
 
   // Computed list of ALL videos in display order (for navigation)
   // This includes videos from collapsed sections so navigation is stable
@@ -1518,9 +1581,7 @@ export class CascadeComponent implements OnDestroy {
       if (item.type === 'header') {
         return item.week.weekLabel;
       }
-      if (item.type === 'video') {
-        return item.weekLabel;
-      }
+      return item.weekLabel;
     }
 
     // Fallback: use first video's week label
@@ -2015,8 +2076,8 @@ export class CascadeComponent implements OnDestroy {
     if (item.type === 'header') {
       return `header-${item.week.weekLabel}`;
     }
-    // Use itemId which is unique per week: `${weekLabel}|${video.id}`
-    return `video-${item.itemId}`;
+    // itemId is unique per week (`${weekLabel}|${video.id}`, and `@<time>` / `@more` for moment rows)
+    return `${item.type}-${item.itemId}`;
   }
 
   /**

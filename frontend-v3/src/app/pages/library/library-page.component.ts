@@ -5,8 +5,7 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom } from 'rxjs';
 import { LibrarySearchFiltersComponent, LibraryFilters } from '../../components/library-search-filters/library-search-filters.component';
-import { CascadeComponent, CascadeEmptyAction, CascadeEmptyState } from '../../components/cascade/cascade.component';
-import { SearchResultsComponent, OpenAt } from '../../components/search-results/search-results.component';
+import { CascadeComponent, CascadeEmptyAction, CascadeEmptyState, CascadeMoments } from '../../components/cascade/cascade.component';
 import { LibrarySearchResponse, SearchHit } from '../../models/library-search.model';
 import { LibraryManagerModalComponent } from '../../components/library-manager-modal/library-manager-modal.component';
 import { QueueItemConfigModalComponent } from '../../components/queue-item-config-modal/queue-item-config-modal.component';
@@ -78,7 +77,6 @@ export interface ProcessingTask {
   imports: [
     CommonModule,
     LibrarySearchFiltersComponent,
-    SearchResultsComponent,
     CascadeComponent,
     LibraryManagerModalComponent,
     QueueItemConfigModalComponent,
@@ -258,6 +256,13 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     if (error) {
       return { kind: 'error', detail: error };
     }
+    if (this.searchQuery()) {
+      const searchError = this.searchError();
+      if (searchError) return { kind: 'error', title: 'The search failed', detail: searchError };
+      if (this.searchLoading() && !this.searchResponse()) return { kind: 'searching' };
+      const total = this.videoWeeks().reduce((sum, w) => sum + w.videos.length, 0);
+      return { kind: 'filtered', hiddenCount: total };
+    }
     const shown = this.combinedWeeks().reduce((sum, w) => sum + w.videos.length, 0);
     if (shown > 0) {
       return { kind: 'empty' }; // not shown — cascade has items
@@ -271,7 +276,8 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
 
   onCascadeEmptyAction(action: CascadeEmptyAction): void {
     if (action === 'retry') {
-      this.retryLibraryLoad();
+      if (this.searchQuery() && this.searchError()) this.runSearch(this.searchQuery());
+      else this.retryLibraryLoad();
     } else {
       // Clear every layer that can hide items: search/filters accordion,
       // the type-filter segments, and any active search query.
@@ -290,7 +296,9 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   }
 
   // The library search: the query, its answer, and its hits after the
-  // library filters and the type filter (search results replace the cascade).
+  // library filters and the type filter. The hits are shown in the cascade
+  // (one "Search results" section, best first) so they select, highlight and
+  // right-click like any video, with their moments as rows under each.
   searchQuery = signal('');
   searchResponse = signal<LibrarySearchResponse | null>(null);
   searchLoading = signal(false);
@@ -306,6 +314,34 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       kept = new Set((narrowed[0]?.videos ?? []).map(v => v.id));
     }
     return hits.filter(h => kept.has(h.video.id) && (type === 'all' || this.matchesTypeFilter(h.video, type)));
+  });
+  searchWeeks = computed<VideoWeek[]>(() => {
+    const hits = this.searchHits();
+    return hits.length ? [{ weekLabel: 'Search results', videos: hits.map(h => h.video) }] : [];
+  });
+  searchMoments = computed<ReadonlyMap<string, CascadeMoments>>(() =>
+    new Map(this.searchHits().map(h => [h.video.id, { moments: h.moments, momentCount: h.momentCount }]))
+  );
+  /** "12 videos · 3 by title · 40 moments", and what is still being indexed or was widened. */
+  searchSummary = computed(() => {
+    const res = this.searchResponse();
+    if (!res) return { line: this.searchLoading() ? 'Searching…' : '', notes: [] as string[] };
+    const hits = this.searchHits();
+    const titled = hits.filter(h => h.titleHighlights.length > 0).length;
+    const moments = hits.reduce((n, h) => n + h.momentCount, 0);
+    const parts = [`${hits.length} ${hits.length === 1 ? 'video' : 'videos'}`];
+    if (titled) parts.push(`${titled} by title`);
+    parts.push(`${res.capped ? 'at least ' : ''}${moments} ${moments === 1 ? 'moment' : 'moments'}`);
+    const notes: string[] = [];
+    if (res.indexing?.error) {
+      notes.push(`Transcript indexing stopped (${res.indexing.error}); ${res.indexing.pending} transcripts are not searched.`);
+    } else if (res.indexing) {
+      notes.push(`Indexing transcripts: ${res.indexing.total - res.indexing.pending} of ${res.indexing.total} done; the rest are not searched yet.`);
+    }
+    for (const [word, words] of Object.entries(res.spellings)) {
+      if (words.length > 1) notes.push(`“${word}” also matched ${words.filter(w => w !== word).join(', ')}`);
+    }
+    return { line: parts.join(' · '), notes };
   });
 
   // Total video count for library toolbar
@@ -1734,7 +1770,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   }
 
   /** Open a search hit in the editor, at a moment or from the start. */
-  onOpenSearchHit({ video, seconds }: OpenAt): void {
+  onOpenSearchHit({ video, seconds }: { video: VideoItem; seconds: number }): void {
     if (this.electronService.isElectron) {
       this.electronService.openEditorWindow({ videoId: video.id, videoPath: video.filePath, videoTitle: video.name, startSeconds: seconds });
     } else {

@@ -39,11 +39,14 @@
               <h2 class="section-title">{{ searchQuery() ? 'Search' : 'Media Library' }}</h2>
               <p class="section-subtitle">
                 @if (searchQuery()) {
-                  Titles and transcripts matching “{{ searchQuery() }}”
+                  {{ searchSummary().line }}
                 } @else {
                   {{ totalVideoCount() }} videos
                 }
               </p>
+              @for (note of searchSummary().notes; track note) {
+                <p class="search-note">{{ note }}</p>
+              }
             </div>
             <ui-segmented-control
               class="type-filter"
@@ -51,26 +54,18 @@
               [value]="typeFilter()"
               (valueChange)="onTypeFilterChange($event)" />
           </div>
-          @if (searchQuery()) {
-            <app-search-results
-              [response]="searchResponse()"
-              [hits]="searchHits()"
-              [loading]="searchLoading()"
-              [error]="searchError()"
-              (open)="onOpenSearchHit($event)"
-            />
-          } @else {
-            <app-cascade
-              [weeks]="combinedWeeks()"
-              [tabbedVideoIds]="tabbedVideoIds()"
-              [emptyState]="cascadeEmptyState()"
-              (emptyAction)="onCascadeEmptyAction($event)"
-              (selectionChanged)="onSelectionChanged($event)"
-              (videoAction)="onVideoAction($event)"
-              (configureItem)="onConfigureItem($event)"
-              (previewRequested)="onPreviewRequested($event)"
-            />
-          }
+          <app-cascade
+            [weeks]="searchQuery() ? searchWeeks() : combinedWeeks()"
+            [tabbedVideoIds]="tabbedVideoIds()"
+            [emptyState]="cascadeEmptyState()"
+            [moments]="searchQuery() ? searchMoments() : null"
+            (momentOpened)="onOpenSearchHit($event)"
+            (emptyAction)="onCascadeEmptyAction($event)"
+            (selectionChanged)="onSelectionChanged($event)"
+            (videoAction)="onVideoAction($event)"
+            (configureItem)="onConfigureItem($event)"
+            (previewRequested)="onPreviewRequested($event)"
+          />
         }
 
         <!-- Queue Tab: Staging, Processing, and Completed queues -->

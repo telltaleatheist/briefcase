@@ -199,6 +199,69 @@ cdk-virtual-scroll-viewport.library-content {
   }
 }
 
+// Search moment row - Fixed height for virtual scroll (must match itemSize="56").
+// Indented to sit under the video's title (indicator + thumbnail).
+.moment-row {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  width: 100%;
+  height: 56px;
+  padding: 0 $spacing-md 0 124px;
+  border: 0;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: left;
+  color: var(--text-secondary);
+  cursor: pointer;
+  box-sizing: border-box;
+  min-width: 0;
+
+  &:hover { color: var(--text-primary); background: var(--bg-input); }
+  &:focus-visible { outline: 2px solid var(--primary-orange); outline-offset: -2px; }
+
+  .moment-time {
+    flex: none;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    color: var(--primary-orange);
+  }
+
+  .moment-text {
+    min-width: 0;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+
+  .match {
+    color: var(--primary-orange);
+    font-weight: 700;
+  }
+
+  &.more {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--primary-orange);
+
+    &:hover { text-decoration: underline; }
+  }
+
+  .moment-unlisted {
+    font-weight: 400;
+    color: var(--text-tertiary);
+  }
+}
+
+@media (max-width: 700px) {
+  .moment-row { padding-left: $spacing-md; }
+}
+
 // Video Item - Fixed height for virtual scroll (must match itemSize="56")
 .video-item {
   display: flex;
