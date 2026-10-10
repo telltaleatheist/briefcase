@@ -41,6 +41,18 @@ describe('searchLibrary', () => {
     expect(res.hits[2].moments[0].text).toContain('Logan Paul');
   });
 
+  it('follows typing: a partial word finds the titles and moments with words it starts', () => {
+    const db = library([
+      { id: 'shane', filename: '2026-03-01 Shane Vaughn on the end times.mp4', lines: ['Shane Vaughn speaks.'] },
+      { id: 'other', filename: 'cooking.mp4', lines: ['We shall see.'] },
+    ]);
+    const res = searchLibrary(db, 'sha');
+    expect(res.hits.map((h) => h.videoId)).toEqual(['shane', 'other']);
+    expect(res.hits[0].titleHighlights.map(([a, b]) => res.hits[0].title.slice(a, b))).toEqual(['Shane']);
+    expect(searchLibrary(db, 'shane vau').hits.map((h) => h.videoId)).toEqual(['shane']);
+    expect(searchLibrary(db, '"sha"').hits).toEqual([]);
+  });
+
   it('a title must hold every part; phrases, prefixes and exclusions apply to titles too', () => {
     const db = library([
       { id: 'a', filename: 'god debate night.mp4' },

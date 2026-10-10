@@ -87,15 +87,17 @@ describe('the query', () => {
   it('reads words, phrases, prefixes, OR and exclusions', () => {
     const q = parseMomentQuery('logan "god debate" pray* atheist OR agnostic -boxing');
     expect(q.groups).toEqual([
-      [{ kind: 'word', term: 'logan' }],
+      [{ kind: 'word', term: 'logan', starts: true }],
       [{ kind: 'phrase', terms: ['god', 'debate'] }],
       [{ kind: 'prefix', term: 'pray' }],
-      [{ kind: 'word', term: 'atheist' }, { kind: 'word', term: 'agnostic' }],
+      [{ kind: 'word', term: 'atheist', starts: true }, { kind: 'word', term: 'agnostic', starts: true }],
     ]);
     expect(q.excluded).toEqual([{ kind: 'word', term: 'boxing' }]);
     expect(matchExpression(q, (t) => (t === 'logan' ? ['logan', 'logans'] : [t]))).toBe(
-      '("logan" OR "logans") AND "god debate" AND "pray"* AND ("atheist" OR "agnostic") NOT "boxing"',
+      '("logan" OR "logans" OR "logan"*) AND "god debate" AND "pray"* AND (("atheist" OR "atheist"*) OR ("agnostic" OR "agnostic"*)) NOT "boxing"',
     );
+    // Under three letters a plain word is exact.
+    expect(parseMomentQuery('is').groups).toEqual([[{ kind: 'word', term: 'is' }]]);
   });
 
   it('folds case and accents the way the index does, and splits on apostrophes', () => {

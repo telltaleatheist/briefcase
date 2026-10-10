@@ -3,9 +3,11 @@
  * window index can match, and the pieces of a moment's text that matched.
  *
  * The syntax is the library search's, kept small:
- *   word          the word; a word the transcripts rarely or never hold
- *                 also matches near spellings (transcription slips:
- *                 "somalies" finds "somalis"); a word under 4 letters is exact
+ *   word          the word, and (3+ letters) any word it starts, so the
+ *                 search follows typing ("sha" finds "shane"); a word the
+ *                 transcripts rarely or never hold also matches near
+ *                 spellings (transcription slips: "somalies" finds
+ *                 "somalis"); a word under 3 letters is exact
  *   "a phrase"    those words in that order, exactly
  *   word*         any word starting with it
  *   a OR b        either
@@ -43,7 +45,8 @@ export function tokenize(text: string): TextToken[] {
 
 /** A matchable piece of the query. */
 export type QueryTerm =
-  | { kind: 'word'; term: string }
+  /** `starts`: also any word this one starts (plain words of MIN_PREFIX_LETTERS or more). */
+  | { kind: 'word'; term: string; starts?: boolean }
   | { kind: 'prefix'; term: string }
   | { kind: 'phrase'; terms: string[] };
 
@@ -53,6 +56,9 @@ export interface ParsedMomentQuery {
   /** Windows holding any of these are left out (exact words and phrases). */
   excluded: QueryTerm[];
 }
+
+/** A plain word this long or longer also matches the words it starts. */
+export const MIN_PREFIX_LETTERS = 3;
 
 /** Read the query. An empty `groups` means there is nothing to search for. */
 export function parseMomentQuery(query: string): ParsedMomentQuery {
@@ -82,7 +88,8 @@ export function parseMomentQuery(query: string): ParsedMomentQuery {
       const words = tokenize(raw).map((t) => t.term);
       if (words.length === 0) term = null;
       else if (words.length > 1) term = { kind: 'phrase', terms: words };
-      else term = prefix ? { kind: 'prefix', term: words[0] } : { kind: 'word', term: words[0] };
+      else if (prefix) term = { kind: 'prefix', term: words[0] };
+      else term = { kind: 'word', term: words[0], ...(!negate && [...words[0]].length >= MIN_PREFIX_LETTERS ? { starts: true } : {}) };
     }
     if (!term) {
       joinNext = false;
@@ -196,8 +203,9 @@ const quote = (term: string) => `"${term.replace(/"/g, '""')}"`;
 function expressionOf(term: QueryTerm, spell: (term: string) => string[]): string {
   if (term.kind === 'phrase') return quote(term.terms.join(' '));
   if (term.kind === 'prefix') return `${quote(term.term)}*`;
-  const words = spell(term.term);
-  return words.length === 1 ? quote(words[0]) : `(${words.map(quote).join(' OR ')})`;
+  const parts = spell(term.term).map(quote);
+  if (term.starts) parts.push(`${quote(term.term)}*`);
+  return parts.length === 1 ? parts[0] : `(${parts.join(' OR ')})`;
 }
 
 /**
@@ -231,7 +239,10 @@ export function matcherOf(query: ParsedMomentQuery, spell: (term: string) => str
   const phrases: string[][] = [];
   for (const group of query.groups) {
     for (const term of group) {
-      if (term.kind === 'word') for (const w of spell(term.term)) words.add(w);
+      if (term.kind === 'word') {
+        for (const w of spell(term.term)) words.add(w);
+        if (term.starts) prefixes.push(term.term);
+      }
       else if (term.kind === 'prefix') prefixes.push(term.term);
       else phrases.push(term.terms);
     }
