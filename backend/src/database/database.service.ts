@@ -293,6 +293,8 @@ export class DatabaseService {
   private db: Database.Database | null = null;
   /** The open library's background moment indexing, while it has work left. */
   private momentIndexing: MomentIndexing | null = null;
+  /** Told when the library's transcript index may have new work (see onTranscriptsIndexed). */
+  private readonly transcriptsIndexedListeners = new Set<() => void>();
   private dbPath: string | null = null;
   private readonly appDataPath: string;
 
@@ -394,6 +396,28 @@ export class DatabaseService {
     this.thumbnailService.setLibraryPath(this.dbPath);
 
     this.indexMomentsInBackground();
+    this.notifyTranscriptsIndexed();
+  }
+
+  /**
+   * Call `listener` whenever the open library's transcript index may hold
+   * transcripts that later stages (meaning search's vectors) have not seen: a
+   * library opened, the background moment indexing finished, a transcript was
+   * saved. Returns the unsubscribe.
+   */
+  onTranscriptsIndexed(listener: () => void): () => void {
+    this.transcriptsIndexedListeners.add(listener);
+    return () => this.transcriptsIndexedListeners.delete(listener);
+  }
+
+  private notifyTranscriptsIndexed(): void {
+    for (const listener of this.transcriptsIndexedListeners) {
+      try {
+        listener();
+      } catch (error) {
+        this.logger.error(`[Search] A transcript-index listener failed: ${(error as Error).message}`);
+      }
+    }
   }
 
   /**
@@ -426,6 +450,7 @@ export class DatabaseService {
           return;
         }
         this.logger.log(`[Search] Indexed ${counts.pending} transcripts for moment search in ${((Date.now() - started) / 1000).toFixed(1)} s`);
+        this.notifyTranscriptsIndexed();
       } catch (error) {
         progress.error = (error as Error).message;
         this.logger.error(`[Search] Moment indexing stopped with ${progress.pending} transcripts left: ${progress.error}`);
@@ -2798,6 +2823,7 @@ export class DatabaseService {
     insertTranscriptTxn();
 
     this.saveDatabase();
+    this.notifyTranscriptsIndexed();
     this.logger.log(`Set has_transcript flag for video ${transcript.videoId}`);
   }
 

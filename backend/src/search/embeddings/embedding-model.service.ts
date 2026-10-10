@@ -25,6 +25,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import axios from 'axios';
 
@@ -147,7 +148,10 @@ export class EmbeddingModelService {
         const read = (f: string) => JSON.parse(fs.readFileSync(path.join(this.dir, f), 'utf8'));
         const tokenizer = new Tokenizer(read('tokenizer.json'), read('tokenizer_config.json'));
         const t0 = Date.now();
-        const session = await ort.InferenceSession.create(path.join(this.dir, 'onnx/model_quantized.onnx'));
+        // Half the cores: the library backfill runs in the background and the app must stay responsive.
+        const session = await ort.InferenceSession.create(path.join(this.dir, 'onnx/model_quantized.onnx'), {
+          intraOpNumThreads: Math.max(1, Math.floor(os.cpus().length / 2)),
+        });
         this.logger.log(`[Embeddings] ${EMBEDDING_MODEL_ID} loaded in ${Date.now() - t0} ms`);
         const wantsTypes = session.inputNames.includes('token_type_ids');
 

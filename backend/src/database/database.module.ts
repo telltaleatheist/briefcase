@@ -1,6 +1,7 @@
 import { Module, Global, forwardRef } from '@nestjs/common';
 import { DatabaseService } from './database.service';
 import { EmbeddingModelService } from '../search/embeddings/embedding-model.service';
+import { MeaningIndexService } from '../search/meaning-index.service';
 import { FileScannerService } from './file-scanner.service';
 import { MigrationService } from './migration.service';
 import { LibraryManagerService } from './library-manager.service';
@@ -47,6 +48,7 @@ import { MediaModule } from '../media/media.module';
   providers: [
     DatabaseService,
     EmbeddingModelService,
+    MeaningIndexService,
     LibraryManagerService,
     LibraryMigrationService,
     FileScannerService,

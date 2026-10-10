@@ -6,8 +6,11 @@
  * from the devil"). The transcript is cut into CHUNKS of about 10-20 s of
  * speech (single segments can be one-word fragments, too short to mean
  * anything), each turned into a vector by the embedding model
- * (embeddings/embedding-model.service.ts) once and kept in the library, so
- * the next search on that video only embeds what was typed.
+ * (embeddings/embedding-model.service.ts) and kept in the library. Vectors
+ * are made in the pipeline: when a transcript is saved, and for transcripts
+ * from before, by a background pass (meaning-index.service.ts). A search only
+ * embeds what was typed (and indexes its video first if the pass has not
+ * reached it yet, with the same function).
  *
  * A video's vectors are dropped with its moment index when its transcript
  * changes (removeVideoMoments) and with the video (ON DELETE CASCADE).
@@ -22,7 +25,7 @@ import { DIMENSIONS, EMBEDDING_MODEL_ID, ONNX_RUNTIME_VERSION } from './embeddin
  * differently (1.23 vs 1.30: cosine 0.97-0.99), so vectors from two runtimes
  * should not be compared.
  */
-export const MEANING_MODEL_KEY = `${EMBEDDING_MODEL_ID}/${DIMENSIONS}/ort-${ONNX_RUNTIME_VERSION}`;
+export const MEANING_MODEL_KEY = `${EMBEDDING_MODEL_ID}/${DIMENSIONS}/ort-${ONNX_RUNTIME_VERSION}/i8`;
 
 /** A chunk ends once it holds this much speech and this many words, or reaches the cap. */
 const CHUNK_MIN_SECONDS = 10;
@@ -92,12 +95,30 @@ export interface MeaningSearchResult {
 
 export type Embed = (texts: string[], task: 'search_query' | 'search_document') => Promise<Float32Array[]>;
 
-const toBlob = (v: Float32Array) => Buffer.from(v.buffer, v.byteOffset, v.byteLength);
-/** A copy: a Buffer read from SQLite need not be 4-byte aligned for a Float32Array view. */
-const fromBlob = (b: Buffer) => new Float32Array(Uint8Array.from(b).buffer);
+/**
+ * A stored vector: its largest magnitude (float32), then each value as a signed
+ * byte of it. 260 bytes instead of 1,024 for 256 floats: a whole library's
+ * vectors are ~55 MB rather than ~230 MB (the clips library: ~210k chunks),
+ * and similarities move in the third decimal.
+ */
+export function toBlob(v: Float32Array): Buffer {
+  let max = 0;
+  for (const x of v) max = Math.max(max, Math.abs(x));
+  const out = Buffer.alloc(4 + v.length);
+  out.writeFloatLE(max, 0);
+  for (let j = 0; j < v.length; j++) out.writeInt8(max ? Math.round((v[j] / max) * 127) : 0, 4 + j);
+  return out;
+}
+
+export function fromBlob(b: Buffer): Float32Array {
+  const max = b.readFloatLE(0);
+  const v = new Float32Array(b.length - 4);
+  for (let j = 0; j < v.length; j++) v[j] = (b.readInt8(4 + j) / 127) * max;
+  return v;
+}
 
 /** Embed and store a video's chunks if they are missing or were made with another model. */
-async function ensureVideoVectors(db: Database, videoId: string, embed: Embed): Promise<{ chunks: number; embeddedNow: boolean }> {
+export async function indexVideoMeaning(db: Database, videoId: string, embed: Embed): Promise<{ chunks: number; embeddedNow: boolean }> {
   const state = db.prepare('SELECT model FROM transcript_meaning_state WHERE video_id = ?').get(videoId) as { model: string } | undefined;
   if (state?.model === MEANING_MODEL_KEY) {
     const n = (db.prepare('SELECT COUNT(*) AS n FROM transcript_meaning_chunks WHERE video_id = ?').get(videoId) as { n: number }).n;
@@ -106,6 +127,8 @@ async function ensureVideoVectors(db: Database, videoId: string, embed: Embed): 
   const segments = db.prepare('SELECT idx, start_s AS start, end_s AS end, text FROM transcript_segments WHERE video_id = ? ORDER BY idx').all(videoId) as Array<{ idx: number; start: number; end: number; text: string }>;
   const chunks = meaningChunks(segments);
   const vectors = chunks.length ? await embed(chunks.map((c) => c.text), 'search_document') : [];
+  // The library may have been closed (switched) while embedding: write nothing to it.
+  if (!db.open) return { chunks: 0, embeddedNow: false };
   db.transaction(() => {
     db.prepare('DELETE FROM transcript_meaning_chunks WHERE video_id = ?').run(videoId);
     const insert = db.prepare('INSERT INTO transcript_meaning_chunks (video_id, first_idx, last_idx, start_s, vec) VALUES (?, ?, ?, ?, ?)');
@@ -119,14 +142,18 @@ async function ensureVideoVectors(db: Database, videoId: string, embed: Embed): 
 export async function searchMeaning(db: Database, videoId: string, query: string, embed: Embed): Promise<MeaningSearchResult> {
   const q = query.trim();
   if (!q) return { hits: [], chunks: 0, embeddedNow: false };
-  const { chunks, embeddedNow } = await ensureVideoVectors(db, videoId, embed);
+  const { chunks, embeddedNow } = await indexVideoMeaning(db, videoId, embed);
   const [qv] = await embed([q], 'search_query');
   const rows = db.prepare('SELECT first_idx AS first, last_idx AS last, start_s AS start, vec FROM transcript_meaning_chunks WHERE video_id = ?').all(videoId) as Array<{ first: number; last: number; start: number; vec: Buffer }>;
   const scored = rows.map((r) => {
     const v = fromBlob(r.vec);
     let dot = 0;
-    for (let j = 0; j < v.length; j++) dot += v[j] * qv[j];
-    return { first: r.first, last: r.last, start: r.start, score: dot };
+    let norm = 0;
+    for (let j = 0; j < v.length; j++) {
+      dot += v[j] * qv[j];
+      norm += v[j] * v[j];
+    }
+    return { first: r.first, last: r.last, start: r.start, score: dot / (Math.sqrt(norm) || 1) };
   });
   const mean = scored.reduce((a, h) => a + h.score, 0) / (scored.length || 1);
   const sd = Math.sqrt(scored.reduce((a, h) => a + (h.score - mean) ** 2, 0) / (scored.length || 1));
@@ -137,4 +164,20 @@ export async function searchMeaning(db: Database, videoId: string, query: string
     .sort((a, b) => b.score - a.score)
     .slice(0, MAX_MEANING_HITS);
   return { hits, chunks, embeddedNow };
+}
+
+/**
+ * Videos whose transcript has no meaning vectors yet, or vectors from another
+ * model or runtime: the transcripts the moment index has read (their segments
+ * exist), newest first, at most `limit`.
+ */
+export function pendingMeaningVideos(db: Database, limit: number): string[] {
+  return (db.prepare(`
+    SELECT s.video_id AS id FROM transcript_index_state s
+    JOIN videos v ON v.id = s.video_id
+    LEFT JOIN transcript_meaning_state m ON m.video_id = s.video_id
+    WHERE m.video_id IS NULL OR m.model != ?
+    ORDER BY v.added_at DESC
+    LIMIT ?
+  `).all(MEANING_MODEL_KEY, limit) as Array<{ id: string }>).map((r) => r.id);
 }
