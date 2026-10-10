@@ -41,6 +41,13 @@ const FILES: ReadonlyArray<{ path: string; sha256: string; bytes: number }> = [
   { path: 'onnx/model_quantized.onnx', sha256: 'b4342336debaea79de872370664b0aaeb67dea4605513d00ee236ea871a81f27', bytes: 137296292 },
 ];
 
+/**
+ * The onnxruntime-node release the backend pins (package.json; a spec keeps
+ * them equal). 1.23.0 is the newest with a runtime for every platform Briefcase
+ * ships, Intel Macs included (1.24 dropped darwin/x64).
+ */
+export const ONNX_RUNTIME_VERSION = '1.23.0';
+
 /** Length of a stored vector (Nomic's Matryoshka sizes: 768, 512, 256, 128, 64). */
 export const DIMENSIONS = 256;
 /** Texts embedded per model call. */

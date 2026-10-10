@@ -62,6 +62,38 @@ function stripAppleDoubleFiles(context) {
   console.log(`[afterPack] Removed ${removed} AppleDouble (._*) file(s) from the app bundle`);
 }
 
+/** The packaged app's backend node_modules. */
+function backendModulesDir(context, platform) {
+  if (platform === 'darwin') {
+    const appName = context.packager.appInfo.productFilename;
+    return path.join(context.appOutDir, `${appName}.app`, 'Contents', 'Resources', 'backend', 'node_modules');
+  }
+  // Windows and Linux use the same structure
+  return path.join(context.appOutDir, 'resources', 'backend', 'node_modules');
+}
+
+/**
+ * Keep only this build's ONNX runtime (search's embedding model,
+ * backend/src/search/embeddings). package-backend-prod.js keeps every arch of
+ * the build machine's platform, because one backend install feeds both Mac
+ * builds; each packaged app then keeps its own arch. A build whose arch has no
+ * runtime fails here rather than shipping an app whose search cannot run.
+ */
+function keepOnnxRuntimeFor(nodeModules, platform, arch) {
+  const binDir = path.join(nodeModules, 'onnxruntime-node', 'bin');
+  if (!fs.existsSync(binDir)) return;
+  for (const napi of fs.readdirSync(binDir)) {
+    const platformDir = path.join(binDir, napi, platform);
+    if (!fs.existsSync(path.join(platformDir, arch))) {
+      throw new Error(`[afterPack] onnxruntime-node has no runtime for ${platform}/${arch} (${napi}); the embedding model could not run in this build`);
+    }
+    for (const a of fs.readdirSync(platformDir)) {
+      if (a !== arch) fs.rmSync(path.join(platformDir, a), { recursive: true, force: true });
+    }
+  }
+  console.log(`[afterPack] onnxruntime-node: kept ${platform}/${arch} only`);
+}
+
 module.exports = async function afterPack(context) {
   const arch = ARCH_MAP[context.arch] || 'x64';
   const platform = context.electronPlatformName;
@@ -73,6 +105,9 @@ module.exports = async function afterPack(context) {
     // Strip ._* detritus so nothing unsigned lands in the sealed bundle.
     stripAppleDoubleFiles(context);
   }
+
+  // Every single-arch build ships its own ONNX runtime only (a universal one needs both).
+  if (arch !== 'universal') keepOnnxRuntimeFor(backendModulesDir(context, platform), platform, arch);
 
   // Skip for universal builds - they combine arm64 and x64
   if (arch === 'universal') {
@@ -95,27 +130,7 @@ module.exports = async function afterPack(context) {
   console.log(`[afterPack] ====================================\n`);
 
   // Determine path to backend node_modules in the packaged app
-  let backendNodeModules;
-
-  if (platform === 'darwin') {
-    const appName = context.packager.appInfo.productFilename;
-    backendNodeModules = path.join(
-      context.appOutDir,
-      `${appName}.app`,
-      'Contents',
-      'Resources',
-      'backend',
-      'node_modules'
-    );
-  } else {
-    // Windows and Linux use the same structure
-    backendNodeModules = path.join(
-      context.appOutDir,
-      'resources',
-      'backend',
-      'node_modules'
-    );
-  }
+  const backendNodeModules = backendModulesDir(context, platform);
 
   console.log(`[afterPack] Backend modules path: ${backendNodeModules}`);
 

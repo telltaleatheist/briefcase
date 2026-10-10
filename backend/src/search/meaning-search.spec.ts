@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import Database = require('better-sqlite3');
 
-import { DIMENSIONS } from './embeddings/embedding-model.service';
+import { DIMENSIONS, ONNX_RUNTIME_VERSION } from './embeddings/embedding-model.service';
 import { meaningChunks, searchMeaning, type Embed } from './meaning-search';
 import { ensureMomentSchema, indexVideoMoments, removeVideoMoments } from './transcript-moments';
 
@@ -45,6 +45,13 @@ describe('meaningChunks', () => {
   });
 });
 
+describe('the pinned runtime', () => {
+  it('is the onnxruntime-node release package.json pins', () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    expect(require('../../package.json').dependencies['onnxruntime-node']).toBe(ONNX_RUNTIME_VERSION);
+  });
+});
+
 describe('searchMeaning', () => {
   it('finds the stretch that means what was typed, embeds a video once, and drops its vectors when the transcript changes', async () => {
     const db = library();
@@ -63,5 +70,38 @@ describe('searchMeaning', () => {
 
     removeVideoMoments(db, 'v');
     expect((db.prepare('SELECT COUNT(*) AS n FROM transcript_meaning_chunks').get() as { n: number }).n).toBe(0);
+  });
+
+  it('in a long transcript, lists only what stands out from the rest for the same query', async () => {
+    const db = new Database(':memory:');
+    db.exec('CREATE TABLE videos (id TEXT PRIMARY KEY)');
+    ensureMomentSchema(db);
+    db.prepare("INSERT INTO videos (id) VALUES ('long')").run();
+    // 40 chunks of filler, one about Iran.
+    const lines: string[] = [];
+    for (let i = 0; i < 40; i++) lines.push(`Ordinary talk about the weather number ${i} today.`, `More ordinary talk about the weather, part ${i}.`);
+    lines.splice(40, 2, 'Iran may be activating sleeper cells right now.', 'Terror plots are rising this year, they say.');
+    indexVideoMoments(db, 'long', srtOf(lines), 'x');
+    // Every chunk scores the same 0.7 against the query (above MIN_SIMILARITY), so none stands out.
+    const alike: Embed = async (texts, task) => texts.map(() => {
+      const v = new Float32Array(DIMENSIONS);
+      if (task === 'search_query') { v[0] = 0.7; v[1] = Math.sqrt(1 - 0.49); } else v[0] = 1;
+      return v;
+    });
+    const flat = await searchMeaning(db, 'long', 'anything', alike);
+    expect(flat.chunks).toBeGreaterThanOrEqual(20);
+    expect(flat.hits).toEqual([]); // all alike: nothing stands out
+
+    // The Iran chunk scores 0.95, the rest 0.60-0.66: it stands out.
+    const standout: Embed = async (texts, task) => texts.map((t) => {
+      const v = new Float32Array(DIMENSIONS);
+      if (task === 'search_query') { v[0] = 1; return v; }
+      const s = /iran/i.test(t) ? 0.95 : 0.6 + (t.length % 7) / 100;
+      v[0] = s; v[1] = Math.sqrt(1 - s * s); return v;
+    });
+    removeVideoMoments(db, 'long');
+    indexVideoMoments(db, 'long', srtOf(lines), 'x');
+    const res = await searchMeaning(db, 'long', 'sleeper cells', standout);
+    expect(res.hits.map((h) => h.start)).toEqual([200]);
   });
 });

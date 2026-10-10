@@ -14,18 +14,35 @@
  */
 import type { Database } from 'better-sqlite3';
 
-import { DIMENSIONS, EMBEDDING_MODEL_ID } from './embeddings/embedding-model.service';
+import { DIMENSIONS, EMBEDDING_MODEL_ID, ONNX_RUNTIME_VERSION } from './embeddings/embedding-model.service';
 
-/** What the stored vectors were made with: a change re-embeds. */
-export const MEANING_MODEL_KEY = `${EMBEDDING_MODEL_ID}/${DIMENSIONS}`;
+/**
+ * What the stored vectors were made with: a change re-embeds. The runtime is
+ * part of it: onnxruntime versions compute the quantized model slightly
+ * differently (1.23 vs 1.30: cosine 0.97-0.99), so vectors from two runtimes
+ * should not be compared.
+ */
+export const MEANING_MODEL_KEY = `${EMBEDDING_MODEL_ID}/${DIMENSIONS}/ort-${ONNX_RUNTIME_VERSION}`;
 
 /** A chunk ends once it holds this much speech and this many words, or reaches the cap. */
 const CHUNK_MIN_SECONDS = 10;
 const CHUNK_MIN_WORDS = 12;
 const CHUNK_MAX_SECONDS = 20;
 
-/** Below this similarity a chunk is not about what was typed. On the clips library (2026-10-10) real matches scored 0.63-0.86 and an unrelated query ("recipe for chocolate chip cookies") at most 0.56. */
+/**
+ * A chunk is a meaning match when it scores at least MIN_SIMILARITY AND
+ * stands out from the rest of the video for the same query: at least
+ * MIN_STANDOUT standard deviations above the video's mean. Measured on a
+ * 4-hour show (2026-10-10, onnxruntime 1.23): strong real matches stood out
+ * 5.5-6.1; unrelated queries (cookies, knitting, a cat, astronauts) topped
+ * out at 2.9-3.6 while scoring up to 0.62 on similarity alone, so similarity
+ * alone let them through. Weak descriptive matches (about 3) cannot be told
+ * from noise by this model and are left to the word search.
+ */
 export const MIN_SIMILARITY = 0.6;
+export const MIN_STANDOUT = 4;
+/** Fewer chunks than this are too few to measure standing out: similarity alone decides. */
+export const MIN_CHUNKS_FOR_STANDOUT = 20;
 /** The most meaning hits returned. */
 export const MAX_MEANING_HITS = 20;
 
@@ -105,14 +122,18 @@ export async function searchMeaning(db: Database, videoId: string, query: string
   const { chunks, embeddedNow } = await ensureVideoVectors(db, videoId, embed);
   const [qv] = await embed([q], 'search_query');
   const rows = db.prepare('SELECT first_idx AS first, last_idx AS last, start_s AS start, vec FROM transcript_meaning_chunks WHERE video_id = ?').all(videoId) as Array<{ first: number; last: number; start: number; vec: Buffer }>;
-  const hits = rows
-    .map((r) => {
-      const v = fromBlob(r.vec);
-      let dot = 0;
-      for (let j = 0; j < v.length; j++) dot += v[j] * qv[j];
-      return { first: r.first, last: r.last, start: r.start, score: Math.round(dot * 1000) / 1000 };
-    })
-    .filter((h) => h.score >= MIN_SIMILARITY)
+  const scored = rows.map((r) => {
+    const v = fromBlob(r.vec);
+    let dot = 0;
+    for (let j = 0; j < v.length; j++) dot += v[j] * qv[j];
+    return { first: r.first, last: r.last, start: r.start, score: dot };
+  });
+  const mean = scored.reduce((a, h) => a + h.score, 0) / (scored.length || 1);
+  const sd = Math.sqrt(scored.reduce((a, h) => a + (h.score - mean) ** 2, 0) / (scored.length || 1));
+  const standsOut = (score: number) => scored.length < MIN_CHUNKS_FOR_STANDOUT || (sd > 0 && (score - mean) / sd >= MIN_STANDOUT);
+  const hits = scored
+    .filter((h) => h.score >= MIN_SIMILARITY && standsOut(h.score))
+    .map((h) => ({ ...h, score: Math.round(h.score * 1000) / 1000 }))
     .sort((a, b) => b.score - a.score)
     .slice(0, MAX_MEANING_HITS);
   return { hits, chunks, embeddedNow };

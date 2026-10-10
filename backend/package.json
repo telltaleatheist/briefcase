@@ -48,7 +48,7 @@
     "concat-stream": "^2.0.0",
     "defaults": "^3.0.0",
     "fs-extra": "^11.3.0",
-    "onnxruntime-node": "1.30.0",
+    "onnxruntime-node": "1.23.0",
     "path-to-regexp": "^8.2.0",
     "proper-lockfile": "^4.1.2",
     "reflect-metadata": "^0.1.13",
