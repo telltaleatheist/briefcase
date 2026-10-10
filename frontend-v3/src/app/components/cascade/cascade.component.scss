@@ -231,6 +231,18 @@ cdk-virtual-scroll-viewport.library-content {
     color: var(--primary-orange);
   }
 
+  .moment-meaning {
+    flex: none;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    padding: 1px 6px;
+  }
+
   .moment-text {
     min-width: 0;
     overflow: hidden;

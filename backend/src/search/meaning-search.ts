@@ -18,6 +18,7 @@
 import type { Database } from 'better-sqlite3';
 
 import { DIMENSIONS, EMBEDDING_MODEL_ID, ONNX_RUNTIME_VERSION } from './embeddings/embedding-model.service';
+import { meaningChanged, meaningGeneration, type Moment } from './transcript-moments';
 
 /**
  * What the stored vectors were made with: a change re-embeds. The runtime is
@@ -135,6 +136,7 @@ export async function indexVideoMeaning(db: Database, videoId: string, embed: Em
     chunks.forEach((c, i) => insert.run(videoId, c.first, c.last, c.start, toBlob(vectors[i])));
     db.prepare('INSERT OR REPLACE INTO transcript_meaning_state (video_id, model) VALUES (?, ?)').run(videoId, MEANING_MODEL_KEY);
   })();
+  meaningChanged(db);
   return { chunks: chunks.length, embeddedNow: true };
 }
 
@@ -180,4 +182,127 @@ export function pendingMeaningVideos(db: Database, limit: number): string[] {
     ORDER BY v.added_at DESC
     LIMIT ?
   `).all(MEANING_MODEL_KEY, limit) as Array<{ id: string }>).map((r) => r.id);
+}
+
+// =============================================================================
+// ACROSS THE LIBRARY
+// =============================================================================
+
+/**
+ * Every current vector of a library, decoded once into flat arrays (the clips
+ * library: ~210k chunks, ~55 MB) and kept until meaning rows change, so a
+ * library search scans memory instead of reading and decoding every row.
+ */
+interface VectorTable {
+  generation: number;
+  count: number;
+  videoIds: string[];
+  first: Int32Array;
+  last: Int32Array;
+  start: Float64Array;
+  /** Per row: scale / 127 / the dequantized vector's length, so a dot product with the bytes is the cosine. */
+  factor: Float32Array;
+  bytes: Int8Array;
+}
+
+const tables = new WeakMap<Database, VectorTable>();
+
+function vectorTable(db: Database): VectorTable {
+  const generation = meaningGeneration(db);
+  const cached = tables.get(db);
+  if (cached && cached.generation === generation) return cached;
+  const rows = db.prepare(`
+    SELECT c.video_id AS videoId, c.first_idx AS first, c.last_idx AS last, c.start_s AS start, c.vec
+    FROM transcript_meaning_chunks c JOIN transcript_meaning_state m ON m.video_id = c.video_id AND m.model = ?
+  `).all(MEANING_MODEL_KEY) as Array<{ videoId: string; first: number; last: number; start: number; vec: Buffer }>;
+  const n = rows.length;
+  const table: VectorTable = {
+    generation,
+    count: n,
+    videoIds: new Array<string>(n),
+    first: new Int32Array(n),
+    last: new Int32Array(n),
+    start: new Float64Array(n),
+    factor: new Float32Array(n),
+    bytes: new Int8Array(n * DIMENSIONS),
+  };
+  rows.forEach((r, i) => {
+    table.videoIds[i] = r.videoId;
+    table.first[i] = r.first;
+    table.last[i] = r.last;
+    table.start[i] = r.start;
+    let norm = 0;
+    for (let j = 0; j < DIMENSIONS; j++) {
+      const b = r.vec.readInt8(4 + j);
+      table.bytes[i * DIMENSIONS + j] = b;
+      norm += b * b;
+    }
+    // cos = (scale/127 * sum(q*b)) / (scale/127 * sqrt(sum(b*b))) = sum(q*b) / sqrt(sum(b*b))
+    table.factor[i] = norm > 0 ? 1 / Math.sqrt(norm) : 0;
+  });
+  tables.set(db, table);
+  return table;
+}
+
+/** The most chunks a library meaning search returns, across all videos. */
+export const MAX_LIBRARY_MEANING_HITS = 200;
+
+export interface LibraryMeaningResult {
+  /** Per video, its meaning moments in time order, videos best first. */
+  videos: Array<{ videoId: string; score: number; moments: Moment[] }>;
+  /** Chunks searched (the library's indexed transcripts). */
+  chunks: number;
+}
+
+/**
+ * The chunks of the whole library closest in meaning to an embedded query
+ * (`qv`, unit length): those at MIN_SIMILARITY or more that stand out from the
+ * whole library for the same query (MIN_STANDOUT), grouped by video. Only
+ * transcripts already indexed are searched; nothing is embedded here.
+ */
+export function searchLibraryMeaning(db: Database, qv: Float32Array, maxMomentsPerVideo = 25): LibraryMeaningResult {
+  const t = vectorTable(db);
+  if (t.count === 0) return { videos: [], chunks: 0 };
+  const scores = new Float32Array(t.count);
+  let sum = 0;
+  let sumSq = 0;
+  for (let i = 0; i < t.count; i++) {
+    let dot = 0;
+    const base = i * DIMENSIONS;
+    for (let j = 0; j < DIMENSIONS; j++) dot += qv[j] * t.bytes[base + j];
+    const score = dot * t.factor[i];
+    scores[i] = score;
+    sum += score;
+    sumSq += score * score;
+  }
+  const mean = sum / t.count;
+  const sd = Math.sqrt(Math.max(0, sumSq / t.count - mean * mean));
+  const floor = Math.max(MIN_SIMILARITY, t.count >= MIN_CHUNKS_FOR_STANDOUT && sd > 0 ? mean + MIN_STANDOUT * sd : MIN_SIMILARITY);
+  const picked: number[] = [];
+  for (let i = 0; i < t.count; i++) if (scores[i] >= floor) picked.push(i);
+  picked.sort((a, b) => scores[b] - scores[a]);
+  picked.length = Math.min(picked.length, MAX_LIBRARY_MEANING_HITS);
+
+  const textOf = db.prepare(`SELECT group_concat(text, ' ') AS text FROM (SELECT text FROM transcript_segments WHERE video_id = ? AND idx BETWEEN ? AND ? ORDER BY idx)`);
+  const endOf = db.prepare('SELECT end_s AS end FROM transcript_segments WHERE video_id = ? AND idx = ?');
+  const byVideo = new Map<string, { videoId: string; score: number; moments: Moment[] }>();
+  for (const i of picked) {
+    const videoId = t.videoIds[i];
+    let entry = byVideo.get(videoId);
+    if (!entry) byVideo.set(videoId, (entry = { videoId, score: scores[i], moments: [] }));
+    if (entry.moments.length >= maxMomentsPerVideo) continue;
+    const text = (textOf.get(videoId, t.first[i], t.last[i]) as { text: string | null }).text ?? '';
+    const end = (endOf.get(videoId, t.last[i]) as { end: number } | undefined)?.end ?? t.start[i];
+    entry.moments.push({ start: t.start[i], end, text, highlights: [], score: Math.round(scores[i] * 1000) / 1000, meaning: true });
+  }
+  const videos = [...byVideo.values()];
+  for (const v of videos) v.moments.sort((a, b) => a.start - b.start);
+  return { videos, chunks: t.count };
+}
+
+/** Transcripts with current meaning vectors, of those the moment index holds. */
+export function meaningIndexCounts(db: Database): { indexed: number; total: number } {
+  const total = (db.prepare('SELECT COUNT(*) AS n FROM transcript_index_state s JOIN videos v ON v.id = s.video_id').get() as { n: number }).n;
+  const indexed = (db.prepare('SELECT COUNT(*) AS n FROM transcript_meaning_state WHERE model = ?').get(MEANING_MODEL_KEY) as { n: number }).n;
+  return { indexed, total };
 }

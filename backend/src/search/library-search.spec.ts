@@ -2,7 +2,9 @@ import { describe, expect, it } from '@jest/globals';
 import Database = require('better-sqlite3');
 
 import { ensureTitleIndex, searchLibrary, titleOf } from './library-search';
-import { ensureMomentSchema, indexPendingTranscripts } from './transcript-moments';
+import { DIMENSIONS } from './embeddings/embedding-model.service';
+import { indexVideoMeaning, searchLibraryMeaning, type Embed } from './meaning-search';
+import { ensureMomentSchema, indexPendingTranscripts, removeVideoMoments } from './transcript-moments';
 
 const hms = (s: number) => `00:${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')},000`;
 const srtOf = (lines: string[]) => lines.map((t, i) => `${i + 1}\n${hms(i * 5)} --> ${hms(i * 5 + 5)}\n${t}\n`).join('\n');
@@ -10,7 +12,7 @@ const srtOf = (lines: string[]) => lines.map((t, i) => `${i + 1}\n${hms(i * 5)} 
 function library(videos: Array<{ id: string; filename: string; lines?: string[] }>) {
   const db = new Database(':memory:');
   db.exec(`
-    CREATE TABLE videos (id TEXT PRIMARY KEY, filename TEXT NOT NULL);
+    CREATE TABLE videos (id TEXT PRIMARY KEY, filename TEXT NOT NULL, added_at TEXT);
     CREATE TABLE transcripts (video_id TEXT PRIMARY KEY REFERENCES videos(id) ON DELETE CASCADE, srt_format TEXT, transcribed_at TEXT);
   `);
   ensureMomentSchema(db);
@@ -82,5 +84,33 @@ describe('searchLibrary', () => {
   it('titleOf drops the extension only', () => {
     expect(titleOf('a.b.mp4')).toBe('a.b');
     expect(titleOf('no extension')).toBe('no extension');
+  });
+
+  it('expanded search adds what was meant: under a word hit without repeating its moment, and videos found only by meaning after', async () => {
+    const lines = (topic: string) => [`${topic} is what we talk about today, friends.`, `More about ${topic} for the next while here.`];
+    const db = library([
+      { id: 'words', filename: 'sleeper cells update.mp4', lines: [...lines('sleeper cells'), ...lines('the weather')] },
+      { id: 'meaning', filename: 'a podcast.mp4', lines: lines('hidden enemy agents') },
+      { id: 'other', filename: 'cooking.mp4', lines: lines('pasta sauce') },
+    ]);
+    // Axis 0: "hidden agents"; everything else points elsewhere.
+    const embed: Embed = async (texts) => texts.map((t) => {
+      const v = new Float32Array(DIMENSIONS);
+      if (/sleeper|agents/i.test(t)) v[0] = 1; else v[1] = 1;
+      return v;
+    });
+    for (const id of ['words', 'meaning', 'other']) await indexVideoMeaning(db, id, embed);
+    const [qv] = await embed(['sleeper cells'], 'search_query');
+
+    const res = searchLibrary(db, 'sleeper cells', { meaningQuery: qv });
+    expect(res.hits.map((h) => h.videoId)).toEqual(['words', 'meaning']);
+    // The word moment is not repeated as a meaning moment; the other video's moment is marked as meaning.
+    expect(res.hits[0].moments.filter((m) => m.meaning)).toEqual([]);
+    expect(res.hits[1].moments.every((m) => m.meaning)).toBe(true);
+    expect(res.meaning).toEqual({ indexed: 3, total: 3 });
+
+    // The cached vectors follow changes: a video's vectors removed with its transcript are gone from the search.
+    removeVideoMoments(db, 'meaning');
+    expect(searchLibraryMeaning(db, qv).videos.map((v) => v.videoId)).toEqual(['words']);
   });
 });

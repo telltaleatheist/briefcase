@@ -554,22 +554,26 @@ export class DatabaseController {
   }
 
   /**
-   * GET /api/database/search?q=...&fuzzy=false
+   * GET /api/database/search?q=...&fuzzy=false&expanded=true
    * The library search (search/library-search.ts): videos whose title holds
    * the query, then videos where the transcript says it, each with its
-   * moments (time, the sentences, highlight ranges). `indexing`, while the
+   * moments (time, the sentences, highlight ranges). With expanded=true, also
+   * the moments that MEAN it (the meaning index; `meaning` says how much of
+   * the library it covers yet). `indexing`, while the
    * moment index fills in the background after a library opens, says how many
    * transcripts it has yet to read (null once done). With no library open yet
    * (first run) the answer is empty.
    */
   @Get('search')
-  search(@Query('q') query: string, @Query('fuzzy') fuzzy?: string) {
+  async search(@Query('q') query: string, @Query('fuzzy') fuzzy?: string, @Query('expanded') expanded?: string) {
     const q = (query ?? '').trim();
     const none = { query: q, hits: [], momentCount: 0, capped: false, spellings: {}, indexing: null };
     if (!q) return none;
+    // Expanded search: the query is embedded (the local model) and the library's meaning index searched too.
+    const meaningQuery = expanded === 'true' ? (await this.embeddingModel.embed([q], 'search_query'))[0] : undefined;
     let result: ReturnType<DatabaseService['searchLibrary']>;
     try {
-      result = this.databaseService.searchLibrary(q, { fuzzy: fuzzy !== 'false' });
+      result = this.databaseService.searchLibrary(q, { fuzzy: fuzzy !== 'false', meaningQuery });
     } catch (error) {
       if (error instanceof Error && error.message.includes('Database not initialized')) return none;
       throw error;

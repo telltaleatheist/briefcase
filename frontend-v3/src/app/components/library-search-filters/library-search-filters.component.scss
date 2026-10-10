@@ -20,6 +20,20 @@
   background: transparent;
 }
 
+.meaning-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  font-size: 13px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+
+  input { accent-color: var(--primary-orange); cursor: pointer; }
+}
+
 .search-input-wrapper {
   position: relative;
   flex: 1;

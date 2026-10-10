@@ -4,6 +4,8 @@ import { VideoWeek } from '../models/video.model';
 export interface LibraryFilters {
   /** The library search (backend search/library-search.ts); filters below narrow its results too. */
   searchQuery: string;
+  /** Expanded search: also find moments by meaning (the meaning index), not only by their words. Remembered. */
+  meaningSearch: boolean;
   dateRange: 'all' | 'today' | 'week' | 'month' | 'year';
   mediaType: 'all' | 'video' | 'audio' | 'image' | 'document' | 'webpage';
   duration: 'all' | 'under10' | 'over10';
@@ -202,6 +204,7 @@ export class LibraryFilterService {
   getDefaultFilters(): LibraryFilters {
     return {
       searchQuery: '',
+      meaningSearch: readMeaningSearch(),
       dateRange: 'all',
       mediaType: 'all',
       duration: 'all',
@@ -221,4 +224,23 @@ export function startOfRange(range: 'today' | 'week' | 'month' | 'year', now: Da
   if (range === 'month') start.setDate(1);
   if (range === 'year') start.setMonth(0, 1);
   return start;
+}
+
+const MEANING_SEARCH_KEY = 'briefcase-library-expanded-search';
+
+/** The remembered Expanded search choice (off when storage is unavailable). */
+export function readMeaningSearch(): boolean {
+  try {
+    return localStorage.getItem(MEANING_SEARCH_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+export function rememberMeaningSearch(on: boolean): void {
+  try {
+    localStorage.setItem(MEANING_SEARCH_KEY, String(on));
+  } catch {
+    // Remembering the choice is a convenience; the search works without it.
+  }
 }

@@ -64,6 +64,9 @@
             [title]="'Open at ' + formatMomentTime(item.moment.start)"
             (click)="openMoment(item.video, item.moment.start, $event)">
             <span class="moment-time">{{ formatMomentTime(item.moment.start) }}</span>
+            @if (item.moment.meaning) {
+              <span class="moment-meaning" title="Found by meaning (expanded search), not by its words">similar</span>
+            }
             <span class="moment-text">@for (piece of momentPieces(item.moment.text, item.moment.highlights); track $index) {<span [class.match]="piece.hit">{{ piece.text }}</span>}</span>
           </button>
         }

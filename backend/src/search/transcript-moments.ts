@@ -159,6 +159,13 @@ export function ensureMomentSchema(db: Database): void {
 const generations = new WeakMap<Database, number>();
 const bump = (db: Database) => generations.set(db, (generations.get(db) ?? 0) + 1);
 
+/** Meaning-vector generation per handle: any write or delete of meaning rows makes cached vectors stale. */
+const meaningGenerations = new WeakMap<Database, number>();
+export const meaningGeneration = (db: Database): number => meaningGenerations.get(db) ?? 0;
+export const meaningChanged = (db: Database): void => {
+  meaningGenerations.set(db, meaningGeneration(db) + 1);
+};
+
 /** Drop a video's moments (its windows, their index rows, its segments, its meaning vectors and state). */
 export function removeVideoMoments(db: Database, videoId: string): void {
   db.prepare('DELETE FROM transcript_windows WHERE video_id = ?').run(videoId);
@@ -167,6 +174,7 @@ export function removeVideoMoments(db: Database, videoId: string): void {
   db.prepare('DELETE FROM transcript_meaning_chunks WHERE video_id = ?').run(videoId);
   db.prepare('DELETE FROM transcript_meaning_state WHERE video_id = ?').run(videoId);
   bump(db);
+  meaningChanged(db);
 }
 
 /**
@@ -249,6 +257,8 @@ export interface Moment {
   /** [start, end) character ranges of `text` that matched. */
   highlights: Array<[number, number]>;
   score: number;
+  /** Found by meaning (meaning-search.ts), not by its words: nothing is highlighted. */
+  meaning?: boolean;
 }
 
 export interface VideoMoments {

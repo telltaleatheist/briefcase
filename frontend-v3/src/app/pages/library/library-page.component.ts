@@ -304,6 +304,8 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   searchLoading = signal(false);
   searchError = signal<string | null>(null);
   private searchSeq = 0;
+  /** The query and Expanded search setting of the last search asked (a repeat reloads quietly). */
+  private searchKey = '';
   searchHits = computed<SearchHit[]>(() => {
     const hits = this.searchResponse()?.hits ?? [];
     const filters = this.currentFiltersSignal();
@@ -337,6 +339,9 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       notes.push(`Transcript indexing stopped (${res.indexing.error}); ${res.indexing.pending} transcripts are not searched.`);
     } else if (res.indexing) {
       notes.push(`Indexing transcripts: ${res.indexing.total - res.indexing.pending} of ${res.indexing.total} done; the rest are not searched yet.`);
+    }
+    if (res.meaning && res.meaning.indexed < res.meaning.total) {
+      notes.push(`Expanded search covers ${res.meaning.indexed} of ${res.meaning.total} transcripts so far; the rest are being indexed in the background.`);
     }
     for (const [word, words] of Object.entries(res.spellings)) {
       if (words.length > 1) notes.push(`“${word}” also matched ${words.filter(w => w !== word).join(', ')}`);
@@ -1724,6 +1729,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       this.runSearch(query);
     } else {
       this.searchSeq++;
+      this.searchKey = '';
       this.searchResponse.set(null);
       this.searchError.set(null);
       this.searchLoading.set(false);
@@ -1752,8 +1758,11 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
    */
   private runSearch(query: string): void {
     const seq = ++this.searchSeq;
-    if (this.searchResponse()?.query !== query) this.searchLoading.set(true);
-    this.libraryService.search(query).subscribe({
+    const expanded = this.currentFilters?.meaningSearch ?? false;
+    const key = `${expanded}|${query}`;
+    if (this.searchKey !== key) this.searchLoading.set(true);
+    this.searchKey = key;
+    this.libraryService.search(query, expanded).subscribe({
       next: (response) => {
         if (seq !== this.searchSeq) return;
         this.searchResponse.set(response);

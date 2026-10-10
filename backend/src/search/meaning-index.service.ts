@@ -78,7 +78,8 @@ export class MeaningIndexService implements OnModuleInit, OnModuleDestroy {
     const embed = (texts: string[], task: 'search_query' | 'search_document') => this.model.embed(texts, task);
     for (;;) {
       if (!db.open || this.currentDb() !== db) {
-        if (done) this.logger.log(`[Search] Library changed; meaning indexing stopped after ${done} transcripts`);
+        // A library opened (or the same one reopened) replaced this connection; its notice starts the next pass.
+        if (done) this.logger.log(`[Search] Meaning indexing paused after ${done} transcripts: the library was (re)opened, and continues on it`);
         return;
       }
       const [videoId] = pendingMeaningVideos(db, 1);

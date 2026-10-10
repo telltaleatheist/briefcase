@@ -23,6 +23,10 @@
         class="search-input"
       />
     </div>
+    <label class="meaning-toggle" title="Also find moments that mean what you typed, even in other words (searches the transcripts indexed so far)">
+      <input type="checkbox" [ngModel]="filters.meaningSearch" (ngModelChange)="onMeaningSearchChange($event)" />
+      Expanded search
+    </label>
     <button
       class="accordion-toggle"
       (click)="toggleAccordion()"

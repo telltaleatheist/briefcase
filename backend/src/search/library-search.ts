@@ -18,6 +18,7 @@
 import type { Database } from 'better-sqlite3';
 
 import { highlightRanges, matchExpression, matcherOf, parseMomentQuery } from './moment-query';
+import { meaningIndexCounts, searchLibraryMeaning } from './meaning-search';
 import { findMomentWindows, momentsOf, spellerFor, type Moment, type MomentWindow } from './transcript-moments';
 
 /** A file name as the library shows it: without its extension. */
@@ -80,12 +81,21 @@ export interface LibrarySearchResult {
   capped: boolean;
   /** The words each plain query word also matched (near spellings). */
   spellings: Record<string, string[]>;
+  /** With expanded search: the transcripts searched by meaning, of those there are (the index fills in the background). */
+  meaning?: { indexed: number; total: number };
 }
 
 export interface LibrarySearchOptions {
   fuzzy?: boolean;
   /** Most videos returned (default 300). */
   maxVideos?: number;
+  /**
+   * Expanded search: the query embedded by the meaning model (unit length).
+   * Meaning moments (meaning-search.ts) join the word results: added under a
+   * video that matched by words where they do not overlap its moments, and
+   * videos found only by meaning listed after the word results, best first.
+   */
+  meaningQuery?: Float32Array;
 }
 
 export function searchLibrary(db: Database, query: string, options: LibrarySearchOptions = {}): LibrarySearchResult {
@@ -124,5 +134,33 @@ export function searchLibrary(db: Database, query: string, options: LibrarySearc
     momentCount: v.windows.length,
   });
   const hits = [...titled.slice(0, maxVideos).map((v) => hit(v, true)), ...spoken.map((v) => hit(v, false))];
-  return { hits, momentCount: found.momentCount, capped: found.capped, spellings };
+  if (!options.meaningQuery) return { hits, momentCount: found.momentCount, capped: found.capped, spellings };
+
+  const meaning = searchLibraryMeaning(db, options.meaningQuery);
+  const byId = new Map(hits.map((h) => [h.videoId, h]));
+  let meaningMoments = 0;
+  for (const v of meaning.videos) {
+    const existing = byId.get(v.videoId);
+    if (existing) {
+      const fresh = v.moments.filter((m) => existing.moments.every((w) => m.end <= w.start || m.start >= w.end));
+      existing.moments = [...existing.moments, ...fresh].sort((a, b) => a.start - b.start);
+      existing.momentCount += fresh.length;
+      meaningMoments += fresh.length;
+      continue;
+    }
+    if (hits.length >= maxVideos) continue;
+    const row = filenameOf.get(v.videoId) as { filename: string } | undefined;
+    if (!row) continue;
+    const added: LibraryHit = { videoId: v.videoId, title: titleOf(row.filename), titleHighlights: [], moments: v.moments, momentCount: v.moments.length };
+    hits.push(added);
+    byId.set(v.videoId, added);
+    meaningMoments += v.moments.length;
+  }
+  return {
+    hits,
+    momentCount: found.momentCount + meaningMoments,
+    capped: found.capped,
+    spellings,
+    meaning: meaningIndexCounts(db),
+  };
 }

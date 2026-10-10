@@ -14,6 +14,8 @@ export interface TranscriptMoment {
   /** [start, end) character ranges of `text` that matched. */
   highlights: Array<[number, number]>;
   score: number;
+  /** Found by meaning (expanded search), not by its words: nothing is highlighted. */
+  meaning?: boolean;
 }
 
 export interface SearchHit {
@@ -37,6 +39,8 @@ export interface LibrarySearchResponse {
   capped: boolean;
   /** The words each plain query word also matched (near spellings). */
   spellings: Record<string, string[]>;
+  /** With expanded search: transcripts the meaning index covers so far, of all (it fills in the background). */
+  meaning?: { indexed: number; total: number };
   /** While the transcript index fills after a library opens: what is left (those are not searched yet). */
   indexing: { pending: number; total: number; error?: string } | null;
 }
