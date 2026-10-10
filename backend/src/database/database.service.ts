@@ -15,6 +15,7 @@ import {
   pendingTranscriptCount,
   removeVideoMoments,
 } from '../search/transcript-moments';
+import { searchMeaning, type Embed, type MeaningSearchResult } from '../search/meaning-search';
 import { ensureTitleIndex, searchLibrary, type LibrarySearchOptions, type LibrarySearchResult } from '../search/library-search';
 
 /** Transcripts indexed per background tick (the whole clips library took ~9 s). */
@@ -431,6 +432,11 @@ export class DatabaseService {
       }
     };
     setTimeout(step, 0);
+  }
+
+  /** Scout's expanded search in one video's transcript (search/meaning-search.ts). */
+  searchTranscriptMeaning(videoId: string, query: string, embed: Embed): Promise<MeaningSearchResult> {
+    return searchMeaning(this.ensureInitialized(), videoId, query, embed);
   }
 
   /**

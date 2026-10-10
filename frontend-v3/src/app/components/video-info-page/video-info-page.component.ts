@@ -12,7 +12,8 @@ import {
   TranscriptionSegment,
   TranscriptionSearchResult
 } from '../../models/video-info.model';
-import { TranscriptSearchService, TranscriptSearchOptions } from '../../services/transcript-search.service';
+import { closeMatches } from '@search/close-match';
+import { highlightPieces } from '../../models/library-search.model';
 import { VideoItem, VideoWeek } from '../../models/video.model';
 import { LibraryService } from '../../services/library.service';
 import { TourService } from '../../services/tour.service';
@@ -37,7 +38,6 @@ export class VideoInfoPageComponent implements OnInit, OnDestroy {
   private http = inject(HttpClient);
   private cdr = inject(ChangeDetectorRef);
   private tourService = inject(TourService);
-  private transcriptSearchService = inject(TranscriptSearchService);
 
   @Input() videoId?: string;
 
@@ -87,11 +87,6 @@ export class VideoInfoPageComponent implements OnInit, OnDestroy {
   showTimestamps = true;
   transcriptionView: 'continuous' | 'segments' = 'segments';
   playbackPosition = 0; // Current video position in seconds
-  transcriptSearchOptions: TranscriptSearchOptions = {
-    useSoundex: false,
-    usePhraseSearch: false
-  };
-
   // Children Management
   childVideos: any[] = [];
   parentVideos: any[] = [];
@@ -610,41 +605,25 @@ export class VideoInfoPageComponent implements OnInit, OnDestroy {
   }
 
   // Transcription Methods
+  /** The places closest to the query (search/close-match.ts: the library's rules, scored for misremembered quotes). */
   searchTranscription(): void {
-    if (!this.videoInfo || !this.transcriptionSearchQuery.trim()) {
+    const query = this.transcriptionSearchQuery.trim();
+    if (!this.videoInfo || !query) {
       this.transcriptionSearchResults = [];
       return;
     }
-
-    const query = this.transcriptionSearchQuery.trim();
-    const results: TranscriptionSearchResult[] = [];
-
-    this.videoInfo.transcription.forEach((segment, index) => {
-      // Use the transcript search service with options
-      if (this.transcriptSearchService.matchesQuery(query, segment.text, this.transcriptSearchOptions)) {
-        const text = segment.text.toLowerCase();
-        const queryLower = query.toLowerCase();
-        const matchIndex = text.indexOf(queryLower);
-        const actualMatchIndex = matchIndex >= 0 ? matchIndex : 0;
-
-        const before = segment.text.substring(Math.max(0, actualMatchIndex - 50), actualMatchIndex);
-        const matchedText = matchIndex >= 0
-          ? segment.text.substring(actualMatchIndex, actualMatchIndex + query.length)
-          : segment.text.substring(0, Math.min(20, segment.text.length));
-        const after = segment.text.substring(
-          actualMatchIndex + matchedText.length,
-          Math.min(segment.text.length, actualMatchIndex + matchedText.length + 50)
-        );
-
-        results.push({
-          segment,
-          matchedText,
-          context: { before, after }
-        });
-      }
+    const segments = this.videoInfo.transcription;
+    this.transcriptionSearchResults = closeMatches(segments.map(s => ({ start: s.startTime, end: s.endTime, text: s.text })), query).map(hit => {
+      const shown = segments.slice(hit.first, hit.last + 1);
+      const ranges: Array<[number, number]> = [];
+      let offset = 0;
+      shown.forEach((s, k) => {
+        for (const [segment, a, b] of hit.highlights) if (segment === hit.first + k) ranges.push([offset + a, offset + b]);
+        offset += s.text.length + 1;
+      });
+      ranges.sort((x, y) => x[0] - y[0]);
+      return { segment: shown[0], pieces: highlightPieces(shown.map(s => s.text).join(' '), ranges) };
     });
-
-    this.transcriptionSearchResults = results;
   }
 
   clearSearch(): void {

@@ -7,6 +7,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { createReadStream, statSync } from 'fs';
 import { DatabaseService } from './database.service';
+import { EmbeddingModelService } from '../search/embeddings/embedding-model.service';
 import { RelinkingService } from './relinking.service';
 import { FileScannerService } from './file-scanner.service';
 import { MigrationService } from './migration.service';
@@ -58,6 +59,7 @@ export class DatabaseController {
     private readonly mediaEventService: MediaEventService,
     private readonly ignoreService: IgnoreService,
     private readonly thumbnailService: ThumbnailService,
+    private readonly embeddingModel: EmbeddingModelService,
     private readonly waveformService: WaveformService,
     private readonly moduleRef: ModuleRef,
   ) {}
@@ -577,6 +579,22 @@ export class DatabaseController {
       return video ? [{ ...hit, video }] : [];
     });
     return { query: q, ...result, hits };
+  }
+
+  /**
+   * GET /api/database/videos/:id/transcript/meaning?q=...
+   * Scout's expanded search: the stretches of this video's transcript closest
+   * in MEANING to what was typed (search/meaning-search.ts), best first, as
+   * segment index ranges with their start time and similarity. The first
+   * search on a video embeds its transcript (seconds, on the CPU) and the first
+   * search ever fetches the embedding model (137 MB, once).
+   */
+  @Get('videos/:id/transcript/meaning')
+  async searchTranscriptMeaning(@Param('id') id: string, @Query('q') query: string) {
+    const q = (query ?? '').trim();
+    if (!q) return { hits: [], chunks: 0, embeddedNow: false };
+    if (!this.databaseService.getVideoById(id)) throw new NotFoundException(`No video ${id} in this library`);
+    return this.databaseService.searchTranscriptMeaning(id, q, (texts, task) => this.embeddingModel.embed(texts, task));
   }
 
   /**

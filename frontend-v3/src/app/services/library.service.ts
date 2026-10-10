@@ -212,6 +212,16 @@ export class LibraryService {
   }
 
   /**
+   * Scout's expanded search: the stretches of one video's transcript closest
+   * in meaning to `query`, best first. The first search on a video embeds its
+   * transcript (seconds); the first ever fetches the embedding model once.
+   * GET /api/database/videos/:id/transcript/meaning?q=
+   */
+  transcriptMeaning(videoId: string, query: string): Observable<{ hits: Array<{ first: number; last: number; start: number; score: number }>; chunks: number; embeddedNow: boolean }> {
+    return this.http.get<any>(`${this.API_BASE}/database/videos/${encodeURIComponent(videoId)}/transcript/meaning`, { params: { q: query } });
+  }
+
+  /**
    * Get single video with details
    * GET /api/database/videos/:id
    */

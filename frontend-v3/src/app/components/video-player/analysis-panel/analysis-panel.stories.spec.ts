@@ -1,5 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import type { TimelineChapter } from '../../../models/video-editor.model';
+import { LibraryService } from '../../../services/library.service';
 import { AnalysisPanelComponent } from './analysis-panel.component';
 
 /** Scout's Chapters tab on a stories outline: stories as an accordion, opened by the chevron only. */
@@ -20,7 +21,7 @@ describe('AnalysisPanelComponent: stories accordion', () => {
   let panel: AnalysisPanelComponent;
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ imports: [AnalysisPanelComponent] });
+    TestBed.configureTestingModule({ imports: [AnalysisPanelComponent], providers: [{ provide: LibraryService, useValue: {} }] });
     fixture = TestBed.createComponent(AnalysisPanelComponent);
     panel = fixture.componentInstance;
     panel.chapters = OUTLINE;

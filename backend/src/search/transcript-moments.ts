@@ -129,6 +129,20 @@ export function ensureMomentSchema(db: Database): void {
       DELETE FROM transcript_windows_fts WHERE rowid = old.id;
     END;
 
+    -- Meaning search (meaning-search.ts): a vector per chunk of speech, made on first use.
+    CREATE TABLE IF NOT EXISTS transcript_meaning_chunks (
+      video_id TEXT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+      first_idx INTEGER NOT NULL,
+      last_idx INTEGER NOT NULL,
+      start_s REAL NOT NULL,
+      vec BLOB NOT NULL,
+      PRIMARY KEY (video_id, first_idx)
+    ) WITHOUT ROWID;
+    CREATE TABLE IF NOT EXISTS transcript_meaning_state (
+      video_id TEXT PRIMARY KEY REFERENCES videos(id) ON DELETE CASCADE,
+      model TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS transcript_index_state (
       video_id TEXT PRIMARY KEY REFERENCES videos(id) ON DELETE CASCADE,
       transcribed_at TEXT,
@@ -145,11 +159,13 @@ export function ensureMomentSchema(db: Database): void {
 const generations = new WeakMap<Database, number>();
 const bump = (db: Database) => generations.set(db, (generations.get(db) ?? 0) + 1);
 
-/** Drop a video's moments (its windows, their index rows, its segments and state). */
+/** Drop a video's moments (its windows, their index rows, its segments, its meaning vectors and state). */
 export function removeVideoMoments(db: Database, videoId: string): void {
   db.prepare('DELETE FROM transcript_windows WHERE video_id = ?').run(videoId);
   db.prepare('DELETE FROM transcript_segments WHERE video_id = ?').run(videoId);
   db.prepare('DELETE FROM transcript_index_state WHERE video_id = ?').run(videoId);
+  db.prepare('DELETE FROM transcript_meaning_chunks WHERE video_id = ?').run(videoId);
+  db.prepare('DELETE FROM transcript_meaning_state WHERE video_id = ?').run(videoId);
   bump(db);
 }
 

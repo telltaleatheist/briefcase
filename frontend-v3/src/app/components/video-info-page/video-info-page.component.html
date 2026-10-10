@@ -728,16 +728,6 @@
               <span class="button-icon">✕</span>
             </button>
           </div>
-          <div class="search-options">
-            <label class="search-option" title="Match words consecutively as a phrase">
-              <input type="checkbox" [(ngModel)]="transcriptSearchOptions.usePhraseSearch">
-              Phrase
-            </label>
-            <label class="search-option" title="Match similar-sounding words">
-              <input type="checkbox" [(ngModel)]="transcriptSearchOptions.useSoundex">
-              Phonetic
-            </label>
-          </div>
           <div class="search-results" *ngIf="transcriptionSearchResults.length > 0">
             <span class="results-count">{{ transcriptionSearchResults.length }} results found</span>
           </div>
@@ -799,9 +789,7 @@
           (click)="jumpToSegment(result.segment)">
           <div class="result-time">{{ formatTime(result.segment.startTime) }}</div>
           <div class="result-text">
-            <span class="context-before">{{ result.context.before }}</span>
-            <span class="matched-text">{{ result.matchedText }}</span>
-            <span class="context-after">{{ result.context.after }}</span>
+            @for (piece of result.pieces; track $index) {<span [class.matched-text]="piece.hit">{{ piece.text }}</span>}
           </div>
           <div class="result-speaker" *ngIf="result.segment.speaker">
             {{ result.segment.speaker }}

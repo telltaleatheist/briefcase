@@ -288,25 +288,15 @@
         }
       </div>
       @if (transcriptSearch()) {
-        <span class="search-results">{{ transcriptResultCount }} {{ transcriptView() === 'plain' ? 'matches' : 'segments' }}</span>
+        <span class="search-results">{{ transcriptRows().length }} {{ transcriptRows().length === 1 ? 'match' : 'matches' }}</span>
       }
     </div>
-    <!-- Search Options -->
     <div class="search-options">
-      <label class="search-option" title="Match words consecutively as a phrase">
-        <input
-          type="checkbox"
-          [(ngModel)]="searchOptions.usePhraseSearch">
-        Phrase
-      </label>
-      <label class="search-option" title="Match similar-sounding words">
-        <input
-          type="checkbox"
-          [(ngModel)]="searchOptions.useSoundex">
-        Phonetic
+      <label class="search-option" title="Also find lines that mean what you typed, even in other words">
+        <input type="checkbox" [ngModel]="expandedSearch()" (ngModelChange)="setExpandedSearch($event)">
+        Expanded search
       </label>
     </div>
-
     <!-- View Toggle: Segments / Plain Text -->
     <div class="view-toggle-section transcript-view-toggle">
       <div class="view-toggle">
@@ -370,17 +360,36 @@
       <!-- Segments View -->
       @if (transcriptView() === 'segments') {
         <div class="transcript-list">
-          @for (segment of filteredTranscript; track segment.id) {
+          @for (row of transcriptRows(); track row.segment.id) {
             <button
               class="transcript-segment"
-              [class.follow-current]="followCursor() && segment.id === currentSegmentId"
-              (click)="onTranscriptSegmentClick(segment)">
-              <span class="segment-time">{{ formatTime(segment.startTime) }}</span>
-              <span class="segment-text">{{ segment.text }}</span>
+              [class.follow-current]="followCursor() && row.segment.id === currentSegmentId"
+              (click)="onTranscriptSegmentClick(row.segment)">
+              <span class="segment-time">{{ formatTime(row.segment.startTime) }}</span>
+              <span class="segment-text">@for (piece of row.pieces; track $index) {<span [class.match]="piece.hit">{{ piece.text }}</span>}</span>
             </button>
           }
 
-          @if (filteredTranscript.length === 0 && transcriptSearch()) {
+          @if (expandedSearch() && transcriptSearch()) {
+            @if (meaningState() === 'searching') {
+              <div class="related-divider">Searching by meaning… (the first search on a video takes a few seconds)</div>
+            } @else if (meaningState() === 'error') {
+              <div class="related-divider error">Expanded search failed: {{ meaningError() }}</div>
+            } @else if (relatedRows().length > 0) {
+              <div class="related-divider">Similar in meaning</div>
+              @for (row of relatedRows(); track row.segment.id) {
+                <button
+                  class="transcript-segment"
+                  [class.follow-current]="followCursor() && row.segment.id === currentSegmentId"
+                  (click)="onTranscriptSegmentClick(row.segment)">
+                  <span class="segment-time">{{ formatTime(row.segment.startTime) }}</span>
+                  <span class="segment-text">{{ row.segment.text }}</span>
+                </button>
+              }
+            }
+          }
+
+          @if (transcriptRows().length === 0 && relatedRows().length === 0 && meaningState() !== 'searching' && transcriptSearch()) {
             <div class="empty-state">
               <p>No matches found for "{{ transcriptSearch() }}"</p>
             </div>
@@ -391,7 +400,7 @@
       <!-- Plain Text View -->
       @if (transcriptView() === 'plain') {
         <div class="plain-transcript">
-          @if (plainTextHasMatch || !transcriptSearch()) {
+          @if (transcriptRows().length > 0 || !transcriptSearch()) {
             <p class="plain-text">{{ plainTranscript() }}</p>
           } @else {
             <div class="empty-state">

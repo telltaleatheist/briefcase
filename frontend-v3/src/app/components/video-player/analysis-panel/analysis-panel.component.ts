@@ -12,8 +12,31 @@ import {
   ghostLabel,
 } from '../../../models/flag-filter';
 import { TranscriptionSegment } from '../../../models/video-info.model';
-import { TranscriptSearchService, TranscriptSearchOptions } from '../../../services/transcript-search.service';
+import { closeMatches } from '@search/close-match';
+import { LibraryService } from '../../../services/library.service';
+import { highlightPieces } from '../../../models/library-search.model';
 import { ChapterRow, chapterRows, leafChapters } from './chapter-outline';
+
+const EXPANDED_KEY = 'briefcase-transcript-expanded-search';
+
+function readExpanded(): boolean {
+  try {
+    return localStorage.getItem(EXPANDED_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+/** The segment playing at `time` (a meaning hit's start), or the nearest one after it. */
+function segmentAt(segments: TranscriptionSegment[], time: number): TranscriptionSegment | undefined {
+  return segments.find(s => s.startTime <= time + 0.5 && time < s.endTime) ?? segments.find(s => s.startTime >= time);
+}
+
+/** A transcript row: its (first) segment, and its text cut into matched and plain pieces. */
+export interface TranscriptRow {
+  segment: TranscriptionSegment;
+  pieces: Array<{ text: string; hit: boolean }>;
+}
 
 @Component({
   selector: 'app-analysis-panel',
@@ -23,8 +46,8 @@ import { ChapterRow, chapterRows, leafChapters } from './chapter-outline';
   styleUrls: ['./analysis-panel.component.scss']
 })
 export class AnalysisPanelComponent implements OnChanges {
-  private transcriptSearchService = inject(TranscriptSearchService);
   private host = inject(ElementRef) as ElementRef<HTMLElement>;
+  private libraryService = inject(LibraryService);
   @Input() sections: TimelineSection[] = [];
   @Input() chapters: TimelineChapter[] = [];
   @Input() categoryFilters: CategoryFilter[] = [];
@@ -97,63 +120,72 @@ export class AnalysisPanelComponent implements OnChanges {
   // Brief "Copied" feedback for the transcript copy button
   transcriptCopied = signal(false);
 
-  // Transcript search
+  // Transcript search: what is typed, and the query it settles on (after a
+  // pause in typing, so a long transcript is not searched on every key).
   transcriptSearch = signal('');
+  private readonly searchQuery = signal('');
+  private searchTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The transcript input as a signal, so the search reruns only when it changes. */
+  private readonly transcriptSegments = signal<TranscriptionSegment[]>([]);
 
-  // Transcript search options
-  searchOptions: TranscriptSearchOptions = {
-    useSoundex: false,
-    usePhraseSearch: false
-  };
+  /**
+   * Expanded search: also find what was MEANT (the backend's meaning search,
+   * search/meaning-search.ts), listed after the word matches. Remembered.
+   */
+  readonly expandedSearch = signal(readExpanded());
+  readonly meaningHits = signal<Array<{ start: number; score: number }>>([]);
+  readonly meaningState = signal<'idle' | 'searching' | 'error'>('idle');
+  readonly meaningError = signal('');
+  private meaningSeq = 0;
 
   // Computed plain text transcript
-  plainTranscript = computed(() => {
-    return this.transcript.map(s => s.text).join(' ').trim();
+  plainTranscript = computed(() => this.transcriptSegments().map(s => s.text).join(' ').trim());
+
+  /**
+   * The transcript rows to list: every segment, or, while searching, the
+   * places closest to the query (search/close-match.ts, the same rules as the
+   * library search, scored so a misremembered quote still finds its line),
+   * each with the words that matched marked.
+   */
+  readonly transcriptRows = computed<TranscriptRow[]>(() => {
+    const segments = this.transcriptSegments();
+    const query = this.searchQuery().trim();
+    if (!query) return segments.map(segment => ({ segment, pieces: [{ text: segment.text, hit: false }] }));
+    return closeMatches(segments.map(s => ({ start: s.startTime, end: s.endTime, text: s.text })), query).map(hit => {
+      const shown = segments.slice(hit.first, hit.last + 1);
+      const ranges: Array<[number, number]> = [];
+      let offset = 0;
+      shown.forEach((s, k) => {
+        for (const [segment, a, b] of hit.highlights) if (segment === hit.first + k) ranges.push([offset + a, offset + b]);
+        offset += s.text.length + 1;
+      });
+      ranges.sort((x, y) => x[0] - y[0]);
+      return { segment: shown[0], pieces: highlightPieces(shown.map(s => s.text).join(' '), ranges) };
+    });
   });
 
-  // Filtered plain text (for search)
-  get filteredPlainTranscript(): string {
-    const query = this.transcriptSearch().toLowerCase().trim();
-    if (!query) return this.plainTranscript();
-
-    // For plain view, just return the full text (highlighting handled in template)
-    return this.plainTranscript();
-  }
-
-  // Check if search matches plain text
-  get plainTextHasMatch(): boolean {
-    const query = this.transcriptSearch().toLowerCase().trim();
-    if (!query) return true;
-    return this.plainTranscript().toLowerCase().includes(query);
-  }
-
-  get filteredTranscript(): TranscriptionSegment[] {
-    const query = this.transcriptSearch().trim();
-    if (!query) return this.transcript;
-
-    return this.transcript.filter(segment =>
-      this.transcriptSearchService.matchesQuery(query, segment.text, this.searchOptions)
-    );
-  }
-
-  get transcriptResultCount(): number {
-    if (this.transcriptView() === 'plain') {
-      const query = this.transcriptSearch().toLowerCase().trim();
-      if (!query) return 0;
-      // Count occurrences in plain text
-      const text = this.plainTranscript().toLowerCase();
-      let count = 0;
-      let pos = 0;
-      while ((pos = text.indexOf(query, pos)) !== -1) {
-        count++;
-        pos += query.length;
-      }
-      return count;
+  /**
+   * Meaning matches the word search did not list: each at the transcript
+   * segment it starts in, best first, under a "Similar in meaning" divider.
+   */
+  readonly relatedRows = computed<TranscriptRow[]>(() => {
+    if (!this.expandedSearch() || !this.searchQuery().trim()) return [];
+    const segments = this.transcriptSegments();
+    const listed = new Set(this.transcriptRows().map(r => r.segment.id));
+    const rows: TranscriptRow[] = [];
+    for (const hit of this.meaningHits()) {
+      const segment = segmentAt(segments, hit.start);
+      if (!segment || listed.has(segment.id)) continue;
+      listed.add(segment.id);
+      rows.push({ segment, pieces: [{ text: segment.text, hit: false }] });
     }
-    return this.filteredTranscript.length;
-  }
+    return rows;
+  });
 
   ngOnChanges(changes: SimpleChanges): void {
+    if (changes['transcript']) this.transcriptSegments.set(this.transcript ?? []);
+    // Another video (or its new transcript): meaning results belong to the old one.
+    if (changes['videoId'] || changes['transcript']) this.runMeaningSearch();
     if (changes['chapters']) this.refreshChapterRows();
     if (changes['currentTime'] || changes['chapters'] || changes['sections'] ||
         changes['transcript'] || changes['categoryFilters']) {
@@ -278,10 +310,53 @@ export class AnalysisPanelComponent implements OnChanges {
 
   onTranscriptSearchChange(value: string): void {
     this.transcriptSearch.set(value);
+    clearTimeout(this.searchTimer);
+    this.searchTimer = setTimeout(() => {
+      this.searchQuery.set(value);
+      this.runMeaningSearch();
+    }, 200);
   }
 
   clearTranscriptSearch(): void {
+    clearTimeout(this.searchTimer);
     this.transcriptSearch.set('');
+    this.searchQuery.set('');
+    this.runMeaningSearch();
+  }
+
+  setExpandedSearch(on: boolean): void {
+    this.expandedSearch.set(on);
+    try {
+      localStorage.setItem(EXPANDED_KEY, String(on));
+    } catch {
+      // Remembering the choice is a convenience; the search works without it.
+    }
+    this.runMeaningSearch();
+  }
+
+  /** Ask the backend what the query means here; only the latest answer is kept. */
+  private runMeaningSearch(): void {
+    const seq = ++this.meaningSeq;
+    const query = this.searchQuery().trim();
+    this.meaningHits.set([]);
+    this.meaningError.set('');
+    if (!this.expandedSearch() || !query || !this.videoId) {
+      this.meaningState.set('idle');
+      return;
+    }
+    this.meaningState.set('searching');
+    this.libraryService.transcriptMeaning(this.videoId, query).subscribe({
+      next: (res) => {
+        if (seq !== this.meaningSeq) return;
+        this.meaningHits.set(res.hits);
+        this.meaningState.set('idle');
+      },
+      error: (err) => {
+        if (seq !== this.meaningSeq) return;
+        this.meaningState.set('error');
+        this.meaningError.set(err?.error?.message || err?.message || 'unknown error');
+      },
+    });
   }
 
   onTranscriptSegmentClick(segment: TranscriptionSegment): void {

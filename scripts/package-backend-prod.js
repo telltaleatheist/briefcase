@@ -22,6 +22,39 @@ const tempDir = path.join(__dirname, '..', 'backend-prod-temp');
 const arch = process.arch; // 'arm64' or 'x64'
 
 /**
+ * onnxruntime-node (the embedding model's runtime, backend/src/search/embeddings)
+ * ships its native library for every platform: ~290 MB, of which a build needs
+ * one platform and arch (~25-85 MB). Delete the others from the production
+ * install. Its loader picks bin/napi-v*/<platform>/<arch> at run time, so the
+ * one kept is exactly the one this build uses.
+ */
+function pruneOnnxRuntime(nodeModulesDir) {
+  const binDir = path.join(nodeModulesDir, 'onnxruntime-node', 'bin');
+  if (!fs.existsSync(binDir)) return;
+  let removed = 0;
+  for (const napi of fs.readdirSync(binDir)) {
+    const napiDir = path.join(binDir, napi);
+    for (const platform of fs.readdirSync(napiDir)) {
+      const platformDir = path.join(napiDir, platform);
+      if (platform !== process.platform) {
+        fs.removeSync(platformDir);
+        removed++;
+        continue;
+      }
+      for (const a of fs.readdirSync(platformDir)) {
+        if (a !== arch) {
+          fs.removeSync(path.join(platformDir, a));
+          removed++;
+        }
+      }
+    }
+  }
+  const kept = path.join(binDir, fs.readdirSync(binDir)[0] ?? '', process.platform, arch);
+  if (!fs.existsSync(kept)) throw new Error(`onnxruntime-node has no runtime for ${process.platform}/${arch}; search's embedding model could not run`);
+  console.log(`   ✓ onnxruntime-node: kept ${process.platform}/${arch}, removed ${removed} other platform folders`);
+}
+
+/**
  * Calculate hash of package-lock.json to detect dependency changes
  */
 function getPackageLockHash() {
@@ -225,6 +258,9 @@ async function main() {
       cwd: tempDir,
       stdio: 'inherit'
     });
+
+    // 4b. Keep only this platform's ONNX runtime (search's embedding model).
+    pruneOnnxRuntime(path.join(tempDir, 'node_modules'));
 
     // 5. Rebuild native modules for Electron
     console.log('\n🔨 Rebuilding native modules for Electron...');

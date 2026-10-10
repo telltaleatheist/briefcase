@@ -99,13 +99,10 @@ export interface TaskStatus {
   completedAt?: Date;
 }
 
+/** A transcript search hit: its (first) segment, and its text cut into matched and plain pieces. */
 export interface TranscriptionSearchResult {
   segment: TranscriptionSegment;
-  matchedText: string;
-  context: {
-    before: string;
-    after: string;
-  };
+  pieces: Array<{ text: string; hit: boolean }>;
 }
 
 export interface VideoInfoFilter {

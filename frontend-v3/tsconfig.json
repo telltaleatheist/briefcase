@@ -33,6 +33,9 @@
       "@crucible-wire/*": [
         "../backend/src/crucible/wire/*"
       ],
+      "@search/*": [
+        "../backend/src/search/*"
+      ],
       "plyr": [
         "node_modules/plyr/src/js/plyr.d.ts"
       ]
