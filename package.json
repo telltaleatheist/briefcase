@@ -42,9 +42,10 @@
     "dev:test-bundled": "node scripts/dev-test-bundled.js",
     "electron:test-packaged": "npm run build:all && cross-env NODE_ENV=production electron .",
     "electron": "npm run build:all && electron .",
-    "package:mac": "npm run clean:mac && npm run build:all && npm run package:backend:prod && npm run package:mac:electron-arm64:unsigned && npm run package:mac:electron-x64:unsigned",
-    "package:mac:signed": "npm run clean:mac && npm run build:all && npm run package:backend:prod && npm run package:mac:electron-arm64 && npm run package:mac:electron-x64",
-    "package:mac:fast": "npm run build:fast && npm run package:backend:prod && npm run package:mac:electron-arm64:unsigned && npm run package:mac:electron-x64:unsigned",
+    "package:mac": "npm run clean:mac && npm run build:all && npm run package:backend:prod && npm run package:mac:electron-arm64:unsigned",
+    "package:mac-intel": "npm run clean:mac && npm run build:all && npm run package:backend:prod && npm run package:mac:electron-x64:unsigned",
+    "package:mac:signed": "npm run clean:mac && npm run build:all && npm run package:backend:prod && npm run package:mac:electron-arm64",
+    "package:mac:fast": "npm run build:fast && npm run package:backend:prod && npm run package:mac:electron-arm64:unsigned",
     "package:mac:electron-arm64": "electron-builder --mac --arm64 --publish never",
     "package:mac:electron-x64": "electron-builder --mac --x64 --publish never",
     "package:mac:electron-arm64:unsigned": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false SKIP_NOTARIZE=1 electron-builder --mac --arm64 --publish never",
@@ -195,8 +196,7 @@
         {
           "target": "dmg",
           "arch": [
-            "arm64",
-            "x64"
+            "arm64"
           ]
         }
       ],

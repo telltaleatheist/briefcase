@@ -880,8 +880,8 @@ this.cdr.detectChanges();
 npm run build:all
 
 # Create package
-npm run package:mac
-npm run package:mac-intel
+npm run package:mac         # Apple Silicon (the only Mac build shipped for now)
+npm run package:mac-intel   # Intel Mac, on request (not shipped; Intel support to be revisited)
 npm run package:win
 npm run package:linux
 ```
