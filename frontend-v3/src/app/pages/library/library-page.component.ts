@@ -297,7 +297,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
 
   // The library search: the query, its answer, and its hits after the
   // library filters and the type filter. The hits are shown in the cascade
-  // (one "Search results" section, best first) so they select, highlight and
+  // (one "Search results" section, in the filters' order) so they select, highlight and
   // right-click like any video, with their moments as rows under each.
   searchQuery = signal('');
   searchResponse = signal<LibrarySearchResponse | null>(null);
@@ -315,7 +315,12 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       const narrowed = this.filterService.applyFilters([{ weekLabel: '', videos: hits.map(h => h.video) }], filters);
       kept = new Set((narrowed[0]?.videos ?? []).map(v => v.id));
     }
-    return hits.filter(h => kept.has(h.video.id) && (type === 'all' || this.matchesTypeFilter(h.video, type)));
+    const shown = hits.filter(h => kept.has(h.video.id) && (type === 'all' || this.matchesTypeFilter(h.video, type)));
+    // The filters' Sort By and Order apply to results too (newest download
+    // first by default); relevance keeps the search's own best-first order.
+    if (!filters || filters.sortBy === 'relevance') return shown;
+    const compare = this.filterService.videoComparator(filters);
+    return [...shown].sort((a, b) => compare(a.video, b.video));
   });
   searchWeeks = computed<VideoWeek[]>(() => {
     const hits = this.searchHits();

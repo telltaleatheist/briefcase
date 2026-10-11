@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { VideoWeek } from '../models/video.model';
+import { VideoItem, VideoWeek } from '../models/video.model';
 
 export interface LibraryFilters {
   /** The library search (backend search/library-search.ts); filters below narrow its results too. */
@@ -12,7 +12,8 @@ export interface LibraryFilters {
   hasTranscript: boolean | null;
   hasAnalysis: boolean | null;
   hasSuggestions: boolean | null;
-  sortBy: 'date' | 'name' | 'duration' | 'suggestions' | 'no-analysis' | 'no-transcript';
+  /** 'relevance' orders search results best match first; the library itself has no relevance and sorts by date. */
+  sortBy: 'date' | 'relevance' | 'name' | 'duration' | 'suggestions' | 'no-analysis' | 'no-transcript';
   sortOrder: 'asc' | 'desc';
 }
 
@@ -124,8 +125,9 @@ export class LibraryFilterService {
     const { sortBy, sortOrder } = filters;
     const ascending = sortOrder === 'asc';
 
-    // For date sorting, reorder the sections themselves
-    if (sortBy === 'date') {
+    // For date sorting (and relevance, which only search results have),
+    // reorder the sections themselves
+    if (sortBy === 'date' || sortBy === 'relevance') {
       weeks.sort((a, b) => {
         if (a.weekLabel === 'New') return ascending ? 1 : -1;
         if (b.weekLabel === 'New') return ascending ? -1 : 1;
@@ -137,65 +139,42 @@ export class LibraryFilterService {
       });
 
       // Also sort videos within each section by their specific date
-      for (const week of weeks) {
-        week.videos.sort((a, b) => {
-          const dateA = a.downloadDate ? new Date(a.downloadDate).getTime() : 0;
-          const dateB = b.downloadDate ? new Date(b.downloadDate).getTime() : 0;
-          return ascending ? dateA - dateB : dateB - dateA;
-        });
-      }
+      const byDate = this.videoComparator({ ...filters, sortBy: 'date' });
+      for (const week of weeks) week.videos.sort(byDate);
       return;
     }
 
     // For other sorts, flatten into single group and sort all videos
-    const allVideos = weeks.flatMap(w => w.videos);
-
-    switch (sortBy) {
-      case 'name':
-        allVideos.sort((a, b) => {
-          const comparison = (a.name || '').localeCompare(b.name || '');
-          return ascending ? comparison : -comparison;
-        });
-        break;
-
-      case 'duration':
-        allVideos.sort((a, b) => {
-          const durationA = this.parseDurationToSeconds(a.duration);
-          const durationB = this.parseDurationToSeconds(b.duration);
-          return ascending ? durationA - durationB : durationB - durationA;
-        });
-        break;
-
-      case 'suggestions':
-        allVideos.sort((a, b) => {
-          const hasSuggestionsA = a.suggestedTitle && a.suggestedTitle.trim().length > 0 ? 1 : 0;
-          const hasSuggestionsB = b.suggestedTitle && b.suggestedTitle.trim().length > 0 ? 1 : 0;
-          return ascending ? hasSuggestionsA - hasSuggestionsB : hasSuggestionsB - hasSuggestionsA;
-        });
-        break;
-
-      case 'no-analysis':
-        allVideos.sort((a, b) => {
-          const missingAnalysisA = a.hasAnalysis ? 0 : 1;
-          const missingAnalysisB = b.hasAnalysis ? 0 : 1;
-          return ascending ? missingAnalysisA - missingAnalysisB : missingAnalysisB - missingAnalysisA;
-        });
-        break;
-
-      case 'no-transcript':
-        allVideos.sort((a, b) => {
-          const missingTranscriptA = a.hasTranscript ? 0 : 1;
-          const missingTranscriptB = b.hasTranscript ? 0 : 1;
-          return ascending ? missingTranscriptA - missingTranscriptB : missingTranscriptB - missingTranscriptA;
-        });
-        break;
-    }
+    const allVideos = weeks.flatMap(w => w.videos).sort(this.videoComparator(filters));
 
     // Replace weeks content with single "All" section
     weeks.length = 0;
     if (allVideos.length > 0) {
       weeks.push({ weekLabel: 'All', videos: allVideos });
     }
+  }
+
+  /**
+   * How two videos compare under the chosen Sort By and Order: the library's
+   * order, and the order of search results unless Sort By is relevance.
+   */
+  videoComparator(filters: Pick<LibraryFilters, 'sortBy' | 'sortOrder'>): (a: VideoItem, b: VideoItem) => number {
+    const sign = filters.sortOrder === 'asc' ? 1 : -1;
+    const key = (video: VideoItem): number | string => {
+      switch (filters.sortBy) {
+        case 'name': return video.name || '';
+        case 'duration': return this.parseDurationToSeconds(video.duration);
+        case 'suggestions': return video.suggestedTitle && video.suggestedTitle.trim().length > 0 ? 1 : 0;
+        case 'no-analysis': return video.hasAnalysis ? 0 : 1;
+        case 'no-transcript': return video.hasTranscript ? 0 : 1;
+        default: return video.downloadDate ? new Date(video.downloadDate).getTime() : 0;
+      }
+    };
+    return (a, b) => {
+      const ka = key(a);
+      const kb = key(b);
+      return sign * (typeof ka === 'string' ? ka.localeCompare(kb as string) : ka - (kb as number));
+    };
   }
 
   /**

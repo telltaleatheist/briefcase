@@ -68,6 +68,8 @@ export class LibrarySearchFiltersComponent implements OnDestroy {
   }
 
   private emitFilters() {
+    // Relevance is offered only while searching; without a search the library sorts by date.
+    if (this.filters.sortBy === 'relevance' && !this.filters.searchQuery.trim()) this.filters.sortBy = 'date';
     this.filtersChanged.emit({ ...this.filters });
   }
 }

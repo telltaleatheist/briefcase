@@ -8,6 +8,7 @@ import { ThumbnailService } from './thumbnail.service';
 import { migrateAnalysisSectionsRanker } from './ranker-migration';
 import { deleteChapterSubtree, migrateChaptersOutline } from './chapter-outline';
 import { sweepOrphans } from './orphan-sweep';
+import { FilenameDateUtil } from '../common/utils/filename-date.util';
 import {
   ensureMomentSchema,
   indexPendingTranscripts,
@@ -2004,6 +2005,33 @@ export class DatabaseService {
       );
     }
 
+    // Migration 29: upload_date from the filename's date prefix where it is
+    // missing. Every add path sets both, but a November 2025 bulk import left
+    // ~2,200 dated filenames with no upload_date, so those videos sorted by
+    // download date instead of upload date. Rows without a dated
+    // filename stay as they are; the check reads only rows that lack a date.
+    try {
+      const missing = db.prepare('SELECT id, filename FROM videos WHERE upload_date IS NULL').all() as Array<{ id: string; filename: string }>;
+      const set = db.prepare('UPDATE videos SET upload_date = ? WHERE id = ?');
+      let filled = 0;
+      db.transaction(() => {
+        for (const row of missing) {
+          const info = FilenameDateUtil.extractDateInfo(row.filename ?? '');
+          const date = info.hasDate ? FilenameDateUtil.toISODate(info.date) : null;
+          if (date) {
+            set.run(date, row.id);
+            filled++;
+          }
+        }
+      })();
+      if (filled) this.logger.log(`Migration complete: upload_date filled from the filename for ${filled} videos`);
+    } catch (migrationError: any) {
+      throw new Error(
+        `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
+        `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
+        `Check that the library volume is mounted and writable, then reopen the library.`,
+      );
+    }
   }
 
   /**
