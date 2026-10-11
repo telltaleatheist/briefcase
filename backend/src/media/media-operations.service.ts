@@ -680,8 +680,10 @@ export class MediaOperationsService {
         throw new Error('Video not found');
       }
 
-      // Verify and update video metadata using ffprobe
-      await this.verifyVideoMetadata(videoId, video.current_path, video, jobId);
+      // Verify and update video metadata using ffprobe. The duration is what
+      // tells a clip with no speech from a short one that is all speech.
+      const probedSeconds = await this.verifyVideoMetadata(videoId, video.current_path, video, jobId);
+      const durationSeconds = probedSeconds ?? video.duration_seconds ?? null;
 
       const transcript = this.databaseService.getTranscript(videoId);
       if (!transcript) {
@@ -764,6 +766,7 @@ export class MediaOperationsService {
         parts: [...asked],
         ...(range ? { range } : {}),
         ...(existingChapters ? { existingChapters } : {}),
+        durationSeconds,
       });
 
       // EVERY database write in this method is below this await. A cancelled
@@ -1112,13 +1115,14 @@ export class MediaOperationsService {
   /**
    * Verify and update video metadata using ffprobe
    * Called during analysis to ensure metadata is accurate
+   * Returns the probed duration in seconds, or null when the probe had none.
    */
   private async verifyVideoMetadata(
     videoId: string,
     videoPath: string,
     currentVideo: { duration_seconds: number | null; width?: number | null; height?: number | null; fps?: number | null },
     jobId?: string
-  ): Promise<void> {
+  ): Promise<number | null> {
     try {
       this.logger.log(`[${jobId || 'standalone'}] Verifying video metadata for: ${videoPath}`);
 
@@ -1173,9 +1177,11 @@ export class MediaOperationsService {
       } else {
         this.logger.log(`[${jobId || 'standalone'}] Video metadata verified - no updates needed`);
       }
+      return metadata.duration !== undefined && metadata.duration > 0 ? metadata.duration : null;
     } catch (error: any) {
       // Log but don't fail the analysis if metadata verification fails
       this.logger.warn(`[${jobId || 'standalone'}] Failed to verify video metadata: ${error.message}`);
+      return null;
     }
   }
 

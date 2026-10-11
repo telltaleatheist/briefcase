@@ -5,7 +5,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { MediaOperationsService } from './media-operations.service';
-import type { AnalysisOptions, AnalysisResult } from '../analysis/ai-analysis.service';
+import { AIAnalysisService, type AnalysisOptions, type AnalysisResult } from '../analysis/ai-analysis.service';
 import { AnalysisCancelledError } from '../analysis/cancellation';
 import type { AnalysisPart } from '../analysis/analysis-parts';
 import type { DatabaseService } from '../database/database.service';
@@ -239,6 +239,40 @@ suite('analyzeVideo replaces only the parts it made', () => {
     expect(chapterTitles()).toHaveLength(4);
     expect(video().ai_description).toBe('Old description.');
     expect(db.getAnalysis('v1')!.sections_count).toBe(3);
+  });
+
+  it('a video with no speech stores the placeholder through the real pipeline, with no model call', async () => {
+    // The real case: 31.4 s of music, transcribed as one stray lyric.
+    db.insertVideo({ id: 'v2', filename: 'dance.mp4', fileHash: 'h2', currentPath: path.join(dir, 'dance.mp4'), durationSeconds: 31.4 });
+    db.insertTranscript({ videoId: 'v2', plainText: 'I want to be a man', srtFormat: '1\n00:00:00,160 --> 00:00:01,996\nI want to be a man\n' });
+    db.insertTag({ id: 't-old', videoId: 'v2', tagName: 'gender identity', source: 'ai' });
+    db.updateVideoSuggestedTitle('v2', 'an old junk title');
+    const modelCalls: string[] = [];
+    const refuse = (what: string) => async () => {
+      modelCalls.push(what);
+      throw new Error(`${what} must not be called`);
+    };
+    const real = new AIAnalysisService(
+      { withRun: refuse('withRun'), generateText: refuse('generateText'), crucibleContextWindow: refuse('crucibleContextWindow') } as any,
+      { run: refuse('snap') } as any,
+      undefined,
+    );
+    run = (opts) => real.analyzeTranscript(opts);
+
+    expect(await media.analyzeVideo('v2', { aiModel: 'claude:claude-test' }, 'job-2')).toMatchObject({ success: true });
+    expect(modelCalls).toEqual([]);
+    expect(calls[0].durationSeconds).toBe(31.4);
+    expect(db.getChapters('v2').map((c) => [c.title, c.description, c.start_seconds, c.end_seconds])).toEqual([
+      ['No speech', 'No speech in this video (music, ambient sound or silence).', 0, 31],
+    ]);
+    expect(db.getAnalysisSections('v2')).toEqual([]);
+    expect(db.getTags('v2')).toEqual([]);
+    const v2 = db.getVideoById('v2') as any;
+    expect(v2.ai_description).toBe('No speech in this video.');
+    expect(v2.suggested_title).toBeNull();
+    const row = db.getAnalysis('v2')!;
+    expect(row.summary).toBeNull();
+    expect(row.ai_analysis).toContain('No speech in this video.');
   });
 
   it('an impossible request fails by name before any work', async () => {

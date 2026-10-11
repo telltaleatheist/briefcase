@@ -23,6 +23,9 @@
  * Pass 2b, over the whole video or one chapter's range; metadata alone is
  * written from the video's stored chapters (made first when it has none).
  *
+ * A video with no speech (speech-presence.ts) makes no model calls: each part
+ * it makes stores the no-speech placeholder (noSpeechResult).
+ *
  * Snap is the only engine (P7 removed the classic embedding/lexical chaptering,
  * the NLI ranker and LLM chapter discovery): a stage that cannot be made fails
  * the analysis by name, and a busy or silent Crucible parks the task.
@@ -81,10 +84,12 @@ import {
   describeParts,
   GENERATE_FLAGS_STAGE_WEIGHT,
   formatHms,
+  partsToMake,
   resolveAnalysisParts,
   resolveAnalysisRange,
   segmentsInRange,
 } from './analysis-parts';
+import { speechPresence, SpeechPresence } from './speech-presence';
 import { ChapterTreeResult, nestAnalysisChapters } from '../scorer/chapters/chapter-tree';
 import { storyTreeFromGroups } from '../scorer/chapters/story-chapters';
 import type { SnapChapter } from '../scorer/chapters/segmenter';
@@ -245,6 +250,11 @@ export interface AnalysisOptions {
    * chapters first (see analyzeTranscriptRun).
    */
   existingChapters?: Chapter[];
+  /**
+   * The video's duration in seconds, when known: what tells a few stray words
+   * from a short clip that is all speech (speech-presence.ts).
+   */
+  durationSeconds?: number | null;
 }
 
 export interface TokenStats {
@@ -287,6 +297,16 @@ export interface AnalysisResult {
 // =============================================================================
 
 const MAX_RETRIES = 3;
+
+/** What a video with no speech stores (see noSpeechResult). */
+const NO_SPEECH_TITLE = 'No speech';
+const NO_SPEECH_SUMMARY = 'No speech in this video (music, ambient sound or silence).';
+const NO_SPEECH_DESCRIPTION = 'No speech in this video.';
+
+/** The stored chapters metadata can be written from: real ones, with a title. */
+function usableStoredChapters(chapters: Chapter[] | undefined): Chapter[] {
+  return (chapters ?? []).filter((ch) => !ch.failed && ch.title.trim() !== '');
+}
 const JSON_PARSE_RETRIES = 2;
 
 /**
@@ -733,10 +753,56 @@ export class AIAnalysisService {
    * verification) and the metadata, all on Crucible (see the file header).
    */
   async analyzeTranscript(options: AnalysisOptions): Promise<AnalysisResult> {
+    // A video with no speech has nothing for a model to read: what it is sent
+    // comes back as junk (speech-presence.ts). Decided before a Crucible run is
+    // even opened, so such a video makes no model calls at all.
+    const presence = speechPresence(options.segments ?? [], options.durationSeconds);
+    if (!presence.speech) return this.noSpeechResult(options, presence);
+
     // ONE Crucible run per analysis: one queue session per server it uses,
     // each local model loaded once in it, closed when the analysis settles
     // (done, failed or cancelled).
     return this.aiProviderService.withRun(() => this.analyzeTranscriptRun(options));
+  }
+
+  /**
+   * The analysis of a video with no speech: what each part it makes would
+   * store, said plainly instead of asked of a model. The chapters are one
+   * "No speech" chapter over the whole video, the flags are none, and the
+   * metadata is a placeholder description with no tags and no suggested title
+   * (the filename stays). A recognized outcome, not an empty run: the
+   * every-chapter-failed rule in the pipeline is for runs whose calls failed.
+   */
+  private noSpeechResult(options: AnalysisOptions, presence: SpeechPresence): AnalysisResult {
+    const asked = resolveAnalysisParts(options.parts);
+    const range = resolveAnalysisRange(options.range, asked);
+    const { made } = partsToMake(asked, usableStoredChapters(options.existingChapters).length > 0);
+    const segments = options.segments ?? [];
+    const lastCueEnd = segments.length ? segments[segments.length - 1].end : 0;
+    const videoSeconds = options.durationSeconds && options.durationSeconds > 0 ? options.durationSeconds : lastCueEnd;
+
+    this.logger.log(
+      `[AI Analysis] No speech in ${options.videoTitle || 'this video'} ` +
+        `(${presence.words} word${presence.words === 1 ? '' : 's'} over ${presence.spokenSeconds.toFixed(1)}s` +
+        `${options.durationSeconds ? ` of ${options.durationSeconds.toFixed(1)}s` : ''}): ` +
+        `storing the no-speech placeholder for ${describeParts(made)}, no model calls`,
+    );
+
+    // The report the analysis row keeps, as a run that made these parts writes it.
+    fs.writeFileSync(options.outputFile, `${'='.repeat(80)}\nVIDEO ANALYSIS RESULTS\n${'='.repeat(80)}\n\n`, 'utf-8');
+    if (made.includes('metadata')) this.prependSummaryToFile(options.outputFile, NO_SPEECH_DESCRIPTION);
+    options.onProgress?.({ phase: 'analysis', progress: 100, message: 'No speech in this video: nothing to analyze' });
+
+    return {
+      sections_count: 0,
+      sections: [],
+      chapters: made.includes('chapters')
+        ? [{ sequence: 1, start_time: formatHms(0), end_time: formatHms(videoSeconds), title: NO_SPEECH_TITLE, summary: NO_SPEECH_SUMMARY }]
+        : [],
+      ...(made.includes('metadata') ? { tags: { people: [], topics: [] }, description: NO_SPEECH_DESCRIPTION } : {}),
+      parts: made,
+      ...(range ? { range } : {}),
+    };
   }
 
   private async analyzeTranscriptRun(options: AnalysisOptions): Promise<AnalysisResult> {
@@ -879,20 +945,15 @@ export class AIAnalysisService {
       // there were none to replace). The job says so. Writing metadata from the
       // raw transcript instead would be a second, unmeasured prompt family, and
       // a 4-hour transcript does not fit in one call anyway.
-      const storedChapters = (options.existingChapters ?? []).filter((ch) => !ch.failed && ch.title.trim() !== '');
-      const chaptersFirst = asked.has('metadata') && !asked.has('chapters') && storedChapters.length === 0;
-      const makeChapters = asked.has('chapters') || chaptersFirst;
-      const makeFlags = asked.has('flags');
-      const makeMetadata = asked.has('metadata');
+      const storedChapters = usableStoredChapters(options.existingChapters);
+      const { made, chaptersFirst } = partsToMake(asked, storedChapters.length > 0);
+      const makeChapters = made.includes('chapters');
+      const makeFlags = made.includes('flags');
+      const makeMetadata = made.includes('metadata');
       // How flags are found: the flags model reading the transcript, or the
       // scorer's ranking (Settings › AI Analysis). Only the second takes the scorer.
       const flagFinder: FlagFinder | null = makeFlags ? this.loadFlagFinder() : null;
       const flagsOnScorer = flagFinder === 'snap';
-      const made: AnalysisPart[] = [
-        ...(makeChapters ? (['chapters'] as const) : []),
-        ...(makeFlags ? (['flags'] as const) : []),
-        ...(makeMetadata ? (['metadata'] as const) : []),
-      ];
       // The outline's top level: a video of 10 minutes or more has its
       // chapters grouped into stories after Pass 2 (stories.ts); a shorter one
       // is one story, and its outline stays flat.

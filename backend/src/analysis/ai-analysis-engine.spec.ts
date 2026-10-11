@@ -82,6 +82,8 @@ function snapResult(over: Partial<SnapStageResult> = {}): SnapStageResult {
 class Harness {
   generated: Array<{ prompt: string; task: string; overrides?: Record<string, unknown> }> = [];
   snapRuns: SnapStageRequest[] = [];
+  /** Crucible runs (queue sessions) opened. */
+  runsOpened = 0;
   snapRun: (req: SnapStageRequest) => Promise<SnapStageResult> = async () => snapResult();
   /** Replaceable: every LLM call's answer. */
   answer: (prompt: string, task: string) => Promise<{ text: string; inputTokens: number; outputTokens: number; doneReason?: string }> = async (_prompt, task) => ({
@@ -97,7 +99,10 @@ class Harness {
         this.generated.push({ prompt, task, overrides });
         return this.answer(prompt, task);
       },
-      withRun: <T>(fn: () => Promise<T>) => fn(),
+      withRun: <T>(fn: () => Promise<T>) => {
+        this.runsOpened++;
+        return fn();
+      },
       crucibleOllamaStandInChoice: async () => null,
       crucibleOllamaTakesContext: async () => true,
       crucibleContextWindow: async () => 32768,
@@ -803,6 +808,87 @@ describe('AIAnalysisService: stories are the chapters grouped', () => {
     const res = await h.service().analyzeTranscript({ ...options(), parts: ['chapters'] });
     expect(h.generated.some(grouping)).toBe(false);
     expect(res.chapters.map((c) => c.title)).toEqual(['Pasta day', 'Summer travel']);
+  });
+});
+
+describe('AIAnalysisService: a video with no speech', () => {
+  beforeAll(() => {
+    Logger.overrideLogger(false);
+    jest_silence();
+  });
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'engine-spec-'));
+    process.env.APPDATA = tmp;
+  });
+  afterAll(() => {
+    process.env = savedEnv;
+  });
+
+  // The real case: a 31.4 s clip of music whose transcript is one stray lyric.
+  const noSpeech = (over: Partial<AnalysisOptions> = {}): AnalysisOptions => ({
+    ...options(),
+    transcript: 'I want to be a man',
+    segments: [{ start: 0.16, end: 1.996, text: 'I want to be a man' }],
+    durationSeconds: 31.4,
+    ...over,
+  });
+  const untouched = (h: Harness) => {
+    expect(h.runsOpened).toBe(0);
+    expect(h.snapRuns).toHaveLength(0);
+    expect(h.generated).toHaveLength(0);
+  };
+
+  it('makes no model call and stores the placeholder for every part', async () => {
+    const h = new Harness();
+    const res = await h.service().analyzeTranscript(noSpeech());
+    untouched(h);
+    expect(res.parts).toEqual(['chapters', 'flags', 'metadata']);
+    expect(res.chapters).toEqual([
+      { sequence: 1, start_time: '00:00:00', end_time: '00:00:31', title: 'No speech', summary: 'No speech in this video (music, ambient sound or silence).' },
+    ]);
+    expect(res.sections).toEqual([]);
+    expect(res.sections_count).toBe(0);
+    expect(res.tags).toEqual({ people: [], topics: [] });
+    expect(res.description).toBe('No speech in this video.');
+    expect(res.suggested_title).toBeUndefined();
+    const report = fs.readFileSync(path.join(tmp, 'analysis.txt'), 'utf-8');
+    expect(report).toContain('VIDEO ANALYSIS RESULTS');
+    expect(report).toContain('**VIDEO OVERVIEW**\n\nNo speech in this video.');
+  });
+
+  it('makes only the parts asked for', async () => {
+    const h = new Harness();
+    const svc = h.service();
+    const chapters = await svc.analyzeTranscript(noSpeech({ parts: ['chapters'] }));
+    expect(chapters.parts).toEqual(['chapters']);
+    expect(chapters.chapters.map((c) => c.title)).toEqual(['No speech']);
+    expect(chapters).not.toHaveProperty('description');
+
+    const flags = await svc.analyzeTranscript(noSpeech({ parts: ['flags'], range: { start: 0, end: 10 } }));
+    expect(flags).toMatchObject({ parts: ['flags'], sections: [], chapters: [], range: { start: 0, end: 10 } });
+
+    // Metadata alone keeps the stored chapters, or makes the placeholder one when there are none.
+    const stored = [{ sequence: 1, start_time: '00:00:00', end_time: '00:00:31', title: 'Old', summary: 'Old.' }];
+    const metadata = await svc.analyzeTranscript(noSpeech({ parts: ['metadata'], existingChapters: stored }));
+    expect(metadata).toMatchObject({ parts: ['metadata'], chapters: [], description: 'No speech in this video.' });
+    const first = await svc.analyzeTranscript(noSpeech({ parts: ['metadata'], existingChapters: [] }));
+    expect(first.parts).toEqual(['chapters', 'metadata']);
+    expect(first.chapters.map((c) => c.title)).toEqual(['No speech']);
+    untouched(h);
+  });
+
+  it('an empty transcript is no speech even with no known duration', async () => {
+    const h = new Harness();
+    const res = await h.service().analyzeTranscript(noSpeech({ transcript: '', segments: [], durationSeconds: undefined, parts: ['chapters'] }));
+    untouched(h);
+    expect(res.chapters.map((c) => c.title)).toEqual(['No speech']);
+  });
+
+  it('a short clip that is all speech is analyzed as usual', async () => {
+    const h = new Harness();
+    await h.service().analyzeTranscript(noSpeech({ durationSeconds: 3, parts: ['chapters'] }));
+    expect(h.runsOpened).toBe(1);
+    expect(h.snapRuns).toHaveLength(1);
   });
 });
 

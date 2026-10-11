@@ -60,6 +60,20 @@ export function resolveAnalysisParts(parts: unknown): Set<AnalysisPart> {
 }
 
 /**
+ * The parts a run MAKES from the parts it was asked for. Metadata is written
+ * from chapter summaries, so metadata asked for without chapters, on a video
+ * with no stored chapters, makes the chapters first (and they are stored).
+ */
+export function partsToMake(
+  asked: ReadonlySet<AnalysisPart>,
+  hasStoredChapters: boolean,
+): { made: AnalysisPart[]; chaptersFirst: boolean } {
+  const chaptersFirst = asked.has('metadata') && !asked.has('chapters') && !hasStoredChapters;
+  const made = ANALYSIS_PARTS.filter((p) => asked.has(p) || (p === 'chapters' && chaptersFirst));
+  return { made, chaptersFirst };
+}
+
+/**
  * The task's range, checked. A range belongs to a flags-only run: chapters and
  * metadata describe the whole video, so a chapter-sized slice of either would
  * replace the whole with a part.
