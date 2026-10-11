@@ -18,6 +18,16 @@ import { parentPort } from 'worker_threads';
 /** Longest input in tokens (a chunk of speech is far shorter; the model takes 8192). */
 const MAX_TOKENS = 512;
 
+/**
+ * Most padded tokens (texts x longest text) in one model run. Under Electron's
+ * V8, freeing a large ONNX output crashes the process (SIGTRAP), and a crash
+ * in a worker takes the backend with it. Measured 2026-10-10 on Electron 33:
+ * 40 runs at up to 3,200 tokens (9 MB of output) were fine; 16 x 336 tokens
+ * (15 MB) crashed, reached by an ASR loop transcript ("I'm I'm I'm ...") where
+ * normal speech chunks are ~100 tokens. 2,048 tokens keeps each output ~6 MB.
+ */
+const MAX_BATCH_TOKENS = 2048;
+
 type Pool = (texts: string[]) => Promise<Float32Array[]>;
 let pool: Promise<Pool> | null = null;
 
@@ -29,21 +39,21 @@ async function load(dir: string, threads: number): Promise<Pool> {
   const session = await ort.InferenceSession.create(path.join(dir, 'onnx/model_quantized.onnx'), { intraOpNumThreads: threads });
   const wantsTypes = session.inputNames.includes('token_type_ids');
 
-  return async (texts: string[]) => {
-    const encoded = texts.map((t) => tokenizer.encode(t).ids.slice(0, MAX_TOKENS));
+  /** One model run over texts whose padded size is within MAX_BATCH_TOKENS (or a single text). */
+  const runBatch = async (encoded: number[][]): Promise<Float32Array[]> => {
     const length = Math.max(...encoded.map((ids) => ids.length));
-    const ids = new BigInt64Array(texts.length * length);
-    const mask = new BigInt64Array(texts.length * length);
+    const ids = new BigInt64Array(encoded.length * length);
+    const mask = new BigInt64Array(encoded.length * length);
     encoded.forEach((row, r) => row.forEach((id, k) => {
       ids[r * length + k] = BigInt(id);
       mask[r * length + k] = 1n;
     }));
-    const dims = [texts.length, length];
+    const dims = [encoded.length, length];
     const feeds: Record<string, InstanceType<typeof ort.Tensor>> = {
       input_ids: new ort.Tensor('int64', ids, dims),
       attention_mask: new ort.Tensor('int64', mask, dims),
     };
-    if (wantsTypes) feeds.token_type_ids = new ort.Tensor('int64', new BigInt64Array(texts.length * length), dims);
+    if (wantsTypes) feeds.token_type_ids = new ort.Tensor('int64', new BigInt64Array(encoded.length * length), dims);
     const result = await session.run(feeds);
     const hidden = result[session.outputNames[0]];
     const width = hidden.dims[2];
@@ -58,6 +68,26 @@ async function load(dir: string, threads: number): Promise<Pool> {
       for (let j = 0; j < width; j++) v[j] /= row.length;
       return v;
     });
+  };
+
+  return async (texts: string[]) => {
+    const encoded = texts.map((t) => tokenizer.encode(t).ids.slice(0, MAX_TOKENS));
+    // Consecutive groups whose padded size stays within the budget; order is kept.
+    const out: Float32Array[] = [];
+    let group: number[][] = [];
+    let longest = 0;
+    for (const ids of encoded) {
+      const next = Math.max(longest, ids.length);
+      if (group.length > 0 && (group.length + 1) * next > MAX_BATCH_TOKENS) {
+        out.push(...(await runBatch(group)));
+        group = [];
+        longest = 0;
+      }
+      group.push(ids);
+      longest = Math.max(longest, ids.length);
+    }
+    if (group.length > 0) out.push(...(await runBatch(group)));
+    return out;
   };
 }
 
