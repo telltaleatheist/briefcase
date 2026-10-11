@@ -21,6 +21,10 @@
  * and nothing else: transformers.js would also bring sharp (an image library
  * whose binaries a production install omits, so it failed to load at all)
  * and a 140 MB browser runtime, for nothing text needs.
+ *
+ * The model runs on its own thread (embedding-worker.ts): onnxruntime holds
+ * the thread it computes on, and on the server's own thread a library
+ * backfill kept the backend from ever answering Electron's readiness check.
  */
 import { Injectable, Logger } from '@nestjs/common';
 import * as crypto from 'crypto';
@@ -28,6 +32,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import axios from 'axios';
+import { Worker } from 'worker_threads';
 
 import { getBriefcaseConfigDir } from '../../bridges/runtime-paths';
 
@@ -59,11 +64,8 @@ export type EmbedTask = 'search_query' | 'search_document';
 /** The progress of the one-time download, for whoever is waiting on it. */
 export type InstallProgress = (doneBytes: number, totalBytes: number) => void;
 
-/** Longest input in tokens (a chunk of speech is far shorter; the model takes 8192). */
-const MAX_TOKENS = 512;
-
 /** The loaded model: text in, one mean-pooled vector (768 values) per text out. */
-type Pool = (texts: string[]) => Promise<number[][]>;
+type Pool = (texts: string[]) => Promise<Float32Array[]>;
 
 @Injectable()
 export class EmbeddingModelService {
@@ -130,7 +132,7 @@ export class EmbeddingModelService {
       const out: Float32Array[] = [];
       for (let i = 0; i < texts.length; i += BATCH) {
         const rows = await pool(texts.slice(i, i + BATCH).map((t) => `${task}: ${t.trim() || '(silence)'}`));
-        for (const row of rows) out.push(matryoshka(row));
+        for (const row of rows) out.push(matryoshka(Array.from(row)));
       }
       return out;
     });
@@ -142,48 +144,36 @@ export class EmbeddingModelService {
     if (!this.model) {
       this.model = (async () => {
         if (!this.isInstalled()) await this.install(onInstallProgress);
-        // Loaded only when first used: the runtime is large, and most runs never need it.
-        const ort = await import('onnxruntime-node');
-        const { Tokenizer } = await import('@huggingface/tokenizers');
-        const read = (f: string) => JSON.parse(fs.readFileSync(path.join(this.dir, f), 'utf8'));
-        const tokenizer = new Tokenizer(read('tokenizer.json'), read('tokenizer_config.json'));
         const t0 = Date.now();
-        // Half the cores: the library backfill runs in the background and the app must stay responsive.
-        const session = await ort.InferenceSession.create(path.join(this.dir, 'onnx/model_quantized.onnx'), {
-          intraOpNumThreads: Math.max(1, Math.floor(os.cpus().length / 2)),
+        const worker = new Worker(path.join(__dirname, 'embedding-worker.js'));
+        worker.unref();
+        let nextId = 0;
+        const waiting = new Map<number, { resolve: (v: Float32Array[]) => void; reject: (e: Error) => void }>();
+        worker.on('message', (msg: { id: number; ok: boolean; vectors?: Float32Array[]; error?: string }) => {
+          const w = waiting.get(msg.id);
+          if (!w) return;
+          waiting.delete(msg.id);
+          if (msg.ok) w.resolve(msg.vectors ?? []);
+          else w.reject(new Error(msg.error ?? 'the embedding model failed'));
         });
-        this.logger.log(`[Embeddings] ${EMBEDDING_MODEL_ID} loaded in ${Date.now() - t0} ms`);
-        const wantsTypes = session.inputNames.includes('token_type_ids');
-
-        return async (texts: string[]) => {
-          const encoded = texts.map((t) => tokenizer.encode(t).ids.slice(0, MAX_TOKENS));
-          const length = Math.max(...encoded.map((ids) => ids.length));
-          const ids = new BigInt64Array(texts.length * length);
-          const mask = new BigInt64Array(texts.length * length);
-          encoded.forEach((row, r) => row.forEach((id, k) => {
-            ids[r * length + k] = BigInt(id);
-            mask[r * length + k] = 1n;
-          }));
-          const dims = [texts.length, length];
-          const feeds: Record<string, InstanceType<typeof ort.Tensor>> = {
-            input_ids: new ort.Tensor('int64', ids, dims),
-            attention_mask: new ort.Tensor('int64', mask, dims),
-          };
-          if (wantsTypes) feeds.token_type_ids = new ort.Tensor('int64', new BigInt64Array(texts.length * length), dims);
-          const result = await session.run(feeds);
-          const hidden = result[session.outputNames[0]];
-          const width = hidden.dims[2];
-          const data = hidden.data as Float32Array;
-          // Mean pooling over each text's real tokens (padding left out).
-          return encoded.map((row, r) => {
-            const v = new Array<number>(width).fill(0);
-            for (let k = 0; k < row.length; k++) {
-              const base = (r * length + k) * width;
-              for (let j = 0; j < width; j++) v[j] += data[base + j];
-            }
-            return v.map((x) => x / row.length);
-          });
+        // A dead worker fails whatever waits on it, and the next use starts a new one.
+        const fail = (error: Error) => {
+          for (const w of waiting.values()) w.reject(error);
+          waiting.clear();
+          this.model = null;
         };
+        worker.on('error', fail);
+        worker.on('exit', (code) => fail(new Error(`the embedding model's thread stopped (exit ${code})`)));
+        const ask = (msg: Record<string, unknown>) =>
+          new Promise<Float32Array[]>((resolve, reject) => {
+            const id = nextId++;
+            waiting.set(id, { resolve, reject });
+            worker.postMessage({ ...msg, id });
+          });
+        // Half the cores: the library backfill runs in the background and the machine must stay responsive.
+        await ask({ dir: this.dir, threads: Math.max(1, Math.floor(os.cpus().length / 2)) });
+        this.logger.log(`[Embeddings] ${EMBEDDING_MODEL_ID} loaded on its own thread in ${Date.now() - t0} ms`);
+        return (texts: string[]) => ask({ texts });
       })();
       this.model.catch(() => {
         this.model = null;
