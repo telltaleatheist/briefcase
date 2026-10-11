@@ -1480,7 +1480,7 @@ export class AIAnalysisService {
                 break;
               case 'tags':
                 tags = await this.generateTagsFromChapters(
-                  step.cfg, metadataChapters, recordFailure, trackTokens, signal,
+                  step.cfg, metadataChapters, videoTitle, recordFailure, trackTokens, signal,
                 );
                 break;
               case 'title':
@@ -2820,6 +2820,7 @@ export class AIAnalysisService {
   private async generateTagsFromChapters(
     config: AIProviderConfig,
     chapters: Chapter[],
+    currentTitle: string,
     recordFailure: (what: string) => void,
     onTokens?: (response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void,
     signal?: AbortSignal,
@@ -2836,7 +2837,9 @@ export class AIAnalysisService {
         .map((ch) => `${ch.title}${ch.summary ? `: ${ch.summary}` : ''}`)
         .join('\n');
 
+      // The filename too: it names the speaker a transcript seldom does.
       const prompt = interpolatePrompt(TAGS_FROM_CHAPTERS_PROMPT, {
+        currentTitle: currentTitle || 'untitled',
         chaptersList: chaptersList.substring(0, 4000),
       });
 

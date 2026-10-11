@@ -410,13 +410,14 @@ Phrasing in this style:
 - "Debate about Trump's refusal to extend the Iran ceasefire MOU"
 - "Debunking Gene Bailey's misreading of Luke 19:13 and his call to occupy territory"`;
 
-export const TAGS_FROM_CHAPTERS_PROMPT = `List the people and topics in these video chapters. Output JSON only.
-- people: proper names of people mentioned in the chapters, Title Case.
+export const TAGS_FROM_CHAPTERS_PROMPT = `List the people and topics in this video. Output JSON only.
+- people: proper names of the people in the video, Title Case. Take them from the chapters AND the current filename: the filename comes from the post the video was downloaded from, and often names the speaker when the chapters only say "the speaker". Leave out the account that posted the video: the words before the first " - " in the filename are often a channel or watchdog account, not a person in the video. Individual people only: a group, faith or label ("Christian", "Republicans") is not a person.
 - topics: 3-8 subjects, 1-3 words each, Title Case.
 
 Output exactly this shape and nothing else:
 {"people": ["Jane Doe"], "topics": ["Election Fraud", "Immigration"]}
 
+Current filename: {currentTitle}
 Chapters:
 {chaptersList}`;
 
@@ -424,16 +425,20 @@ export const TITLE_FROM_CHAPTERS_PROMPT = `Write a filename describing this vide
 
 Chapters:
 {chaptersList}
-Current filename (reference only): {currentTitle}
+Current filename: {currentTitle}
+
+The current filename comes from the post the video was downloaded from, so the people it names are who is in the video. A transcript rarely says the speaker's own name, so the chapters may only say "the speaker".
+- Name the main speaker from the current filename when the chapters do not name them. The filename is right about who is speaking; a person the chapters only talk about is not the speaker.
+- The words before the first " - " are often the account that posted the video (a channel or watchdog account), not a speaker. Do not lead with the account.
 
 Rules:
 - lowercase; separate words with spaces (not hyphens or underscores); max 80 chars; no dates, file extension, parentheses, or special characters
-- if the chapters name the main speaker, lead with them: "speaker name - the striking thing they said"
+- if the speaker is known, lead with them: "speaker name - the striking thing they said"
 - if no speaker is identifiable, describe what was said: "pastor claims voting democrat is sinful"
 - capture the single most notable or quotable point, using a short verbatim phrase when one stands out
-- use only names and facts that appear in these chapters
+- use only names and facts from the chapters and the current filename
 
-The two lines below show the SHAPE only — do not reuse their names or wording, take everything from the chapters above:
+The two lines below show the SHAPE only — do not reuse their names or wording, take everything from the chapters and filename above:
 - "<speaker> - <their most striking quote>"
 - "<role> claims <specific claim>"
 
@@ -441,14 +446,14 @@ Filename:`;
 
 export const TITLE_FROM_WEBPAGE_PROMPT = `Write a filename for this saved webpage from its content. Output only the filename.
 
-Current filename (reference only): {currentTitle}
+Current filename: {currentTitle}
 Page content:
 {pageText}
 
 Rules:
 - lowercase; separate words with spaces (not hyphens or underscores); max 80 chars; no dates, file extension, parentheses, or special characters
 - if a person or source is clearly the subject, lead with them; otherwise use a specific topical title, e.g. "senate passes surveillance bill extending section 702"
-- lead with the single most notable point; use only what appears in the content
+- lead with the single most notable point; use only what appears in the content and the current filename (it comes from where the page was saved from, so the names in it are reliable)
 
 The two lines below show the SHAPE only — do not reuse their names or wording:
 - "<source> - <specific development>"
