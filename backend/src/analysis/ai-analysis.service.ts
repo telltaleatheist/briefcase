@@ -306,6 +306,16 @@ const JSON_PARSE_RETRIES = 2;
 const ROUTABLE_TASKS = ['chapter', 'flags', 'description', 'tags', 'title'] as const;
 
 /**
+ * A suggested title is one line of plain text, so a local model writes it
+ * without thinking first. With thinking on (Qwen3.8 27B's default), it spent
+ * Crucible's default 512 tokens reasoning and stopped before writing a word,
+ * so every title failed (seen 2026-10-11). Thinking off, it answers
+ * in ~30 tokens; 256 leaves room for a long filename. Both are sent to local
+ * models only (crucible/llm/target.ts).
+ */
+const TITLE_OVERRIDES = { thinking: false, maxTokens: 256 } as const;
+
+/**
  * `taskModels` keys that named a task P7 removed: 'boundary' was the classic
  * engine's boundary placement. A stored entry is read and ignored quietly
  * (it is not a mistake the user made), not warned about on every run.
@@ -2836,7 +2846,7 @@ export class AIAnalysisService {
         chaptersList: chaptersList.substring(0, 4000),
       });
 
-      const response = await this.aiProviderService.generateText(prompt, config, 'title', { signal });
+      const response = await this.aiProviderService.generateText(prompt, config, 'title', { ...TITLE_OVERRIDES, signal });
       onTokens?.(response);
 
       if (response && response.text) {
@@ -2943,6 +2953,7 @@ export class AIAnalysisService {
       });
 
       const response = await this.aiProviderService.generateText(prompt, config, 'title', {
+        ...TITLE_OVERRIDES,
         signal: controller.signal,
       });
 
