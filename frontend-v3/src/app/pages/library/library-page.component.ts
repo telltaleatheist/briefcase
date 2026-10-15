@@ -326,6 +326,10 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     const hits = this.searchHits();
     return hits.length ? [{ weekLabel: 'Search results', videos: hits.map(h => h.video) }] : [];
   });
+  /** What the cascade shows: search results while searching, else the library. */
+  displayedWeeks = computed<VideoWeek[]>(() =>
+    this.searchQuery() ? this.searchWeeks() : this.combinedWeeks()
+  );
   searchMoments = computed<ReadonlyMap<string, CascadeMoments>>(() =>
     new Map(this.searchHits().map(h => [h.video.id, { moments: h.moments, momentCount: h.momentCount }]))
   );
@@ -1818,31 +1822,29 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Refresh previewItems from current filteredWeeks data
+   * Refresh previewItems from what the cascade is showing.
    * Called when selection changes while preview modal is open to ensure fresh data
    */
   private refreshPreviewItems(): void {
-    const allVideos: VideoItem[] = [];
-    this.filteredWeeks().forEach(week => {
-      week.videos.forEach(v => {
-        // Exclude queue items
-        if (!v.id.startsWith('queue-')) {
-          allVideos.push(v);
-        }
-      });
-    });
+    const previewItems = this.displayedPreviewItems();
+    if (previewItems.length > 0) this.previewItems.set(previewItems);
+  }
 
-    if (allVideos.length === 0) return;
-
-    // Convert to PreviewItem format
-    const previewItems: PreviewItem[] = allVideos.map(v => ({
-      id: v.id,
-      name: v.name,
-      videoId: v.id,
-      mediaType: v.mediaType || 'video/mp4'
-    }));
-
-    this.previewItems.set(previewItems);
+  /**
+   * The cascade's videos in display order (search results while searching,
+   * else the type-filtered library), so the preview's arrow keys step
+   * through the same list the user sees.
+   */
+  private displayedPreviewItems(): PreviewItem[] {
+    return this.displayedWeeks()
+      .flatMap(week => week.videos)
+      .filter(v => !v.id.startsWith('queue-'))
+      .map(v => ({
+        id: v.id,
+        name: v.name,
+        videoId: v.id,
+        mediaType: v.mediaType || 'video/mp4'
+      }));
   }
 
   onVideoAction(event: { action: string; videos: VideoItem[] }) {
@@ -2539,25 +2541,8 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       return;
     }
 
-    // Build list of all non-queue videos for navigation
-    const allVideos: VideoItem[] = [];
-    this.filteredWeeks().forEach(week => {
-      week.videos.forEach(v => {
-        if (!v.id.startsWith('queue-')) {
-          allVideos.push(v);
-        }
-      });
-    });
-
-    if (allVideos.length === 0) return;
-
-    // Convert to PreviewItem format
-    const previewItems: PreviewItem[] = allVideos.map(v => ({
-      id: v.id,
-      name: v.name,
-      videoId: v.id,
-      mediaType: v.mediaType || 'video/mp4' // Default to video if not specified
-    }));
+    const previewItems = this.displayedPreviewItems();
+    if (previewItems.length === 0) return;
 
     this.previewItems.set(previewItems);
     // Use videoId for completed queue items (which have prefixed display IDs like "completed-xxx")

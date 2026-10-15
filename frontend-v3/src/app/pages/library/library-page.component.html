@@ -55,7 +55,7 @@
               (valueChange)="onTypeFilterChange($event)" />
           </div>
           <app-cascade
-            [weeks]="searchQuery() ? searchWeeks() : combinedWeeks()"
+            [weeks]="displayedWeeks()"
             [tabbedVideoIds]="tabbedVideoIds()"
             [emptyState]="cascadeEmptyState()"
             [moments]="searchQuery() ? searchMoments() : null"
