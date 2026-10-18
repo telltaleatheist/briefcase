@@ -17,7 +17,7 @@ import {
   removeVideoMoments,
 } from '../search/transcript-moments';
 import { searchMeaning, type Embed, type MeaningSearchResult } from '../search/meaning-search';
-import { ensureTitleIndex, searchLibrary, type LibrarySearchOptions, type LibrarySearchResult } from '../search/library-search';
+import { searchLibrary, type LibrarySearchOptions, type LibrarySearchResult } from '../search/library-search';
 
 /** Transcripts indexed per background tick (the whole clips library took ~9 s). */
 const MOMENT_INDEX_BATCH = 50;
@@ -386,7 +386,6 @@ export class DatabaseService {
 
     this.initializeSchema();
     ensureMomentSchema(this.db);
-    ensureTitleIndex(this.db);
     const swept = sweepOrphans(this.db);
     if (Object.keys(swept).length > 0) {
       this.logger.warn(`Removed rows whose video is gone: ${Object.entries(swept).map(([table, n]) => `${table} ${n}`).join(', ')}`);
@@ -466,13 +465,14 @@ export class DatabaseService {
   }
 
   /**
-   * The library search: titles and transcript moments
+   * The library search: file names, and with Deep search transcript moments
    * (search/library-search.ts), with the background indexing's progress
-   * while it runs (transcripts not yet read are not searched).
+   * while it runs (transcripts not yet read are not searched). Without Deep
+   * search the transcripts are not read, so there is no progress to report.
    */
   searchLibrary(query: string, options?: LibrarySearchOptions): LibrarySearchResult & { indexing: MomentIndexing | null } {
     const db = this.ensureInitialized();
-    const indexing = this.momentIndexing && this.momentIndexing.pending > 0 ? { ...this.momentIndexing } : null;
+    const indexing = options?.deep && this.momentIndexing && this.momentIndexing.pending > 0 ? { ...this.momentIndexing } : null;
     return { ...searchLibrary(db, query, options), indexing };
   }
 
@@ -2025,6 +2025,28 @@ export class DatabaseService {
         }
       })();
       if (filled) this.logger.log(`Migration complete: upload_date filled from the filename for ${filled} videos`);
+    } catch (migrationError: any) {
+      throw new Error(
+        `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
+        `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
+        `Check that the library volume is mounted and writable, then reopen the library.`,
+      );
+    }
+
+    // Migration 30: the file-name search index is gone (2026-10-17). Titles
+    // are now matched ignoring word breaks (search/filename-match.ts), which a
+    // word index cannot do, so video_titles_fts and the triggers that kept it
+    // current are dropped: triggers first, or the next write to `videos` would
+    // fail on the missing table. Idempotent; costs nothing once done.
+    try {
+      const hasIndex = !!db.prepare(`SELECT 1 FROM sqlite_master WHERE name = 'video_titles_fts'`).get();
+      db.exec(`
+        DROP TRIGGER IF EXISTS video_titles_ai;
+        DROP TRIGGER IF EXISTS video_titles_ad;
+        DROP TRIGGER IF EXISTS video_titles_au;
+        DROP TABLE IF EXISTS video_titles_fts;
+      `);
+      if (hasIndex) this.logger.log('Migration complete: the file-name search index (video_titles_fts) removed');
     } catch (migrationError: any) {
       throw new Error(
         `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +

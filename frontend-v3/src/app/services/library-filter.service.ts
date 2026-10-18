@@ -4,8 +4,11 @@ import { VideoItem, VideoWeek } from '../models/video.model';
 export interface LibraryFilters {
   /** The library search (backend search/library-search.ts); filters below narrow its results too. */
   searchQuery: string;
-  /** Expanded search: also find moments by meaning (the meaning index), not only by their words. Remembered. */
-  meaningSearch: boolean;
+  /**
+   * Deep search: also what is said in the transcripts, by its words and by
+   * its meaning (the meaning index). Off, only file names are searched. Remembered.
+   */
+  deepSearch: boolean;
   dateRange: 'all' | 'today' | 'week' | 'month' | 'year';
   mediaType: 'all' | 'video' | 'audio' | 'image' | 'document' | 'webpage';
   duration: 'all' | 'under10' | 'over10';
@@ -183,7 +186,7 @@ export class LibraryFilterService {
   getDefaultFilters(): LibraryFilters {
     return {
       searchQuery: '',
-      meaningSearch: readMeaningSearch(),
+      deepSearch: readDeepSearch(),
       dateRange: 'all',
       mediaType: 'all',
       duration: 'all',
@@ -205,20 +208,27 @@ export function startOfRange(range: 'today' | 'week' | 'month' | 'year', now: Da
   return start;
 }
 
-const MEANING_SEARCH_KEY = 'briefcase-library-expanded-search';
+const DEEP_SEARCH_KEY = 'briefcase-library-deep-search';
+/** Before 2026-10-17 the choice was "Expanded search" (meaning on top of words); Deep search covers it. */
+const OLD_EXPANDED_SEARCH_KEY = 'briefcase-library-expanded-search';
 
-/** The remembered Expanded search choice (off when storage is unavailable). */
-export function readMeaningSearch(): boolean {
+/** The remembered Deep search choice (off when storage is unavailable). */
+export function readDeepSearch(): boolean {
   try {
-    return localStorage.getItem(MEANING_SEARCH_KEY) === 'true';
+    const old = localStorage.getItem(OLD_EXPANDED_SEARCH_KEY);
+    if (old !== null) {
+      localStorage.removeItem(OLD_EXPANDED_SEARCH_KEY);
+      if (localStorage.getItem(DEEP_SEARCH_KEY) === null) localStorage.setItem(DEEP_SEARCH_KEY, old);
+    }
+    return localStorage.getItem(DEEP_SEARCH_KEY) === 'true';
   } catch {
     return false;
   }
 }
 
-export function rememberMeaningSearch(on: boolean): void {
+export function rememberDeepSearch(on: boolean): void {
   try {
-    localStorage.setItem(MEANING_SEARCH_KEY, String(on));
+    localStorage.setItem(DEEP_SEARCH_KEY, String(on));
   } catch {
     // Remembering the choice is a convenience; the search works without it.
   }

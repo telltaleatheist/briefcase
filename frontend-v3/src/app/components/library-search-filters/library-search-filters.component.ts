@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Subject } from 'rxjs';
 import { debounceTime } from 'rxjs/operators';
-import { LibraryFilterService, LibraryFilters, rememberMeaningSearch } from '../../services/library-filter.service';
+import { LibraryFilterService, LibraryFilters, rememberDeepSearch } from '../../services/library-filter.service';
 
 export { LibraryFilters } from '../../services/library-filter.service';
 
@@ -56,14 +56,14 @@ export class LibrarySearchFiltersComponent implements OnDestroy {
   }
 
   clearFilters() {
-    // Expanded search is a preference, not a filter: clearing keeps it.
-    this.filters = { ...this.filterService.getDefaultFilters(), meaningSearch: this.filters.meaningSearch };
+    // Deep search is a preference, not a filter: clearing keeps it.
+    this.filters = { ...this.filterService.getDefaultFilters(), deepSearch: this.filters.deepSearch };
     this.emitFilters();
   }
 
-  onMeaningSearchChange(on: boolean) {
-    this.filters.meaningSearch = on;
-    rememberMeaningSearch(on);
+  onDeepSearchChange(on: boolean) {
+    this.filters.deepSearch = on;
+    rememberDeepSearch(on);
     this.emitFilters();
   }
 

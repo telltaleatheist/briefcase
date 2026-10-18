@@ -3,21 +3,21 @@
  * 2026-10-09, replacing the years-old video-level FTS search: "if we need to
  * rip the whole thing out and replace it we can").
  *
- * A query is matched against two things, with the same syntax and the same
- * near spellings (moment-query.ts):
- *   titles       a video whose title holds every part of the query (the old
- *                search's default was filenames only, so this stays first-class)
- *   transcripts  the moments where it is said (transcript-moments.ts)
- * One list comes back: videos whose title matches first, then videos by their
- * best moment, each with its moments. Everything is local SQLite.
- *
- * Titles have their own full-text index over `videos.filename`
- * (external content, so the names are not stored twice), kept current by
- * triggers on `videos`: nothing in the app has to remember to update it.
+ * By default a query is matched against file names only, ignoring word
+ * breaks (filename-match.ts; the user, 2026-10-17: "i name files in such a
+ * way that i should be able to find them easily by a few keywords"). Deep
+ * search adds what is said, with the same syntax:
+ *   transcripts  the moments where it is said, with near spellings
+ *                (transcript-moments.ts)
+ *   meaning      the moments that mean it (meaning-search.ts)
+ * One list comes back: videos whose file name matches first, best match first
+ * (FilenameRank), then videos by their best moment, each with its moments.
+ * Everything is local SQLite.
  */
 import type { Database } from 'better-sqlite3';
 
-import { highlightRanges, matchExpression, matcherOf, parseMomentQuery } from './moment-query';
+import { filenameQueryOf, matchFilename, type FilenameRank } from './filename-match';
+import { parseMomentQuery } from './moment-query';
 import { meaningIndexCounts, searchLibraryMeaning } from './meaning-search';
 import { findMomentWindows, momentsOf, spellerFor, type Moment, type MomentWindow } from './transcript-moments';
 
@@ -26,47 +26,13 @@ export function titleOf(filename: string): string {
   return filename.replace(/\.[A-Za-z0-9]{1,5}$/, '');
 }
 
-/**
- * Create the title index and its triggers if they are missing, and rebuild it
- * when it does not match `videos` (new here, or a table rebuild that dropped
- * the triggers). Safe to call on every open; the check reads ~7k names.
- */
-export function ensureTitleIndex(db: Database): void {
-  const existed = !!db.prepare(`SELECT 1 FROM sqlite_master WHERE name = 'video_titles_fts'`).get();
-  db.exec(`
-    CREATE VIRTUAL TABLE IF NOT EXISTS video_titles_fts USING fts5(
-      filename,
-      content='videos',
-      content_rowid='rowid',
-      tokenize='unicode61 remove_diacritics 2'
-    );
-    CREATE TRIGGER IF NOT EXISTS video_titles_ai AFTER INSERT ON videos BEGIN
-      INSERT INTO video_titles_fts (rowid, filename) VALUES (new.rowid, new.filename);
-    END;
-    CREATE TRIGGER IF NOT EXISTS video_titles_ad AFTER DELETE ON videos BEGIN
-      INSERT INTO video_titles_fts (video_titles_fts, rowid, filename) VALUES ('delete', old.rowid, old.filename);
-    END;
-    CREATE TRIGGER IF NOT EXISTS video_titles_au AFTER UPDATE OF filename ON videos BEGIN
-      INSERT INTO video_titles_fts (video_titles_fts, rowid, filename) VALUES ('delete', old.rowid, old.filename);
-      INSERT INTO video_titles_fts (rowid, filename) VALUES (new.rowid, new.filename);
-    END;
-  `);
-  let consistent = existed;
-  if (existed) {
-    try {
-      db.prepare(`INSERT INTO video_titles_fts (video_titles_fts, rank) VALUES ('integrity-check', 1)`).run();
-    } catch {
-      consistent = false;
-    }
-  }
-  if (!consistent) db.prepare(`INSERT INTO video_titles_fts (video_titles_fts) VALUES ('rebuild')`).run();
-}
-
 export interface LibraryHit {
   videoId: string;
   /** The title as shown, and the ranges of it that matched; empty when only the transcript did. */
   title: string;
   titleHighlights: Array<[number, number]>;
+  /** How well the file name matched (filename-match.ts), 0 best; absent when only the transcript did. */
+  titleRank?: FilenameRank;
   /** In time order, at most the per-video cap. */
   moments: Moment[];
   /** Moments that matched in all, before the cap. */
@@ -81,59 +47,90 @@ export interface LibrarySearchResult {
   capped: boolean;
   /** The words each plain query word also matched (near spellings). */
   spellings: Record<string, string[]>;
-  /** With expanded search: the transcripts searched by meaning, of those there are (the index fills in the background). */
+  /** With Deep search: the transcripts searched by meaning, of those there are (the index fills in the background). */
   meaning?: { indexed: number; total: number };
 }
 
 export interface LibrarySearchOptions {
+  /** Deep search: also near spellings of the words in the transcripts (default true). */
   fuzzy?: boolean;
   /** Most videos returned (default 300). */
   maxVideos?: number;
   /**
-   * Expanded search: the query embedded by the meaning model (unit length).
+   * Deep search: also the transcripts, where it is said. Off, only file names
+   * are matched and the transcripts are not read at all.
+   */
+  deep?: boolean;
+  /**
+   * Deep search: the query embedded by the meaning model (unit length).
    * Meaning moments (meaning-search.ts) join the word results: added under a
-   * video that matched by words where they do not overlap its moments, and
-   * videos found only by meaning listed after the word results, best first.
+   * video that matched by name or words where they do not overlap its
+   * moments, and videos found only by meaning listed after, best first.
+   * Ignored without `deep`.
    */
   meaningQuery?: Float32Array;
 }
 
+/** Videos by file name, best match first and then newest download first. */
+function matchTitles(db: Database, query: ReturnType<typeof filenameQueryOf>) {
+  const rows = db.prepare('SELECT id, filename, download_date FROM videos').all() as Array<{ id: string; filename: string; download_date: string | null }>;
+  return rows
+    .flatMap((v) => {
+      const title = titleOf(v.filename);
+      const match = matchFilename(title, query);
+      return match ? [{ videoId: v.id, title, downloaded: v.download_date ?? '', match }] : [];
+    })
+    .sort((a, b) => a.match.rank - b.match.rank || b.downloaded.localeCompare(a.downloaded) || a.title.localeCompare(b.title));
+}
+
 export function searchLibrary(db: Database, query: string, options: LibrarySearchOptions = {}): LibrarySearchResult {
   const parsed = parseMomentQuery(query);
-  if (parsed.groups.length === 0) return { hits: [], momentCount: 0, capped: false, spellings: {} };
+  const nameQuery = filenameQueryOf(parsed);
+  if (nameQuery.groups.length === 0) return { hits: [], momentCount: 0, capped: false, spellings: {} };
   const maxVideos = options.maxVideos ?? 300;
-  const { spell, spellings } = spellerFor(db, options.fuzzy ?? true);
-  const matcher = matcherOf(parsed, spell);
+  const titled = matchTitles(db, nameQuery);
 
+  if (!options.deep) {
+    const hits = titled.slice(0, maxVideos).map((v): LibraryHit => ({
+      videoId: v.videoId,
+      title: v.title,
+      titleHighlights: v.match.highlights,
+      titleRank: v.match.rank,
+      moments: [],
+      momentCount: 0,
+    }));
+    return { hits, momentCount: 0, capped: false, spellings: {} };
+  }
+
+  const { spell, spellings } = spellerFor(db, options.fuzzy ?? true);
   const found = findMomentWindows(db, parsed, spell);
   const windowsOf = new Map(found.ranked.map((r) => [r.videoId, r.windows]));
 
-  // Titles first (most spoken first), then videos where it is only said, by rank.
-  const titleRows = db.prepare(`
-    SELECT v.id, v.filename FROM video_titles_fts f JOIN videos v ON v.rowid = f.rowid
-    WHERE video_titles_fts MATCH ?
-  `).all(matchExpression(parsed, spell)) as Array<{ id: string; filename: string }>;
-  const titled = titleRows
-    .map((v) => ({ videoId: v.id, title: titleOf(v.filename), windows: windowsOf.get(v.id) ?? [] }))
-    .sort((a, b) => b.windows.length - a.windows.length || a.title.localeCompare(b.title));
-  const titledIds = new Set(titled.map((t) => t.videoId));
+  // File names first (best match, then most spoken), then videos where it is only said, by rank.
+  const named = titled
+    .map((v) => ({ ...v, windows: windowsOf.get(v.videoId) ?? [] }))
+    .sort((a, b) => a.match.rank - b.match.rank || b.windows.length - a.windows.length);
+  const namedIds = new Set(named.map((t) => t.videoId));
   const filenameOf = db.prepare('SELECT filename FROM videos WHERE id = ?');
   const spoken = found.ranked
-    .filter((r) => !titledIds.has(r.videoId))
-    .slice(0, Math.max(0, maxVideos - titled.length))
+    .filter((r) => !namedIds.has(r.videoId))
+    .slice(0, Math.max(0, maxVideos - named.length))
     .flatMap((r) => {
       const row = filenameOf.get(r.videoId) as { filename: string } | undefined;
       return row ? [{ videoId: r.videoId, title: titleOf(row.filename), windows: r.windows }] : [];
     });
 
-  const hit = (v: { videoId: string; title: string; windows: MomentWindow[] }, titleMatched: boolean): LibraryHit => ({
+  const hit = (v: { videoId: string; title: string; windows: MomentWindow[] }): LibraryHit => ({
     videoId: v.videoId,
     title: v.title,
-    titleHighlights: titleMatched ? highlightRanges(v.title, matcher) : [],
+    titleHighlights: [],
     moments: momentsOf(db, v.windows, parsed, spell),
     momentCount: v.windows.length,
   });
-  const hits = [...titled.slice(0, maxVideos).map((v) => hit(v, true)), ...spoken.map((v) => hit(v, false))];
+  const hits = [
+    ...named.slice(0, maxVideos).map((v) => ({ ...hit(v), titleHighlights: v.match.highlights, titleRank: v.match.rank })),
+    ...spoken.map(hit),
+  ];
   if (!options.meaningQuery) return { hits, momentCount: found.momentCount, capped: found.capped, spellings };
 
   const meaning = searchLibraryMeaning(db, options.meaningQuery);

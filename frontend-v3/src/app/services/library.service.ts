@@ -199,12 +199,12 @@ export class LibraryService {
   }
 
   /**
-   * The library search: titles and transcript moments; `expanded` adds the
-   * moments found by meaning (the library's meaning index).
-   * GET /api/database/search?q=&expanded=true
+   * The library search: file names; `deep` adds what is said in the
+   * transcripts, by its words and by its meaning (the library's meaning index).
+   * GET /api/database/search?q=&deep=true
    */
-  search(query: string, expanded = false): Observable<LibrarySearchResponse> {
-    const params: Record<string, string> = expanded ? { q: query, expanded: 'true' } : { q: query };
+  search(query: string, deep = false): Observable<LibrarySearchResponse> {
+    const params: Record<string, string> = deep ? { q: query, deep: 'true' } : { q: query };
     return this.http.get<any>(`${this.API_BASE}/database/search`, { params }).pipe(
       map(response => ({
         ...response,

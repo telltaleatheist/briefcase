@@ -1,4 +1,4 @@
-import { LibraryFilterService } from './library-filter.service';
+import { LibraryFilterService, readDeepSearch, rememberDeepSearch } from './library-filter.service';
 import { VideoItem } from '../models/video.model';
 
 describe('LibraryFilterService.videoComparator', () => {
@@ -16,5 +16,25 @@ describe('LibraryFilterService.videoComparator', () => {
   it('orders by name either way', () => {
     expect(ids('name', 'asc')).toEqual(['c', 'b', 'a']);
     expect(ids('name', 'desc')).toEqual(['a', 'b', 'c']);
+  });
+});
+
+describe('readDeepSearch', () => {
+  afterEach(() => {
+    localStorage.removeItem('briefcase-library-deep-search');
+    localStorage.removeItem('briefcase-library-expanded-search');
+  });
+
+  it('remembers the choice, and carries over the old Expanded search choice once', () => {
+    expect(readDeepSearch()).toBe(false);
+    rememberDeepSearch(true);
+    expect(readDeepSearch()).toBe(true);
+
+    localStorage.removeItem('briefcase-library-deep-search');
+    localStorage.setItem('briefcase-library-expanded-search', 'true');
+    expect(readDeepSearch()).toBe(true);
+    expect(localStorage.getItem('briefcase-library-expanded-search')).toBeNull();
+    rememberDeepSearch(false);
+    expect(readDeepSearch()).toBe(false);
   });
 });

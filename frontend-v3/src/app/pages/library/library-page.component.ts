@@ -6,7 +6,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom } from 'rxjs';
 import { LibrarySearchFiltersComponent, LibraryFilters } from '../../components/library-search-filters/library-search-filters.component';
 import { CascadeComponent, CascadeEmptyAction, CascadeEmptyState, CascadeMoments } from '../../components/cascade/cascade.component';
-import { LibrarySearchResponse, SearchHit } from '../../models/library-search.model';
+import { LibrarySearchResponse, SearchHit, orderSearchHits } from '../../models/library-search.model';
 import { LibraryManagerModalComponent } from '../../components/library-manager-modal/library-manager-modal.component';
 import { QueueItemConfigModalComponent } from '../../components/queue-item-config-modal/queue-item-config-modal.component';
 import { VideoPreviewModalComponent, PreviewItem } from '../../components/video-preview-modal/video-preview-modal.component';
@@ -304,7 +304,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   searchLoading = signal(false);
   searchError = signal<string | null>(null);
   private searchSeq = 0;
-  /** The query and Expanded search setting of the last search asked (a repeat reloads quietly). */
+  /** The query and Deep search setting of the last search asked (a repeat reloads quietly). */
   private searchKey = '';
   searchHits = computed<SearchHit[]>(() => {
     const hits = this.searchResponse()?.hits ?? [];
@@ -316,11 +316,13 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       kept = new Set((narrowed[0]?.videos ?? []).map(v => v.id));
     }
     const shown = hits.filter(h => kept.has(h.video.id) && (type === 'all' || this.matchesTypeFilter(h.video, type)));
-    // The filters' Sort By and Order apply to results too (newest download
-    // first by default); relevance keeps the search's own best-first order.
+    // Closest file name matches first, then the rest of the file name matches,
+    // then (Deep search) videos where it is only said: the filters' Sort By
+    // and Order apply within each (newest download first by default), so a
+    // newer video that barely matches never lists above the one named for
+    // the query. Relevance keeps the search's own best-first order.
     if (!filters || filters.sortBy === 'relevance') return shown;
-    const compare = this.filterService.videoComparator(filters);
-    return [...shown].sort((a, b) => compare(a.video, b.video));
+    return orderSearchHits(shown, this.filterService.videoComparator(filters));
   });
   searchWeeks = computed<VideoWeek[]>(() => {
     const hits = this.searchHits();
@@ -333,7 +335,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   searchMoments = computed<ReadonlyMap<string, CascadeMoments>>(() =>
     new Map(this.searchHits().map(h => [h.video.id, { moments: h.moments, momentCount: h.momentCount }]))
   );
-  /** "12 videos · 3 by title · 40 moments", and what is still being indexed or was widened. */
+  /** "12 videos" ("12 videos · 3 by filename · 40 moments" with Deep search), and what is still being indexed or was widened. */
   searchSummary = computed(() => {
     const res = this.searchResponse();
     if (!res) return { line: this.searchLoading() ? 'Searching…' : '', notes: [] as string[] };
@@ -341,8 +343,10 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     const titled = hits.filter(h => h.titleHighlights.length > 0).length;
     const moments = hits.reduce((n, h) => n + h.momentCount, 0);
     const parts = [`${hits.length} ${hits.length === 1 ? 'video' : 'videos'}`];
-    if (titled) parts.push(`${titled} by title`);
-    parts.push(`${res.capped ? 'at least ' : ''}${moments} ${moments === 1 ? 'moment' : 'moments'}`);
+    if (res.deep) {
+      if (titled) parts.push(`${titled} by filename`);
+      parts.push(`${res.capped ? 'at least ' : ''}${moments} ${moments === 1 ? 'moment' : 'moments'}`);
+    }
     const notes: string[] = [];
     if (res.indexing?.error) {
       notes.push(`Transcript indexing stopped (${res.indexing.error}); ${res.indexing.pending} transcripts are not searched.`);
@@ -350,7 +354,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       notes.push(`Indexing transcripts: ${res.indexing.total - res.indexing.pending} of ${res.indexing.total} done; the rest are not searched yet.`);
     }
     if (res.meaning && res.meaning.indexed < res.meaning.total) {
-      notes.push(`Expanded search covers ${res.meaning.indexed} of ${res.meaning.total} transcripts so far; the rest are being indexed in the background.`);
+      notes.push(`Deep search's meaning search covers ${res.meaning.indexed} of ${res.meaning.total} transcripts so far; the rest are being indexed in the background.`);
     }
     for (const [word, words] of Object.entries(res.spellings)) {
       if (words.length > 1) notes.push(`“${word}” also matched ${words.filter(w => w !== word).join(', ')}`);
@@ -1767,11 +1771,11 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
    */
   private runSearch(query: string): void {
     const seq = ++this.searchSeq;
-    const expanded = this.currentFilters?.meaningSearch ?? false;
-    const key = `${expanded}|${query}`;
+    const deep = this.currentFilters?.deepSearch ?? false;
+    const key = `${deep}|${query}`;
     if (this.searchKey !== key) this.searchLoading.set(true);
     this.searchKey = key;
-    this.libraryService.search(query, expanded).subscribe({
+    this.libraryService.search(query, deep).subscribe({
       next: (response) => {
         if (seq !== this.searchSeq) return;
         this.searchResponse.set(response);

@@ -1,5 +1,23 @@
-import { startOfRange } from '../services/library-filter.service';
-import { highlightPieces } from './library-search.model';
+import { LibraryFilterService, startOfRange } from '../services/library-filter.service';
+import { highlightPieces, orderSearchHits, SearchHit } from './library-search.model';
+import { VideoItem } from './video.model';
+
+describe('orderSearchHits', () => {
+  const hit = (id: string, downloadDate: string, titleRank?: 0 | 1 | 2 | 3) =>
+    ({ video: { id, name: id, downloadDate: new Date(downloadDate) } as unknown as VideoItem, title: id, titleHighlights: [], titleRank, moments: [], momentCount: 0 }) as SearchHit;
+  const newestFirst = new LibraryFilterService().videoComparator({ sortBy: 'date', sortOrder: 'desc' });
+
+  it('lists the closest file name matches first and transcript-only hits last, newest first within each', () => {
+    const hits = [
+      hit('said-new', '2026-10-10'),
+      hit('loose-new', '2026-10-01', 3),
+      hit('exact-old', '2020-11-04', 0),
+      hit('loose-old', '2025-01-01', 3),
+      hit('words', '2024-01-01', 2),
+    ];
+    expect(orderSearchHits(hits, newestFirst).map(h => h.video.id)).toEqual(['exact-old', 'words', 'loose-new', 'loose-old', 'said-new']);
+  });
+});
 
 describe('highlightPieces', () => {
   it('cuts text into plain and matched pieces, skipping ranges that overlap or fall outside', () => {

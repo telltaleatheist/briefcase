@@ -554,26 +554,28 @@ export class DatabaseController {
   }
 
   /**
-   * GET /api/database/search?q=...&fuzzy=false&expanded=true
-   * The library search (search/library-search.ts): videos whose title holds
-   * the query, then videos where the transcript says it, each with its
-   * moments (time, the sentences, highlight ranges). With expanded=true, also
-   * the moments that MEAN it (the meaning index; `meaning` says how much of
-   * the library it covers yet). `indexing`, while the
-   * moment index fills in the background after a library opens, says how many
-   * transcripts it has yet to read (null once done). With no library open yet
-   * (first run) the answer is empty.
+   * GET /api/database/search?q=...&deep=true&fuzzy=false
+   * The library search (search/library-search.ts): videos whose file name
+   * holds the query, ignoring word breaks, best match first (`titleRank`).
+   * With deep=true, also videos where the transcript says it, each with its
+   * moments (time, the sentences, highlight ranges), and the moments that
+   * MEAN it (the meaning index; `meaning` says how much of the library it
+   * covers yet). `indexing`, while the moment index fills in the background
+   * after a library opens, says how many transcripts it has yet to read (null
+   * once done, and always without deep). With no library open yet (first run)
+   * the answer is empty.
    */
   @Get('search')
-  async search(@Query('q') query: string, @Query('fuzzy') fuzzy?: string, @Query('expanded') expanded?: string) {
+  async search(@Query('q') query: string, @Query('deep') deepParam?: string, @Query('fuzzy') fuzzy?: string) {
     const q = (query ?? '').trim();
-    const none = { query: q, hits: [], momentCount: 0, capped: false, spellings: {}, indexing: null };
+    const deep = deepParam === 'true';
+    const none = { query: q, deep, hits: [], momentCount: 0, capped: false, spellings: {}, indexing: null };
     if (!q) return none;
-    // Expanded search: the query is embedded (the local model) and the library's meaning index searched too.
-    const meaningQuery = expanded === 'true' ? (await this.embeddingModel.embed([q], 'search_query'))[0] : undefined;
+    // Deep search: the query is embedded (the local model) and the library's meaning index searched too.
+    const meaningQuery = deep ? (await this.embeddingModel.embed([q], 'search_query'))[0] : undefined;
     let result: ReturnType<DatabaseService['searchLibrary']>;
     try {
-      result = this.databaseService.searchLibrary(q, { fuzzy: fuzzy !== 'false', meaningQuery });
+      result = this.databaseService.searchLibrary(q, { deep, fuzzy: fuzzy !== 'false', meaningQuery });
     } catch (error) {
       if (error instanceof Error && error.message.includes('Database not initialized')) return none;
       throw error;
@@ -582,7 +584,7 @@ export class DatabaseController {
       const video = this.databaseService.getVideoById(hit.videoId);
       return video ? [{ ...hit, video }] : [];
     });
-    return { query: q, ...result, hits };
+    return { query: q, deep, ...result, hits };
   }
 
   /**

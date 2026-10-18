@@ -12,20 +12,21 @@
         [(ngModel)]="filters.searchQuery"
         (ngModelChange)="onSearchChange()"
         (focus)="onSearchFocus()"
-        placeholder="Search titles and transcripts"
+        [placeholder]="filters.deepSearch ? 'Search filenames and transcripts' : 'Search filenames'"
         title="Search tips:
-• Words: all must be in the title, or said within about 30 seconds
-• Exact phrase: &quot;hello world&quot;
+• Words: all must be in the filename; spaces and punctuation are ignored (pastor props finds pastorswithprops)
+• A repeated word must be there that many times (strike and strike)
+• Exact phrase: &quot;strike and strike&quot; must be there in that order, run together
 • Exclude: -unwanted
-• Prefix: test* matches testing, tests
 • Either: word1 OR word2
-• A word the transcripts rarely hold also matches near spellings (Somalies finds Somalis)"
+• The closest matches come first, then the Sort By order
+• Deep search also finds what is said in the transcripts"
         class="search-input"
       />
     </div>
-    <label class="meaning-toggle" title="Also find moments that mean what you typed, even in other words (searches the transcripts indexed so far)">
-      <input type="checkbox" [ngModel]="filters.meaningSearch" (ngModelChange)="onMeaningSearchChange($event)" />
-      Expanded search
+    <label class="meaning-toggle" title="Also search what is said in the transcripts: the words (said within about 30 seconds, near spellings too) and moments that mean what you typed, even in other words. Filename matches still come first.">
+      <input type="checkbox" [ngModel]="filters.deepSearch" (ngModelChange)="onDeepSearchChange($event)" />
+      Deep search
     </label>
     <button
       class="accordion-toggle"
