@@ -15,7 +15,7 @@
 .editor-header {
   @include flex-between;
   flex: 0 0 auto; // Don't grow or shrink
-  height: 64px; // Fixed height
+  min-height: 64px; // Grows only when a long filename wraps
   padding: $spacing-md $spacing-lg;
   background: var(--bg-card);
   border-bottom: 2px solid var(--border-color);
@@ -26,8 +26,10 @@
 
 .header-left {
   @include flex-center;
+  justify-content: flex-start;
   gap: $spacing-md;
-  flex: 0 0 auto;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .back-btn {
@@ -54,6 +56,7 @@
 
 .editor-title {
   @include flex-center;
+  flex-shrink: 0;
   gap: $spacing-sm;
   font-size: $font-size-xl;
   font-weight: $font-weight-bold;
@@ -69,16 +72,14 @@
   font-size: $font-size-base;
   font-weight: $font-weight-bold;
   color: var(--text-primary);
-  max-width: 400px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  min-width: 0;
+  overflow-wrap: anywhere; // Show the whole filename; wrap rather than truncate
 }
 
 .header-center {
   @include flex-center;
   gap: $spacing-md;
-  flex: 1;
+  flex: 0 0 auto;
 }
 
 .control-btn {
