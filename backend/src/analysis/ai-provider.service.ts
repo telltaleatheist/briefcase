@@ -12,7 +12,7 @@ import { CrucibleUnreachable } from '@crucible/client';
 import { CrucibleFieldMissing } from '../crucible/errors';
 import { CrucibleBusyError, CrucibleChatCancelled, CrucibleChatError, CrucibleNoVenueError, CrucibleParkedError } from '../crucible/llm/errors';
 import { crucibleUnavailableCause } from '../crucible/transport-failure';
-import { crucibleTargetOf, type CrucibleTarget } from '../crucible/llm/target';
+import { crucibleTargetOf, storedChoice, type CrucibleTarget } from '../crucible/llm/target';
 import { CRUCIBLE_ANALYSIS_CONTEXT } from '../crucible/llm/ollama-map';
 
 /**
@@ -184,9 +184,10 @@ export class AIProviderService {
     let stated: { tokens: number } | null;
     let listed: boolean;
     try {
-      // A retired model sizes as the replacement it will run as (target.ts RETIRED_LOCAL_MODELS).
-      target = (await this.crucibleChat.effectiveTarget(target)).target;
-      venue = await this.crucibleChat.venueFor(target);
+      // A size ceiling (local:max-27b) sizes as the model the server picks for it, on the server it picked it on.
+      const chosen = await this.crucibleChat.effectiveTarget(target);
+      target = chosen.target;
+      venue = chosen.server ?? await this.crucibleChat.venueFor(target);
       listed = (await this.crucibleChat.modelsOn(venue)).some((m) => m.id === target.model);
       stated = listed ? await this.crucibleChat.statedLocalContext(venue, target.model) : null;
     } catch (error) {
@@ -348,7 +349,8 @@ export class AIProviderService {
     const signal = overrides?.signal;
     let target: CrucibleTarget;
     try {
-      target = crucibleTargetOf(config.provider, config.model);
+      const stored = storedChoice(config);
+      target = crucibleTargetOf(stored.provider, stored.model);
     } catch (error) {
       throw new Error(`Crucible: ${(error as Error).message}`);
     }
@@ -425,7 +427,8 @@ export class AIProviderService {
   async testProvider(config: AIProviderConfig): Promise<{ success: boolean; error?: string }> {
     const chat = this.crucibleChat;
     try {
-      const chosen = await chat.effectiveTarget(crucibleTargetOf(config.provider, config.model));
+      const stored = storedChoice(config);
+      const chosen = await chat.effectiveTarget(crucibleTargetOf(stored.provider, stored.model));
       const target = chosen.target;
       const venue = chosen.server ?? await chat.venueFor(target);
       if (target.upstream !== null) {

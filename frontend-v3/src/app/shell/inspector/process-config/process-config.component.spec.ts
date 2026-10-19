@@ -141,10 +141,10 @@ describe('ProcessConfigComponent Crucible gate', () => {
     ready();
     openAnalyzeOptions();
     const select = fixture.nativeElement.querySelector('app-ai-model-select select') as HTMLSelectElement;
-    expect(select.value).toBe('local:qwen3.8-27b-8bit');
+    expect(select.value).toBe('local:max-27b');
     expect(fixture.componentInstance.blockReason()).toBeNull();
     expect(fixture.componentInstance.canSubmit()).toBeTrue();
-    expect(fixture.componentInstance.composedSteps().find(s => s.type === 'ai-analyze')!.config['aiModel']).toBe('local:qwen3.8-27b-8bit');
+    expect(fixture.componentInstance.composedSteps().find(s => s.type === 'ai-analyze')!.config['aiModel']).toBe('local:max-27b');
   }));
 
   it('the three parts are card toggles in the options; the job carries exactly the ones checked, and none checked blocks Add', fakeAsync(() => {

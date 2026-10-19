@@ -80,8 +80,7 @@ describe('AiModelSelectComponent', () => {
     const groups = Array.from(select().querySelectorAll('optgroup')).map((g) => g.label);
     expect(groups).toEqual(['On this Crucible', 'Claude via Crucible']);
     expect(Array.from(select().options).map((o) => o.textContent!.trim())).toEqual([
-      'qwen3.8-27b-8bit',
-      'qwen3.8-27b-4bit',
+      'Biggest that fits, up to 27B (qwen3.8-27b-8bit)',
       'qwen3.5-9b',
       'claude-sonnet-5',
     ]);
@@ -91,13 +90,22 @@ describe('AiModelSelectComponent', () => {
 
   it('a legacy Ollama choice becomes the server model it runs as, handed to the host, with no extra line', fakeAsync(() => {
     answer = modelsView({
-      resolved: [resolved('ollama:qwen3.8:27b', 'local:qwen3.8-27b-8bit', { note: 'Saved as qwen3.8:27b (Ollama). It runs as qwen3.8-27b-8bit.' })],
+      resolved: [resolved('ollama:qwen3.5:9b', 'local:qwen3.5-9b', { note: 'Saved as qwen3.5:9b (Ollama). It runs as qwen3.5-9b.' })],
     });
-    render('ollama:qwen3.8:27b');
-    expect(aiModels).toHaveBeenCalledWith(undefined, ['ollama:qwen3.8:27b']);
-    expect(select().value).toBe('local:qwen3.8-27b-8bit');
-    expect(fixture.componentInstance.picked).toEqual(['local:qwen3.8-27b-8bit']);
+    render('ollama:qwen3.5:9b');
+    expect(aiModels).toHaveBeenCalledWith(undefined, ['ollama:qwen3.5:9b']);
+    expect(select().value).toBe('local:qwen3.5-9b');
+    expect(fixture.componentInstance.picked).toEqual(['local:qwen3.5-9b']);
     expect(lines()).toEqual([]);
+  }));
+
+  it('a saved 27B quantisation becomes the 27B ceiling, handed to the host', fakeAsync(() => {
+    answer = modelsView({
+      resolved: [resolved('local:qwen3.8-27b-8bit', 'local:max-27b', { note: 'Saved as local:qwen3.8-27b-8bit. It now means the biggest model up to 27B that fits.' })],
+    });
+    render('local:qwen3.8-27b-8bit');
+    expect(select().value).toBe('local:max-27b');
+    expect(fixture.componentInstance.picked).toEqual(['local:max-27b']);
   }));
 
   it('a saved choice the server offers nothing for is not listed: it becomes the server\'s pick for analysis, with no message', fakeAsync(() => {
@@ -105,9 +113,9 @@ describe('AiModelSelectComponent', () => {
       resolved: [resolved('claude:claude-sonnet-5', null, { unavailable: 'Claude is not set up on owens-mac-studio.' })],
     });
     render('claude:claude-sonnet-5');
-    expect(select().value).toBe('local:qwen3.8-27b-8bit');
+    expect(select().value).toBe('local:max-27b');
     expect(Array.from(select().options).map((o) => o.textContent!.trim())).not.toContain('claude:claude-sonnet-5 (unavailable)');
-    expect(fixture.componentInstance.picked).toEqual(['local:qwen3.8-27b-8bit']);
+    expect(fixture.componentInstance.picked).toEqual(['local:max-27b']);
     expect(lines()).toEqual([]);
   }));
 
@@ -124,9 +132,9 @@ describe('AiModelSelectComponent', () => {
     render('');
     expect(select().options[0].textContent!.trim()).toBe('Same as the analysis model');
     expect(select().value).toBe('');
-    select().value = 'local:qwen3.8-27b-4bit';
+    select().value = 'local:max-27b';
     select().dispatchEvent(new Event('change'));
-    expect(fixture.componentInstance.picked).toEqual(['local:qwen3.8-27b-4bit']);
+    expect(fixture.componentInstance.picked).toEqual(['local:max-27b']);
   }));
 
   it('while Crucible is not ready: the reason and the door, not a stale list; and the list is read again when it is', fakeAsync(() => {

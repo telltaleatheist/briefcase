@@ -35,6 +35,18 @@
  * with no load and no session. The body rules (no sampling to cloud, ever) live
  * in target.ts.
  *
+ * A SIZE CEILING (`local:max-27b`, target.ts) is a model the serving
+ * Crucible picks: the biggest that fits, up to the ceiling, for the
+ * `generate` verb (Crucible 2.0.1+, `chat.verbs`). Inside a run the run's
+ * session on that server is OPENED with it (act `generate` + `maxParamsB`),
+ * and the model the session opened with (`CrucibleSession.model`) is sent by
+ * name in every chat of the run: chats do not inherit a session's model. A
+ * run whose session is already open, and a call outside any run, ask
+ * `GET /v1/resolve` (the same pick, nothing loaded). Either way the choice is
+ * said in the log and on the task, and kept for the rest of the run. A
+ * refusal (`nothing_fits_ceiling`, ...) is an error by its code; nothing else
+ * is tried.
+ *
  * AN OLLAMA CHOICE runs on the server's own model when it has one
  * ({@link CrucibleChatService.effectiveTarget}, rule in ollama-map.ts): the
  * first ranked server that answers and has a match serves it as a local model
@@ -57,7 +69,6 @@ import { AsyncLocalStorage } from 'async_hooks';
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import {
   CrucibleBusy,
-  CrucibleCardHeld,
   CrucibleRefused,
   CrucibleSessionClosed,
   CrucibleSessionHeld,
@@ -82,11 +93,22 @@ import {
   BUSY_REFUSAL_CODES,
   parseRetryAfter,
 } from './errors';
-import { RETIRED_LOCAL_MODELS, buildChatBody, crucibleTargetOf, type ChatBodyInput, type CrucibleTarget, type UpstreamName } from './target';
+import { CEILING_VERB, buildChatBody, ceilingWords, crucibleTargetOf, type ChatBodyInput, type CrucibleTarget, type UpstreamName } from './target';
 import { CRUCIBLE_ANALYSIS_CONTEXT, crucibleChoiceForOllama, isPageReader, servedContextOf, type MappableModel } from './ollama-map';
 
-/** Capability class sent as `X-Crucible-Act` and as every session's act. */
+/**
+ * Capability class sent as `X-Crucible-Act` and as the act of a session opened
+ * for a named model. A size ceiling's session and chats use {@link CEILING_VERB}.
+ */
 export const BRIEFCASE_ACT = 'analysis';
+
+/** The first Crucible whose chat door and sessions take `max_params_b`, by its `/v1/info` feature. */
+export const CEILING_FEATURE = 'chat.verbs';
+
+/** Refusals of a size ceiling, said as such (the SDK's ChatOptions.maxParamsB / SessionOptions.maxParamsB). */
+export const CEILING_REFUSAL_CODES: ReadonlySet<string> = new Set([
+  'nothing_fits_ceiling', 'unknown_verb', 'verb_not_for_chat', 'verb_not_sized', 'model_with_ceiling', 'capability_undecided',
+]);
 /**
  * How often an open session is touched. Crucible closes a session after its
  * idleS (default 300 s) with nothing in flight; work on this side (a cloud
@@ -239,6 +261,8 @@ export interface EffectiveTarget {
    * analysis window but this host can serve it there (ollama-map.ts rule 4).
    */
   loadContext?: number;
+  /** `X-Crucible-Act` for this target's chats when it is not {@link BRIEFCASE_ACT} (a size ceiling's {@link CEILING_VERB}). */
+  act?: string;
 }
 
 /** How the queue asks for a run (P4). Every field is optional; a bare `withRun(fn)` is P3's run. */
@@ -306,7 +330,6 @@ export { BUSY_REFUSAL_CODES };
 function busyLineOfRefusal(err: unknown): string | null {
   if (err instanceof CrucibleBusy) return err.busyLine;
   if (err instanceof CrucibleSessionHeld) return err.serverMessage;
-  if (err instanceof CrucibleCardHeld) return `held by ${err.who}: ${err.fact}`;
   if (err instanceof CrucibleRefused && BUSY_REFUSAL_CODES.has(err.code)) return err.serverMessage;
   return null;
 }
@@ -407,7 +430,7 @@ export class CrucibleChatService {
     options: { signal?: AbortSignal; busyWait?: BusyWait; provider?: string; loadContext?: number } = {},
   ): Promise<T> {
     return this.withRun(async () => {
-      const chosen = await this.effectiveTarget(crucibleTargetOf(options.provider, model), server);
+      const chosen = await this.effectiveTarget(crucibleTargetOf(options.provider, model), server, options.signal);
       const target = chosen.target;
       const scope = this.runs.getStore()!;
       const venue = server ?? scope.placed.get(target.model) ?? chosen.server ?? await this.venueFor(target);
@@ -489,7 +512,7 @@ export class CrucibleChatService {
   async chat(request: CrucibleChatRequest): Promise<CrucibleChatResult> {
     const signal = request.signal;
     throwIfAborted(signal);
-    const chosen = await this.effectiveTarget(crucibleTargetOf(request.provider, request.model), request.server);
+    const chosen = await this.effectiveTarget(crucibleTargetOf(request.provider, request.model), request.server, signal);
     const target = chosen.target;
     const messages: CrucibleChatMessage[] = request.messages ?? (request.prompt !== undefined ? [{ role: 'user', content: request.prompt }] : []);
     if (messages.length === 0) throw new CrucibleChatError(400, 'invalid_request', 'A chat needs a prompt or messages.');
@@ -535,7 +558,7 @@ export class CrucibleChatService {
     for (;;) {
       throwIfAborted(signal);
       attempts += 1;
-      const response = await this.post(server, body, timeoutMs, signal, request.act);
+      const response = await this.post(server, body, timeoutMs, signal, request.act ?? chosen.act);
       if (response.ok) {
         const result = await this.readReply(response, target, server, request.responseFormat !== undefined);
         if (result.context !== null && !this.contextNoted.has(`${server}\n${target.model}`)) {
@@ -707,11 +730,12 @@ export class CrucibleChatService {
    * tag is looked up on `server` (when the caller pinned one), else on the
    * selected server when it answers; a matching local model there
    * (ollama-map.ts) serves it as that model. No match: the `ollama/` upstream,
-   * as chosen. Inside a run the answer is kept, so a run
+   * as chosen. A size ceiling is the model the server picks for it
+   * ({@link ceilingChoice}). Inside a run the answer is kept, so a run
    * never switches models between calls.
    */
-  async effectiveTarget(target: CrucibleTarget, server?: string): Promise<EffectiveTarget> {
-    if (target.route === 'local' && RETIRED_LOCAL_MODELS[target.model] !== undefined) return this.replacementTarget(target, server);
+  async effectiveTarget(target: CrucibleTarget, server?: string, signal?: AbortSignal): Promise<EffectiveTarget> {
+    if (target.ceilingB !== undefined) return this.ceilingChoice(target, target.ceilingB, server, signal);
     if (target.upstream !== 'ollama') return { target, server: null, mappedFrom: null };
     const scope = this.runs.getStore();
     const key = `${server ?? ''}\n${target.model}`;
@@ -763,45 +787,108 @@ export class CrucibleChatService {
   }
 
   /**
-   * A retired Crucible model (RETIRED_LOCAL_MODELS) runs as its replacement on
-   * a server that no longer has it installed and does have the replacement.
-   * Where the retired model is still installed, or the replacement is not,
-   * the target is taken as it is (and the server answers for it as for any
-   * model).
+   * The model the serving Crucible picks for a size ceiling, on `server` (else
+   * the run's venue for it, else the selected server). Inside a run whose
+   * session on that server is not open yet, the session is OPENED with the
+   * ceiling (act {@link CEILING_VERB} + `maxParamsB`) and its model is the
+   * answer; otherwise `GET /v1/resolve` answers, with nothing loaded. Kept for
+   * the rest of the run, said once in the log, and told to the task.
    */
-  private async replacementTarget(target: CrucibleTarget, server?: string): Promise<EffectiveTarget> {
+  private async ceilingChoice(target: CrucibleTarget, ceilingB: number, server?: string, signal?: AbortSignal): Promise<EffectiveTarget> {
     const scope = this.runs.getStore();
-    const key = `${server ?? ''}\n${target.model}`;
+    const venue = server ?? scope?.placed.get(target.model) ?? await this.venueFor(target);
+    const key = `${venue}\n${target.model}`;
     const kept = scope?.mapped.get(key);
     if (kept !== undefined) return kept;
-    const replacement = RETIRED_LOCAL_MODELS[target.model]!;
-    let name: string | null = server ?? null;
-    if (name === null) {
-      try {
-        name = this.servers.selected();
-      } catch {
-        name = null;
-      }
-    }
-    let chosen: EffectiveTarget = { target, server: null, mappedFrom: null };
-    if (name !== null) {
-      try {
-        const models = await this.modelsOn(name);
-        const installed = (id: string) => models.some((m) => m.id === id && m.installed === true);
-        if (!installed(target.model) && installed(replacement)) {
-          chosen = { target: { model: replacement, route: 'local', upstream: null, bareModel: replacement }, server: name, mappedFrom: target.model };
-          const note = `${name}\n${target.model}`;
-          if (!this.mappingNoted.has(note)) {
-            this.mappingNoted.add(note);
-            this.logger.log(`[${name}] ${target.model} is no longer on this server; it runs as ${replacement}`);
+
+    let model: string;
+    let how: 'session' | 'resolve';
+    try {
+      if (scope === undefined) {
+        model = await this.resolveCeiling(venue, ceilingB);
+        how = 'resolve';
+      } else {
+        // Serialised with the run's other acquisitions, so two calls open one session.
+        const run = scope.lock.then(async () => {
+          const again = scope.mapped.get(key);
+          if (again !== undefined) return { model: again.target.model, how: 'resolve' as const };
+          const open = scope.sessions.get(venue);
+          if (open !== undefined && !open.ended) return { model: await this.resolveCeiling(venue, ceilingB), how: 'resolve' as const };
+          await this.requireCeilingSupport(venue, ceilingB);
+          const opened = await this.sessionFor(scope, venue, signal, { act: CEILING_VERB, maxParamsB: ceilingB });
+          if (opened.session.model === null) {
+            throw new CrucibleChatError(502, 'protocol_error',
+              `Crucible "${venue}" opened a session for ${ceilingWords(ceilingB)} without naming the model it chose.`, venue);
           }
-        }
-      } catch {
-        // The listing could not be read: the target as it is, and the server answers for it.
+          return { model: opened.session.model, how: 'session' as const };
+        });
+        scope.lock = run.catch(() => undefined);
+        ({ model, how } = await run);
       }
+    } catch (err) {
+      throw this.ceilingRefusal(err, venue, ceilingB);
     }
-    scope?.mapped.set(key, chosen);
+
+    const chosen: EffectiveTarget = {
+      target: { model, route: 'local', upstream: null, bareModel: model },
+      server: venue,
+      mappedFrom: target.model,
+      act: CEILING_VERB,
+    };
+    if (scope !== undefined) {
+      scope.placed.set(target.model, venue);
+      scope.mapped.set(key, chosen);
+      this.waiting(`Crucible on ${venue} chose ${model} (${ceilingWords(ceilingB)} that fits)`);
+    }
+    const note = `${venue}\n${target.model}\n${model}`;
+    if (!this.mappingNoted.has(note)) {
+      this.mappingNoted.add(note);
+      this.logger.log(`[${venue}] ${target.model}: Crucible chose ${model}, ${ceilingWords(ceilingB)} that fits this host`
+        + (how === 'session' ? ' (opened the run\'s session with it)' : ' (GET /v1/resolve)'));
+    }
     return chosen;
+  }
+
+  /** `GET /v1/resolve` for a size ceiling: the model the chat door would pick, nothing loaded. */
+  private async resolveCeiling(server: string, ceilingB: number): Promise<string> {
+    await this.requireCeilingSupport(server, ceilingB);
+    const client = await this.servers.clientFor(server);
+    let preview;
+    try {
+      preview = await client.resolve({ verb: CEILING_VERB, maxParamsB: ceilingB });
+    } catch (err) {
+      throw this.asUnreachable(this.mapRefusal(err, server), server);
+    }
+    if (preview.refused !== null) {
+      throw new CrucibleChatError(preview.refused.status, preview.refused.code, preview.refused.message, server, null, preview.refused.details);
+    }
+    if (preview.model === null) {
+      throw new CrucibleChatError(502, 'protocol_error', `Crucible "${server}" answered GET /v1/resolve for ${ceilingWords(ceilingB)} without a model.`, server);
+    }
+    return preview.model;
+  }
+
+  /** A server older than 2.0.1 takes no `max_params_b`: refused by name, never sent a guess. */
+  private async requireCeilingSupport(server: string, ceilingB: number): Promise<void> {
+    let supported: boolean;
+    try {
+      supported = await (await this.servers.clientFor(server)).has(CEILING_FEATURE);
+    } catch (err) {
+      throw this.asUnreachable(this.mapRefusal(err, server), server);
+    }
+    if (!supported) {
+      throw new CrucibleChatError(409, 'ceiling_unsupported',
+        `Crucible "${server}" is too old to pick ${ceilingWords(ceilingB)} (it needs Crucible 2.0.1 or newer). Update it, or pick a specific model in Settings › AI.`, server);
+    }
+  }
+
+  /** A ceiling's refusal as a sentence that says so; anything else as it came. */
+  private ceilingRefusal(err: unknown, server: string, ceilingB: number): unknown {
+    if (!(err instanceof CrucibleChatError) || !CEILING_REFUSAL_CODES.has(err.code)) return err;
+    const lead = err.code === 'nothing_fits_ceiling'
+      ? `No model up to ${ceilingB}B fits on Crucible "${server}"`
+      : `Crucible "${server}" could not pick ${ceilingWords(ceilingB)} (${err.code})`;
+    return new CrucibleChatError(err.status, err.code, `${lead}: ${err.message} Pick a specific model in Settings › AI, or free the card.`, server, err.retryAfterMs, err.details);
   }
 
   /**
@@ -865,6 +952,10 @@ export class CrucibleChatService {
 
   async canServe(server: string, target: CrucibleTarget): Promise<boolean> {
     try {
+      if (target.ceilingB !== undefined) {
+        await this.resolveCeiling(server, target.ceilingB);
+        return true;
+      }
       if (target.route === 'upstream') {
         const configured = await this.upstreamsConfigured(server);
         return configured[target.upstream!] === true;
@@ -1000,7 +1091,12 @@ export class CrucibleChatService {
    * restart), or refused because another app's session holds the server: busy,
    * so a queue run parks.
    */
-  private async sessionFor(scope: RunScope, server: string, signal?: AbortSignal): Promise<OpenSession> {
+  private async sessionFor(
+    scope: RunScope,
+    server: string,
+    signal?: AbortSignal,
+    opening: { act: string; maxParamsB?: number } = { act: BRIEFCASE_ACT },
+  ): Promise<OpenSession> {
     const existing = scope.sessions.get(server);
     if (existing !== undefined && !existing.ended) return existing;
     if (existing !== undefined) this.stopSession(existing);
@@ -1026,7 +1122,8 @@ export class CrucibleChatService {
     let session: CrucibleSession;
     try {
       session = await client.session({
-        act: BRIEFCASE_ACT,
+        act: opening.act,
+        ...(opening.maxParamsB === undefined ? {} : { maxParamsB: opening.maxParamsB }),
         // 1.0.83: opening, but the card is held by a process Crucible does not own.
         onWaiting: (wait) => {
           waited = true;
@@ -1047,6 +1144,10 @@ export class CrucibleChatService {
     } catch (err) {
       if (signal?.aborted) throw new CrucibleChatCancelled();
       if (err instanceof CrucibleSessionClosed) {
+        // A session opened with a model (a size ceiling's) whose load failed: a failure, not a wait.
+        if (err.reason === 'load_failed') {
+          throw new CrucibleChatError(500, 'load_failed', `Crucible "${server}" could not load the model for the session: ${err.serverMessage}`, server);
+        }
         throw new CrucibleBusyError(server, `Crucible ended the wait for a session (${err.reason}): ${err.serverMessage}`);
       }
       throw this.asUnreachable(this.mapRefusal(err, server), server);
@@ -1060,8 +1161,11 @@ export class CrucibleChatService {
       throw new CrucibleChatCancelled();
     }
     this.ledger?.record({ server, kind: 'session', id: session.id, jobType: 'session', model: null, localId: this.localId() });
+    // Opened with a model (a size ceiling's pick): the card changed, so the next
+    // read of the catalog states what is resident now, at the context it was loaded at.
+    if (session.model !== null) this.modelsCache.delete(server);
     if (waited) this.waiting(`Starting on ${server}...`);
-    this.logger.log(`[${server}] session ${session.id} open`);
+    this.logger.log(`[${server}] session ${session.id} open (act ${session.act}${session.model === null ? '' : `, with ${session.model}`})`);
     const open: OpenSession = { server, session, beat: null, ended: false, stopped: false };
     void session.closed.then((end) => {
       open.ended = true;

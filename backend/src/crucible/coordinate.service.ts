@@ -18,9 +18,8 @@
  *  - `task_busy`: another task is running there. FOLLOW it, never re-post;
  *    when it lands, read again from the top (it may have been the other app's
  *    module, which does not answer Briefcase's demand).
- *  - `server_busy` (`CrucibleCardHeld`): the card is held. A WAIT with the
- *    holder named verbatim, and one `GET /v1/activity` per 20 s until the card
- *    accepts work, for at most half an hour.
+ *    (A module task runs beside whatever holds the card since Crucible 2.0, so
+ *    there is no "card held" wait: the SDK no longer produces that refusal.)
  *  - A refusal about the REQUEST (`invalid_module`, `unknown_subject`): fails
  *    once, by name, and is remembered for the session. The vendored module
  *    cannot change while the app runs.
@@ -37,7 +36,6 @@
 import { Inject, Injectable, Logger, OnApplicationBootstrap, OnApplicationShutdown, Optional } from '@nestjs/common';
 import {
   CrucibleAuthError,
-  CrucibleCardHeld,
   CrucibleNotACrucible,
   CrucibleRefused,
   CrucibleUnreachable,
@@ -61,21 +59,15 @@ import type {
   CrucibleUnmetClass,
 } from './wire/coordinate-wire';
 
-/** Between two asks about a held card, and how many asks (half an hour). */
-export const SETTLE_POLL_MS = 20_000;
-export const SETTLE_POLL_ATTEMPTS = 90;
-
 /** How long after boot the startup pass runs, so auto-connect has had its first go. */
 export const STARTUP_COORDINATION_DELAY_MS = 5_000;
 
-/** The outside world a run needs, injectable so a spec does not wait twenty real seconds. */
+/** The outside world a run needs, injectable so a spec pins the clock. */
 export interface CoordinateDeps {
-  sleep(ms: number): Promise<void>;
   now(): string;
 }
 
 export const defaultCoordinateDeps: CoordinateDeps = {
-  sleep: (ms) => new Promise((resolve) => { setTimeout(resolve, ms).unref?.(); }),
   now: () => new Date().toISOString(),
 };
 
@@ -360,25 +352,12 @@ export class CrucibleCoordinationService implements OnApplicationBootstrap, OnAp
     missing: CrucibleMissingEntry[],
     unmet: CrucibleUnmetClass[],
   ): Promise<CrucibleCoordinationState> {
-    let attempts = 0;
-    const budget = { remaining: SETTLE_POLL_ATTEMPTS };
     for (;;) {
       let taskId: string;
       let followed = false;
       try {
         taskId = await postBriefcaseModule(client, server);
       } catch (err) {
-        if (err instanceof CrucibleCardHeld) {
-          attempts += 1;
-          const holder = { fact: err.fact, who: err.who };
-          const stopped = attempts >= SETTLE_POLL_ATTEMPTS;
-          const waiting = this.report({ server, phase: 'waiting', missing, unmet, holder, attempts, stopped });
-          if (stopped) return waiting;
-          if (!(await this.waitForSettle(client, budget))) {
-            return this.report({ server, phase: 'waiting', missing, unmet, holder, attempts, stopped: true });
-          }
-          continue;
-        }
         if (err instanceof CrucibleRefused && err.code === 'task_busy') {
           const other = await this.runningTaskId(client);
           // Landed between the refusal and the listing: decide again from the reads.
@@ -408,22 +387,6 @@ export class CrucibleCoordinationService implements OnApplicationBootstrap, OnAp
       // Somebody else's task landing only freed the slot: read our own demand again.
       if (followed && last.state === 'done') return this.run(server);
       return this.report({ server, phase: 'preparing', missing, unmet, progress: last, followed });
-    }
-  }
-
-  /** Wait until the card accepts work, asking the server on a slow cadence. False when the budget ran out. */
-  private async waitForSettle(client: CrucibleClient, budget: { remaining: number }): Promise<boolean> {
-    try {
-      while (budget.remaining > 0) {
-        budget.remaining -= 1;
-        await this.deps.sleep(SETTLE_POLL_MS);
-        const activity = await client.activity();
-        if (activity.slots.accelerated.acceptsWork) return true;
-      }
-      return false;
-    } catch {
-      // The settle read failed: the post that follows is the authoritative answer.
-      return true;
     }
   }
 

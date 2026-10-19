@@ -54,7 +54,7 @@ import {
 } from '../crucible/in-flight-sweep';
 import { CrucibleChatService } from '../crucible/llm/crucible-chat.service';
 import { CrucibleBusyError, CrucibleChatError, CrucibleParkedError } from '../crucible/llm/errors';
-import { crucibleTargetOf, type CrucibleTarget } from '../crucible/llm/target';
+import { crucibleTargetOf, storedChoice, type CrucibleTarget } from '../crucible/llm/target';
 import { CrucibleProbeService } from '../crucible/probe';
 import { queuesWork } from '../crucible/crucible-queue';
 import { CrucibleRegistryService } from '../crucible/registry.service';
@@ -271,7 +271,8 @@ export class CrucibleLanesService implements OnModuleInit, BeforeApplicationShut
   /** The Crucible target of an AI task's primary model. Throws a named error for a model that is not one. */
   targetOf(task: Task): CrucibleTarget {
     const options = (task.options ?? {}) as { aiModel?: string; aiProvider?: string };
-    return crucibleTargetOf(options.aiProvider, options.aiModel ?? '');
+    const stored = storedChoice({ provider: options.aiProvider ?? '', model: options.aiModel ?? '' });
+    return crucibleTargetOf(stored.provider || undefined, stored.model);
   }
 
   widthOf(lane: string): number {
@@ -281,7 +282,9 @@ export class CrucibleLanesService implements OnModuleInit, BeforeApplicationShut
   async place(chosen: CrucibleTarget): Promise<PlaceAnswer> {
     // An ollama/ choice the server has a model of its own for runs on the
     // GPU lane as that model (ollama-map.ts), leased like any local model.
-    const target = (await this.chat.effectiveTarget(chosen)).target;
+    // A size ceiling stays a ceiling: the run's session is opened with it
+    // (runAdmitted → withModel), and the server's pick is read there.
+    const target = chosen.ceilingB !== undefined ? chosen : (await this.chat.effectiveTarget(chosen)).target;
     const answer: VenueAnswer = await decideVenue(target, {
       selected: () => this.servers.selected(),
       reach: async (server) => {

@@ -22,6 +22,7 @@ import * as os from 'os';
 import * as path from 'path';
 import {
   CRUCIBLE_HOME_ENV as SDK_CRUCIBLE_HOME_ENV,
+  CruciblePairingError,
   PAIRING_FILE as SDK_PAIRING_FILE,
   WINDOWS_HOME_DIRNAME as SDK_WINDOWS_HOME_DIRNAME,
   parsePairing,
@@ -100,8 +101,32 @@ export function cruciblePairingFilePath(host: PairingFileHost): string {
   return path.posix.join(host.homedir, '.crucible', PAIRING_FILE_NAME);
 }
 
+/** A pairing line that carries its bearer token: the only kind Briefcase registers. */
+export type TokenPairing = Pairing & { readonly token: string };
+
+/**
+ * The SDK's `parsePairing`, refusing a line with no `#<token>`. Since SDK 2.0
+ * such a line is a server with `[auth] mode = "none"`; Briefcase's registry
+ * keeps a token for every server (registry.ts: no anonymous mode), so the line
+ * is refused here by name rather than registered without one.
+ */
+export function parseTokenPairing(line: string): TokenPairing {
+  return requireToken(parsePairing(line));
+}
+
+/** A pairing (parsed, or a device-code approval) that must carry its token; see {@link parseTokenPairing}. */
+export function requireToken(pairing: Pairing): TokenPairing {
+  if (pairing.token === null) {
+    throw new CruciblePairingError(
+      `"${pairing.name}" asks for no token (a Crucible with no sign-in); Briefcase connects only to a server that asks for one`,
+      `crucible://${pairing.name}@${pairing.url}`,
+    );
+  }
+  return pairing as TokenPairing;
+}
+
 export interface PairingFileReading {
-  pairing: Pairing;
+  pairing: TokenPairing;
   /** The path it was read from. */
   file: string;
 }
@@ -132,7 +157,7 @@ export function readCruciblePairingFile(
     );
   }
   try {
-    return { pairing: parsePairing(lines[0]!), file };
+    return { pairing: parseTokenPairing(lines[0]!), file };
   } catch (err) {
     // parsePairing elides the token before it throws, so its sentence is safe to keep.
     throw new CruciblePairingFileError('pairing_file_invalid', `${file} is not a connect code: ${(err as Error).message}`);

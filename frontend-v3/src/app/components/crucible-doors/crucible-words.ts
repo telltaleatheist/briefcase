@@ -6,7 +6,7 @@
  * Rules: name the holder on a wait, never say "maybe", never tell the user to
  * open Crucible's own page for a normal workflow.
  */
-import type { CrucibleCoordinationHolder, CrucibleCoordinationState, CrucibleUnmetClass } from '@crucible-wire/coordinate-wire';
+import type { CrucibleCoordinationState, CrucibleUnmetClass } from '@crucible-wire/coordinate-wire';
 import type { CrucibleInstallProgress } from '@crucible-wire/install-wire';
 import type { ServerFacts } from '@crucible-wire/settings-wire';
 import type { LaneView } from '../../models/queue-lanes.model';
@@ -36,11 +36,6 @@ function gb(bytes: number): string {
 function stepWords(step: { readonly name: string | null; readonly index: number | null; readonly total: number | null }): string {
   const place = step.index === null ? 'a step' : step.total === null ? `step ${step.index}` : `step ${step.index} of ${step.total}`;
   return step.name === null ? place : `${place}, ${step.name}`;
-}
-
-/** Who holds the card: the server's name for them, else the fact it held (a job, a lease, ...). */
-function holderWords(holder: CrucibleCoordinationHolder): string {
-  return holder.who ?? `held by ${holder.fact}`;
 }
 
 /**
@@ -81,10 +76,6 @@ export function coordinationLine(state: CrucibleCoordinationState): string {
       const whose = state.followed ? 'finishing another app\'s setup first' : 'preparing what Briefcase needs';
       return `${state.server}: ${whose}, ${step}${bytes}. This keeps going while you work.`;
     }
-    case 'waiting':
-      return state.stopped
-        ? `${state.server} stayed busy (${holderWords(state.holder)}). Briefcase will ask again the next time it connects.`
-        : `${state.server} is busy: ${holderWords(state.holder)}. Briefcase will prepare it when the card is free.`;
     case 'refused':
       return `${state.server} refused Briefcase's request. ${state.message}`;
     case 'unreachable':
@@ -94,7 +85,7 @@ export function coordinationLine(state: CrucibleCoordinationState): string {
 
 /** Is this state still moving (worth a spinner)? */
 export function coordinationBusy(state: CrucibleCoordinationState): boolean {
-  return state.phase === 'checking' || (state.phase === 'preparing' && state.progress.state === 'running') || (state.phase === 'waiting' && !state.stopped);
+  return state.phase === 'checking' || (state.phase === 'preparing' && state.progress.state === 'running');
 }
 
 /** Readable names for the package's install steps. Unknown steps show their own name. */

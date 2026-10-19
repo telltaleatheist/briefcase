@@ -7,7 +7,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import {
   CrucibleCoordinationService,
-  SETTLE_POLL_ATTEMPTS,
   missingForBriefcase,
 } from '../../src/crucible/coordinate.service';
 import { FIRST_RUN_MARKER } from '../../src/crucible/first-run';
@@ -20,7 +19,6 @@ interface Rig {
   h: Harness;
   service: CrucibleCoordinationService;
   states: CrucibleCoordinationState[];
-  sleeps: number[];
 }
 
 const open: FakeCrucible[] = [];
@@ -32,10 +30,9 @@ async function rig(options: FakeCrucibleOptions = {}): Promise<Rig> {
   const states: CrucibleCoordinationState[] = [];
   const ws = { emitCrucibleServersChanged: () => undefined, emitCrucibleCoordination: (s: CrucibleCoordinationState) => states.push(s) };
   const service = new CrucibleCoordinationService(h.registry, h.factory, h.dir, ws as never);
-  const sleeps: number[] = [];
-  service.deps = { sleep: async (ms) => { sleeps.push(ms); }, now: () => '2026-09-23T12:00:00Z' };
+  service.deps = { now: () => '2026-09-23T12:00:00Z' };
   h.registry.add({ name: 'here', url: fake.url, token: fake.token });
-  return { fake, h, service, states, sleeps };
+  return { fake, h, service, states };
 }
 
 const posts = (fake: FakeCrucible) => fake.requestsTo('/v1/tasks', 'POST');
@@ -119,24 +116,6 @@ describe('coordination', () => {
     // The foreign task finishing freed the slot but did not stock Briefcase: it read again and posted.
     expect(state).toMatchObject({ phase: 'preparing', followed: false, progress: { state: 'done' } });
     expect(posts(fake)).toHaveLength(2);
-  });
-
-  it('server_busy with a holder: a WAIT naming the holder verbatim, then it posts once the card settles', async () => {
-    const { fake, service, states, sleeps } = await rig();
-    fake.inject({ cardHeld: { fact: 'a lease', who: "held by bookforge — tts, higgs-v3", times: 1 } });
-    const state = await service.request('here', 'spec');
-    const waiting = states.find((s) => s.phase === 'waiting');
-    expect(waiting).toMatchObject({ holder: { fact: 'a lease', who: 'held by bookforge — tts, higgs-v3' }, attempts: 1, stopped: false });
-    expect(sleeps).toEqual([20_000]);
-    expect(state).toMatchObject({ phase: 'preparing', progress: { state: 'done' } });
-  });
-
-  it('a card held for ever: the wait STOPS after its budget, still naming the holder', async () => {
-    const { fake, service, sleeps } = await rig();
-    fake.inject({ cardHeld: { fact: 'a job', who: 'foundry — pages 12% done' } });
-    const state = await service.request('here', 'spec');
-    expect(state).toMatchObject({ phase: 'waiting', stopped: true, holder: { who: 'foundry — pages 12% done' } });
-    expect(sleeps.length).toBe(SETTLE_POLL_ATTEMPTS);
   });
 
   it('a refusal about the request fails ONCE by name and is never posted again this session', async () => {
@@ -241,7 +220,7 @@ describe('missingForBriefcase', () => {
     classes: [{ capability: 'analysis', enabled: true, selected, reason: 'fits', shortfallBytes: 0, route, work: null, contextCeilings: null }],
   });
   const row = (id: string, installed: boolean, kind: 'model' | 'engine' = 'model', jobType = 'llm') => ({
-    kind, id, name: null, jobType, installed, installedBytes: null, expectedBytes: null, floors: [], license: null, source: 'hf', resident: false, sharesWeightsOf: null, missingFiles: null,
+    kind, id, name: null, jobType, installed, installedBytes: null, expectedBytes: null, floors: [], license: null, source: 'hf', resident: false, sharesWeightsOf: null, missingFiles: null, form: null, formReason: null,
   });
 
   it('a class routed upstream needs no weights', () => {

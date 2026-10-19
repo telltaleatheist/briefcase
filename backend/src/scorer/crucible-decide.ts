@@ -31,7 +31,8 @@
 
 import type {
   DecideCallTiming,
-  DecideAnswer as WireAnswer,
+  DecideAnswer,
+  DecideLikelihoodAnswer,
   DecideItemsRequest as WireItemsRequest,
   DecideItemsResponse as WireItemsResponse,
   DecideQuestion as WireQuestion,
@@ -137,6 +138,13 @@ export function toWireRequest(model: string, req: DecideRequest): WireRequest {
   };
 }
 
+/**
+ * An answer over labels: choice, yesno or score, the only questions Briefcase
+ * asks. SDK 2.0's `likelihood` answer (candidate replies ranked by logprob) is
+ * never asked for, and one arriving is refused in {@link toScorerAnswer}.
+ */
+type WireAnswer = Exclude<DecideAnswer, DecideLikelihoodAnswer>;
+
 /** One answer's distribution over its labels, in label order, as the wire gave it (null = missing, or p exactly 0). */
 function wireLogprobs(answer: WireAnswer, labels: string[]): Array<number | null> {
   if (answer.type === 'yesno') {
@@ -237,8 +245,8 @@ export function floorAnswer(answer: WireAnswer, labels: string[], question: stri
 }
 
 /** The Briefcase answer for one question (the same shapes scorer-decide.ts answerOf builds). */
-export function toScorerAnswer(q: ScorerQuestion, answer: WireAnswer): ScorerAnswer {
-  if (answer.type !== q.type) {
+export function toScorerAnswer(q: ScorerQuestion, answer: DecideAnswer): ScorerAnswer {
+  if (answer.type === 'likelihood' || answer.type !== q.type) {
     throw new ScorerError('engine_error', `question '${q.name}' was a ${q.type} and came back a ${answer.type}`);
   }
   const labels = labelsOf(q);

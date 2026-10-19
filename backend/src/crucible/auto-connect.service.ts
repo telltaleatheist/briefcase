@@ -23,21 +23,20 @@
  * no registry exists.
  */
 import { Inject, Injectable, Logger, OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common';
-import type { Pairing } from '@crucible/client';
 import { CrucibleClientFactory } from './client-factory';
 import { CRUCIBLE_PAIRING_HOST } from './crucible.constants';
-import { readCruciblePairingFile, type PairingFileHost } from './pairing-file';
+import { readCruciblePairingFile, type PairingFileHost, type TokenPairing } from './pairing-file';
 import { originKey } from './registry';
 import { CrucibleRegistryService } from './registry.service';
 import { PROBE_TIMEOUT_MS, failureOutcome } from './probe';
 
 export interface AutoConnectDeps {
   registryExists(): boolean;
-  pairing(): Pairing | null;
+  pairing(): TokenPairing | null;
   list(): Array<{ name: string; url: string }>;
   /** Throws, by name, unless the pairing's server answers `info` as itself on API 1. */
-  verify(pairing: Pairing): Promise<void>;
-  add(pairing: Pairing): { name: string };
+  verify(pairing: TokenPairing): Promise<void>;
+  add(pairing: TokenPairing): { name: string };
 }
 
 export class AutoConnectMismatch extends Error {

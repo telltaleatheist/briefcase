@@ -12,6 +12,12 @@
  *     size) never admit or drop a model. A server that states no candidates
  *     (an engine that has not measured its card) has its text models that are
  *     not page readers read as the candidates, under the same load facts.
+ *   - First, THE SIZE CEILING (`local:max-27b`, target.ts): the biggest model
+ *     the server fits up to 27B, labelled with the model it picks today
+ *     (`GET /v1/resolve`). It stands in for every qwen3.8-27b quantisation,
+ *     which is not listed on its own: a stored one reads as the ceiling.
+ *     Offered only when the server answers the resolve with a model; it is
+ *     Briefcase's analysis default whenever it is offered.
  *   - Each upstream the server has CONFIGURED (`upstreams.<name>.configured`),
  *     listing what the server's own test of it reports. An upstream the server
  *     does not offer, or has not been given a key or address for, adds nothing.
@@ -28,6 +34,7 @@
  *   ollama:<tag>                  the server's own copy of that model when it
  *                                 has one (ollama-map.ts), else the ollama:
  *                                 option when the server's Ollama lists it
+ *   local:max-<N>b, local:qwen3.8-27b-…   the ceiling option
  *   local:<id>, crucible:<id>, a bare id   the local:<id> option
  *
  * Anything else, or a model the server does not offer, is UNAVAILABLE with the
@@ -37,7 +44,12 @@ import type { ModelInfo } from '@crucible/client';
 import type { AiModelOption, AiOptionGroup, AiOptionGroupKind, AiResolvedValue } from '../wire/ai-wire';
 import { isAnalysisModel } from './crucible-chat.service';
 import { crucibleChoiceForOllama } from './ollama-map';
-import { CrucibleTargetError, RETIRED_LOCAL_MODELS, crucibleTargetOf, type UpstreamName } from './target';
+import { CrucibleTargetError, ceilingModelId, crucibleTargetOf, storedCeilingOf, storedChoice, type UpstreamName } from './target';
+
+/** The ceiling Briefcase offers for analysis: the biggest model a server fits, up to 27B (the user, 2026-10-19). */
+export const ANALYSIS_CEILING_B = 27;
+/** Its stored value. */
+export const ANALYSIS_CEILING_VALUE = `local:${ceilingModelId(ANALYSIS_CEILING_B)}`;
 
 export const UPSTREAM_ORDER: readonly UpstreamName[] = ['anthropic', 'openai', 'ollama'];
 
@@ -69,10 +81,29 @@ export interface AnalysisOptionFacts {
   ceilings: ReadonlyMap<string, number> | null;
   /** The `analysis` capability row: what the server picks for the class, and where it runs. */
   analysis: { selected: string; route: 'local' | 'upstream'; enabled: boolean } | null;
+  /**
+   * What the server picks for {@link ANALYSIS_CEILING_B} (`GET /v1/resolve`,
+   * verb generate): the model, or the server's refusal as a sentence. Null when
+   * it was not asked.
+   */
+  ceiling: CeilingFacts | null;
   /** `configured` per upstream; null for one the server does not offer. */
   upstreams: Record<UpstreamName, { configured: boolean } | null>;
   /** The configured upstreams' listings. */
   listings: Partial<Record<UpstreamName, UpstreamListing>>;
+}
+
+export interface CeilingFacts {
+  ceilingB: number;
+  /** The model the server picks today; null when it refused or could not be asked. */
+  pick: { model: string; paramsB: number | null; bits: number | null; resident: boolean | null } | null;
+  /** Why there is no pick, as a sentence. */
+  refusal: string | null;
+}
+
+/** The ceiling option's label: what it means, and what it is on this server today. */
+export function ceilingLabel(ceiling: CeilingFacts, pick: NonNullable<CeilingFacts['pick']>): string {
+  return `Biggest that fits, up to ${ceiling.ceilingB}B (${pick.model})`;
 }
 
 export interface AnalysisOptions {
@@ -92,10 +123,12 @@ export function isPickableUpstreamModel(upstream: UpstreamName, id: string): boo
   return !/embed/.test(lower);
 }
 
-/** A Crucible model string as Briefcase's stored `provider:model`. */
+/** A Crucible model string as Briefcase's stored `provider:model` (a 27B quantisation as the ceiling it reads as). */
 export function optionValueOf(crucibleModel: string): string {
   const m = /^(anthropic|openai|ollama)\/(.+)$/.exec(crucibleModel);
   if (m) return `${PROVIDER_OF[m[1] as UpstreamName]}:${m[2]}`;
+  const ceiling = storedCeilingOf(crucibleModel);
+  if (ceiling !== null) return `local:${ceilingModelId(ceiling)}`;
   return `local:${crucibleModel}`;
 }
 
@@ -117,16 +150,31 @@ function textModels(facts: AnalysisOptionFacts): string[] {
 
 /** The options, grouped as the server presents them. */
 export function buildAnalysisOptions(facts: AnalysisOptionFacts): AnalysisOptions {
-  const analysisDefault = facts.analysis?.enabled && facts.analysis.selected ? optionValueOf(facts.analysis.selected) : null;
+  const serverPick = facts.analysis?.enabled && facts.analysis.selected ? optionValueOf(facts.analysis.selected) : null;
   const byId = new Map(facts.models.map((m) => [m.id, m]));
   const candidates = facts.classCandidates !== null && facts.classCandidates.length > 0 ? facts.classCandidates : textModels(facts);
 
   const serverOptions: AiModelOption[] = [];
+  const pick = facts.ceiling?.pick ?? null;
+  if (facts.ceiling !== null && pick !== null) {
+    serverOptions.push({
+      value: ANALYSIS_CEILING_VALUE,
+      label: ceilingLabel(facts.ceiling, pick),
+      group: 'server',
+      sizeB: pick.paramsB,
+      resident: pick.resident,
+      serverChoice: serverPick === ANALYSIS_CEILING_VALUE,
+    });
+  }
+  // Briefcase's default is the ceiling when it is offered, else the server's own pick.
+  const analysisDefault = pick !== null ? ANALYSIS_CEILING_VALUE : serverPick === ANALYSIS_CEILING_VALUE ? null : serverPick;
   for (const id of new Set(candidates)) {
     const model = byId.get(id);
     if (model === undefined || !canRun(model)) continue;
+    // A 27B quantisation is the ceiling option, not one of its own.
+    if (storedCeilingOf(id) !== null) continue;
     const value = `local:${id}`;
-    const serverChoice = value === analysisDefault;
+    const serverChoice = value === serverPick;
     serverOptions.push({ value, label: id, group: 'server', sizeB: model.paramsB, resident: model.resident, serverChoice });
   }
   const groups: AiOptionGroup[] = [];
@@ -139,7 +187,7 @@ export function buildAnalysisOptions(facts: AnalysisOptionFacts): AnalysisOption
     for (const id of new Set(listing.ids ?? [])) {
       if (!isPickableUpstreamModel(upstream, id)) continue;
       const value = `${PROVIDER_OF[upstream]}:${id}`;
-      const serverChoice = value === analysisDefault;
+      const serverChoice = value === serverPick;
       options.push({ value, label: id, group: upstream, sizeB: null, resident: null, serverChoice });
     }
     groups.push({ kind: upstream, label: groupLabel(upstream, facts.server, facts.local), options, error: listing.error });
@@ -180,7 +228,8 @@ export function resolveStoredModel(stored: string, facts: AnalysisOptionFacts, o
 
   let target;
   try {
-    target = crucibleTargetOf(undefined, value);
+    const read = storedChoice({ provider: '', model: value });
+    target = crucibleTargetOf(read.provider || undefined, read.model);
   } catch (err) {
     const message = err instanceof CrucibleTargetError ? err.message : (err as Error).message;
     return as(null, null, `${value} is not a model Briefcase can run through Crucible. ${message}`);
@@ -195,7 +244,10 @@ export function resolveStoredModel(stored: string, facts: AnalysisOptionFacts, o
       own = null;
     }
     if (own !== null) {
-      const local = `local:${own}`;
+      const local = optionValueOf(own);
+      if (local === ANALYSIS_CEILING_VALUE && options.has(local)) {
+        return as(local, `Saved as ${tag} (Ollama). It now means the biggest model up to ${ANALYSIS_CEILING_B}B that fits ${facts.server}.`, null);
+      }
       if (options.has(local)) return as(local, `Saved as ${tag} (Ollama). It runs as ${own}, ${facts.server}'s own copy of that model.`, null);
       return as(null, null, `${tag} (Ollama) runs as ${own} on ${facts.server}, and ${localUnavailable(own, facts)}`);
     }
@@ -214,11 +266,19 @@ export function resolveStoredModel(stored: string, facts: AnalysisOptionFacts, o
   }
 
   const canonical = `local:${target.bareModel}`;
-  if (options.has(canonical)) return as(canonical, value === canonical ? null : `Saved as ${value}.`, null);
-  // A model the server stopped carrying runs as its replacement (target.ts RETIRED_LOCAL_MODELS).
-  const replacement = RETIRED_LOCAL_MODELS[target.bareModel];
-  if (replacement !== undefined && options.has(`local:${replacement}`)) {
-    return as(`local:${replacement}`, `Saved as ${target.bareModel}, which ${facts.server} no longer has. It runs as ${replacement}.`, null);
+  if (target.ceilingB !== undefined) {
+    const ceiling = facts.ceiling;
+    if (ceiling === null) return as(null, null, `${facts.server} did not say which model up to ${target.ceilingB}B it would pick.`);
+    if (ceiling.ceilingB !== target.ceilingB) {
+      return as(null, null, `Briefcase offers the biggest model up to ${ANALYSIS_CEILING_B}B, not up to ${target.ceilingB}B. Pick another model.`);
+    }
+    if (options.has(canonical)) {
+      const pickNote = ceiling.pick === null ? '' : ` (${ceiling.pick.model} on ${facts.server})`;
+      return as(canonical, value === canonical ? null
+        : `Saved as ${value}. It now means the biggest model up to ${target.ceilingB}B that fits${pickNote}.`, null);
+    }
+    return as(null, null, ceiling.refusal ?? `${facts.server} did not say which model up to ${target.ceilingB}B it would pick.`);
   }
+  if (options.has(canonical)) return as(canonical, value === canonical ? null : `Saved as ${value}.`, null);
   return as(null, null, localUnavailable(target.bareModel, facts));
 }

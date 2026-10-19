@@ -21,6 +21,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { atomicReplaceFile } from '../common/utils/temp-file.util';
 import { isParked } from '../crucible/llm/errors';
+import { ceilingWords } from '../crucible/llm/target';
 import { isAsrUnavailable } from '../crucible/asr/crucible-asr-job';
 import { isTranscriptionRetryable, type WhisperRoute } from '../media/whisper.service';
 import { CrucibleReadinessService, crucibleTasksIn } from '../crucible/readiness.service';
@@ -916,7 +917,7 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         abort: new AbortController(),
         message: task.type === 'transcribe'
           ? `Sending to Crucible on ${placement.server}...`
-          : `Reserving ${placement.target.model} on ${placement.server}...`,
+          : `Reserving ${placement.target.ceilingB === undefined ? placement.target.model : ceilingWords(placement.target.ceilingB)} on ${placement.server}...`,
       }),
     };
 

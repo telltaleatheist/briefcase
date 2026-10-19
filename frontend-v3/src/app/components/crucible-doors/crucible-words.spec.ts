@@ -7,14 +7,6 @@ const progress = (over: Partial<CrucibleModuleProgress>): CrucibleModuleProgress
 });
 
 describe('coordinationLine', () => {
-  it('names the holder on a wait, verbatim', () => {
-    const state: CrucibleCoordinationState = {
-      server: 'mac', phase: 'waiting', missing: [], unmet: [], holder: { fact: 'a lease', who: 'bookforge, tts 62% done' }, attempts: 1, stopped: false,
-    };
-    expect(coordinationLine(state)).toContain('bookforge, tts 62% done');
-    expect(coordinationBusy(state)).toBe(true);
-  });
-
   it('says a held first run prepares on finish, and does nothing meanwhile', () => {
     const state: CrucibleCoordinationState = { server: 'mac', phase: 'deferred', reason: 'first-run' };
     expect(coordinationLine(state)).toContain('when you finish setup');
@@ -52,13 +44,6 @@ describe('coordinationLine', () => {
 });
 
 describe('a server that leaves informational fields out (Crucible 1.0.25)', () => {
-  it('a holder the server did not name is said by the fact it holds', () => {
-    const state: CrucibleCoordinationState = {
-      server: 'mac', phase: 'waiting', missing: [], unmet: [], holder: { fact: 'a job', who: null }, attempts: 1, stopped: false,
-    };
-    expect(coordinationLine(state)).toBe('mac is busy: held by a job. Briefcase will prepare it when the card is free.');
-  });
-
   it('a step with no stated place or name still reads, never "null"', () => {
     const bare: CrucibleCoordinationState = {
       server: 'mac', phase: 'preparing', missing: [], unmet: [], followed: false,

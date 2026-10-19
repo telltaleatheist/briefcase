@@ -20,10 +20,8 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import {
   CruciblePairingError,
-  parsePairing,
   pollPairing,
   startPairing,
-  type Pairing,
   type PairingRequest,
 } from '@crucible/client';
 import { CRUCIBLE_CLIPBOARD, CRUCIBLE_PAIRING_HOST } from './crucible.constants';
@@ -31,7 +29,7 @@ import { CrucibleConnectError } from './errors';
 import { maskToken } from './registry';
 import { CrucibleRegistryService } from './registry.service';
 import { CrucibleProbeService } from './probe';
-import { readCruciblePairingFile, type PairingFileHost } from './pairing-file';
+import { parseTokenPairing, readCruciblePairingFile, requireToken, type PairingFileHost, type TokenPairing } from './pairing-file';
 import type { ClipboardWriter } from './clipboard';
 import type {
   ConnectCodeReading,
@@ -126,7 +124,7 @@ export class CrucibleConnectService {
       if (result.status === 'pending') return result;
       this.cancelPairing(requestId);
       if (result.status !== 'approved') return result;
-      const row = await this.probeThenAdd(result.pairing, pending.name);
+      const row = await this.probeThenAdd(requireToken(result.pairing), pending.name);
       return { status: 'approved', name: row.name };
     })();
     try {
@@ -146,7 +144,7 @@ export class CrucibleConnectService {
   /** A pasted line read back with the token masked, for the add form's preview. */
   readConnectCode(line: string): ConnectCodeReading {
     try {
-      const pairing = parsePairing(line);
+      const pairing = parseTokenPairing(line);
       return { ok: true, name: pairing.name, url: pairing.url, tokenMasked: maskToken(pairing.token) };
     } catch (err) {
       if (err instanceof CruciblePairingError) return { ok: false, code: 'invalid_pairing', message: err.message };
@@ -155,9 +153,9 @@ export class CrucibleConnectService {
   }
 
   async addFromConnectCode(line: string, name?: string): Promise<CrucibleServerRow> {
-    let pairing: Pairing;
+    let pairing: TokenPairing;
     try {
-      pairing = parsePairing(line);
+      pairing = parseTokenPairing(line);
     } catch (err) {
       if (err instanceof CruciblePairingError) throw new CrucibleConnectError('invalid_pairing', err.message);
       throw err;
@@ -199,7 +197,7 @@ export class CrucibleConnectService {
   }
 
   /** Probe, and write the registry only when the server answers `ok`. */
-  private async probeThenAdd(pairing: Pairing, name?: string): Promise<CrucibleServerRow> {
+  private async probeThenAdd(pairing: TokenPairing, name?: string): Promise<CrucibleServerRow> {
     const result = await this.probes.probeCredentials(pairing.url, pairing.token, pairing.url);
     if (result.outcome !== 'ok') {
       throw new CrucibleConnectError('probe_failed', result.message);

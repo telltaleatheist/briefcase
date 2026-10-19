@@ -77,7 +77,7 @@ describe('a server that states only what 1.0.72 requires', () => {
     const ai = new CrucibleAiService(servers, h.probes, h.settings, chat, { keysForCopy: () => ({}) } as never, pairingHost(null));
     const view = await ai.models();
     expect(view.unavailable).toBeNull();
-    expect(view.groups.find((g) => g.kind === 'server')?.options[0]).toMatchObject({ value: 'local:qwen3.5-9b', label: 'qwen3.5-9b', group: 'server' });
+    expect(view.groups.find((g) => g.kind === 'server')?.options.find((o) => o.value === 'local:qwen3.5-9b')).toMatchObject({ value: 'local:qwen3.5-9b', label: 'qwen3.5-9b', group: 'server' });
     expect(view.upstreams?.anthropic).toEqual({ configured: true, keyHint: '…1234' });
   });
 
@@ -127,7 +127,7 @@ describe('a server that states only what 1.0.72 requires', () => {
   it('coordination works', async () => {
     const { h } = await rig(stockedForBriefcase());
     const service = new CrucibleCoordinationService(h.registry, h.factory, h.dir);
-    service.deps = { sleep: async () => undefined, now: () => '2026-09-23T12:00:00Z' };
+    service.deps = { now: () => '2026-09-23T12:00:00Z' };
     const state = await service.request('mac', 'a spec asked');
     expect(state).toMatchObject({ phase: 'stocked', unmet: [] });
   });

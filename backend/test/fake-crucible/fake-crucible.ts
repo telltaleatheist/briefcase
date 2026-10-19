@@ -79,6 +79,8 @@ import type { AddressInfo } from 'net';
 export interface RecordedRequest {
   method: string;
   path: string;
+  /** The query string, without its `?`, when there was one. */
+  query?: string;
   headers: http.IncomingHttpHeaders;
   body?: unknown;
   at: number;
@@ -131,12 +133,6 @@ export interface NamedFaults {
   serverBusy?: { client: string; type: string; progress: number; model?: string | null };
   /** Every route stalls this long before answering nothing (a sleeping machine). */
   stallMs?: number;
-  /**
-   * The operator door's `409 server_busy`: a task post is refused with the
-   * holder named (`CrucibleCardHeld`), and `activity` says the card does not
-   * accept work. `times` counts the refusals (absent: until cleared).
-   */
-  cardHeld?: { fact: string; who: string; times?: number };
   /** Another app's task is running: posts are refused `task_busy`, and it lists as running. */
   taskBusy?: { type: string; finishAfterMs?: number };
   /** Every chat completion waits this long before answering (a cancel can land in it). */
@@ -203,6 +199,8 @@ interface FakeSession {
   itemsRun: number;
   /** Playing `queueLine`: not opened by another session's end. */
   heldBack?: boolean;
+  /** 2.0.1: opened with a size ceiling; `model` is its pick. */
+  maxParamsB?: number;
 }
 
 /** A job this fake ran, for a spec to assert on. */
@@ -420,6 +418,14 @@ export interface FakeCrucibleOptions {
   failModuleWith?: { code: string; message: string };
   /** What `GET /v1/models` lists. Default: `qwen3.5-9b`, installed. */
   models?: FakeModel[];
+  /**
+   * 2.0.1: size ceilings (`max_params_b` on sessions and the chat door,
+   * `GET /v1/resolve`, info feature `chat.verbs`). Default on. `false`: an
+   * older server. `pick` overrides the pick (null: `nothing_fits_ceiling`);
+   * the default is the biggest installed, supported text model at or under the
+   * ceiling, the first listed on a tie.
+   */
+  ceilings?: false | { pick?: (verb: string, maxParamsB: number) => string | null };
   /** The model resident at start. Default none. */
   resident?: string | null;
   /** How long a load-model job takes. Default 20 ms. */
@@ -475,7 +481,7 @@ export interface FakeCrucible {
   readonly requests: RecordedRequest[];
   readonly faults: FaultLayer;
   /** Every queue session opened (any client), and how each ended. */
-  readonly sessions: { opened: Array<{ sessionId: string; client: string | null; act: string }>; closed: Array<{ sessionId: string; reason: string }>; touches: string[] };
+  readonly sessions: { opened: Array<{ sessionId: string; client: string | null; act: string; maxParamsB?: number; model?: string | null }>; closed: Array<{ sessionId: string; reason: string }>; touches: string[] };
   readonly settingsPuts: unknown[];
   /** Pairing requests this server has seen, with their device codes. */
   readonly pairings: Array<{ id: string; userCode: string; clientName: string; status: 'pending' | 'approved' | 'denied' | 'expired' }>;
@@ -739,7 +745,8 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
     },
     job_types: role === 'orchestrator' ? [] : [...installedJobTypes, 'load-model', 'unload-model'],
     // 1.0.76: what this server supports, by name (`has(feature)`).
-    features: role === 'orchestrator' ? [] : ['queue.jobs', 'queue.calls', 'queue.sessions', 'events'],
+    features: role === 'orchestrator' ? [] : ['queue.jobs', 'queue.calls', 'queue.sessions', 'events',
+      ...(options.ceilings === false ? [] : ['chat.verbs', 'resolve'])],
     capabilities: role === 'orchestrator' ? [] : installedJobTypes.map((jobType) => (
       { job_type: jobType, models: jobType === 'asr' ? asrRows() : jobType === 'align' ? alignRows() : [] }
     )),
@@ -780,6 +787,8 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
         engine_exit_code: null,
       },
       stopping: null,
+      // 2.0: a self-update holding the server; the fake never updates.
+      updating: null,
       warming: null,
       claim: null,
       streaming: null,
@@ -788,7 +797,7 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
       slots: {
         accelerated: {
           busy: job === null && ownRunning.length === 0 ? 0 : 1, of: 1, queue_depth: ownQueued.length,
-          accepts_work: job === null && ownRunning.length === 0 && openSession === null && (named.cardHeld === undefined || named.cardHeld.times === 0),
+          accepts_work: job === null && ownRunning.length === 0 && openSession === null,
         },
       },
       running: [...(job === null ? [] : [job]), ...ownRunning],
@@ -974,12 +983,6 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
   }
 
   function postTask(res: http.ServerResponse, body: Record<string, unknown>): void {
-    const held = named.cardHeld;
-    if (held !== undefined && (held.times === undefined || held.times > 0)) {
-      if (held.times !== undefined) held.times -= 1;
-      refusal(res, 409, 'server_busy', `the card is held by ${held.fact}`, { fact: held.fact, who: held.who });
-      return;
-    }
     if (named.taskBusy !== undefined && foreignTask.state === 'running') {
       refusal(res, 409, 'task_busy', `task ${foreignTask.taskId} is running`, { task_id: foreignTask.taskId, type: named.taskBusy.type });
       return;
@@ -1143,6 +1146,38 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
     };
   }
 
+  /** The model a size ceiling picks here (2.0.1), or null when nothing fits. */
+  function ceilingPick(verb: string, maxParamsB: number): string | null {
+    const custom = options.ceilings === false ? undefined : options.ceilings?.pick;
+    if (custom !== undefined) return custom(verb, maxParamsB);
+    let best: FakeModel | null = null;
+    for (const m of models) {
+      if (m.installed === false || m.backendSupported === false || m.unloadableReason !== undefined) continue;
+      if (!(m.modalities ?? ['text']).includes('text') || m.paramsB > maxParamsB) continue;
+      if (best === null || m.paramsB > best.paramsB) best = m;
+    }
+    return best?.id ?? null;
+  }
+
+  /** `GET /v1/resolve` (2.0.1): the pick, with nothing loaded. */
+  function resolveDoc(params: URLSearchParams): Record<string, unknown> {
+    const verb = params.get('verb') ?? 'generate';
+    const ceiling = params.get('max_params_b');
+    const named = params.get('model');
+    const id = named ?? (ceiling === null ? null : ceilingPick(verb, Number(ceiling)));
+    const model = id === null ? undefined : models.find((m) => m.id === id);
+    const refused = id === null
+      ? { status: 409, code: 'nothing_fits_ceiling', message: `nothing at or under ${ceiling}B fits this card for ${verb}`, details: null }
+      : null;
+    return {
+      verb, door: 'POST /v1/openai/chat/completions', model: id, source: named !== null ? 'model' : ceiling !== null ? 'max_params_b' : 'auto',
+      params_b: model?.paramsB ?? null, bits: null, engine: null, form: null,
+      installed: model === undefined ? null : model.installed !== false, resident: id === null ? null : resident === id,
+      fit: id === null ? null : { fits: true, need_bytes: 1, available_bytes: 2, context_tokens: 8192, concurrency: 1 },
+      facts: null, refused,
+    };
+  }
+
   // ── queue sessions (1.0.76) ──────────────────────────────────────────
   function newSession(client: string | null, act: string, model: string | null): FakeSession {
     const row: FakeSession = {
@@ -1167,7 +1202,7 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
       resident = row.model;
       residentCtx = null;
     }
-    sessionLog.opened.push({ sessionId: row.id, client: row.client, act: row.act });
+    sessionLog.opened.push({ sessionId: row.id, client: row.client, act: row.act, ...(row.maxParamsB === undefined ? {} : { maxParamsB: row.maxParamsB, model: row.model }) });
     pushSessionEvent(row, 'opened', { session_id: row.id });
   }
 
@@ -1193,7 +1228,7 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
     return {
       session_id: row.id, status: row.status, act: row.act, client: row.client, model: row.model, position: row.position,
       idle_s: 300, max_wait_s: 3600, created: '2026-09-30T12:00:00Z', opened_at: row.openedAt,
-      idle_deadline: row.status === 'open' ? '2026-09-30T12:05:00Z' : null, max_hold_deadline: null, items_run: row.itemsRun,
+      idle_deadline: row.status === 'open' ? '2026-09-30T12:05:00Z' : null, first_work_deadline: null, max_hold_deadline: null, items_run: row.itemsRun,
       in_flight: [], stream_session: null, load_job: null, closed_at: row.closedAt, reason: row.reason, message: row.message, error: null,
     };
   }
@@ -1208,8 +1243,25 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
       refusal(res, 400, 'invalid_request', 'act is required', { field: 'act' });
       return;
     }
-    const model = typeof body['model'] === 'string' ? body['model'] : null;
+    let model = typeof body['model'] === 'string' ? body['model'] : null;
+    const ceiling = body['max_params_b'];
+    if (ceiling !== undefined) {
+      if (options.ceilings === false) {
+        refusal(res, 400, 'invalid_request', 'unknown field max_params_b', { field: 'max_params_b' });
+        return;
+      }
+      if (model !== null) {
+        refusal(res, 400, 'model_with_ceiling', 'a session names a model or a ceiling, not both');
+        return;
+      }
+      model = ceilingPick(body['act'], Number(ceiling));
+      if (model === null) {
+        refusal(res, 409, 'nothing_fits_ceiling', `nothing at or under ${String(ceiling)}B fits this card for ${body['act']}`);
+        return;
+      }
+    }
     const row = newSession(client, body['act'], model);
+    if (ceiling !== undefined) row.maxParamsB = Number(ceiling);
     const line = named.queueLine;
     if (line !== undefined) {
       row.heldBack = true;
@@ -1831,7 +1883,7 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
     const method = req.method ?? 'GET';
     const path = url.pathname;
-    const record: RecordedRequest = { method, path, headers: req.headers, at: Date.now() };
+    const record: RecordedRequest = { method, path, ...(url.search ? { query: url.search.slice(1) } : {}), headers: req.headers, at: Date.now() };
     requests.push(record);
 
     const raw = method === 'GET' || method === 'HEAD' ? Buffer.alloc(0) : await readBody(req);
@@ -1892,6 +1944,8 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
         name,
         api_version: apiVersion(),
         ...(options.pairingVersion === null ? {} : { pairing_version: options.pairingVersion ?? 1 }),
+        // 2.0: `[auth] mode`. The fake always asks for its token.
+        auth: 'token',
       });
       return;
     }
@@ -1967,6 +2021,10 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
       send(res, 200, activityDoc());
       return;
     }
+    if (path === '/v1/resolve' && method === 'GET' && options.ceilings !== false) {
+      send(res, 200, resolveDoc(url.searchParams));
+      return;
+    }
     if (path === '/v1/capability' && method === 'GET') {
       const doc = capabilityDoc(url.searchParams);
       send(res, doc.status, doc.body);
@@ -2020,7 +2078,7 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
           kind: row.kind, id: row.id, name: row.name ?? null, job_type: row.jobType, installed: row.installed,
           installed_bytes: row.installed ? 1024 : null, expected_bytes: row.expectedBytes ?? null, floors: [],
           license: null, source: `hf:fake/${row.id}`, resident: false,
-          shares_weights_of: row.sharesWeightsOf ?? null, missing_files: row.missingFiles ?? null,
+          shares_weights_of: row.sharesWeightsOf ?? null, missing_files: row.missingFiles ?? null, form: null, form_reason: null,
         })),
       });
       return;
@@ -2075,6 +2133,8 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
             : resident === m.id && residentCtx !== null ? residentCtx
               : (m.maxModelLen === undefined ? 262144 : m.maxModelLen),
           weights_of: m.weightsOf ?? null,
+          // 2.0: the quantisation forms. The fake's models come in one form, unstated.
+          form: null, form_reason: null, forms: null,
         };
       }));
       return;

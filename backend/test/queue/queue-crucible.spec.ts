@@ -112,6 +112,38 @@ describe('the reservation of a model the analysis engine does not read from', ()
   });
 });
 
+describe('the reservation of a size ceiling (a saved 27B)', () => {
+  it('is placed as the ceiling, opens the run\'s session with act generate + max_params_b, and every call names the server\'s pick', async () => {
+    await fake.close();
+    fake = await startFakeCrucible({ models: [{ id: 'qwen3.5-9b', paramsB: 9 }, { id: 'qwen3.8-27b-4bit', paramsB: 27 }, { id: 'qwen3.8-27b-8bit', paramsB: 27, installed: false }] });
+    await wire();
+    const rig = makeRig(lanes);
+    rig.media.analyze = analysisThatCalls(['qwen3.8-27b-8bit', 'qwen3.8-27b-8bit']);
+    const id = rig.qm.addJob(analyzeJob('v1', 'local:qwen3.8-27b-8bit'));
+    await until(() => rig.qm.getJob(id)?.status === 'completed');
+    expect(rig.qm.getJob(id)).toMatchObject({ lane: 'gpu:mac', venue: 'mac' });
+    expect(fake.requestsTo('/v1/queue/sessions', 'POST').map((r) => r.body)).toEqual([{ act: 'generate', max_params_b: 27 }]);
+    expect(fake.jobs).toHaveLength(0);
+    expect(fake.chatBodies().map((b) => b['model'])).toEqual(['qwen3.8-27b-4bit', 'qwen3.8-27b-4bit']);
+    expect(fake.sessions.closed.map((x) => x.sessionId)).toEqual(fake.sessions.opened.map((x) => x.sessionId));
+    expect(ledger.read()).toEqual([]);
+  });
+
+  it('nothing fits the ceiling: the task fails with the server\'s refusal by code, and runs nothing', async () => {
+    await fake.close();
+    fake = await startFakeCrucible({ models: [{ id: 'qwen3.5-9b', paramsB: 9 }], ceilings: { pick: () => null } });
+    await wire();
+    const rig = makeRig(lanes);
+    rig.media.analyze = analysisThatCalls(['max-27b']);
+    const id = rig.qm.addJob(analyzeJob('v1', 'local:max-27b'));
+    await until(() => ['failed', 'completed'].includes(rig.qm.getJob(id)?.status ?? ''));
+    expect(rig.qm.getJob(id)?.status).toBe('failed');
+    expect(JSON.stringify(rig.qm.getJob(id))).toMatch(/nothing_fits_ceiling|No model up to 27B/);
+    expect(fake.chatBodies()).toHaveLength(0);
+    expect(fake.jobs).toHaveLength(0);
+  });
+});
+
 describe('an ollama: choice the server has a model of its own for', () => {
   it('is placed on the GPU lane as that local model, loaded in a session before the task, and every call runs on it', async () => {
     await wire();

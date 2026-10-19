@@ -17,6 +17,7 @@ import {
   optionValues,
   resolveStoredModel,
   type AnalysisOptionFacts,
+  type CeilingFacts,
   type OptionModel,
 } from '../../src/crucible/llm/model-options';
 import { startFakeCrucible, type FakeCrucible } from '../fake-crucible/fake-crucible';
@@ -49,6 +50,9 @@ const MAC_MODELS: OptionModel[] = [
   row('qwen3.8-27b-8bit', 27, { contextDefault: 12288, maxModelLen: 12288 }),
 ];
 
+/** What the Mac Studio's GET /v1/resolve?verb=generate&max_params_b=27 answered (Crucible 2.0.16, 2026-10-19). */
+const MAC_CEILING: CeilingFacts = { ceilingB: 27, pick: { model: 'qwen3.8-27b-8bit', paramsB: 27, bits: 8, resident: false }, refusal: null };
+
 function macFacts(extra: Partial<AnalysisOptionFacts> = {}): AnalysisOptionFacts {
   return {
     server: 'owens-mac-studio',
@@ -58,6 +62,7 @@ function macFacts(extra: Partial<AnalysisOptionFacts> = {}): AnalysisOptionFacts
     pageReaders: ['dots-ocr'],
     ceilings: new Map([['qwen3.8-27b-8bit', 131072], ['qwen3.8-27b-4bit', 131072], ['qwen3.5-9b', 131072]]),
     analysis: { selected: 'qwen3.8-27b-8bit', route: 'local', enabled: true },
+    ceiling: MAC_CEILING,
     upstreams: { anthropic: { configured: false }, openai: { configured: false }, ollama: { configured: false } },
     listings: {},
     ...extra,
@@ -82,15 +87,16 @@ function everyUpstream(extra: Partial<AnalysisOptionFacts> = {}): AnalysisOption
 const resolve = (value: string, facts: AnalysisOptionFacts) => resolveStoredModel(value, facts, optionValues(buildAnalysisOptions(facts).groups));
 
 describe('the analysis options a server offers', () => {
-  it('a server with no upstream (the Mac as it is): only its analysis candidates that can load, under "On this Crucible"', () => {
+  it('a server with no upstream (the Mac as it is): the 27B ceiling first, then its analysis candidates that can load, under "On this Crucible"', () => {
     const built = buildAnalysisOptions(macFacts());
     expect(built.groups.map((g) => g.label)).toEqual(['On this Crucible']);
+    // The 27B quantisations are the ceiling option, labelled with today's pick, not options of their own.
     expect(built.groups[0].options.map((o) => [o.value, o.label, o.serverChoice])).toEqual([
-      ['local:qwen3.8-27b-8bit', 'qwen3.8-27b-8bit', true],
-      ['local:qwen3.8-27b-4bit', 'qwen3.8-27b-4bit', false],
+      ['local:max-27b', 'Biggest that fits, up to 27B (qwen3.8-27b-8bit)', true],
       ['local:qwen3.5-9b', 'qwen3.5-9b', false],
     ]);
-    expect(built.analysisDefault).toBe('local:qwen3.8-27b-8bit');
+    expect(built.groups[0].options[0]).toMatchObject({ sizeB: 27, resident: false });
+    expect(built.analysisDefault).toBe('local:max-27b');
     // No Claude, OpenAI or Ollama group at all: nothing the server does not offer.
     expect(JSON.stringify(built)).not.toMatch(/claude|openai|ollama/i);
   });
@@ -101,14 +107,14 @@ describe('the analysis options a server offers', () => {
       models: MAC_MODELS.map((m) => (m.id === 'qwen3.5-9b' ? { ...m, resident: true, loadable: false } : m)),
     });
     const options = buildAnalysisOptions(facts).groups[0].options;
-    expect(options.map((o) => o.value)).toEqual(['local:qwen3.8-27b-8bit', 'local:qwen3.5-9b']);
+    expect(options.map((o) => o.value)).toEqual(['local:max-27b', 'local:qwen3.5-9b']);
     expect(options[1].resident).toBe(true);
   });
 
   it('a server with every upstream: its own models, then Claude, OpenAI and Ollama via Crucible, named for the server when it is not this computer', () => {
     const built = buildAnalysisOptions(everyUpstream());
     expect(built.groups.map((g) => [g.kind, g.label, g.options.map((o) => o.value)])).toEqual([
-      ['server', 'On owens-pc', ['local:qwen3.8-27b-8bit', 'local:qwen3.8-27b-4bit', 'local:qwen3.5-9b']],
+      ['server', 'On owens-pc', ['local:max-27b', 'local:qwen3.5-9b']],
       ['anthropic', 'Claude via Crucible on owens-pc', ['claude:claude-sonnet-5', 'claude:claude-haiku-5']],
       ['openai', 'OpenAI via Crucible on owens-pc', ['openai:gpt-5.1', 'openai:o4-mini']],
       ['ollama', 'Ollama via Crucible on owens-pc', ['ollama:qwen3:14b', 'ollama:gemma3:27b']],
@@ -122,7 +128,8 @@ describe('the analysis options a server offers', () => {
       analysis: { selected: 'anthropic/claude-sonnet-5', route: 'upstream', enabled: true },
       listings: { anthropic: { ids: ['claude-sonnet-5'], error: null }, openai: { ids: null, error: 'The key was refused (401).' }, ollama: { ids: [], error: null } },
     }));
-    expect(built.analysisDefault).toBe('claude:claude-sonnet-5');
+    // Briefcase's default is the ceiling while the server offers one; the server's own pick is still marked.
+    expect(built.analysisDefault).toBe('local:max-27b');
     expect(built.groups[1].options[0]).toMatchObject({ serverChoice: true });
     expect(built.groups[2]).toMatchObject({ kind: 'openai', options: [], error: 'The key was refused (401).' });
   });
@@ -138,8 +145,16 @@ describe('the analysis options a server offers', () => {
   it('a server that states no candidates: its loadable text models that are not page readers', () => {
     const built = buildAnalysisOptions(macFacts({ classCandidates: null }));
     expect(built.groups[0].options.map((o) => o.value)).toEqual([
-      'local:qwen3.5-0.8b', 'local:qwen3.5-2b', 'local:qwen3.5-4b', 'local:qwen3.5-9b', 'local:qwen3.8-27b-4bit', 'local:qwen3.8-27b-8bit',
+      'local:max-27b', 'local:qwen3.5-0.8b', 'local:qwen3.5-2b', 'local:qwen3.5-4b', 'local:qwen3.5-9b',
     ]);
+  });
+
+  it('a server that refuses the ceiling, or was not asked: no ceiling option, and its own pick is the default unless that is a 27B', () => {
+    const refused = macFacts({ ceiling: { ceilingB: 27, pick: null, refusal: 'owens-mac-studio has no model up to 27B for this (nothing_fits_ceiling): nothing fits' } });
+    const built = buildAnalysisOptions(refused);
+    expect(built.groups[0].options.map((o) => o.value)).toEqual(['local:qwen3.5-9b']);
+    expect(built.analysisDefault).toBeNull();
+    expect(buildAnalysisOptions(macFacts({ ceiling: null, analysis: { selected: 'qwen3.5-9b', route: 'local', enabled: true } })).analysisDefault).toBe('local:qwen3.5-9b');
   });
 
   it('labels, values and the upstream filter', () => {
@@ -148,6 +163,7 @@ describe('the analysis options a server offers', () => {
     expect(optionValueOf('anthropic/claude-x')).toBe('claude:claude-x');
     expect(optionValueOf('ollama/qwen3.5:4b')).toBe('ollama:qwen3.5:4b');
     expect(optionValueOf('qwen3.5-9b')).toBe('local:qwen3.5-9b');
+    expect(optionValueOf('qwen3.8-27b-8bit')).toBe('local:max-27b');
     expect(isPickableUpstreamModel('openai', 'text-embedding-3-small')).toBe(false);
     expect(isPickableUpstreamModel('ollama', 'nomic-embed-text:latest')).toBe(false);
   });
@@ -158,11 +174,11 @@ describe('what a stored choice is among the options', () => {
     expect(resolve('local:qwen3.5-9b', macFacts())).toEqual({ value: 'local:qwen3.5-9b', option: 'local:qwen3.5-9b', note: null, unavailable: null });
   });
 
-  it('a legacy Ollama tag is the server\'s own copy of that model, the one the analysis runs (ollama-map)', () => {
+  it('a legacy Ollama tag is the server\'s own copy of that model (ollama-map); a 27B one is the ceiling', () => {
     expect(resolve('ollama:qwen3.8:27b', macFacts())).toEqual({
       value: 'ollama:qwen3.8:27b',
-      option: 'local:qwen3.8-27b-8bit',
-      note: "Saved as qwen3.8:27b (Ollama). It runs as qwen3.8-27b-8bit, owens-mac-studio's own copy of that model.",
+      option: 'local:max-27b',
+      note: 'Saved as qwen3.8:27b (Ollama). It now means the biggest model up to 27B that fits owens-mac-studio.',
       unavailable: null,
     });
     expect(resolve('ollama:qwen3.5:9b', macFacts()).option).toBe('local:qwen3.5-9b');
@@ -180,18 +196,25 @@ describe('what a stored choice is among the options', () => {
     expect(resolve('', facts)).toEqual({ value: '', option: null, note: null, unavailable: null });
   });
 
-  it('a saved 27B 4-bit choice is itself while the server has it, and runs as the 8-bit once it is removed', () => {
-    expect(resolve('local:qwen3.8-27b-4bit', macFacts())).toMatchObject({ option: 'local:qwen3.8-27b-4bit', note: null, unavailable: null });
-    const removed = macFacts({
-      models: MAC_MODELS.filter((m) => !m.id.startsWith('qwen3.8-27b-4bit')),
-      classCandidates: ['qwen3.8-27b-8bit', 'qwen3.5-9b'],
+  it('a saved 27B quantisation (4bit, 8bit, -vl, bare or local:) is the ceiling: the biggest model up to 27B the host fits', () => {
+    for (const saved of ['local:qwen3.8-27b-4bit', 'local:qwen3.8-27b-8bit', 'local:qwen3.8-27b-4bit-vl', 'qwen3.8-27b-8bit', 'crucible:qwen3.8-27b-4bit']) {
+      expect(resolve(saved, macFacts())).toEqual({
+        value: saved,
+        option: 'local:max-27b',
+        note: `Saved as ${saved}. It now means the biggest model up to 27B that fits (qwen3.8-27b-8bit on owens-mac-studio).`,
+        unavailable: null,
+      });
+    }
+    expect(resolve('local:max-27b', macFacts())).toEqual({ value: 'local:max-27b', option: 'local:max-27b', note: null, unavailable: null });
+  });
+
+  it('a ceiling the server refuses is unavailable with its sentence; another ceiling is not offered', () => {
+    const refusal = 'owens-pc has no model up to 27B for this (nothing_fits_ceiling): nothing fits';
+    expect(resolve('local:max-27b', macFacts({ ceiling: { ceilingB: 27, pick: null, refusal } }))).toEqual({
+      value: 'local:max-27b', option: null, note: null, unavailable: refusal,
     });
-    expect(resolve('local:qwen3.8-27b-4bit', removed)).toEqual({
-      value: 'local:qwen3.8-27b-4bit',
-      option: 'local:qwen3.8-27b-8bit',
-      note: 'Saved as qwen3.8-27b-4bit, which owens-mac-studio no longer has. It runs as qwen3.8-27b-8bit.',
-      unavailable: null,
-    });
+    expect(resolve('local:qwen3.8-27b-8bit', macFacts({ ceiling: null })).unavailable).toBe('owens-mac-studio did not say which model up to 27B it would pick.');
+    expect(resolve('local:max-9b', macFacts()).unavailable).toBe('Briefcase offers the biggest model up to 27B, not up to 9B. Pick another model.');
   });
 
   it('a saved value the server offers nothing for is unavailable, with the reason, never another model', () => {
@@ -220,8 +243,9 @@ describe('CrucibleAiService.models, end to end against the fake', () => {
   let fake: FakeCrucible;
   afterEach(() => fake?.close());
 
+  // A server too old for ceilings unless a spec says otherwise, so each spec sees only what it is about.
   async function service(options: Parameters<typeof startFakeCrucible>[0], local = true) {
-    fake = await startFakeCrucible({ name: 'crucible@mac', ...options });
+    fake = await startFakeCrucible({ name: 'crucible@mac', ceilings: false, ...options });
     const host = pairingHost(local ? pairingLineFor('crucible@mac', fake.url, fake.token) : null);
     const h = harness(host);
     h.registry.add({ name: 'mac', url: fake.url, token: fake.token });
@@ -245,6 +269,7 @@ describe('CrucibleAiService.models, end to end against the fake', () => {
   it('adding a Claude key in Settings: Claude is listed, a saved Claude choice becomes available, and a chat on it goes to Claude through the server', async () => {
     fake = await startFakeCrucible({
       name: 'crucible@mac',
+      ceilings: false,
       models: [{ id: 'qwen3.5-9b', paramsB: 9 }],
       upstreamModels: { anthropic: ['claude-sonnet-5'] },
     });
@@ -306,6 +331,24 @@ describe('CrucibleAiService.models, end to end against the fake', () => {
     const view = await ai.models(undefined, ['local:qwen3.5-2b']);
     expect(view.groups[0].options.map((o) => o.value)).toEqual(['local:qwen3.5-9b']);
     expect(view.resolved[0].unavailable).toBe('mac does not offer qwen3.5-2b for analysis. Pick one it offers.');
+  });
+
+  it('a 2.0 server: the ceiling option names what GET /v1/resolve picks, and a saved 27B reads as it', async () => {
+    const ai = await service({
+      ceilings: {},
+      models: [{ id: 'qwen3.5-9b', paramsB: 9 }, { id: 'qwen3.8-27b-4bit', paramsB: 27 }, { id: 'qwen3.8-27b-8bit', paramsB: 27, installed: false }],
+    });
+    const view = await ai.models(undefined, ['local:qwen3.8-27b-8bit']);
+    expect(view.groups[0].options.map((o) => [o.value, o.label])).toEqual([
+      ['local:max-27b', 'Biggest that fits, up to 27B (qwen3.8-27b-4bit)'],
+      ['local:qwen3.5-9b', 'qwen3.5-9b'],
+    ]);
+    expect(view.analysisDefault).toBe('local:max-27b');
+    expect(view.resolved[0]).toMatchObject({ option: 'local:max-27b', unavailable: null });
+    expect(fake.requestsTo('/v1/resolve', 'GET')[0].query).toBe('verb=generate&max_params_b=27');
+    // Nothing was loaded to answer it.
+    expect(fake.jobs).toHaveLength(0);
+    expect(fake.sessions.opened).toHaveLength(0);
   });
 
   it('with no server answering: no options, the reason, and every asked value unavailable with it', async () => {

@@ -36,7 +36,7 @@ import { AIProviderService, AIProviderConfig, AIGenerateOverrides } from './ai-p
 import { ensureNotCancelled, isCancellation, stopsTheRun } from './cancellation';
 import { isParked } from '../crucible/llm/errors';
 import { estimateNumCtx, numCtxMaxForModel, parseProviderModel, AITaskKind } from './model-utils';
-import { crucibleTargetOf } from '../crucible/llm/target';
+import { crucibleTargetOf, storedChoice } from '../crucible/llm/target';
 import { CRUCIBLE_OLLAMA_CONTEXT } from '../crucible/llm/ollama-map';
 import { assembleSentences, FlagWindow, RankedSentence, WindowCategory } from './flag-windows';
 import {
@@ -744,7 +744,7 @@ export class AIAnalysisService {
     if (!model || (provider === base.provider && model === base.model)) return base;
 
     this.logger.log(`[TaskModels] ${task} -> ${provider}:${model}`);
-    return { ...base, provider, model };
+    return storedChoice({ ...base, provider, model });
   }
 
   /**
@@ -993,7 +993,8 @@ export class AIAnalysisService {
         'utf-8',
       );
 
-      const aiConfig: AIProviderConfig = { provider, model };
+      // A stored 27B quantisation runs as the 27B ceiling (target.ts storedChoice), read once here.
+      const aiConfig: AIProviderConfig = storedChoice({ provider, model });
 
       // Per-task model routing. Metadata tasks are narrow and cheap, so they can
       // run on a small fast model while chapter work keeps the big one. The three

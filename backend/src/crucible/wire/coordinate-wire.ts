@@ -67,14 +67,6 @@ export interface CrucibleModuleProgress {
   readonly unmet: readonly CrucibleUnmetClass[] | null;
 }
 
-/** Who holds the card, in the server's own words. Shown verbatim, never as a failure. */
-export interface CrucibleCoordinationHolder {
-  /** `a job`, `a lease`, `the claim` or `a chat`. Always stated. */
-  readonly fact: string;
-  /** Who, in the server's words; null when it did not name them (the SDK's CrucibleCardHeld.who). */
-  readonly who: string | null;
-}
-
 export type CrucibleCoordinationState =
   /** Held back until the first-run wizard finishes, so the user decides before any pull. */
   | { readonly server: string; readonly phase: 'deferred'; readonly reason: 'first-run' }
@@ -90,17 +82,6 @@ export type CrucibleCoordinationState =
       readonly unmet: readonly CrucibleUnmetClass[];
       readonly progress: CrucibleModuleProgress;
       readonly followed: boolean;
-    }
-  /** `409 server_busy`: the card is held. A wait with the holder named, never a failure. */
-  | {
-      readonly server: string;
-      readonly phase: 'waiting';
-      readonly missing: readonly CrucibleMissingEntry[];
-      readonly unmet: readonly CrucibleUnmetClass[];
-      readonly holder: CrucibleCoordinationHolder;
-      readonly attempts: number;
-      /** The wait gave up asking; the next connect starts it again. */
-      readonly stopped: boolean;
     }
   /** A refusal about the REQUEST (`invalid_module`, `unknown_subject`). Once, by name, remembered. */
   | { readonly server: string; readonly phase: 'refused'; readonly code: string; readonly message: string }

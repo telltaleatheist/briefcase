@@ -153,7 +153,7 @@ export class CrucibleDoorsComponent implements OnInit {
   }
 
   unmet(state: CrucibleCoordinationState): string | null {
-    return state.phase === 'stocked' || state.phase === 'preparing' || state.phase === 'waiting' ? unmetLine(state.unmet) : null;
+    return state.phase === 'stocked' || state.phase === 'preparing' ? unmetLine(state.unmet) : null;
   }
 
   openReadme(): void {

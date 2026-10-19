@@ -10,6 +10,19 @@
  *   ollama:<id>           → ollama/<id>        upstream
  *   local:<id>            → <id>               a model in the server's own catalog
  *   crucible:<id>         → <id>               (the same, spelled for Crucible)
+ *   local:max-<N>b        → a SIZE CEILING     the biggest model the serving Crucible
+ *                                              fits, up to N billion parameters
+ *                                              (Crucible 2.0.1+: verb `generate` +
+ *                                              `max_params_b`); which model that is
+ *                                              is the server's answer, read per run
+ *                                              (CrucibleChatService.effectiveTarget)
+ *   local:qwen3.8-27b-…   → local:max-27b      a STORED 27B quantisation (4bit, 8bit,
+ *                                              -vl) means "the best 27B this host
+ *                                              has" (the user, 2026-10-19). Read so
+ *                                              by {@link storedChoice} where a stored
+ *                                              choice enters (the analysis, the queue,
+ *                                              the pickers); a model id a server
+ *                                              names is always that one model
  *   anthropic/… openai/… ollama/…             already Crucible's, taken as they are
  *
  * THE PARAMETER RULES (migration plan §6.1), in one place so a spec can pin them:
@@ -48,6 +61,71 @@ export interface CrucibleTarget {
   upstream: UpstreamName | null;
   /** The id without any prefix, for pricing and display. */
   bareModel: string;
+  /**
+   * A size ceiling, in billions of parameters: `model` is not a catalog id but
+   * the stored spelling (`max-27b`), and the serving Crucible picks the model
+   * (the biggest that fits, up to this). Absent on every other target.
+   */
+  ceilingB?: number;
+}
+
+/** The capability class (verb) a ceiling is asked for: open-ended chat, sized 8192 tokens x 1 in flight. */
+export const CEILING_VERB = 'generate';
+
+/** The stored spelling of a size ceiling: `max-27b` (the bare id of `local:max-27b`). */
+export function ceilingModelId(ceilingB: number): string {
+  return `max-${ceilingB}b`;
+}
+
+const CEILING_ID = /^max-(\d+(?:\.\d+)?)b$/;
+/**
+ * Stored 27B quantisations that read as the 27B ceiling: qwen3.8-27b,
+ * qwen3.8-27b-4bit, qwen3.8-27b-8bit and their -vl spellings.
+ */
+const QWEN_27B = /^qwen3\.8-27b(?:-\d+bit)?(?:-vl)?$/;
+
+/** The ceiling a bare local id spells (`max-27b`), or null when it names one model. */
+export function ceilingOf(bareId: string): number | null {
+  const own = CEILING_ID.exec(bareId);
+  if (!own) return null;
+  const value = Number(own[1]);
+  return value > 0 ? value : null;
+}
+
+/** The ceiling a STORED local id means: its own spelling, or a qwen3.8 27B quantisation (27). */
+export function storedCeilingOf(bareId: string): number | null {
+  return ceilingOf(bareId) ?? (QWEN_27B.test(bareId) ? 27 : null);
+}
+
+/**
+ * A stored `(provider, model)` choice as it is run: a local qwen3.8 27B
+ * quantisation becomes the 27B ceiling (`local`, `max-27b`); anything else is
+ * returned as it is. `model` may carry its own `local:`/`crucible:` prefix.
+ */
+export function storedChoice<T extends { provider: string; model: string }>(choice: T): T {
+  const prov = (choice.provider ?? '').trim().toLowerCase();
+  let bare = (choice.model ?? '').trim();
+  const prefix = /^(local|crucible):(.+)$/i.exec(bare);
+  if (prefix) {
+    if (prov !== '' && prov !== 'local' && prov !== 'crucible') return choice;
+    bare = prefix[2];
+  } else if (prov !== '' && prov !== 'local' && prov !== 'crucible') {
+    return choice;
+  }
+  const ceiling = storedCeilingOf(bare);
+  if (ceiling === null) return choice;
+  return { ...choice, provider: 'local', model: ceilingModelId(ceiling) };
+}
+
+/** The target of a size ceiling. */
+export function ceilingTarget(ceilingB: number): CrucibleTarget {
+  const id = ceilingModelId(ceilingB);
+  return { model: id, route: 'local', upstream: null, bareModel: id, ceilingB };
+}
+
+/** How a ceiling is said to a person: "the biggest model up to 27B". */
+export function ceilingWords(ceilingB: number): string {
+  return `the biggest model up to ${ceilingB}B`;
 }
 
 const PROVIDER_TO_UPSTREAM: Record<string, UpstreamName> = {
@@ -97,22 +175,13 @@ export function crucibleTargetOf(provider: string | undefined, model: string): C
 
   const upstream = PROVIDER_TO_UPSTREAM[prov];
   if (upstream !== undefined) return { model: `${upstream}/${bare}`, route: 'upstream', upstream, bareModel: bare };
-  if (prov === 'local' || prov === 'crucible' || prov === '') return { model: bare, route: 'local', upstream: null, bareModel: bare };
+  if (prov === 'local' || prov === 'crucible' || prov === '') {
+    const ceiling = ceilingOf(bare);
+    if (ceiling !== null) return ceilingTarget(ceiling);
+    return { model: bare, route: 'local', upstream: null, bareModel: bare };
+  }
   throw new CrucibleTargetError(`"${provider}" is not an AI provider Briefcase knows (claude, openai, ollama, or a Crucible model).`);
 }
-
-/**
- * Crucible models a server stops carrying, and the model a choice saved as one
- * runs as instead. Consulted only when the server no longer offers the retired
- * model installed (CrucibleChatService.effectiveTarget, resolveStoredModel), so
- * nothing changes while it is still there.
- *
- * qwen3.8-27b-4bit: the user, 2026-09-28: "we're about to remove the 4 bit 27b
- * from crucible on mac. we're migrating to the 8 bit 27b."
- */
-export const RETIRED_LOCAL_MODELS: Readonly<Record<string, string>> = {
-  'qwen3.8-27b-4bit': 'qwen3.8-27b-8bit',
-};
 
 /** Cloud upstreams: the ones that are never sent a sampling parameter. */
 export function isCloudTarget(target: CrucibleTarget): boolean {

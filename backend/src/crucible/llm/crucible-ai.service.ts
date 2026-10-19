@@ -29,15 +29,17 @@ import type {
   KeyCopyOutcome,
   LegacyKeysView,
 } from '../wire/ai-wire';
-import { CrucibleChatService } from './crucible-chat.service';
-import type { UpstreamName } from './target';
+import { CEILING_FEATURE, CrucibleChatService } from './crucible-chat.service';
+import { CEILING_VERB, type UpstreamName } from './target';
 import {
+  ANALYSIS_CEILING_B,
   UPSTREAM_ORDER,
   UPSTREAM_WORDS,
   buildAnalysisOptions,
   optionValues,
   resolveStoredModel,
   type AnalysisOptionFacts,
+  type CeilingFacts,
   type UpstreamListing,
 } from './model-options';
 
@@ -146,6 +148,7 @@ export class CrucibleAiService {
     } catch {
       analysis = null;
     }
+    const ceiling = await this.ceilingFacts(server);
     const listings: Partial<Record<UpstreamName, UpstreamListing>> = {};
     for (const upstream of UPSTREAM_ORDER) {
       if (view.upstreams[upstream]?.configured === true) listings[upstream] = await this.upstreamIds(server, upstream);
@@ -159,6 +162,7 @@ export class CrucibleAiService {
       pageReaders,
       ceilings,
       analysis,
+      ceiling,
       upstreams: {
         anthropic: view.upstreams.anthropic === null ? null : { configured: view.upstreams.anthropic.configured },
         openai: view.upstreams.openai === null ? null : { configured: view.upstreams.openai.configured },
@@ -167,6 +171,30 @@ export class CrucibleAiService {
       listings,
     };
     return { facts, upstreams: view.upstreams };
+  }
+
+  /**
+   * What `server` picks for the analysis ceiling today (`GET /v1/resolve`,
+   * verb generate, max_params_b 27): nothing is loaded. A server too old to take a
+   * ceiling, a refusal, or a read that fails is a sentence, never a guess.
+   */
+  private async ceilingFacts(server: string): Promise<CeilingFacts> {
+    const ceilingB = ANALYSIS_CEILING_B;
+    try {
+      const client = await this.servers.clientFor(server);
+      if (!(await client.has(CEILING_FEATURE))) {
+        return { ceilingB, pick: null, refusal: `${server} is too old to pick the biggest model up to ${ceilingB}B (it needs Crucible 2.0.1 or newer).` };
+      }
+      const preview = await client.resolve({ verb: CEILING_VERB, maxParamsB: ceilingB });
+      if (preview.refused !== null) {
+        return { ceilingB, pick: null, refusal: `${server} has no model up to ${ceilingB}B for this (${preview.refused.code}): ${preview.refused.message}` };
+      }
+      if (preview.model === null) return { ceilingB, pick: null, refusal: `${server} did not name a model up to ${ceilingB}B.` };
+      return { ceilingB, pick: { model: preview.model, paramsB: preview.paramsB, bits: preview.bits, resident: preview.resident }, refusal: null };
+    } catch (err) {
+      this.logger.warn(`[${server}] asking which model up to ${ceilingB}B it picks failed: ${(err as Error).message}`);
+      return { ceilingB, pick: null, refusal: `${server} could not be asked which model up to ${ceilingB}B it picks: ${(err as Error).message}` };
+    }
   }
 
   private async upstreamIds(server: string, upstream: UpstreamName): Promise<UpstreamListing> {

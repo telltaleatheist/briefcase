@@ -11,6 +11,7 @@ import {
   CLOUD_FORBIDDEN_KEYS,
   crucibleTargetOf,
   responseFormatFor,
+  storedChoice,
 } from '../../src/crucible/llm/target';
 import { tempDir } from './helpers';
 
@@ -32,6 +33,36 @@ describe('crucibleTargetOf: Briefcase provider:model → Crucible model', () => 
   ])('%s + %s → %s', (provider, model, crucible, route, upstream) => {
     const target = crucibleTargetOf(provider, model);
     expect(target).toMatchObject({ model: crucible, route, upstream });
+  });
+
+  it('a size ceiling: local:max-27b (any spelling) is a ceiling target, never a catalog id', () => {
+    for (const [provider, model] of [['local', 'max-27b'], [undefined, 'local:max-27b'], [undefined, 'max-27b'], ['crucible', 'max-27b']] as const) {
+      expect(crucibleTargetOf(provider, model)).toEqual({ model: 'max-27b', route: 'local', upstream: null, bareModel: 'max-27b', ceilingB: 27 });
+    }
+    expect(crucibleTargetOf('local', 'max-9.5b')).toMatchObject({ ceilingB: 9.5 });
+    // A model id a server names is that one model: only a STORED choice reads as the ceiling.
+    expect(crucibleTargetOf('local', 'qwen3.8-27b-4bit')).toEqual({ model: 'qwen3.8-27b-4bit', route: 'local', upstream: null, bareModel: 'qwen3.8-27b-4bit' });
+    expect(crucibleTargetOf('local', 'max-0b').ceilingB).toBeUndefined();
+  });
+
+  it('storedChoice: a stored qwen3.8 27B quantisation is the 27B ceiling; everything else is kept as stored', () => {
+    for (const [provider, model] of [
+      ['local', 'qwen3.8-27b-8bit'], ['local', 'qwen3.8-27b-4bit'], ['local', 'qwen3.8-27b-4bit-vl'], ['local', 'qwen3.8-27b'],
+      ['', 'local:qwen3.8-27b-8bit'], ['crucible', 'qwen3.8-27b-4bit'], ['local', 'local:qwen3.8-27b-4bit'], ['local', 'max-27b'],
+    ]) {
+      expect(storedChoice({ provider, model })).toEqual({ provider: 'local', model: 'max-27b' });
+    }
+    for (const choice of [
+      { provider: 'local', model: 'qwen3.5-9b' },
+      { provider: 'ollama', model: 'qwen3.8:27b' },
+      { provider: 'claude', model: 'claude-sonnet-5' },
+      { provider: 'ollama', model: 'local:qwen3.8-27b-8bit' },
+      { provider: 'local', model: 'qwen3.8-27b-8bit-extra' },
+    ]) {
+      expect(storedChoice(choice)).toBe(choice);
+    }
+    // Other fields of a config ride along.
+    expect(storedChoice({ provider: 'local', model: 'qwen3.8-27b-8bit', apiKey: 'k' })).toEqual({ provider: 'local', model: 'max-27b', apiKey: 'k' });
   });
 
   it('refuses an empty model and an unknown provider by name', () => {

@@ -4,6 +4,7 @@
  * with Retry-After, the typed busy error on 409, cancel mid-request and
  * mid-load, and exactly what each body carried.
  */
+import { Logger } from '@nestjs/common';
 import { CRUCIBLE_CLIENT_NAME } from '../../src/crucible/client-factory';
 import { CrucibleServersService } from '../../src/crucible/crucible-servers.service';
 import { CrucibleChatService } from '../../src/crucible/llm/crucible-chat.service';
@@ -70,16 +71,104 @@ describe('CrucibleChatService: one server', () => {
     expect(fake.chatBodies()[0]).not.toHaveProperty('chat_template_kwargs');
   });
 
-  it('a saved 27B 4-bit runs as the 8-bit once the server no longer has it, and as itself while it does', async () => {
-    await start({ models: [{ id: 'qwen3.8-27b-4bit', paramsB: 27, installed: false }, { id: 'qwen3.8-27b-8bit', paramsB: 27 }] });
-    await chat.chat({ model: 'local:qwen3.8-27b-4bit', prompt: 'x' });
-    expect(fake.jobs.map((j) => [j.type, j.model])).toEqual([['load-model', 'qwen3.8-27b-8bit']]);
-    expect(fake.chatBodies()[0]).toMatchObject({ model: 'qwen3.8-27b-8bit' });
-    await fake.close();
+  // ── a size ceiling (local:max-27b): the server picks, the run names its pick ──
+  const PC_27B: FakeCrucibleOptions['models'] = [
+    { id: 'qwen3.5-9b', paramsB: 9 },
+    { id: 'qwen3.8-27b-4bit', paramsB: 27, contextDefault: 16384, maxModelLen: 16384 },
+    { id: 'qwen3.8-27b-8bit', paramsB: 27, installed: false },
+  ];
 
-    await start({ models: [{ id: 'qwen3.8-27b-4bit', paramsB: 27 }, { id: 'qwen3.8-27b-8bit', paramsB: 27 }] });
-    await chat.chat({ model: 'local:qwen3.8-27b-4bit', prompt: 'x' });
+  it('a ceiling in a run: the session opens with act generate + max_params_b, and every chat names the model it opened with', async () => {
+    await start({ models: PC_27B });
+    const logged: string[] = [];
+    const spy = jest.spyOn(Logger.prototype, 'log').mockImplementation(function (this: unknown, message: unknown) { logged.push(String(message)); });
+    const told: string[] = [];
+    try {
+      await chat.withRun(async () => {
+        const first = await chat.chat({ model: 'local:max-27b', prompt: 'one' });
+        const second = await chat.chat({ model: 'local:max-27b', prompt: 'two' });
+        expect([first.model, second.model]).toEqual(['qwen3.8-27b-4bit', 'qwen3.8-27b-4bit']);
+        expect(first.target).toMatchObject({ model: 'qwen3.8-27b-4bit', route: 'local' });
+      }, { onWaiting: (line) => told.push(line) });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(fake.requestsTo('/v1/queue/sessions', 'POST').map((r) => r.body)).toEqual([{ act: 'generate', max_params_b: 27 }]);
+    expect(fake.sessions.opened).toEqual([{ sessionId: 'ses-1', client: CRUCIBLE_CLIENT_NAME, act: 'generate', maxParamsB: 27, model: 'qwen3.8-27b-4bit' }]);
+    // Loaded by the session's open, so no load job; chats do not inherit it, so each names it.
+    expect(fake.jobs).toHaveLength(0);
+    expect(fake.chatBodies().map((b) => b['model'])).toEqual(['qwen3.8-27b-4bit', 'qwen3.8-27b-4bit']);
+    expect(fake.chatBodies().some((b) => 'max_params_b' in b || 'verb' in b)).toBe(false);
+    expect(fake.requestsTo('/v1/openai/chat/completions').map((r) => r.headers['x-crucible-act'])).toEqual(['generate', 'generate']);
+    // The pick is said in the log (once) and on the task.
+    expect(logged.filter((m) => /max-27b: Crucible chose qwen3\.8-27b-4bit/.test(m))).toHaveLength(1);
+    expect(told).toContain('Crucible on mac chose qwen3.8-27b-4bit (the biggest model up to 27B that fits)');
+    expect(fake.sessions.closed).toEqual([{ sessionId: 'ses-1', reason: 'client' }]);
+  });
+
+  it('a ceiling outside a run asks GET /v1/resolve, loads the pick by name and chats with it', async () => {
+    await start({ models: PC_27B });
+    const result = await chat.chat({ model: 'max-27b', provider: 'local', prompt: 'x' });
+    expect(result.model).toBe('qwen3.8-27b-4bit');
+    const [resolve] = fake.requestsTo('/v1/resolve', 'GET');
+    expect(resolve.query).toMatch(/verb=generate/);
+    expect(resolve.query).toMatch(/max_params_b=27/);
+    expect(fake.jobs.map((j) => [j.type, j.model])).toEqual([['load-model', 'qwen3.8-27b-4bit']]);
     expect(fake.chatBodies()[0]).toMatchObject({ model: 'qwen3.8-27b-4bit' });
+    expect(fake.sessions.opened).toHaveLength(0);
+  });
+
+  it('a ceiling whose run already holds a session asks resolve, and loads the pick in that session', async () => {
+    await start({ models: PC_27B });
+    await chat.withRun(async () => {
+      await chat.chat({ model: 'qwen3.5-9b', prompt: 'a' });
+      await chat.chat({ model: 'local:max-27b', prompt: 'b' });
+    });
+    expect(fake.requestsTo('/v1/queue/sessions', 'POST').map((r) => r.body)).toEqual([{ act: 'analysis' }]);
+    expect(fake.requestsTo('/v1/resolve', 'GET')).toHaveLength(1);
+    expect(fake.jobs.map((j) => j.model)).toEqual(['qwen3.5-9b', 'qwen3.8-27b-4bit']);
+    expect(fake.chatBodies().map((b) => b['model'])).toEqual(['qwen3.5-9b', 'qwen3.8-27b-4bit']);
+  });
+
+  it('nothing fits the ceiling: an error by its code naming the server, and nothing else is tried', async () => {
+    await start({ models: PC_27B, ceilings: { pick: () => null } });
+    const inRun = await chat.withRun(() => chat.chat({ model: 'local:max-27b', prompt: 'x' })).catch((e) => e);
+    expect(inRun).toBeInstanceOf(CrucibleChatError);
+    expect(inRun).toMatchObject({ code: 'nothing_fits_ceiling', server: 'mac' });
+    expect(inRun.message).toMatch(/No model up to 27B fits on Crucible "mac"/);
+    const outside = await chat.chat({ model: 'local:max-27b', prompt: 'x' }).catch((e) => e);
+    expect(outside).toMatchObject({ code: 'nothing_fits_ceiling' });
+    expect(fake.chatBodies()).toHaveLength(0);
+    expect(fake.jobs).toHaveLength(0);
+  });
+
+  it('a server too old for ceilings (no chat.verbs) is refused by name, before anything is sent', async () => {
+    await start({ models: PC_27B, ceilings: false });
+    const failure = await chat.withRun(() => chat.chat({ model: 'local:max-27b', prompt: 'x' })).catch((e) => e);
+    expect(failure).toMatchObject({ code: 'ceiling_unsupported' });
+    expect(failure.message).toMatch(/2\.0\.1/);
+    expect(fake.requestsTo('/v1/queue/sessions', 'POST')).toHaveLength(0);
+    expect(fake.chatBodies()).toHaveLength(0);
+  });
+
+  it('withModel on a ceiling (the queue reservation) opens the session with it and holds its pick', async () => {
+    await start({ models: PC_27B });
+    await chat.withModel('mac', 'max-27b', async (held) => {
+      expect(held).toMatchObject({ server: 'mac', model: 'qwen3.8-27b-4bit', target: { model: 'qwen3.8-27b-4bit', route: 'local' } });
+      await chat.chat({ model: 'local:max-27b', prompt: 'x' });
+      expect(chat.heldInRun()).toEqual([{ server: 'mac', model: 'qwen3.8-27b-4bit', sessionId: 'ses-1' }]);
+    });
+    expect(fake.sessions.opened).toHaveLength(1);
+    expect(fake.sessions.opened[0]).toMatchObject({ act: 'generate', maxParamsB: 27 });
+    expect(fake.jobs).toHaveLength(0);
+    expect(fake.chatBodies().map((b) => b['model'])).toEqual(['qwen3.8-27b-4bit']);
+  });
+
+  it('a concrete 27B id is that one model (only a STORED choice reads as the ceiling)', async () => {
+    await start({ models: [{ id: 'qwen3.8-27b-4bit', paramsB: 27 }, { id: 'qwen3.8-27b-8bit', paramsB: 27 }] });
+    await chat.chat({ model: 'local:qwen3.8-27b-8bit', prompt: 'x' });
+    expect(fake.chatBodies()[0]).toMatchObject({ model: 'qwen3.8-27b-8bit' });
+    expect(fake.requestsTo('/v1/resolve', 'GET')).toHaveLength(0);
   });
 
   it('withModel: opens one queue session, loads in it, touches it, closes it when the run ends', async () => {
