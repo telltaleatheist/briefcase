@@ -1146,8 +1146,15 @@ export class CrucibleChatService {
       if (err instanceof CrucibleSessionClosed) {
         // A session opened with a model (a size ceiling's) whose load failed: a failure, not a wait.
         if (err.reason === 'load_failed') {
-          throw new CrucibleChatError(500, 'load_failed', `Crucible "${server}" could not load the model for the session: ${err.serverMessage}`, server);
+          throw new CrucibleChatError(500, 'load_failed', `Crucible "${server}" could not load the model for the session: ${err.serverMessage}`, server, null, err.details);
         }
+        // The server's admission said no (a model whose KV cache this card cannot
+        // afford, ...). Crucible keeps a "not yet" (a busy card) waiting in its own
+        // line, so a session it ends `refused` would be refused again: a failure.
+        if (err.reason === 'refused') {
+          throw new CrucibleChatError(409, 'refused', `Crucible "${server}" refused the session: ${err.serverMessage}`, server, null, err.details);
+        }
+        // Taken out of the line (it waited too long, an operator, a restart): not now, never no.
         throw new CrucibleBusyError(server, `Crucible ended the wait for a session (${err.reason}): ${err.serverMessage}`);
       }
       throw this.asUnreachable(this.mapRefusal(err, server), server);

@@ -14,7 +14,7 @@ import { queuesWork } from '../../src/crucible/crucible-queue';
 import { CrucibleServersService } from '../../src/crucible/crucible-servers.service';
 import { InFlightLedger } from '../../src/crucible/in-flight-ledger';
 import { CrucibleChatService } from '../../src/crucible/llm/crucible-chat.service';
-import { CrucibleBusyError, CrucibleChatCancelled, CrucibleParkedError } from '../../src/crucible/llm/errors';
+import { CrucibleBusyError, CrucibleChatCancelled, CrucibleChatError, CrucibleParkedError } from '../../src/crucible/llm/errors';
 import { startFakeCrucible, stockedForBriefcase, type FakeCrucible, type FakeCrucibleOptions } from '../fake-crucible/fake-crucible';
 import { harness } from './harness';
 import { tempDir } from './helpers';
@@ -101,6 +101,17 @@ describe('a run\'s queue session in Crucible\'s line (1.0.76)', () => {
     const err = await reserve(chat).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(CrucibleBusyError);
     expect((err as CrucibleBusyError).busyLine).toContain('Crucible ended the wait for a session (expired)');
+  });
+
+  it('refused at the front of the line is a failure with the server\'s reason, never busy', async () => {
+    const { fake, chat } = await rig({ resident: 'qwen3.5-9b' });
+    const message = 'cannot give qwen3.5-9b a KV cache at 16384 tokens: ... This card affords 14_247 tokens';
+    fake.inject({ queueLine: { positions: [1], then: { refused: { code: 'context_unaffordable', message } }, stepMs: 5 } });
+    const err = await reserve(chat).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(CrucibleChatError);
+    expect(err).not.toBeInstanceOf(CrucibleBusyError);
+    expect(err).toMatchObject({ status: 409, code: 'refused', server: 'mac', message: `Crucible "mac" refused the session: ${message}` });
+    expect(fake.openSession()).toBeNull();
   });
 
   it('a cancel while it waits takes it out of the line: cancelled, and nothing left open', async () => {

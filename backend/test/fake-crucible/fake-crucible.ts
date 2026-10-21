@@ -149,10 +149,13 @@ export interface NamedFaults {
    * submit runs as before. `stepMs` apart (default 5). 1.0.76: a queue
    * session waits the same way (its own stream says `queued`/`moved`, GET
    * /v1/queue lists it as kind "session"), then opens, or is `removed`.
+   * `refused`: at the front, admission says no (the server's line `fail`): a
+   * session is removed with reason `refused` and the refusal as its `error`, a
+   * job fails with it.
    */
   queueLine?: {
     positions: number[];
-    then: 'start' | { removed: 'expired' | 'operator' | 'server_restart' };
+    then: 'start' | { removed: 'expired' | 'operator' | 'server_restart' } | { refused: { code: string; message: string } };
     stepMs?: number;
     /** 1.0.82+: at the front, a `waiting` event naming a foreign holder of the card (a job's stream, or an opening session's). */
     waitingFor?: string;
@@ -1207,11 +1210,11 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
   }
 
   /** End a waiting or open session; the next waiting one opens. */
-  function endSessionRow(row: FakeSession, reason: string): void {
+  function endSessionRow(row: FakeSession, reason: string, refusal: { code: string; message: string } | null = null): void {
     const wasOpen = row.status === 'open';
     row.status = 'closed';
     row.reason = reason;
-    row.message = `queue session ${row.id} ended (${reason})`;
+    row.message = refusal?.message ?? `queue session ${row.id} ended (${reason})`;
     row.closedAt = '2026-09-30T12:01:00Z';
     sessionLog.closed.push({ sessionId: row.id, reason });
     if (wasOpen) {
@@ -1220,7 +1223,7 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
       const next = sessionRows.find((x) => x.status === 'queued' && !x.heldBack);
       if (next !== undefined) openSessionRow(next);
     } else {
-      pushSessionEvent(row, 'removed', { reason, message: row.message });
+      pushSessionEvent(row, 'removed', { reason, message: row.message, ...(refusal === null ? {} : { error: refusal }) });
     }
   }
 
@@ -1286,7 +1289,8 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
           if (openSession === null) openSessionRow(row);
           return;
         }
-        endSessionRow(row, line.then.removed);
+        if ('refused' in line.then) endSessionRow(row, 'refused', line.then.refused);
+        else endSessionRow(row, line.then.removed);
       }, step * Math.max(1, line.positions.length) * 2).unref?.();
       send(res, 201, sessionDoc(row));
       return;
@@ -1405,6 +1409,11 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
       if (line.then === 'start') {
         pushJobEvent(job, 'started', { waited_s: 1 });
         go();
+        return;
+      }
+      if ('refused' in line.then) {
+        job.status = 'failed';
+        pushJobEvent(job, 'failed', { error: line.then.refused });
         return;
       }
       job.status = 'removed';

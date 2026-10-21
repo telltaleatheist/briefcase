@@ -193,6 +193,21 @@ describe('parking against the fake', () => {
     rig.qm.onModuleDestroy();
   });
 
+  it("a session Crucible refuses FAILS the task with the server's reason: never parked, never asked again", async () => {
+    await wire();
+    const message = 'cannot give qwen3.5-9b a KV cache at 16384 tokens: ... This card affords 14_247 tokens';
+    fake.inject({ queueLine: { positions: [1], then: { refused: { code: 'context_unaffordable', message } } } });
+    const rig = makeRig(lanes);
+    const id = rig.qm.addJob(analyzeJob('v1', 'local:qwen3.5-9b'));
+    await until(() => rig.qm.getJob(id)?.status === 'failed');
+    expect(rig.qm.getJob(id)?.parkedReason).toBeUndefined();
+    expect(rig.qm.getJob(id)?.error).toBe(`Crucible "mac" refused the session: ${message}`);
+    expect(rig.events.find((e) => e.name === 'task.failed')).toBeDefined();
+    expect(rig.media.started('analyze')).toHaveLength(0);
+    expect(rig.qm.getLanePool().size).toBe(0);
+    rig.qm.onModuleDestroy();
+  });
+
   it('a busy card met INSIDE the run (a second model) parks the task, closes its session, and keeps nothing', async () => {
     await wire();
     const rig = makeRig(lanes);
