@@ -193,13 +193,58 @@ describe('a whole analysis through Crucible', () => {
 
   it('a saved local:qwen3.8-27b-8bit on a host without it (the PC): the run opens its session as the 27B ceiling, every chat names the pick, sized at its context', async () => {
     await fake.close();
-    // The PC as it answered on 2026-10-19 (Crucible 2.0.16): the 4-bit 27B installed and served at 16K, the 8-bit not here.
+    const logged = await analyseOnThePc();
+    expect(fake.requestsTo('/v1/queue/sessions', 'POST').map((r) => r.body)).toEqual([{ act: 'generate', max_params_b: 27 }]);
+    expect(fake.chatBodies().length).toBeGreaterThan(1);
+    expect(fake.chatBodies().every((b) => b['model'] === 'qwen3.8-27b-4bit')).toBe(true);
+    expect(fake.requestsTo('/v1/openai/chat/completions').every((r) => r.headers['x-crucible-act'] === 'generate')).toBe(true);
+    // Loaded by the session's open: no load job, and no load context asked for.
+    expect(fake.jobs.filter((j) => j.type === 'load-model')).toHaveLength(0);
+    // Chunked for the context the session loaded the pick at (16K, its own default here), not the 32K analysis window.
+    expect(effectiveContexts(logged)).toEqual([16384]);
+    expect(logged.some((m) => /max-27b: Crucible chose qwen3\.8-27b-4bit.*loaded at 16384 tokens/.test(m))).toBe(true);
+    expect(fake.sessions.closed.map((x) => x.sessionId)).toEqual(fake.sessions.opened.map((x) => x.sessionId));
+  });
+
+  it('2.0.19: the pick loaded UNDER its stated context (the card fit 14247 of 16384): chunks follow the session\'s context, not the catalog\'s', async () => {
+    const logged = await analyseOnThePc((model) => (model === 'qwen3.8-27b-4bit' ? 14_247 : null));
+    expect(fake.sessions.opened).toEqual([expect.objectContaining({ model: 'qwen3.8-27b-4bit', context: 14_247 })]);
+    // Read off the session itself (GET /v1/queue/sessions/{id}), Crucible's word for what loaded.
+    expect(fake.requestsTo('/v1/queue/sessions/ses-1', 'GET').length).toBeGreaterThan(0);
+    expect(effectiveContexts(logged)).toEqual([14_247]);
+    expect(logged.some((m) => /Crucible chose qwen3\.8-27b-4bit.*loaded at 14247 tokens/.test(m))).toBe(true);
+    // Nothing reloaded it at the catalog's figure.
+    expect(fake.jobs.filter((j) => j.type === 'load-model')).toHaveLength(0);
+  });
+
+  it('2.0.19: the pick loaded AT its stated context: chunks follow the session\'s context, which is the same figure', async () => {
+    const logged = await analyseOnThePc(() => 16_384);
+    expect(fake.sessions.opened).toEqual([expect.objectContaining({ model: 'qwen3.8-27b-4bit', context: 16_384 })]);
+    expect(effectiveContexts(logged)).toEqual([16_384]);
+    expect(logged.some((m) => /Crucible chose qwen3\.8-27b-4bit.*loaded at 16384 tokens/.test(m))).toBe(true);
+  });
+
+  /** Every `[Model Limits] effective ctx=` figure logged, deduplicated. */
+  function effectiveContexts(logged: string[]): number[] {
+    return [...new Set(logged.map((m) => /^\[Model Limits\] effective ctx=(\d+):/.exec(m)?.[1]).filter((x): x is string => x !== undefined).map(Number))];
+  }
+
+  /**
+   * The PC as it answered on 2026-10-19, on Crucible 2.0.19: the 4-bit 27B
+   * installed and stated at 16K, the 8-bit not here. A saved 8-bit analysis
+   * runs as the 27B ceiling; `sessionContext` is what the session loads the
+   * pick at (default its own 16K). The log lines, for the caller to read.
+   */
+  async function analyseOnThePc(sessionContext?: (model: string) => number | null): Promise<string[]> {
+    await fake.close();
     fake = await startFakeCrucible({
+      version: '2.0.19',
       models: [
         { id: 'qwen3.5-9b', paramsB: 9, contextDefault: 16384, maxModelLen: 16384 },
         { id: 'qwen3.8-27b-4bit', paramsB: 27, contextDefault: 16384, maxModelLen: 16384 },
         { id: 'qwen3.8-27b-8bit', paramsB: 27, installed: false, contextDefault: 12288, maxModelLen: null },
       ],
+      ...(sessionContext === undefined ? {} : { sessionContext }),
       chatReplies: { '*': '{"title":"A chapter","summary":"About it.","verdict":"skip","flags":[],"people":[],"topics":["cooking"],"hook":"Hook.","body":"Body.","description":"Desc.","tags":["x"]}' },
     });
     h.registry.remove('mac');
@@ -212,17 +257,8 @@ describe('a whole analysis through Crucible', () => {
     } finally {
       spy.mockRestore();
     }
-    expect(fake.requestsTo('/v1/queue/sessions', 'POST').map((r) => r.body)).toEqual([{ act: 'generate', max_params_b: 27 }]);
-    expect(fake.chatBodies().length).toBeGreaterThan(1);
-    expect(fake.chatBodies().every((b) => b['model'] === 'qwen3.8-27b-4bit')).toBe(true);
-    expect(fake.requestsTo('/v1/openai/chat/completions').every((r) => r.headers['x-crucible-act'] === 'generate')).toBe(true);
-    // Loaded by the session's open: no load job, and no load context asked for.
-    expect(fake.jobs.filter((j) => j.type === 'load-model')).toHaveLength(0);
-    // Chunked for the pick's stated context (16K), not the 32K analysis window.
-    expect(logged.filter((m) => m.startsWith('[Model Limits] effective ctx=')).every((m) => m.startsWith('[Model Limits] effective ctx=16384:'))).toBe(true);
-    expect(logged.some((m) => /max-27b: Crucible chose qwen3\.8-27b-4bit/.test(m))).toBe(true);
-    expect(fake.sessions.closed.map((x) => x.sessionId)).toEqual(fake.sessions.opened.map((x) => x.sessionId));
-  });
+    return logged;
+  }
 
   it('REGRESSION (the version gate): an ollama/ model through a Crucible older than 1.0.24 is chunked for Ollama\'s default context (it can\'t send num_ctx), said once', async () => {
     await fake.close();

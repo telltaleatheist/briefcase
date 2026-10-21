@@ -169,13 +169,16 @@ export class AIProviderService {
 
   /**
    * The context window a Crucible local model is sized for in an analysis:
-   * the context this run loads it at (`loadContext`, ollama-map rule 4), else
-   * what the server STATES (CrucibleChatService.statedLocalContext: the row's
-   * served context, or this host's ceiling, which chat() then loads it at),
-   * capped at 32K (a larger chunk is slower on a local card for no gain).
-   * Never a guessed number: a server that states none of them is refused by
-   * name (CrucibleFieldMissing); a model it does not list is refused as
-   * unknown; a server that can't be read parks or fails as a chat would.
+   * the context this run loads it at (`loadContext`, ollama-map rule 4); else,
+   * for a size ceiling whose pick the run's queue session was opened with, the
+   * context that session REPORTS its model loaded at (EffectiveTarget.context:
+   * Crucible 2.0.19 may load it under its stated context when the card can't
+   * hold that); else what the server STATES (CrucibleChatService.statedLocalContext:
+   * the row's served context, or this host's ceiling, which chat() then loads
+   * it at). Capped at 32K (a larger chunk is slower on a local card for no
+   * gain). Never a guessed number: a server that states none of them is
+   * refused by name (CrucibleFieldMissing); a model it does not list is
+   * refused as unknown; a server that can't be read parks or fails as a chat would.
    */
   async crucibleContextWindow(model: string, loadContext?: number): Promise<number> {
     if (loadContext !== undefined) return Math.min(loadContext, CRUCIBLE_ANALYSIS_CONTEXT);
@@ -186,6 +189,7 @@ export class AIProviderService {
     try {
       // A size ceiling (local:max-27b) sizes as the model the server picks for it, on the server it picked it on.
       const chosen = await this.crucibleChat.effectiveTarget(target);
+      if (chosen.context !== undefined) return Math.min(chosen.context, CRUCIBLE_ANALYSIS_CONTEXT);
       target = chosen.target;
       venue = chosen.server ?? await this.crucibleChat.venueFor(target);
       listed = (await this.crucibleChat.modelsOn(venue)).some((m) => m.id === target.model);

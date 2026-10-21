@@ -7,6 +7,7 @@
 import { Logger } from '@nestjs/common';
 import { CRUCIBLE_CLIENT_NAME } from '../../src/crucible/client-factory';
 import { CrucibleServersService } from '../../src/crucible/crucible-servers.service';
+import { CrucibleFieldMissing } from '../../src/crucible/errors';
 import { CrucibleChatService } from '../../src/crucible/llm/crucible-chat.service';
 import { CrucibleBusyError, CrucibleChatCancelled, CrucibleChatError, CrucibleNoVenueError } from '../../src/crucible/llm/errors';
 import { CLOUD_FORBIDDEN_KEYS } from '../../src/crucible/llm/target';
@@ -77,9 +78,11 @@ describe('CrucibleChatService: one server', () => {
     { id: 'qwen3.8-27b-4bit', paramsB: 27, contextDefault: 16384, maxModelLen: 16384 },
     { id: 'qwen3.8-27b-8bit', paramsB: 27, installed: false },
   ];
+  /** A ceiling's session is opened only on a Crucible that reports the context it loaded the pick at. */
+  const SESSION_CONTEXT = '2.0.19';
 
   it('a ceiling in a run: the session opens with act generate + max_params_b, and every chat names the model it opened with', async () => {
-    await start({ models: PC_27B });
+    await start({ models: PC_27B, version: SESSION_CONTEXT });
     const logged: string[] = [];
     const spy = jest.spyOn(Logger.prototype, 'log').mockImplementation(function (this: unknown, message: unknown) { logged.push(String(message)); });
     const told: string[] = [];
@@ -94,7 +97,7 @@ describe('CrucibleChatService: one server', () => {
       spy.mockRestore();
     }
     expect(fake.requestsTo('/v1/queue/sessions', 'POST').map((r) => r.body)).toEqual([{ act: 'generate', max_params_b: 27 }]);
-    expect(fake.sessions.opened).toEqual([{ sessionId: 'ses-1', client: CRUCIBLE_CLIENT_NAME, act: 'generate', maxParamsB: 27, model: 'qwen3.8-27b-4bit' }]);
+    expect(fake.sessions.opened).toEqual([{ sessionId: 'ses-1', client: CRUCIBLE_CLIENT_NAME, act: 'generate', maxParamsB: 27, model: 'qwen3.8-27b-4bit', context: 16384 }]);
     // Loaded by the session's open, so no load job; chats do not inherit it, so each names it.
     expect(fake.jobs).toHaveLength(0);
     expect(fake.chatBodies().map((b) => b['model'])).toEqual(['qwen3.8-27b-4bit', 'qwen3.8-27b-4bit']);
@@ -102,6 +105,8 @@ describe('CrucibleChatService: one server', () => {
     expect(fake.requestsTo('/v1/openai/chat/completions').map((r) => r.headers['x-crucible-act'])).toEqual(['generate', 'generate']);
     // The pick is said in the log (once) and on the task.
     expect(logged.filter((m) => /max-27b: Crucible chose qwen3\.8-27b-4bit/.test(m))).toHaveLength(1);
+    // With the context the session reports it loaded the pick at.
+    expect(logged.filter((m) => /Crucible chose qwen3\.8-27b-4bit.*loaded at 16384 tokens/.test(m))).toHaveLength(1);
     expect(told).toContain('Crucible on mac chose qwen3.8-27b-4bit (the biggest model up to 27B that fits)');
     expect(fake.sessions.closed).toEqual([{ sessionId: 'ses-1', reason: 'client' }]);
   });
@@ -131,7 +136,7 @@ describe('CrucibleChatService: one server', () => {
   });
 
   it('nothing fits the ceiling: an error by its code naming the server, and nothing else is tried', async () => {
-    await start({ models: PC_27B, ceilings: { pick: () => null } });
+    await start({ models: PC_27B, ceilings: { pick: () => null }, version: SESSION_CONTEXT });
     const inRun = await chat.withRun(() => chat.chat({ model: 'local:max-27b', prompt: 'x' })).catch((e) => e);
     expect(inRun).toBeInstanceOf(CrucibleChatError);
     expect(inRun).toMatchObject({ code: 'nothing_fits_ceiling', server: 'mac' });
@@ -151,8 +156,27 @@ describe('CrucibleChatService: one server', () => {
     expect(fake.chatBodies()).toHaveLength(0);
   });
 
+  it('a ceiling in a run on a Crucible older than 2.0.19 (no session context) is refused by name, before a session is opened', async () => {
+    await start({ models: PC_27B, version: '2.0.18' });
+    const failure = await chat.withRun(() => chat.chat({ model: 'local:max-27b', prompt: 'x' })).catch((e) => e);
+    expect(failure).toBeInstanceOf(CrucibleChatError);
+    expect(failure).toMatchObject({ code: 'session_context_unsupported', server: 'mac' });
+    expect(failure.message).toMatch(/2\.0\.18, too old.*2\.0\.19/);
+    expect(fake.requestsTo('/v1/queue/sessions', 'POST')).toHaveLength(0);
+    expect(fake.chatBodies()).toHaveLength(0);
+  });
+
+  it('a ceiling session that opens with a model but states no context is refused by name, never sized from the catalog', async () => {
+    await start({ models: PC_27B, version: SESSION_CONTEXT, sessionContext: () => null });
+    const failure = await chat.withRun(() => chat.chat({ model: 'local:max-27b', prompt: 'x' })).catch((e) => e);
+    expect(failure).toBeInstanceOf(CrucibleFieldMissing);
+    expect(failure.message).toMatch(/context on its queue session ses-1/);
+    expect(fake.chatBodies()).toHaveLength(0);
+    expect(fake.sessions.closed.map((x) => x.sessionId)).toEqual(['ses-1']);
+  });
+
   it('withModel on a ceiling (the queue reservation) opens the session with it and holds its pick', async () => {
-    await start({ models: PC_27B });
+    await start({ models: PC_27B, version: SESSION_CONTEXT });
     await chat.withModel('mac', 'max-27b', async (held) => {
       expect(held).toMatchObject({ server: 'mac', model: 'qwen3.8-27b-4bit', target: { model: 'qwen3.8-27b-4bit', route: 'local' } });
       await chat.chat({ model: 'local:max-27b', prompt: 'x' });

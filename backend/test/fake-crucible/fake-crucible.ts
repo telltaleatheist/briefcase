@@ -204,6 +204,8 @@ interface FakeSession {
   heldBack?: boolean;
   /** 2.0.1: opened with a size ceiling; `model` is its pick. */
   maxParamsB?: number;
+  /** 2.0.19: the context its model was loaded at, set when it opens with one; null otherwise. */
+  context: number | null;
 }
 
 /** A job this fake ran, for a spec to assert on. */
@@ -429,6 +431,16 @@ export interface FakeCrucibleOptions {
    * ceiling, the first listed on a tie.
    */
   ceilings?: false | { pick?: (verb: string, maxParamsB: number) => string | null };
+  /**
+   * 2.0.19: the context a session opened with a model loads it at (its
+   * `context`, and the resident row's `max_model_len`). Default the model's
+   * own default, under its `maxModelLen`. A number under that is the card
+   * fitting it smaller; null is a session that states none (a broken server).
+   * Every session document carries `context`, whatever `version` says, as it
+   * carries the other 2.0 session fields: SDK 2.0.19 reads it on every session
+   * answer (its close included), so a document without it is unreadable.
+   */
+  sessionContext?: (model: string) => number | null;
   /** The model resident at start. Default none. */
   resident?: string | null;
   /** How long a load-model job takes. Default 20 ms. */
@@ -484,7 +496,7 @@ export interface FakeCrucible {
   readonly requests: RecordedRequest[];
   readonly faults: FaultLayer;
   /** Every queue session opened (any client), and how each ended. */
-  readonly sessions: { opened: Array<{ sessionId: string; client: string | null; act: string; maxParamsB?: number; model?: string | null }>; closed: Array<{ sessionId: string; reason: string }>; touches: string[] };
+  readonly sessions: { opened: Array<{ sessionId: string; client: string | null; act: string; maxParamsB?: number; model?: string | null; context?: number | null }>; closed: Array<{ sessionId: string; reason: string }>; touches: string[] };
   readonly settingsPuts: unknown[];
   /** Pairing requests this server has seen, with their device codes. */
   readonly pairings: Array<{ id: string; userCode: string; clientName: string; status: 'pending' | 'approved' | 'denied' | 'expired' }>;
@@ -1185,7 +1197,7 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
   function newSession(client: string | null, act: string, model: string | null): FakeSession {
     const row: FakeSession = {
       id: `ses-${nextSession++}`, client, act, model, status: 'queued', position: 1, reason: null, message: null,
-      events: [], openedAt: null, closedAt: null, itemsRun: 0,
+      events: [], openedAt: null, closedAt: null, itemsRun: 0, context: null,
     };
     sessionRows.push(row);
     return row;
@@ -1203,10 +1215,13 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
     openSession = row;
     if (row.model !== null) {
       resident = row.model;
-      residentCtx = null;
+      const info = models.find((m) => m.id === row.model);
+      const own = Math.min(info?.contextDefault ?? 32768, typeof info?.maxModelLen === 'number' ? info.maxModelLen : Infinity);
+      row.context = options.sessionContext === undefined ? own : options.sessionContext(row.model);
+      residentCtx = row.context;
     }
-    sessionLog.opened.push({ sessionId: row.id, client: row.client, act: row.act, ...(row.maxParamsB === undefined ? {} : { maxParamsB: row.maxParamsB, model: row.model }) });
-    pushSessionEvent(row, 'opened', { session_id: row.id });
+    sessionLog.opened.push({ sessionId: row.id, client: row.client, act: row.act, ...(row.maxParamsB === undefined ? {} : { maxParamsB: row.maxParamsB, model: row.model, context: row.context }) });
+    pushSessionEvent(row, 'opened', { session_id: row.id, model: row.model, load_job: null, context: row.context });
   }
 
   /** End a waiting or open session; the next waiting one opens. */
@@ -1229,7 +1244,7 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
 
   function sessionDoc(row: FakeSession): Record<string, unknown> {
     return {
-      session_id: row.id, status: row.status, act: row.act, client: row.client, model: row.model, position: row.position,
+      session_id: row.id, status: row.status, act: row.act, client: row.client, model: row.model, context: row.context, position: row.position,
       idle_s: 300, max_wait_s: 3600, created: '2026-09-30T12:00:00Z', opened_at: row.openedAt,
       idle_deadline: row.status === 'open' ? '2026-09-30T12:05:00Z' : null, first_work_deadline: null, max_hold_deadline: null, items_run: row.itemsRun,
       in_flight: [], stream_session: null, load_job: null, closed_at: row.closedAt, reason: row.reason, message: row.message, error: null,

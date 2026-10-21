@@ -1011,6 +1011,8 @@ export class AIAnalysisService {
       // routed model's context and silently truncate its prompt.
       // Through Crucible a 'local' model is one in the server's catalog, served
       // at the context its manifest sizes for this host: read it once per model.
+      // A size ceiling whose pick the run's session loaded is sized at the
+      // context that session reports (crucibleContextWindow).
       const crucibleLocalContext = new Map<string, number>();
       // An ollama choice the serving Crucible has a model of its own for runs
       // as that model (ollama-map.ts, decided again by chat() at call time):

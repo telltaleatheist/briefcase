@@ -115,7 +115,7 @@ describe('the reservation of a model the analysis engine does not read from', ()
 describe('the reservation of a size ceiling (a saved 27B)', () => {
   it('is placed as the ceiling, opens the run\'s session with act generate + max_params_b, and every call names the server\'s pick', async () => {
     await fake.close();
-    fake = await startFakeCrucible({ models: [{ id: 'qwen3.5-9b', paramsB: 9 }, { id: 'qwen3.8-27b-4bit', paramsB: 27 }, { id: 'qwen3.8-27b-8bit', paramsB: 27, installed: false }] });
+    fake = await startFakeCrucible({ models: [{ id: 'qwen3.5-9b', paramsB: 9 }, { id: 'qwen3.8-27b-4bit', paramsB: 27 }, { id: 'qwen3.8-27b-8bit', paramsB: 27, installed: false }], version: '2.0.19' });
     await wire();
     const rig = makeRig(lanes);
     rig.media.analyze = analysisThatCalls(['qwen3.8-27b-8bit', 'qwen3.8-27b-8bit']);
@@ -131,7 +131,7 @@ describe('the reservation of a size ceiling (a saved 27B)', () => {
 
   it('nothing fits the ceiling: the task fails with the server\'s refusal by code, and runs nothing', async () => {
     await fake.close();
-    fake = await startFakeCrucible({ models: [{ id: 'qwen3.5-9b', paramsB: 9 }], ceilings: { pick: () => null } });
+    fake = await startFakeCrucible({ models: [{ id: 'qwen3.5-9b', paramsB: 9 }], ceilings: { pick: () => null }, version: '2.0.19' });
     await wire();
     const rig = makeRig(lanes);
     rig.media.analyze = analysisThatCalls(['max-27b']);

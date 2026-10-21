@@ -40,7 +40,10 @@
  * `generate` verb (Crucible 2.0.1+, `chat.verbs`). Inside a run the run's
  * session on that server is OPENED with it (act `generate` + `maxParamsB`),
  * and the model the session opened with (`CrucibleSession.model`) is sent by
- * name in every chat of the run: chats do not inherit a session's model. A
+ * name in every chat of the run: chats do not inherit a session's model. The
+ * context the session reports its model loaded at (Crucible 2.0.19+, which may
+ * load it under its stated context to fit the card) is the run's chunk size
+ * (EffectiveTarget.context); an older server is refused before the open. A
  * run whose session is already open, and a call outside any run, ask
  * `GET /v1/resolve` (the same pick, nothing loaded). Either way the choice is
  * said in the log and on the task, and kept for the rest of the run. A
@@ -79,6 +82,7 @@ import {
   type ModelInfo,
 } from '@crucible/client';
 import { crucibleUnavailableCause } from '../transport-failure';
+import { CrucibleFieldMissing } from '../errors';
 import { CrucibleClientFactory } from '../client-factory';
 import { CrucibleServersService } from '../crucible-servers.service';
 import { CrucibleProbeService, compareVersions } from '../probe';
@@ -104,6 +108,14 @@ export const BRIEFCASE_ACT = 'analysis';
 
 /** The first Crucible whose chat door and sessions take `max_params_b`, by its `/v1/info` feature. */
 export const CEILING_FEATURE = 'chat.verbs';
+
+/**
+ * The first Crucible whose queue session reports the context its model was
+ * loaded at (`context`): a size ceiling's session is opened only on it, since
+ * the pick may be loaded under its stated context and the run is sized to what
+ * actually loaded.
+ */
+export const SESSION_CONTEXT_VERSION = '2.0.19';
 
 /** Refusals of a size ceiling, said as such (the SDK's ChatOptions.maxParamsB / SessionOptions.maxParamsB). */
 export const CEILING_REFUSAL_CODES: ReadonlySet<string> = new Set([
@@ -263,6 +275,14 @@ export interface EffectiveTarget {
   loadContext?: number;
   /** `X-Crucible-Act` for this target's chats when it is not {@link BRIEFCASE_ACT} (a size ceiling's {@link CEILING_VERB}). */
   act?: string;
+  /**
+   * The context, in tokens, the run's queue session loaded this model at, when
+   * the session was opened with it (a size ceiling's pick): what the server
+   * reports (`QueueSessionState.context`, Crucible 2.0.19+), which may be under
+   * the catalog's stated context when the card could not hold that. Work is
+   * sized to this, never to the catalog, while it is set.
+   */
+  context?: number;
 }
 
 /** How the queue asks for a run (P4). Every field is optional; a bare `withRun(fn)` is P3's run. */
@@ -803,27 +823,30 @@ export class CrucibleChatService {
 
     let model: string;
     let how: 'session' | 'resolve';
+    /** The context the run's session loaded the pick at; undefined when no session was opened with it. */
+    let context: number | undefined;
     try {
       if (scope === undefined) {
         model = await this.resolveCeiling(venue, ceilingB);
         how = 'resolve';
       } else {
         // Serialised with the run's other acquisitions, so two calls open one session.
-        const run = scope.lock.then(async () => {
+        const run = scope.lock.then(async (): Promise<{ model: string; how: 'session' | 'resolve'; context?: number }> => {
           const again = scope.mapped.get(key);
-          if (again !== undefined) return { model: again.target.model, how: 'resolve' as const };
+          if (again !== undefined) return { model: again.target.model, how: 'resolve', ...(again.context === undefined ? {} : { context: again.context }) };
           const open = scope.sessions.get(venue);
-          if (open !== undefined && !open.ended) return { model: await this.resolveCeiling(venue, ceilingB), how: 'resolve' as const };
+          if (open !== undefined && !open.ended) return { model: await this.resolveCeiling(venue, ceilingB), how: 'resolve' };
           await this.requireCeilingSupport(venue, ceilingB);
+          await this.requireSessionContext(venue, ceilingB);
           const opened = await this.sessionFor(scope, venue, signal, { act: CEILING_VERB, maxParamsB: ceilingB });
           if (opened.session.model === null) {
             throw new CrucibleChatError(502, 'protocol_error',
               `Crucible "${venue}" opened a session for ${ceilingWords(ceilingB)} without naming the model it chose.`, venue);
           }
-          return { model: opened.session.model, how: 'session' as const };
+          return { model: opened.session.model, how: 'session', context: await this.sessionContext(opened, venue) };
         });
         scope.lock = run.catch(() => undefined);
-        ({ model, how } = await run);
+        ({ model, how, context } = await run);
       }
     } catch (err) {
       throw this.ceilingRefusal(err, venue, ceilingB);
@@ -834,6 +857,7 @@ export class CrucibleChatService {
       server: venue,
       mappedFrom: target.model,
       act: CEILING_VERB,
+      ...(context === undefined ? {} : { context }),
     };
     if (scope !== undefined) {
       scope.placed.set(target.model, venue);
@@ -844,7 +868,7 @@ export class CrucibleChatService {
     if (!this.mappingNoted.has(note)) {
       this.mappingNoted.add(note);
       this.logger.log(`[${venue}] ${target.model}: Crucible chose ${model}, ${ceilingWords(ceilingB)} that fits this host`
-        + (how === 'session' ? ' (opened the run\'s session with it)' : ' (GET /v1/resolve)'));
+        + (how === 'session' ? ` (opened the run's session with it, loaded at ${context} tokens)` : ' (GET /v1/resolve)'));
     }
     return chosen;
   }
@@ -880,6 +904,39 @@ export class CrucibleChatService {
       throw new CrucibleChatError(409, 'ceiling_unsupported',
         `Crucible "${server}" is too old to pick ${ceilingWords(ceilingB)} (it needs Crucible 2.0.1 or newer). Update it, or pick a specific model in Settings › AI.`, server);
     }
+  }
+
+  /**
+   * A server older than {@link SESSION_CONTEXT_VERSION} does not say the context
+   * a session loaded its model at, so a run could not be sized to what loaded:
+   * refused by name before the session is opened, never sized from the catalog.
+   */
+  private async requireSessionContext(server: string, ceilingB: number): Promise<void> {
+    const version = await this.serverVersion(server);
+    if (version !== null && compareVersions(version, SESSION_CONTEXT_VERSION) >= 0) return;
+    throw new CrucibleChatError(409, 'session_context_unsupported',
+      `Crucible "${server}" ${version === null ? 'did not say its release, so it can\'t be trusted' : `is ${version}, too old`} to say the context it loads ${ceilingWords(ceilingB)} at`
+        + ` (it needs Crucible ${SESSION_CONTEXT_VERSION} or newer). Update it, or pick a specific model in Settings › AI.`, server);
+  }
+
+  /**
+   * The context the session's model was loaded at (`GET /v1/queue/sessions/{id}`,
+   * `context`). A session open on a text model always states it; one that does
+   * not is refused by name, never sized by a guess.
+   */
+  private async sessionContext(open: OpenSession, server: string): Promise<number> {
+    let context: number | null;
+    try {
+      context = (await open.session.state()).context;
+    } catch (err) {
+      throw this.asUnreachable(this.mapRefusal(err, server), server);
+    }
+    if (context === null || !(context > 0)) {
+      throw new CrucibleFieldMissing(server,
+        `context on its queue session ${open.session.id} (GET /v1/queue/sessions/{id}), opened with ${open.session.model ?? 'no model'}`,
+        'size the analysis chunks for the model the session loaded');
+    }
+    return context;
   }
 
   /** A ceiling's refusal as a sentence that says so; anything else as it came. */
@@ -1168,8 +1225,8 @@ export class CrucibleChatService {
       throw new CrucibleChatCancelled();
     }
     this.ledger?.record({ server, kind: 'session', id: session.id, jobType: 'session', model: null, localId: this.localId() });
-    // Opened with a model (a size ceiling's pick): the card changed, so the next
-    // read of the catalog states what is resident now, at the context it was loaded at.
+    // Opened with a model (a size ceiling's pick): the card changed, so a cached
+    // catalog no longer says what is resident.
     if (session.model !== null) this.modelsCache.delete(server);
     if (waited) this.waiting(`Starting on ${server}...`);
     this.logger.log(`[${server}] session ${session.id} open (act ${session.act}${session.model === null ? '' : `, with ${session.model}`})`);
