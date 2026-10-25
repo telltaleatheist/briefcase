@@ -376,6 +376,8 @@ export class CrucibleChatService {
   private readonly settingsCache = new Map<string, { at: number; configured: Record<UpstreamName, boolean> }>();
   private readonly modelsCache = new Map<string, { at: number; models: ModelInfo[] }>();
   private readonly pagesCache = new Map<string, { at: number; readers: string[] | null; ceilings: Map<string, number> | null }>();
+  /** Each model's largest loadable context per server ({@link maxLocalContext}), from the raw models rows. */
+  private readonly maxContextCache = new Map<string, { at: number; byModel: Map<string, number | null> }>();
   /** `server\nollama/<tag>` already said in the log (once per model per process). */
   private readonly mappingNoted = new Set<string>();
   /** `server\nollama/<tag>` whose `X-Crucible-Context` was already logged. */
@@ -1095,6 +1097,36 @@ export class CrucibleChatService {
     return { tokens, loadAt: tokens };
   }
 
+  /**
+   * The largest context `model` can be LOADED at on `server`, which may be far
+   * over the context it loads at by default: the row's `max_context.tokens`
+   * (the manifest's max_context, or what the weights allow), never past its
+   * `card_affords` (what this card's memory holds). The SDK's ModelInfo does
+   * not carry `max_context`, so the raw `GET /v1/models` row is read (cached
+   * with the models). Null when the row states none (an older Crucible, a
+   * model with one context), or the server does not list the model.
+   */
+  async maxLocalContext(server: string, model: string): Promise<number | null> {
+    let rows = this.maxContextCache.get(server);
+    if (rows === undefined || this.now() - rows.at >= MODELS_CACHE_MS) {
+      const response = await this.factory.engineFetch(server, '/v1/models', { method: 'GET', headers: { Accept: 'application/json' } });
+      if (!response.ok) throw new CrucibleChatError(response.status, `http_${response.status}`, `Crucible "${server}" answered GET /v1/models with HTTP ${response.status}.`, server);
+      const body = await response.json() as unknown;
+      const byModel = new Map<string, number | null>();
+      for (const row of Array.isArray(body) ? body : []) {
+        if (row === null || typeof row !== 'object' || typeof (row as { id?: unknown }).id !== 'string') continue;
+        const max = (row as { max_context?: unknown }).max_context as { tokens?: unknown; card_affords?: unknown } | null | undefined;
+        const stated = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.floor(v) : null);
+        const tokens = stated(max?.tokens);
+        const affords = stated(max?.card_affords);
+        byModel.set((row as { id: string }).id, tokens === null ? null : Math.min(tokens, affords ?? tokens));
+      }
+      rows = { at: this.now(), byModel };
+      this.maxContextCache.set(server, rows);
+    }
+    return rows.byModel.get(model) ?? null;
+  }
+
   /** `GET /v1/models` on a server (cached 15 s; a load or a settings change drops it). */
   async modelsOn(server: string, fresh = false): Promise<ModelInfo[]> {
     const cached = this.modelsCache.get(server);
@@ -1111,11 +1143,13 @@ export class CrucibleChatService {
       this.settingsCache.clear();
       this.modelsCache.clear();
       this.pagesCache.clear();
+      this.maxContextCache.clear();
       return;
     }
     this.settingsCache.delete(server);
     this.modelsCache.delete(server);
     this.pagesCache.delete(server);
+    this.maxContextCache.delete(server);
   }
 
   // ── residency and sessions ─────────────────────────────────────────────

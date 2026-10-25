@@ -393,6 +393,14 @@ $proposal: var(--ask-proposal, #38bdf8);
 
   &:hover:not(:disabled) { background: var(--primary-orange-hover, #ff8c5a); }
   &:disabled { opacity: 0.45; cursor: default; }
+
+  &.stop {
+    color: var(--text-primary);
+    background: var(--bg-secondary, #f8f9fa);
+    border-color: var(--border-color, #dee2e6);
+
+    &:hover:not(:disabled) { background: var(--bg-secondary, #f8f9fa); border-color: var(--primary-orange, #ff6b35); }
+  }
 }
 
 .composer-note {

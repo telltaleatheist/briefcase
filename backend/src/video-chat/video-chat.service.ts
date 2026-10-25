@@ -35,8 +35,19 @@
  * path is read at the start, and the answer is written there
  * (DatabaseService.withDatabaseAt) even if another library is open by then.
  *
- * Nothing is cut to fit: a transcript and conversation larger than the
- * model's context is refused `transcript_too_long`, naming the model.
+ * THE CONTEXT IS SIZED TO THE TRANSCRIPT. A local model loads at a default
+ * context far under the most it can take (qwen3.8-27b-8bit: 12,288 of
+ * 131,072); an answer that needs more than it is loaded at loads it bigger, in
+ * the answer's run, up to its stated maximum (`max_context` on GET /v1/models).
+ * Nothing is cut to fit: a transcript and conversation larger than that
+ * maximum (or than a cloud model's window) is refused `transcript_too_long`,
+ * naming the model and its maximum.
+ *
+ * STOP. `POST threads/:id/cancel` aborts the thread's answer in flight (the
+ * open model call, a load, a wait in Crucible's line; the run's session is
+ * closed as it settles) and takes the question back: its message is deleted
+ * and the thread is as it was before it was asked. The question's own request
+ * is refused 499 `cancelled`.
  */
 import { randomUUID } from 'crypto';
 import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
@@ -65,13 +76,20 @@ import type { ChatMarker, ChatMessage, ChatThread, VideoChatPhase } from './vide
 export const CHAT_LINE_WAIT_S = 120;
 /** Rounds of add_marker calls one answer may make. */
 export const CHAT_MAX_TOOL_ROUNDS = 3;
-/** Characters per token, the analysis's estimate (ai-analysis.service getModelLimits). */
-const CHARS_PER_TOKEN = 3;
+/**
+ * Characters per token, kept on the safe side. Measured on qwen3.8-27b-8bit
+ * (Oct 25 2026): an English transcript's prompt, 67,295 characters, was 15,348
+ * prompt tokens (4.4 characters a token); 3.5 leaves a quarter's margin for
+ * denser text (names, numbers, other languages).
+ */
+const CHARS_PER_TOKEN = 3.5;
 /** Room kept for the model's reply, and for each tool round's reply and results. */
 const CHAT_OUTPUT_RESERVE_TOKENS = 4096;
 const CHAT_ROUND_RESERVE_TOKENS = 512;
 /** A cloud model's window, as the analysis takes it (claude/openai have large windows). */
 const CLOUD_CONTEXT_TOKENS = 128000;
+/** How long a cancel waits for its answer to settle (the question taken back, the run's session closed). */
+export const CHAT_CANCEL_SETTLE_MS = 10_000;
 
 /** A refusal with its HTTP status and `code` (the global filter carries `code` through). */
 export class VideoChatError extends HttpException {
@@ -88,6 +106,21 @@ interface ChatWindow {
   contextTokens?: number;
   /** A local model: the context to load it at, at least. */
   loadContext?: number;
+  /** A local model: the most it can be loaded at (max_context), when the server states it. */
+  maxTokens?: number;
+  /** What a refusal suggests instead, when not the usual (a cloud model, a new conversation). */
+  refusal?: string;
+}
+
+/**
+ * The context a local model is loaded at for an answer that needs `needed`
+ * tokens: room for follow-ups too (a quarter more, at least 8K), in steps of
+ * 4096, never past `max`, so a conversation that grows a little is not a reload
+ * per question.
+ */
+export function chatLoadContext(needed: number, max: number): number {
+  const roomy = Math.max(Math.ceil(needed * 1.25), needed + 8192);
+  return Math.min(max, Math.ceil(roomy / 4096) * 4096);
 }
 
 /** Where an answer runs: forwarded, in a run of its own, or inside the queue's session. */
@@ -96,8 +129,8 @@ type Venue = { kind: 'upstream' } | { kind: 'own-run' } | { kind: 'queue-session
 @Injectable()
 export class VideoChatService {
   private readonly logger = new Logger('VideoChat');
-  /** Threads with an answer in flight: one at a time per thread. */
-  private readonly answering = new Set<string>();
+  /** Threads with an answer in flight (one at a time per thread): its stop, and when it has settled. */
+  private readonly answering = new Map<string, { stop: AbortController; settled: Promise<void> }>();
 
   constructor(
     private readonly database: DatabaseService,
@@ -193,7 +226,8 @@ export class VideoChatService {
    * choice, as the analysis picker stores it). The question is saved first,
    * so it shows even when the answer fails; the failure is then thrown as an
    * HTTP refusal with its `code`. `signal` (the request going away) stops the
-   * answer: the open model call, a load, a wait in Crucible's line.
+   * answer: the open model call, a load, a wait in Crucible's line. So does
+   * {@link cancel}, which also takes the question back.
    */
   async ask(threadId: string, content: unknown, model: unknown, signal?: AbortSignal): Promise<{ userMessage: ChatMessage; assistantMessage: ChatMessage }> {
     const question = typeof content === 'string' ? content.trim() : '';
@@ -218,7 +252,10 @@ export class VideoChatService {
     const video = this.database.getVideoById(start.thread.videoId);
     const srt = this.database.getTranscript(start.thread.videoId)?.srt_format ?? '';
 
-    this.answering.add(threadId);
+    const stop = new AbortController();
+    let settle: () => void = () => undefined;
+    this.answering.set(threadId, { stop, settled: new Promise<void>((resolve) => { settle = resolve; }) });
+    const answerSignal = signal === undefined ? stop.signal : AbortSignal.any([signal, stop.signal]);
     try {
       this.readiness.assertReadyNow('Ask');
       const sentences = assembleSentences(parseSrtSegments(srt));
@@ -226,7 +263,9 @@ export class VideoChatService {
         throw new VideoChatError(HttpStatus.UNPROCESSABLE_ENTITY, 'no_transcript', 'This video has no transcript yet. Transcribe it first, then ask.');
       }
       const system = buildVideoChatSystemPrompt(video?.title || video?.filename || 'untitled', sentences);
-      const result = await this.answer(threadId, choice, system, start.history, question, chatTranscript(sentences), signal);
+      const result = await this.answer(threadId, choice, system, start.history, question, chatTranscript(sentences), answerSignal);
+      // Stopped as the answer came in: nothing is stored.
+      if (stop.signal.aborted) throw new ToolLoopAborted(stop.signal.reason);
       const assistantMessage = this.database.withDatabaseAt(dbPath, (db) => {
         if (!store.getThread(db, threadId)) {
           throw new VideoChatError(HttpStatus.CONFLICT, 'thread_deleted', 'The conversation was deleted while it was answering.');
@@ -243,13 +282,45 @@ export class VideoChatService {
       return { userMessage: start.userMessage, assistantMessage };
     } catch (error) {
       this.status(threadId, 'error');
-      const refusal = this.refusalOf(error, choice);
+      if (stop.signal.aborted) {
+        // Stopped: the question goes back to the asker, so the thread is as it was before it.
+        try {
+          this.database.withDatabaseAt(dbPath, (db) => {
+            store.deleteMessage(db, start.userMessage.id);
+            store.restoreThread(db, start.thread);
+          });
+        } catch (err) {
+          this.logger.warn(`[${threadId}] taking the stopped question back failed: ${(err as Error).message}`);
+        }
+      }
+      const refusal = this.refusalOf(stop.signal.aborted ? new ToolLoopAborted(stop.signal.reason) : error, choice);
       const { code, message } = refusal.getResponse() as { code?: string; message?: string };
       this.logger.warn(`[${threadId}] ${choice}: ${code ?? refusal.getStatus()}: ${message ?? refusal.message}`);
       throw refusal;
     } finally {
       this.answering.delete(threadId);
+      settle();
     }
+  }
+
+  /**
+   * Stop the thread's answer in flight and take its question back (see ask).
+   * Answers once that answer has settled (its run's session closed, the
+   * question deleted), at most {@link CHAT_CANCEL_SETTLE_MS}, so a question
+   * asked right after is not refused `thread_busy`. Nothing in flight: nothing to do.
+   */
+  async cancel(threadId: string): Promise<{ ok: true }> {
+    const inFlight = this.answering.get(threadId);
+    if (inFlight === undefined) return { ok: true };
+    this.logger.log(`[${threadId}] stopped by the user`);
+    inFlight.stop.abort(new Error('The question was stopped.'));
+    let timer: NodeJS.Timeout | undefined;
+    await Promise.race([
+      inFlight.settled,
+      new Promise<void>((resolve) => { timer = setTimeout(resolve, CHAT_CANCEL_SETTLE_MS); timer.unref?.(); }),
+    ]);
+    if (timer !== undefined) clearTimeout(timer);
+    return { ok: true };
   }
 
   private async answer(
@@ -269,14 +340,17 @@ export class VideoChatService {
     const promptChars = [system, tagCodec.toolsPrompt(tools), question, ...replayed.map((m) => m.content)].reduce((sum, text) => sum + text.length, 0);
     const venue = await this.venueOf(target);
 
+    const needed = Math.ceil(promptChars / CHARS_PER_TOKEN) + CHAT_OUTPUT_RESERVE_TOKENS + CHAT_MAX_TOOL_ROUNDS * CHAT_ROUND_RESERVE_TOKENS;
+
     const work = async () => {
       if (venue.kind !== 'upstream') this.status(threadId, 'loading-model');
-      const window = await this.windowOf(target, promptChars, signal);
-      const needed = Math.ceil(promptChars / CHARS_PER_TOKEN) + CHAT_OUTPUT_RESERVE_TOKENS + CHAT_MAX_TOOL_ROUNDS * CHAT_ROUND_RESERVE_TOKENS;
+      const window = await this.windowOf(target, promptChars, needed, venue, signal);
       if (needed > window.tokens) {
+        const most = window.maxTokens ?? window.tokens;
         throw new VideoChatError(HttpStatus.UNPROCESSABLE_ENTITY, 'transcript_too_long',
-          `This video's transcript and the conversation need about ${needed.toLocaleString('en-US')} tokens, more than ${value} takes `
-          + `(${window.tokens.toLocaleString('en-US')}). Pick a model with a larger context, or start a new conversation.`);
+          `This video's transcript and the conversation need about ${needed.toLocaleString('en-US')} tokens, more than ${value} `
+          + (window.maxTokens === undefined ? 'takes' : 'can take at most')
+          + ` (${most.toLocaleString('en-US')}). ${window.refusal ?? 'Pick a cloud model, or start a new conversation.'}`);
       }
       const transport = crucibleTransport(this.chat, {
         provider: choice.provider,
@@ -329,10 +403,11 @@ export class VideoChatService {
    * window; an `ollama/` upstream's num_ctx cap (Ollama's default on a
    * Crucible older than 1.0.24, which forwards none); a local model's
    * context as its session loaded it (a size ceiling), or as the server states
-   * it (its served context, or the host's ceiling it is then loaded at).
-   * Called inside the answer's run, so a ceiling's session opens here.
+   * it (its served context, or the host's ceiling it is then loaded at),
+   * widened when the answer needs more ({@link widened}). Called inside the
+   * answer's run, so a ceiling's session opens here.
    */
-  private async windowOf(target: CrucibleTarget, promptChars: number, signal: AbortSignal | undefined): Promise<ChatWindow> {
+  private async windowOf(target: CrucibleTarget, promptChars: number, needed: number, venue: Venue, signal: AbortSignal | undefined): Promise<ChatWindow> {
     if (isCloudTarget(target)) return { tokens: CLOUD_CONTEXT_TOKENS };
     const chosen = await this.chat.effectiveTarget(target, undefined, signal);
     const model = chosen.target;
@@ -342,24 +417,53 @@ export class VideoChatService {
       const reserve = CHAT_OUTPUT_RESERVE_TOKENS + CHAT_MAX_TOOL_ROUNDS * CHAT_ROUND_RESERVE_TOKENS;
       return { tokens: numCtxMaxForModel(model.bareModel), contextTokens: estimateNumCtx(promptChars, model.bareModel, reserve) };
     }
-    if (chosen.context !== undefined) return { tokens: chosen.context, loadContext: chosen.context };
-    if (chosen.loadContext !== undefined) return { tokens: chosen.loadContext, loadContext: chosen.loadContext };
     const server = chosen.server ?? await this.chat.venueFor(model);
-    const stated = await this.chat.statedLocalContext(server, model.model);
-    if (stated === null || !(stated.tokens > 0)) {
-      if (!(await this.chat.modelsOn(server)).some((m) => m.id === model.model)) {
-        throw new CrucibleChatError(404, 'unknown_model', `"${model.model}" is not a model Crucible "${server}" knows. Pick one from its catalog.`, server);
+    let loaded: ChatWindow;
+    if (chosen.context !== undefined) loaded = { tokens: chosen.context, loadContext: chosen.context };
+    else if (chosen.loadContext !== undefined) loaded = { tokens: chosen.loadContext, loadContext: chosen.loadContext };
+    else {
+      const stated = await this.chat.statedLocalContext(server, model.model);
+      if (stated === null || !(stated.tokens > 0)) {
+        if (!(await this.chat.modelsOn(server)).some((m) => m.id === model.model)) {
+          throw new CrucibleChatError(404, 'unknown_model', `"${model.model}" is not a model Crucible "${server}" knows. Pick one from its catalog.`, server);
+        }
+        throw new CrucibleFieldMissing(server, `a context for ${model.model} (maxModelLen / contextDefault on GET /v1/models, or its context_ceilings row on GET /v1/capability)`, 'fit the transcript to it');
       }
-      throw new CrucibleFieldMissing(server, `a context for ${model.model} (maxModelLen / contextDefault on GET /v1/models, or its context_ceilings row on GET /v1/capability)`, 'fit the transcript to it');
+      loaded = { tokens: stated.tokens, ...(stated.loadAt === undefined ? {} : { loadContext: stated.loadAt }) };
     }
-    return { tokens: stated.tokens, ...(stated.loadAt === undefined ? {} : { loadContext: stated.loadAt }) };
+    return needed > loaded.tokens ? this.widened(loaded, server, model.model, needed, venue) : loaded;
+  }
+
+  /**
+   * A local model whose loaded (or default) context is under what the answer
+   * needs, sized up to it: the context it is resident at now when that holds
+   * the answer, else loaded at {@link chatLoadContext}, up to the model's
+   * maximum (max_context). The load is the run's (withModel → makeResident
+   * reloads a resident model that is too small; a size ceiling's pick too,
+   * over the context its session opened it at). Inside the queue's session the
+   * model is that run's, so it is never reloaded for an answer. A server that
+   * states no maximum leaves the window as it was (refused as too long).
+   */
+  private async widened(loaded: ChatWindow, server: string, model: string, needed: number, venue: Venue): Promise<ChatWindow> {
+    const max = await this.chat.maxLocalContext(server, model);
+    if (max === null) return loaded;
+    const info = (await this.chat.modelsOn(server, true)).find((m) => m.id === model);
+    const resident = info?.resident === true ? info.maxModelLen ?? 0 : 0;
+    if (resident >= needed) return { tokens: resident, loadContext: resident, maxTokens: max };
+    if (venue.kind !== 'own-run') {
+      return { ...loaded, refusal: `Briefcase's queue is using ${model} at that context right now; ask with a cloud model, or when that work is done.` };
+    }
+    if (needed > max) return { ...loaded, maxTokens: max };
+    const loadContext = chatLoadContext(needed, max);
+    this.logger.log(`[${server}] ${model}: the answer needs about ${needed} tokens, over the ${loaded.tokens} it loads at; loading it at ${loadContext} (its maximum is ${max})`);
+    return { tokens: loadContext, loadContext, maxTokens: max };
   }
 
   /** A failure as the HTTP refusal the Ask tab reads: 409 Crucible, 422 the transcript, 503 not now, 502 the model. */
   private refusalOf(error: unknown, model: string): HttpException {
     if (error instanceof HttpException) return error;
     if (error instanceof CrucibleTargetError) return new VideoChatError(HttpStatus.BAD_REQUEST, 'invalid_model', error.message);
-    // The request went away: nobody reads this, but the log says why it stopped.
+    // Stopped, or the request went away: the Ask tab shows nothing for it, but the log says why it stopped.
     if (error instanceof ToolLoopAborted || error instanceof CrucibleChatCancelled) return new VideoChatError(499 as HttpStatus, 'cancelled', 'The question was cancelled.');
     if (error instanceof CrucibleBusyError) {
       return new VideoChatError(HttpStatus.SERVICE_UNAVAILABLE, 'crucible_busy', `Crucible "${error.server}" is busy: ${error.busyLine}. Ask again in a moment.`);

@@ -45,6 +45,15 @@ export class VideoChatService {
     return this.http.post<ChatSendResult>(`${this.base}/threads/${encodeURIComponent(threadId)}/messages`, { content, model });
   }
 
+  /**
+   * Stop the thread's answer in flight and take its question back (the backend
+   * deletes it; the send's own request is refused 499 `cancelled`). Answers
+   * once that answer has settled. Nothing in flight: a no-op.
+   */
+  cancel(threadId: string): Observable<{ ok: true }> {
+    return this.http.post<{ ok: true }>(`${this.base}/threads/${encodeURIComponent(threadId)}/cancel`, {});
+  }
+
   /** Dismiss a proposal, or bring a dismissed one back ('proposed'). */
   setMarkerStatus(markerId: string, status: 'dismissed' | 'proposed'): Observable<ChatMarker> {
     return this.http.patch<ChatMarker>(`${this.base}/markers/${encodeURIComponent(markerId)}`, { status });

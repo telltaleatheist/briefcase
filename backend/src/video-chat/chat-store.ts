@@ -58,6 +58,14 @@ export function touchThread(db: Database, threadId: string, model: string, quest
   db.prepare('UPDATE chat_threads SET updated_at = ?, model = ?, title = COALESCE(title, ?) WHERE id = ?').run(now, model, threadTitleOf(question), threadId);
 }
 
+/**
+ * A thread put back as `thread` read it (a question taken back): its time, its
+ * model, and its title, unnamed again when that question was its first.
+ */
+export function restoreThread(db: Database, thread: ChatThread): void {
+  db.prepare('UPDATE chat_threads SET updated_at = ?, model = ?, title = ? WHERE id = ?').run(thread.updatedAt, thread.model, thread.title || null, thread.id);
+}
+
 /** Its messages and markers go with it; custom markers applied from it stay. True when it existed. */
 export function deleteThread(db: Database, threadId: string): boolean {
   return db.prepare('DELETE FROM chat_threads WHERE id = ?').run(threadId).changes > 0;
@@ -69,6 +77,11 @@ export function insertUserMessage(db: Database, threadId: string, content: strin
   const id = randomUUID();
   db.prepare('INSERT INTO chat_messages (id, thread_id, role, content, model, created_at) VALUES (?, ?, \'user\', ?, ?, ?)').run(id, threadId, content, model, now);
   return { id, threadId, role: 'user', content, model, markers: [], createdAt: now };
+}
+
+/** A message taken back (a stopped question); a user message has no markers. */
+export function deleteMessage(db: Database, messageId: string): void {
+  db.prepare('DELETE FROM chat_messages WHERE id = ?').run(messageId);
 }
 
 /** An answer, its hidden trace and usage, and the markers it placed (as proposals), in one transaction. */

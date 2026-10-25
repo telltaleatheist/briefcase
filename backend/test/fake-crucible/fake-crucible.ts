@@ -177,6 +177,8 @@ export interface FakeModel {
   family?: string;
   /** 1.0.24: the base whose weights this alias shares (`weights_of`). */
   weightsOf?: string | null;
+  /** The most it can be loaded at (`max_context`: its `tokens` and `card_affords`); unset: the row has none. */
+  maxContext?: { tokens: number; cardAffords: number };
 }
 
 /** A canned chat reply: fixed content, or computed from the request body. */
@@ -2157,6 +2159,10 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
             : resident === m.id && residentCtx !== null ? residentCtx
               : (m.maxModelLen === undefined ? 262144 : m.maxModelLen),
           weights_of: m.weightsOf ?? null,
+          max_context: m.maxContext === undefined ? null : {
+            tokens: m.maxContext.tokens, card_affords: m.maxContext.cardAffords, max_context: m.maxContext.tokens,
+            limited_by: m.maxContext.tokens <= m.maxContext.cardAffords ? 'max_context' : 'card', concurrency: 1, basis: 'computed',
+          },
           // 2.0: the quantisation forms. The fake's models come in one form, unstated.
           form: null, form_reason: null, forms: null,
         };

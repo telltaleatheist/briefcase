@@ -16,7 +16,7 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { firstValueFrom } from 'rxjs';
+import { Subject, firstValueFrom, takeUntil } from 'rxjs';
 import { VideoChatService } from '../../../../services/video-chat.service';
 import { WebsocketService } from '../../../../services/websocket.service';
 import { CrucibleReadinessService } from '../../../../services/crucible-readiness.service';
@@ -31,6 +31,7 @@ import {
   chatErrorMessage,
   chatPhaseLabel,
   formatChatRange,
+  isChatCancelled,
 } from '../../../../models/video-chat.model';
 
 const SHOW_ON_TIMELINE_KEY = 'briefcase-ask-proposals-on-timeline';
@@ -49,6 +50,8 @@ interface PendingSend {
   threadId: string | null;
   content: string;
   phase: ChatPhase | null;
+  /** Stop was pressed: the bubble is gone and the question is back in the box; the send is winding down. */
+  stopping: boolean;
 }
 
 /** The inline "apply to marker set" form: which proposals, and where it opened ('thread', 'message:<id>', 'marker:<id>'). */
@@ -130,10 +133,10 @@ export class AskPanelComponent implements OnChanges, OnDestroy {
   readonly proposals = computed(() =>
     this.messages().flatMap(m => m.markers ?? []).filter(k => k.status === 'proposed'));
 
-  /** The pending send belongs to the open thread (or to the new chat being written). */
+  /** The pending send belongs to the open thread (or to the new chat being written). A stopped one shows nothing. */
   readonly pendingHere = computed(() => {
     const p = this.pending();
-    return !!p && p.videoId === this.videoId && p.threadId === this.currentThreadId();
+    return !!p && !p.stopping && p.videoId === this.videoId && p.threadId === this.currentThreadId();
   });
   readonly statusLine = computed(() => chatPhaseLabel(this.pending()?.phase ?? null));
   readonly sendErrorHere = computed(() => {
@@ -148,6 +151,8 @@ export class AskPanelComponent implements OnChanges, OnDestroy {
 
   private loadedFor: string | null = null;
   private seq = 0;
+  /** Stop: drops the pending send's request. */
+  private readonly stop$ = new Subject<void>();
   private readonly offStatus: () => void;
 
   constructor() {
@@ -299,7 +304,9 @@ export class AskPanelComponent implements OnChanges, OnDestroy {
     }
 
     let threadId = this.currentThreadId();
-    this.pending.set({ videoId, threadId, content, phase: null });
+    /** The thread this send made (a new chat's): a stopped send deletes it again. */
+    let made: string | null = null;
+    this.pending.set({ videoId, threadId, content, phase: null, stopping: false });
     this.sendError.set(null);
     this.draft.set('');
     this.scrollToBottom();
@@ -307,7 +314,11 @@ export class AskPanelComponent implements OnChanges, OnDestroy {
       if (!threadId) {
         const thread = await firstValueFrom(this.chat.createThread(videoId, model));
         if (this.videoId !== videoId) return;
-        threadId = thread.id;
+        threadId = made = thread.id;
+        if (this.pending()?.stopping) {
+          await this.takeBack(content, made);
+          return;
+        }
         this.threads.update(list => [thread, ...list.filter(t => t.id !== thread.id)]);
         if (this.currentThreadId() === null) {
           this.currentThreadId.set(thread.id);
@@ -317,8 +328,10 @@ export class AskPanelComponent implements OnChanges, OnDestroy {
         if (p) this.pending.set({ ...p, threadId });
       }
 
-      const result = await firstValueFrom(this.chat.sendMessage(threadId, content, model));
+      const result = await firstValueFrom(this.chat.sendMessage(threadId, content, model).pipe(takeUntil(this.stop$)));
       if (this.videoId !== videoId) return;
+      // Answered before Stop could land: the answer stands, and the question is not given back twice.
+      if (this.pending()?.stopping && this.draft().trim() === content) this.draft.set('');
       if (this.currentThreadId() === threadId) {
         this.messages.update(list => [...list, result.userMessage, result.assistantMessage]);
         this.scrollToBottom();
@@ -326,6 +339,10 @@ export class AskPanelComponent implements OnChanges, OnDestroy {
       void this.loadThreads(false); // the title and order may have changed
     } catch (error) {
       if (this.videoId !== videoId) return;
+      if (this.pending()?.stopping || isChatCancelled(error)) {
+        await this.takeBack(content, made);
+        return;
+      }
       this.readiness.handleRefusal(error);
       this.sendError.set({ threadId, message: chatErrorMessage(error) });
       // Show what the backend kept; give the question back unless it was saved.
@@ -347,6 +364,43 @@ export class AskPanelComponent implements OnChanges, OnDestroy {
       const p = this.pending();
       if (p && p.content === content && p.videoId === videoId) this.pending.set(null);
       this.scrollToBottom();
+    }
+  }
+
+  /**
+   * Stop the send in flight: the bubble goes at once and the question is back
+   * in the box. The backend stops the answer and deletes the question
+   * (cancel answers once it has), then the send's request is dropped; the
+   * send's own ending puts the thread back as it was and frees the composer.
+   */
+  async stop(): Promise<void> {
+    const p = this.pending();
+    if (!p || p.stopping) return;
+    this.pending.set({ ...p, stopping: true });
+    if (!this.draft().trim()) this.draft.set(p.content);
+    if (p.threadId) {
+      try {
+        await firstValueFrom(this.chat.cancel(p.threadId));
+      } catch {
+        // Dropping the request below stops the answer anyway.
+      }
+    }
+    this.stop$.next();
+  }
+
+  /** A stopped send: nothing to show, the question back in the box, and a thread it made for a new chat deleted again. */
+  private async takeBack(content: string, made: string | null): Promise<void> {
+    if (!this.draft().trim()) this.draft.set(content);
+    if (made === null) return;
+    this.threads.update(list => list.filter(t => t.id !== made));
+    if (this.currentThreadId() === made) {
+      this.currentThreadId.set(null);
+      this.messages.set([]);
+    }
+    try {
+      await firstValueFrom(this.chat.deleteThread(made));
+    } catch {
+      // An empty thread left behind; it shows in the list on the next load.
     }
   }
 

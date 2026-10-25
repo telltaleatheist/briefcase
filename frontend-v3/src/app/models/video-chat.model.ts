@@ -92,6 +92,13 @@ export function formatChatRange(start: number, end: number): string {
   return a === b ? a : `${a}–${b}`;
 }
 
+/** A send refused because it was stopped (499 `cancelled`): not an error to show. */
+export function isChatCancelled(error: unknown): boolean {
+  if (!(error instanceof HttpErrorResponse)) return false;
+  const body = (error.error && typeof error.error === 'object' ? error.error : null) as { code?: string } | null;
+  return error.status === 499 || body?.code === 'cancelled';
+}
+
 /** What an error from a send (or any chat call) says, to show inline in the thread. */
 export function chatErrorMessage(error: unknown): string {
   if (error instanceof HttpErrorResponse) {

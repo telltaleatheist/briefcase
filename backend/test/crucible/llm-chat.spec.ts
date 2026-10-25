@@ -188,6 +188,35 @@ describe('CrucibleChatService: one server', () => {
     expect(fake.chatBodies().map((b) => b['model'])).toEqual(['qwen3.8-27b-4bit']);
   });
 
+  it('a ceiling\'s pick, needed bigger than its session loaded it: reloaded in the session at that context, and kept there', async () => {
+    await start({
+      models: [{ id: 'qwen3.8-27b-8bit', paramsB: 27, contextDefault: 12288, maxModelLen: 12288, maxContext: { tokens: 131072, cardAffords: 375595 } }],
+      version: SESSION_CONTEXT,
+    });
+    await chat.withRun(async () => {
+      expect(await chat.maxLocalContext('mac', 'qwen3.8-27b-8bit')).toBe(131072);
+      await chat.withModel(undefined, 'max-27b', async () => {
+        await chat.chat({ model: 'local:max-27b', prompt: 'x', loadContext: 49152 });
+      }, { provider: 'local', loadContext: 49152 });
+    });
+    expect(fake.sessions.opened).toEqual([expect.objectContaining({ act: 'generate', maxParamsB: 27, model: 'qwen3.8-27b-8bit', context: 12288 })]);
+    // One reload, of the pick, at the bigger context; the chat finds it held there.
+    expect(fake.jobs.map((j) => [j.type, j.model, j.params])).toEqual([['load-model', 'qwen3.8-27b-8bit', { context: 49152 }]]);
+    expect((await chat.modelsOn('mac', true)).find((m) => m.id === 'qwen3.8-27b-8bit')?.maxModelLen).toBe(49152);
+  });
+
+  it('maxLocalContext: max_context.tokens, never past card_affords; null for a row that states none', async () => {
+    await start({
+      models: [
+        { id: 'qwen3.8-27b-8bit', paramsB: 27, maxContext: { tokens: 131072, cardAffords: 90000 } },
+        { id: 'qwen3.5-9b', paramsB: 9 },
+      ],
+    });
+    expect(await chat.maxLocalContext('mac', 'qwen3.8-27b-8bit')).toBe(90000);
+    expect(await chat.maxLocalContext('mac', 'qwen3.5-9b')).toBeNull();
+    expect(await chat.maxLocalContext('mac', 'nope')).toBeNull();
+  });
+
   it('a concrete 27B id is that one model (only a STORED choice reads as the ceiling)', async () => {
     await start({ models: [{ id: 'qwen3.8-27b-4bit', paramsB: 27 }, { id: 'qwen3.8-27b-8bit', paramsB: 27 }] });
     await chat.chat({ model: 'local:qwen3.8-27b-8bit', prompt: 'x' });

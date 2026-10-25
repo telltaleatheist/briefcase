@@ -1,5 +1,5 @@
 import { HttpErrorResponse } from '@angular/common/http';
-import { chatErrorMessage, chatPhaseLabel, formatChatRange, formatChatTime } from './video-chat.model';
+import { chatErrorMessage, chatPhaseLabel, formatChatRange, formatChatTime, isChatCancelled } from './video-chat.model';
 
 describe('video-chat model helpers', () => {
   it('formats times as HH:MM:SS', () => {
@@ -20,6 +20,14 @@ describe('video-chat model helpers', () => {
     expect(chatPhaseLabel('thinking')).toBe('Thinking…');
     expect(chatPhaseLabel('placing-markers')).toBe('Placing markers…');
     expect(chatPhaseLabel(null)).toBe('Sending…');
+  });
+
+  it('reads a stopped send (499 cancelled) as no error', () => {
+    const err = (status: number, error: unknown) => new HttpErrorResponse({ status, error });
+    expect(isChatCancelled(err(499, { code: 'cancelled', message: 'The question was cancelled.' }))).toBeTrue();
+    expect(isChatCancelled(err(499, null))).toBeTrue();
+    expect(isChatCancelled(err(422, { code: 'transcript_too_long' }))).toBeFalse();
+    expect(isChatCancelled(new Error('cancelled'))).toBeFalse();
   });
 
   it("uses the backend's sentence for 409 / 422 / 5xx", () => {

@@ -161,11 +161,17 @@
         ariaLabel="Model for this chat"
         [value]="modelValue()"
         (valueChange)="modelChoice.set($event)" />
-      <button type="button" class="send-btn" (click)="send()" [disabled]="!canSend()" title="Send (Enter)">
-        Send
-      </button>
+      @if (pending(); as p) {
+        <button type="button" class="send-btn stop" (click)="stop()" [disabled]="p.stopping" title="Stop answering, and put the question back">
+          {{ p.stopping ? 'Stopping…' : 'Stop' }}
+        </button>
+      } @else {
+        <button type="button" class="send-btn" (click)="send()" [disabled]="!canSend()" title="Send (Enter)">
+          Send
+        </button>
+      }
     </div>
-    @if (pending() && !pendingHere()) {
+    @if (pending() && !pending()!.stopping && !pendingHere()) {
       <p class="composer-note">Waiting for an answer in another chat ({{ statusLine() }})</p>
     }
   </div>

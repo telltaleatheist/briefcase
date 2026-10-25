@@ -39,6 +39,15 @@ describe('VideoChatService', () => {
     expect(send.request.body).toEqual({ content: 'Where does he mention the flood?', model: 'local:max-27b' });
   });
 
+  it('stops a thread\'s answer in flight', () => {
+    let answer: unknown;
+    service.cancel('t1').subscribe(r => (answer = r));
+    const cancel = http.expectOne({ method: 'POST', url: `${base}/threads/t1/cancel` });
+    expect(cancel.request.body).toEqual({});
+    cancel.flush({ ok: true });
+    expect(answer).toEqual({ ok: true });
+  });
+
   it('dismisses, restores and applies markers', () => {
     service.setMarkerStatus('m1', 'dismissed').subscribe();
     expect(http.expectOne({ method: 'PATCH', url: `${base}/markers/m1` }).request.body).toEqual({ status: 'dismissed' });

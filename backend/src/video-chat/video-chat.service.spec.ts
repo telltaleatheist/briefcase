@@ -3,7 +3,7 @@ import { HttpException, Logger } from '@nestjs/common';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { CrucibleBusyError } from '../crucible/llm/errors';
+import { CrucibleBusyError, CrucibleChatCancelled } from '../crucible/llm/errors';
 
 /**
  * Ask end to end on a real library database: threads, a question answered
@@ -150,12 +150,139 @@ suite('VideoChatService on a library database', () => {
       otherRunsOn: () => [],
       withRun: (fn: () => Promise<unknown>) => fn(),
       statedLocalContext: async () => ({ tokens: 2048 }),
+      // A server that states no maximum: the context it loads at is the limit.
+      maxLocalContext: async () => null,
     });
     const thread = service.createThread('v1', null);
     const tooLong = await refusal(service.ask(thread.id, 'Summarise?', 'local:qwen3.5-9b'));
     expect(tooLong).toMatchObject({ status: 422, code: 'transcript_too_long' });
     expect(tooLong.message).toContain('local:qwen3.5-9b');
+    expect(tooLong.message).toContain('(2,048)');
     expect(requests).toHaveLength(0);
+  });
+
+  /** A local model in a run of its own: what withModel was asked to load it at, and what each chat carried. */
+  function localModel(stated: number, max: number | null, extras: Record<string, unknown> = {}) {
+    const local = { target: { model: 'qwen3.8-27b-8bit', route: 'local', upstream: null, bareModel: 'qwen3.8-27b-8bit' }, server: null, mappedFrom: null };
+    const held: Array<{ loadContext?: number }> = [];
+    const askedMax: string[] = [];
+    return {
+      held,
+      askedMax,
+      extras: {
+        effectiveTarget: async () => local,
+        venueFor: async () => 'mac',
+        otherRunsOn: () => [],
+        withRun: (fn: () => Promise<unknown>) => fn(),
+        withModel: (_server: unknown, _model: string, fn: () => Promise<unknown>, options: { loadContext?: number }) => {
+          held.push({ loadContext: options.loadContext });
+          return fn();
+        },
+        statedLocalContext: async () => ({ tokens: stated }),
+        maxLocalContext: async (_server: string, model: string) => { askedMax.push(model); return max; },
+        modelsOn: async () => [{ id: 'qwen3.8-27b-8bit', resident: false, maxModelLen: stated }],
+        ...extras,
+      },
+    };
+  }
+
+  it('a need that fits the context the model loads at: no reload, its maximum not even asked', async () => {
+    const model = localModel(32768, 131072);
+    const { service, requests, phases } = await setup(['There.'], model.extras);
+    const thread = service.createThread('v1', null);
+    await service.ask(thread.id, 'Budget?', 'local:qwen3.8-27b-8bit');
+    expect(model.held).toEqual([{ loadContext: undefined }]);
+    expect(requests[0].loadContext).toBeUndefined();
+    expect(model.askedMax).toEqual([]);
+    expect(phases).toEqual(['loading-model', 'thinking', 'done']);
+  });
+
+  it('a need over the loaded context but under the model\'s maximum: loaded bigger in the run, with room for follow-ups', async () => {
+    const model = localModel(2048, 131072);
+    const { service, requests, phases } = await setup(['There.'], model.extras);
+    const thread = service.createThread('v1', null);
+    await service.ask(thread.id, 'Budget?', 'local:qwen3.8-27b-8bit');
+    const loadContext = model.held[0].loadContext!;
+    // The need here is about 6-7K tokens (a short transcript, the reserves): +8K, in steps of 4096.
+    expect(loadContext).toBe(16384);
+    expect(requests[0].loadContext).toBe(loadContext);
+    expect(model.askedMax).toEqual(['qwen3.8-27b-8bit']);
+    expect(phases[0]).toBe('loading-model');
+  });
+
+  it('a need over the model\'s maximum: 422 naming that maximum, suggesting a cloud model or a new conversation, nothing loaded', async () => {
+    const model = localModel(2048, 4096);
+    const { service, requests } = await setup([], model.extras);
+    const thread = service.createThread('v1', null);
+    const tooLong = await refusal(service.ask(thread.id, 'Summarise?', 'local:qwen3.8-27b-8bit'));
+    expect(tooLong).toMatchObject({ status: 422, code: 'transcript_too_long' });
+    expect(tooLong.message).toMatch(/more than local:qwen3\.8-27b-8bit can take at most \(4,096\)\. Pick a cloud model, or start a new conversation\./);
+    expect(model.held).toEqual([]);
+    expect(requests).toHaveLength(0);
+  });
+
+  it('a model already resident at a context that holds the need: used as it is, no reload', async () => {
+    const model = localModel(2048, 131072, { modelsOn: async () => [{ id: 'qwen3.8-27b-8bit', resident: true, maxModelLen: 49152 }] });
+    const { service, requests } = await setup(['There.'], model.extras);
+    const thread = service.createThread('v1', null);
+    await service.ask(thread.id, 'Budget?', 'local:qwen3.8-27b-8bit');
+    expect(model.held).toEqual([{ loadContext: 49152 }]);
+    expect(requests[0].loadContext).toBe(49152);
+  });
+
+  it('chatLoadContext: the need plus a quarter (at least 8K), in steps of 4096, never past the maximum', async () => {
+    const { chatLoadContext } = await import('./video-chat.service');
+    expect(chatLoadContext(37513, 131072)).toBe(49152);
+    expect(chatLoadContext(6000, 131072)).toBe(16384);
+    expect(chatLoadContext(120000, 131072)).toBe(131072);
+  });
+
+  it('Stop: the answer in flight is aborted, its request refused 499 cancelled, and the thread is as it was before the question', async () => {
+    let seen: AbortSignal | undefined;
+    const { service } = await setup(['Fine.'], {
+      async chat(req: { signal?: AbortSignal }) {
+        seen = req.signal;
+        return new Promise((_resolve, reject) => {
+          req.signal?.addEventListener('abort', () => reject(new CrucibleChatCancelled()), { once: true });
+        });
+      },
+    });
+    const thread = service.createThread('v1', 'claude:claude-sonnet-4-5');
+    const before = service.getThread(thread.id).thread;
+    const asked = refusal(service.ask(thread.id, 'What about the budget?', 'claude:claude-sonnet-4-5'));
+    await new Promise((r) => setTimeout(r, 5));
+    expect(service.getThread(thread.id).messages).toHaveLength(1);
+    expect(await service.cancel(thread.id)).toEqual({ ok: true });
+    expect(seen?.aborted).toBe(true);
+    expect(await asked).toMatchObject({ status: 499, code: 'cancelled' });
+    expect(service.getThread(thread.id)).toEqual({ thread: before, messages: [] });
+    // Nothing in flight: a no-op.
+    expect(await service.cancel(thread.id)).toEqual({ ok: true });
+  });
+
+  it('Stop releases the thread: the next question is answered, with nothing of the stopped one replayed', async () => {
+    let calls = 0;
+    const sent: any[] = [];
+    const { service } = await setup([], {
+      async chat(req: any) {
+        sent.push(req);
+        if ((calls += 1) === 1) {
+          return new Promise((_resolve, reject) => {
+            req.signal?.addEventListener('abort', () => reject(new CrucibleChatCancelled()), { once: true });
+          });
+        }
+        return { text: 'Answered.', usage: null, finishReason: 'stop' };
+      },
+    });
+    const thread = service.createThread('v1', null);
+    const stopped = refusal(service.ask(thread.id, 'First?', 'claude:claude-sonnet-4-5'));
+    await new Promise((r) => setTimeout(r, 5));
+    await service.cancel(thread.id);
+    await stopped;
+    await service.ask(thread.id, 'Second?', 'claude:claude-sonnet-4-5');
+    expect(sent[1].messages.slice(1).map((m: any) => m.content)).toEqual(['Second?']);
+    expect(service.getThread(thread.id).messages.map((m) => m.content)).toEqual(['Second?', 'Answered.']);
+    expect(service.getThread(thread.id).thread.title).toBe('Second?');
   });
 
   it('a local model on a server another Briefcase run holds with a different model: 503 crucible_busy, nothing loaded', async () => {

@@ -48,6 +48,15 @@ export class VideoChatController {
     return this.chat.ask(threadId, body?.content, body?.model, gone.signal);
   }
 
+  /**
+   * Stop the thread's answer in flight and take its question back; that
+   * question's POST is refused 499 `cancelled`. Nothing in flight: a no-op.
+   */
+  @Post('threads/:threadId/cancel')
+  cancel(@Param('threadId') threadId: string): Promise<{ ok: true }> {
+    return this.chat.cancel(threadId);
+  }
+
   @Patch('markers/:markerId')
   setMarkerStatus(@Param('markerId') markerId: string, @Body() body: { status?: unknown }): ChatMarker {
     return this.chat.setMarkerStatus(markerId, body?.status);
