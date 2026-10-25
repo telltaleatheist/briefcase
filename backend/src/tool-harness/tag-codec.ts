@@ -23,6 +23,13 @@
  * can't be read is a call with the reason, so the model can be told and call
  * again. The blocks (and fences left empty by them) are cut out of the prose.
  *
+ * Claude also writes calls in its own format some of the time, in place of the
+ * tags it was asked for (13 of 99 replies in the highlights test):
+ *   <invoke name="add_marker"><parameter name="title">…</parameter>…</invoke>
+ * optionally inside <function_calls>. Those are read as calls too, in reply
+ * order with the tags; a parameter is a string unless its text is a JSON
+ * object or array.
+ *
  * A trace stored in the native format replays as tags: an assistant message's
  * structured calls become <tool_use> blocks after its text, and the `tool`
  * messages after it one <tool_result> user turn, so a thread that began on a
@@ -31,7 +38,9 @@
 import { parseLenientJson } from './lenient-json';
 import type { ChatMessage, ParsedToolCall, Tool, ToolCallCodec } from './types';
 
-const TOOL_CALL_BLOCK = /<tool_use>([\s\S]*?)(?:<\/tool_use>|$)/gi;
+const TOOL_CALL_BLOCK = /<tool_use>([\s\S]*?)(?:<\/tool_use>|$)|<invoke\s+name\s*=\s*"([^"]*)"\s*>([\s\S]*?)(?:<\/invoke>|$)/gi;
+
+const PARAMETER = /<parameter\s+name\s*=\s*"([^"]+)"\s*>([\s\S]*?)(?:<\/parameter>|$)/gi;
 
 /** A tag the reply stopped partway into ("<", "<tool_u", "</tool"): never prose. */
 const CUT_TAG = /<\/?(?:t(?:o(?:o(?:l(?:_(?:u(?:se?)?)?)?)?)?)?)?$/i;
@@ -64,12 +73,12 @@ For each function call, return a json object with function name and arguments wi
 
   parse(text) {
     const calls: ParsedToolCall[] = [];
-    for (const match of text.matchAll(TOOL_CALL_BLOCK)) calls.push(readCall(match[1]));
+    for (const match of text.matchAll(TOOL_CALL_BLOCK)) calls.push(match[1] !== undefined ? readCall(match[1]) : readInvoke(match[2], match[3]));
     const prose = text
       .replace(TOOL_CALL_BLOCK, '')
       .trimEnd()
       .replace(CUT_TAG, '')
-      .replace(/<\/?tool_use>/gi, '')
+      .replace(/<\/?(?:tool_use|function_calls)>/gi, '')
       // A fence that only wrapped the tags is empty now.
       .replace(/```[a-z]*\s*```/gi, '')
       // Lines a cut-out call leaves holding only its indent.
@@ -131,6 +140,17 @@ function readCall(body: string): ParsedToolCall {
   const args = typeof raw === 'string' ? parseLenientJson(raw) : raw;
   if (!isObject(args)) return { ok: false, reason: '"arguments" is not a JSON object' };
   return { ok: true, name: call['name'].trim(), args };
+}
+
+function readInvoke(name: string, body: string): ParsedToolCall {
+  if (!name.trim()) return { ok: false, reason: 'it names no tool ("name")' };
+  const args: Record<string, unknown> = {};
+  for (const [, key, raw] of body.matchAll(PARAMETER)) {
+    const value = raw.trim();
+    const json = /^[[{]/.test(value) ? parseLenientJson(value) : undefined;
+    args[key] = json !== undefined && json !== null ? json : value;
+  }
+  return { ok: true, name: name.trim(), args };
 }
 
 export function isObject(value: unknown): value is Record<string, unknown> {

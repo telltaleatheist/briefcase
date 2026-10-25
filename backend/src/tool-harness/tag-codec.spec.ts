@@ -33,6 +33,16 @@ describe('tagCodec.parse', () => {
     expect(around).toEqual({ prose: 'Found it.', calls: [{ ok: true, name: 'a', args: {} }] });
   });
 
+  it("Claude's own <invoke> format is read too, in order with the tags, and cut from the prose", () => {
+    const invoke = '<function_calls>\n<invoke name="add_marker">\n<parameter name="title">Sharia in "Michigan"</parameter>\n<parameter name="meta">{"n": 2}</parameter>\n</invoke>\n</function_calls>';
+    const parsed = tagCodec.parse(`Marking these.\n${tag({ name: 'a', arguments: {} })}\n${invoke}\nDone.`);
+    expect(parsed).toEqual({
+      prose: 'Marking these.\n\nDone.',
+      calls: [{ ok: true, name: 'a', args: {} }, { ok: true, name: 'add_marker', args: { title: 'Sharia in "Michigan"', meta: { n: 2 } } }],
+    });
+    expect(tagCodec.parse('<invoke name="b"><parameter name="x">1').calls).toEqual([{ ok: true, name: 'b', args: { x: '1' } }]);
+  });
+
   it('a block cut off at the end of the reply is still read', () => {
     expect(tagCodec.parse(`Placing. <tool_use>${JSON.stringify({ name: 'a', arguments: {} })}`)).toEqual({ prose: 'Placing.', calls: [{ ok: true, name: 'a', args: {} }] });
   });
