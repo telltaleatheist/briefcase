@@ -16,6 +16,8 @@ import { closeMatches } from '@search/close-match';
 import { LibraryService } from '../../../services/library.service';
 import { highlightPieces } from '../../../models/library-search.model';
 import { ChapterRow, chapterRows, leafChapters } from './chapter-outline';
+import { AskPanelComponent } from './ask-panel/ask-panel.component';
+import { ChatMarker } from '../../../models/video-chat.model';
 
 const EXPANDED_KEY = 'briefcase-transcript-expanded-search';
 
@@ -41,7 +43,7 @@ export interface TranscriptRow {
 @Component({
   selector: 'app-analysis-panel',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, AskPanelComponent],
   templateUrl: './analysis-panel.component.html',
   styleUrls: ['./analysis-panel.component.scss']
 })
@@ -87,6 +89,12 @@ export class AnalysisPanelComponent implements OnChanges {
   @Output() filterSelectMarkers = new EventEmitter<void>();
   @Output() generateAnalysis = new EventEmitter<string>();
   @Output() transcriptSeek = new EventEmitter<number>();
+  /** Ask: a marker chip was clicked (seek to its start). */
+  @Output() askSeek = new EventEmitter<number>();
+  /** Ask: the open chat's proposed markers, for the timeline's ghost lane. */
+  @Output() askProposalsChange = new EventEmitter<ChatMarker[]>();
+  /** Ask: proposals were applied as custom markers (reload them). */
+  @Output() askMarkersApplied = new EventEmitter<void>();
 
   // "Follow cursor": when enabled, the list scrolls to (and highlights) the
   // item containing the current playback position — chapter, category section,
@@ -109,7 +117,7 @@ export class AnalysisPanelComponent implements OnChanges {
   chapterCount = 0;
 
   // Primary tabs
-  activeTab = signal<'analysis' | 'chapters' | 'transcript'>('analysis');
+  activeTab = signal<'analysis' | 'chapters' | 'transcript' | 'ask'>('analysis');
 
   // Filter accordion state
   filtersExpanded = signal(true);
@@ -224,6 +232,7 @@ export class AnalysisPanelComponent implements OnChanges {
     switch (this.activeTab()) {
       case 'transcript': return this.currentSegmentId;
       case 'chapters': return this.currentChapterId;
+      case 'ask': return null;
       default: return this.currentSectionId; // analysis (categories)
     }
   }
@@ -242,7 +251,7 @@ export class AnalysisPanelComponent implements OnChanges {
     });
   }
 
-  setActiveTab(tab: 'analysis' | 'chapters' | 'transcript'): void {
+  setActiveTab(tab: 'analysis' | 'chapters' | 'transcript' | 'ask'): void {
     this.activeTab.set(tab);
     this.scrollToCurrent(true);
   }

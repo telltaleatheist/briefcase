@@ -7,6 +7,7 @@ import type { CrucibleCoordinationState } from '@crucible-wire/coordinate-wire';
 import type { CrucibleInstallDoorEvent } from '@crucible-wire/install-door-wire';
 import { CRUCIBLE_READINESS_EVENT, type CrucibleReadinessView } from '@crucible-wire/readiness-wire';
 import type { LanesStatus } from '../models/queue-lanes.model';
+import { VIDEO_CHAT_STATUS_EVENT, type VideoChatStatus } from '../models/video-chat.model';
 
 export type CrucibleServersChanged = CrucibleServersChangedPayload;
 
@@ -165,6 +166,7 @@ export class WebsocketService implements OnDestroy {
   private crucibleCoordinationCallbacks: ((event: CrucibleCoordinationState) => void)[] = [];
   private crucibleInstallDoorCallbacks: ((event: CrucibleInstallDoorEvent) => void)[] = [];
   private crucibleReadinessCallbacks: ((event: CrucibleReadinessView) => void)[] = [];
+  private videoChatStatusCallbacks: ((event: VideoChatStatus) => void)[] = [];
 
   constructor(private ngZone: NgZone) {}
 
@@ -370,6 +372,10 @@ export class WebsocketService implements OnDestroy {
       this.dispatch(this.crucibleReadinessCallbacks, event);
     });
 
+    this.socket.on(VIDEO_CHAT_STATUS_EVENT, (event: VideoChatStatus) => {
+      this.dispatch(this.videoChatStatusCallbacks, event);
+    });
+
     this.socket.on('analysisProgress', (event: any) => {
       const progress: TaskProgress = {
         taskId: event.taskId || event.id,
@@ -515,6 +521,14 @@ export class WebsocketService implements OnDestroy {
     this.crucibleReadinessCallbacks.push(callback);
     return () => {
       this.crucibleReadinessCallbacks = this.crucibleReadinessCallbacks.filter(cb => cb !== callback);
+    };
+  }
+
+  /** Where an Ask send is (loading the model, thinking, placing markers) while its request waits. */
+  onVideoChatStatus(callback: (event: VideoChatStatus) => void): () => void {
+    this.videoChatStatusCallbacks.push(callback);
+    return () => {
+      this.videoChatStatusCallbacks = this.videoChatStatusCallbacks.filter(cb => cb !== callback);
     };
   }
 

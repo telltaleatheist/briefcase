@@ -40,6 +40,13 @@
       (click)="setActiveTab('transcript')">
       Transcript
     </button>
+    <button
+      class="tab-btn"
+      [class.active]="activeTab() === 'ask'"
+      (click)="setActiveTab('ask')"
+      title="Ask about this video: a chat over its transcript that can propose markers">
+      Ask
+    </button>
   </div>
 
   <!-- Analysis Tab Content -->
@@ -411,4 +418,16 @@
       }
     }
   }
+
+  <!-- Ask Tab Content: kept alive while hidden, so a send in flight and the
+       timeline's proposals survive a tab switch -->
+  <app-ask-panel
+    [class.hidden]="activeTab() !== 'ask'"
+    [videoId]="videoId"
+    [active]="activeTab() === 'ask'"
+    [hasTranscript]="transcript.length > 0"
+    (seek)="askSeek.emit($event)"
+    (proposalsChange)="askProposalsChange.emit($event)"
+    (markersApplied)="askMarkersApplied.emit()">
+  </app-ask-panel>
 </div>

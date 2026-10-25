@@ -2838,6 +2838,7 @@ export class DatabaseController {
                 title: m.title ?? undefined,
                 description: m.description ?? undefined,
                 category: m.category ?? undefined,
+                markerSet: m.marker_set ?? undefined,
               });
             } catch (e) {
               // Ignore marker errors

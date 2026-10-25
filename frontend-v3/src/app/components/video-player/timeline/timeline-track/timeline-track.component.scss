@@ -60,6 +60,17 @@
   }
 }
 
+// Ask proposals lane - dashed, translucent blocks (see timeline-proposals-layer)
+.track-proposals-header {
+  position: relative;
+  height: 22px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-top: none;
+  border-bottom: none;
+  overflow: hidden;
+}
+
 // Waveform container - the colored section blocks are overlaid on top of it.
 // Always the last row, so it carries the rounded bottom corners.
 .track-waveform-container {

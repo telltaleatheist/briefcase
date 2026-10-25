@@ -223,6 +223,13 @@ export class WebSocketService {
   }
 
   /**
+   * Ask (video chat) Events
+   */
+  emitVideoChatStatus(payload: WebSocketEventMap[WebSocketEvent.VIDEO_CHAT_STATUS]): void {
+    this.emit(WebSocketEvent.VIDEO_CHAT_STATUS, payload);
+  }
+
+  /**
    * Advanced Methods for Future Use
    */
 

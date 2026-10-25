@@ -34,6 +34,7 @@ import {
   saveFlagFilter,
 } from '../../models/flag-filter';
 import { TranscriptionSegment } from '../../models/video-info.model';
+import { ChatMarker } from '../../models/video-chat.model';
 
 // Sub-components
 import { MediaDisplayComponent } from './media-display/media-display.component';
@@ -598,6 +599,13 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
 
   // Transcript for video
   transcript = signal<TranscriptionSegment[]>([]);
+
+  /**
+   * Ask: the open chat's PROPOSED markers (the Ask tab emits them; [] when its
+   * "Proposals on timeline" toggle is off). Drawn as a ghost lane, never saved
+   * from here: applying them in the Ask tab makes real custom markers.
+   */
+  askProposals = signal<ChatMarker[]>([]);
 
   // Category filters
   categoryFilters = signal<CategoryFilter[]>([]);
@@ -2100,6 +2108,16 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
       endTime
     });
     this.showMarkerDialog.set(true);
+  }
+
+  /** Ask applied proposals as custom markers: reload so they show as real markers. */
+  async onAskMarkersApplied(): Promise<void> {
+    const videoId = this.videoId();
+    if (videoId) await this.loadAnalysisForVideo(videoId);
+  }
+
+  onAskProposalClick(marker: ChatMarker): void {
+    this.seekTo(marker.startSeconds);
   }
 
   // Handle marker dialog save

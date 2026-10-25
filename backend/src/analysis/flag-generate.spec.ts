@@ -2,21 +2,19 @@ import { describe, expect, it } from '@jest/globals';
 import {
   GENERATE_MAX_PASSAGE_SECONDS,
   splitLongPassage,
-  anchorWords,
   buildGenerateFlagsPrompt,
   chunkSentences,
-  chunkWords,
   DEFAULT_FLAG_FINDER,
   flagFinderOf,
   generateFlagsSchema,
   GENERATE_CHUNK_CHARS,
   GENERATE_CHUNK_OVERLAP_SENTENCES,
-  matchPassage,
   parseGeneratedPassages,
   readFlagFinder,
   resolveCategoryName,
   windowsFromPassages,
 } from './flag-generate';
+import { anchorWords, chunkWords, matchPassage } from './passage-anchor';
 import { buildFlagPlan, SNAP_OPTION_TEXTS, FLAG_PROPOSITIONS } from '../scorer/flags/flag-options';
 
 /**

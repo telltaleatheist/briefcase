@@ -3,6 +3,7 @@ import type { CrucibleCoordinationState } from '../crucible/wire/coordinate-wire
 import type { CrucibleInstallProgress } from '../crucible/wire/install-wire';
 import type { CrucibleInstallDoorEvent } from '../crucible/wire/install-door-wire';
 import type { CrucibleReadinessView } from '../crucible/wire/readiness-wire';
+import type { VideoChatStatusPayload } from '../video-chat/video-chat.types';
 
 // WebSocket Event Type Definitions
 // Centralized registry of all WebSocket events and their payloads
@@ -210,6 +211,9 @@ export enum WebSocketEvent {
   // Is Crucible there for AI work, and what repairs it (P7)
   CRUCIBLE_READINESS = 'crucible.readiness',
 
+  // An Ask answer's progress (video-chat/): best effort, the HTTP answer is the result
+  VIDEO_CHAT_STATUS = 'video-chat:status',
+
   // Connection Management
   CONNECTION = 'connection',
   DISCONNECT = 'disconnect',
@@ -285,4 +289,7 @@ export interface WebSocketEventMap {
   [WebSocketEvent.CRUCIBLE_INSTALL_DOOR]: CrucibleInstallDoorEvent;
   [WebSocketEvent.CRUCIBLE_COORDINATION]: CrucibleCoordinationState;
   [WebSocketEvent.CRUCIBLE_READINESS]: CrucibleReadinessView;
+
+  // Ask
+  [WebSocketEvent.VIDEO_CHAT_STATUS]: VideoChatStatusPayload;
 }

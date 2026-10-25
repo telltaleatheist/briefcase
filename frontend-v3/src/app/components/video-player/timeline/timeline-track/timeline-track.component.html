@@ -30,6 +30,18 @@
     </div>
   }
 
+  <!-- Ask proposals lane - the open chat's proposed markers, not yet applied -->
+  @if (proposals.length > 0) {
+    <div class="track-proposals-header">
+      <app-timeline-proposals-layer
+        [markers]="proposals"
+        [duration]="duration"
+        [zoomState]="zoomState"
+        (markerClick)="proposalClick.emit($event)">
+      </app-timeline-proposals-layer>
+    </div>
+  }
+
   <!-- Waveform container - colored section blocks are overlaid on top -->
   <div class="track-waveform-container">
     <app-timeline-waveform

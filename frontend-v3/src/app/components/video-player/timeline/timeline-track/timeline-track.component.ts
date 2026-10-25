@@ -4,6 +4,8 @@ import { TimelineSectionsLayerComponent } from '../timeline-sections-layer/timel
 import { TimelineChaptersLayerComponent } from '../timeline-chapters-layer/timeline-chapters-layer.component';
 import { TimelineMuteLayerComponent, MuteResizeEvent } from '../timeline-mute-layer/timeline-mute-layer.component';
 import { TimelineWaveformComponent } from '../timeline-waveform/timeline-waveform.component';
+import { TimelineProposalsLayerComponent } from '../timeline-proposals-layer/timeline-proposals-layer.component';
+import { ChatMarker } from '../../../../models/video-chat.model';
 import { TimelineSection, TimelineChapter, MuteSection, ZoomState, WaveformData, TimelineSelection } from '../../../../models/video-editor.model';
 
 @Component({
@@ -14,7 +16,8 @@ import { TimelineSection, TimelineChapter, MuteSection, ZoomState, WaveformData,
     TimelineSectionsLayerComponent,
     TimelineChaptersLayerComponent,
     TimelineMuteLayerComponent,
-    TimelineWaveformComponent
+    TimelineWaveformComponent,
+    TimelineProposalsLayerComponent
   ],
   templateUrl: './timeline-track.component.html',
   styleUrls: ['./timeline-track.component.scss']
@@ -25,6 +28,8 @@ export class TimelineTrackComponent {
   /** Chapters that begin a story (id -> story title): a stories outline marks them. */
   @Input() storyStarts: ReadonlyMap<string, string> = new Map();
   @Input() muteSections: MuteSection[] = [];
+  /** Ask's proposed markers (the open chat's), drawn as their own dashed lane. */
+  @Input() proposals: ChatMarker[] = [];
   @Input() duration: number = 0;
   @Input() currentTime: number = 0;
   @Input() zoomState: ZoomState = { level: 1, offset: 0 };
@@ -41,6 +46,7 @@ export class TimelineTrackComponent {
   @Output() sectionHover = new EventEmitter<TimelineSection | null>();
   @Output() chapterClick = new EventEmitter<TimelineChapter>();
   @Output() chapterHover = new EventEmitter<TimelineChapter | null>();
+  @Output() proposalClick = new EventEmitter<ChatMarker>();
   @Output() muteSectionClick = new EventEmitter<MuteSection>();
   @Output() muteSectionDelete = new EventEmitter<MuteSection>();
   @Output() muteSectionResizeStart = new EventEmitter<MuteResizeEvent>();

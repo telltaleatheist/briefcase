@@ -299,6 +299,13 @@ export interface RunOptions {
   onWaiting?: (message: string) => void;
   /** Briefcase's id for the work, written on every ledger row. */
   localId?: string;
+  /**
+   * How long the run's session may wait in Crucible's line to open, in seconds
+   * (the session's `maxWaitS`, 10..86400). Absent: the server's default, an
+   * hour. Past it the server ends the wait, which is a {@link CrucibleBusyError}.
+   * For interactive work (the Ask chat) that must answer, not wait.
+   */
+  maxWaitS?: number;
 }
 
 interface RunScope {
@@ -406,11 +413,13 @@ export class CrucibleChatService {
   async withRun<T>(fn: () => Promise<T>, options: RunOptions = {}): Promise<T> {
     if (this.runs.getStore() !== undefined) return fn();
     const scope: RunScope = { held: new Map(), sessions: new Map(), placed: new Map(), mapped: new Map(), lock: Promise.resolve(), options, parked: null };
+    this.liveScopes.add(scope);
     const run = (async () => {
       try {
         return await this.runs.run(scope, fn);
       } finally {
         await this.releaseScope(scope);
+        this.liveScopes.delete(scope);
       }
     })();
     const settled = run.then(() => undefined, () => undefined);
@@ -421,6 +430,29 @@ export class CrucibleChatService {
 
   /** Every top-level run not yet settled (its release included). */
   private readonly openRuns = new Set<Promise<void>>();
+  /** The scopes of those runs, for {@link otherRunsOn}. */
+  private readonly liveScopes = new Set<RunScope>();
+
+  /**
+   * The runs other than the caller's own that hold an open queue session on
+   * `server`, each with the model it holds there (null: none yet, or work that
+   * loads none). Crucible counts every request from this client as an item of
+   * an open session of this client's (same-client membership), so a call made
+   * beside one of these runs lands inside its session: a different local model
+   * loaded by it would evict the run's.
+   */
+  otherRunsOn(server: string): Array<{ model: string | null }> {
+    const mine = this.runs.getStore();
+    const out: Array<{ model: string | null }> = [];
+    for (const scope of this.liveScopes) {
+      if (scope === mine) continue;
+      const open = scope.sessions.get(server);
+      if (open === undefined || open.ended) continue;
+      const held = scope.held.get(server);
+      out.push({ model: held !== undefined && !held.lost ? held.model : null });
+    }
+    return out;
+  }
 
   /**
    * Wait, at most `ms`, for every open run to settle, its own release
@@ -1181,6 +1213,7 @@ export class CrucibleChatService {
       session = await client.session({
         act: opening.act,
         ...(opening.maxParamsB === undefined ? {} : { maxParamsB: opening.maxParamsB }),
+        ...(scope.options.maxWaitS === undefined ? {} : { maxWaitS: scope.options.maxWaitS }),
         // 1.0.83: opening, but the card is held by a process Crucible does not own.
         onWaiting: (wait) => {
           waited = true;

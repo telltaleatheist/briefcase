@@ -1,0 +1,184 @@
+<div class="ask-panel">
+  <!-- Thread bar: switcher, new chat, delete, timeline toggle -->
+  <div class="ask-bar">
+    <select
+      class="thread-select"
+      aria-label="Chat"
+      [ngModel]="currentThreadId() ?? ''"
+      (ngModelChange)="onThreadPick($event)"
+      [disabled]="threadsState() === 'loading'">
+      <option value="">New chat</option>
+      @for (thread of threads(); track thread.id) {
+        <option [value]="thread.id">{{ thread.title || 'Untitled chat' }}</option>
+      }
+    </select>
+    <button type="button" class="bar-btn" (click)="newChat()" title="Start a new chat about this video">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+      New
+    </button>
+    @if (currentThreadId()) {
+      <button type="button" class="bar-btn icon danger" (click)="confirmingDelete.set(true)" title="Delete this chat" aria-label="Delete this chat">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>
+      </button>
+    }
+  </div>
+
+  @if (confirmingDelete()) {
+    <div class="inline-confirm" role="alert">
+      <span>Delete "{{ currentThread()?.title || 'this chat' }}"? Applied markers stay.</span>
+      <button type="button" class="mini-btn danger" (click)="deleteThread()">Delete</button>
+      <button type="button" class="mini-btn" (click)="confirmingDelete.set(false)">Cancel</button>
+    </div>
+  }
+
+  <div class="ask-subbar">
+    <label class="timeline-toggle" title="Show this chat's proposed markers on the timeline as a dashed lane">
+      <input type="checkbox" [ngModel]="showOnTimeline()" (ngModelChange)="setShowOnTimeline($event)">
+      Proposals on timeline
+    </label>
+    @if (proposals().length > 0 && currentThreadId()) {
+      <button type="button" class="mini-btn accent" (click)="openApplyThread()"
+        [disabled]="applying()"
+        title="Apply every proposed marker in this chat as custom markers">
+        Apply all proposed ({{ proposals().length }})
+      </button>
+    }
+  </div>
+  @if (isApplyOpen('thread')) {
+    <ng-container *ngTemplateOutlet="applyFormTpl"></ng-container>
+  }
+
+  <!-- Messages -->
+  <div class="message-list" #messageList>
+    @if (threadsState() === 'loading' || threadLoading()) {
+      <div class="ask-empty">Loading…</div>
+    } @else if (threadsState() === 'error') {
+      <div class="ask-error">
+        Couldn't load the chats: {{ threadsError() }}
+        <button type="button" class="mini-btn" (click)="retryThreads()">Retry</button>
+      </div>
+    } @else if (threadError()) {
+      <div class="ask-error">Couldn't open the chat: {{ threadError() }}</div>
+    } @else if (messages().length === 0 && !pendingHere()) {
+      <div class="ask-empty">
+        <p class="ask-empty-title">Ask about this video</p>
+        <p>Questions are answered from the transcript. Ask it to mark moments and they appear here and on the timeline as proposals to apply or dismiss.</p>
+        @if (!hasTranscript) {
+          <p class="ask-hint">No transcript is loaded for this video yet.</p>
+        }
+      </div>
+    }
+
+    @for (message of messages(); track message.id) {
+      <div class="message" [class.user]="message.role === 'user'" [class.assistant]="message.role === 'assistant'">
+        <div class="bubble">{{ message.content }}</div>
+
+        @if (markersOf(message).length) {
+          <div class="chips">
+            @for (marker of markersOf(message); track marker.id) {
+              <div class="chip"
+                [class.applied]="marker.status === 'applied'"
+                [class.dismissed]="marker.status === 'dismissed'"
+                [class.busy]="isBusy(marker)">
+                <button type="button" class="chip-main" (click)="onChipClick(marker)" [title]="markerTitle(marker) + ' (click to play from here)'">
+                  @if (marker.status === 'applied') {
+                    <svg class="chip-state" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg>
+                  }
+                  <span class="chip-title">{{ marker.title }}</span>
+                  <span class="chip-time">{{ formatRange(marker.startSeconds, marker.endSeconds) }}</span>
+                </button>
+                @if (marker.status === 'proposed') {
+                  <button type="button" class="chip-act apply" (click)="openApply('marker:' + marker.id, [marker.id])"
+                    [disabled]="isBusy(marker) || applying()" title="Apply as a custom marker" aria-label="Apply marker">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg>
+                  </button>
+                  <button type="button" class="chip-act dismiss" (click)="dismiss(marker)"
+                    [disabled]="isBusy(marker)" title="Dismiss this proposal" aria-label="Dismiss marker">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                  </button>
+                } @else if (marker.status === 'dismissed') {
+                  <button type="button" class="chip-act undo" (click)="undoDismiss(marker)" [disabled]="isBusy(marker)" title="Bring this proposal back">
+                    Undo
+                  </button>
+                }
+              </div>
+              @if (isApplyOpen('marker:' + marker.id)) {
+                <ng-container *ngTemplateOutlet="applyFormTpl"></ng-container>
+              }
+            }
+          </div>
+          @if (proposedOf(message).length > 1) {
+            <div class="message-actions">
+              <button type="button" class="mini-btn" (click)="openApplyMessage(message)"
+                [disabled]="applying()">
+                Apply all {{ proposedOf(message).length }}
+              </button>
+            </div>
+            @if (isApplyOpen('message:' + message.id)) {
+              <ng-container *ngTemplateOutlet="applyFormTpl"></ng-container>
+            }
+          }
+        }
+      </div>
+    }
+
+    @if (pendingHere()) {
+      <div class="message user pending">
+        <div class="bubble">{{ pending()!.content }}</div>
+      </div>
+      <div class="status-line" role="status" aria-live="polite">
+        <span class="spinner" aria-hidden="true"></span>
+        {{ statusLine() }}
+      </div>
+    }
+
+    @if (sendErrorHere()) {
+      <div class="ask-error" role="alert">{{ sendErrorHere() }}</div>
+    }
+  </div>
+
+  @if (actionError()) {
+    <div class="ask-error action" role="alert">
+      {{ actionError() }}
+      <button type="button" class="mini-btn" (click)="actionError.set('')">Close</button>
+    </div>
+  }
+
+  <!-- Composer -->
+  <div class="composer">
+    <textarea
+      class="composer-input"
+      rows="3"
+      [placeholder]="readiness.ready() ? 'Ask about this video. Enter sends, Shift+Enter adds a line.' : 'AI needs Crucible'"
+      [ngModel]="draft()"
+      (ngModelChange)="draft.set($event)"
+      (keydown)="onComposerKeydown($event)"
+      [disabled]="!readiness.ready() || !!pending()"
+      aria-label="Ask about this video"></textarea>
+    <div class="composer-foot">
+      <app-ai-model-select
+        class="composer-model"
+        ariaLabel="Model for this chat"
+        [value]="modelValue()"
+        (valueChange)="modelChoice.set($event)" />
+      <button type="button" class="send-btn" (click)="send()" [disabled]="!canSend()" title="Send (Enter)">
+        Send
+      </button>
+    </div>
+    @if (pending() && !pendingHere()) {
+      <p class="composer-note">Waiting for an answer in another chat ({{ statusLine() }})</p>
+    }
+  </div>
+</div>
+
+<ng-template #applyFormTpl>
+  <form class="apply-form" (ngSubmit)="confirmApply()">
+    <label class="apply-label" for="ask-set-name">Marker set</label>
+    <input id="ask-set-name" type="text" class="apply-input" name="setName"
+      [ngModel]="setName()" (ngModelChange)="setName.set($event)" [disabled]="applying()" autofocus>
+    <button type="submit" class="mini-btn accent" [disabled]="applying() || !setName().trim()">
+      {{ applying() ? 'Applying…' : 'Apply ' + applyForm()!.markerIds.length }}
+    </button>
+    <button type="button" class="mini-btn" (click)="cancelApply()" [disabled]="applying()">Cancel</button>
+  </form>
+</ng-template>

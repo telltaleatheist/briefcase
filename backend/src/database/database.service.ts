@@ -163,6 +163,8 @@ export interface CustomMarkerRecord {
   description: string | null;
   category: string | null;
   created_at: string;
+  /** The named set it was applied into from an Ask conversation; null for a hand-made marker. */
+  marker_set: string | null;
   source?: string;
 }
 
@@ -770,6 +772,7 @@ export class DatabaseService {
         description TEXT,
         category TEXT DEFAULT 'custom',
         created_at TEXT NOT NULL,
+        marker_set TEXT,
         FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
       );
 
@@ -886,6 +889,53 @@ export class DatabaseService {
         FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE,
         FOREIGN KEY (saved_link_id) REFERENCES saved_links(id) ON DELETE CASCADE
       );
+
+      -- Ask: a conversation about one video's transcript (video-chat/)
+      CREATE TABLE IF NOT EXISTS chat_threads (
+        id TEXT PRIMARY KEY,
+        video_id TEXT NOT NULL,
+        title TEXT,
+        model TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
+      );
+
+      -- Ask: one question or answer. tool_trace_json holds an answer's hidden
+      -- turns (the model's raw replies and the marker results it was sent back).
+      CREATE TABLE IF NOT EXISTS chat_messages (
+        id TEXT PRIMARY KEY,
+        thread_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        model TEXT,
+        tool_trace_json TEXT,
+        usage_json TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (thread_id) REFERENCES chat_threads(id) ON DELETE CASCADE
+      );
+
+      -- Ask: a marker an answer placed, proposed until applied into
+      -- custom_markers (custom_marker_id) or dismissed. Applied custom markers
+      -- outlive the conversation.
+      CREATE TABLE IF NOT EXISTS chat_markers (
+        id TEXT PRIMARY KEY,
+        thread_id TEXT NOT NULL,
+        message_id TEXT NOT NULL,
+        video_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        note TEXT,
+        first_words TEXT NOT NULL,
+        last_words TEXT NOT NULL,
+        start_seconds REAL NOT NULL,
+        end_seconds REAL NOT NULL,
+        status TEXT NOT NULL DEFAULT 'proposed',
+        custom_marker_id TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (thread_id) REFERENCES chat_threads(id) ON DELETE CASCADE,
+        FOREIGN KEY (message_id) REFERENCES chat_messages(id) ON DELETE CASCADE,
+        FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
+      );
     `;
 
     // Execute table creation
@@ -924,6 +974,10 @@ export class DatabaseService {
       CREATE INDEX IF NOT EXISTS idx_video_tab_items_video ON video_tab_items(video_id);
       CREATE INDEX IF NOT EXISTS idx_video_tab_items_saved_link ON video_tab_items(saved_link_id);
       CREATE INDEX IF NOT EXISTS idx_video_tab_items_display_order ON video_tab_items(display_order);
+      CREATE INDEX IF NOT EXISTS idx_chat_threads_video ON chat_threads(video_id, updated_at);
+      CREATE INDEX IF NOT EXISTS idx_chat_messages_thread ON chat_messages(thread_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_chat_markers_thread ON chat_markers(thread_id);
+      CREATE INDEX IF NOT EXISTS idx_chat_markers_message ON chat_markers(message_id);
     `;
 
     db.exec(indexSchema);
@@ -2054,6 +2108,24 @@ export class DatabaseService {
         `Check that the library volume is mounted and writable, then reopen the library.`,
       );
     }
+
+    // Migration 31: custom_markers.marker_set, the named set a marker was
+    // applied into from an Ask conversation (video-chat/). Additive and
+    // nullable: a marker made by hand belongs to no set.
+    try {
+      const columns = db.prepare('PRAGMA table_info(custom_markers)').all() as Array<{ name: string }>;
+      if (columns.length > 0 && !columns.some((c) => c.name === 'marker_set')) {
+        db.exec('ALTER TABLE custom_markers ADD COLUMN marker_set TEXT');
+        this.saveDatabase();
+        this.logger.log('Migration complete: marker_set column added to custom_markers');
+      }
+    } catch (migrationError: any) {
+      throw new Error(
+        `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
+        `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
+        `Check that the library volume is mounted and writable, then reopen the library.`,
+      );
+    }
   }
 
   /**
@@ -2061,6 +2133,28 @@ export class DatabaseService {
    */
   getDatabase(): Database.Database {
     return this.ensureInitialized();
+  }
+
+  /**
+   * Run `fn` on the library database at `dbPath` (a path read from
+   * {@link getCurrentDbPath} earlier): the open connection while that library
+   * is still the open one, else a connection of its own, closed after `fn`.
+   *
+   * For work that captured its library at the start and writes minutes later
+   * (an Ask answer): the shared connection follows library switches, so
+   * writing through it then would land in whichever library is open at the
+   * end. `fn` must be synchronous, so no switch can happen inside it.
+   */
+  withDatabaseAt<T>(dbPath: string, fn: (db: Database.Database) => T): T {
+    if (this.db && this.db.open && this.dbPath === dbPath) return fn(this.db);
+    const own = new Database(dbPath, { fileMustExist: true });
+    try {
+      own.pragma('foreign_keys = ON');
+      own.pragma('busy_timeout = 5000');
+      return fn(own);
+    } finally {
+      own.close();
+    }
   }
 
   /**
@@ -3233,13 +3327,15 @@ export class DatabaseService {
     title?: string;
     description?: string;
     category?: string;
+    /** The named set it was applied into from an Ask conversation; none for a hand-made marker. */
+    markerSet?: string;
   }) {
     const db = this.ensureInitialized();
 
     db.prepare(
       `INSERT INTO custom_markers (
-        id, video_id, start_seconds, end_seconds, timestamp_text, title, description, category, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        id, video_id, start_seconds, end_seconds, timestamp_text, title, description, category, created_at, marker_set
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       marker.id,
       marker.videoId,
@@ -3250,6 +3346,7 @@ export class DatabaseService {
       marker.description || null,
       marker.category || 'custom',
       new Date().toISOString(),
+      marker.markerSet || null,
     );
 
     this.saveDatabase();

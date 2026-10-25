@@ -20,6 +20,7 @@ import { JobStateManagerModule } from './common/job-state-manager.module';
 import { CommonModule } from './common/common.module';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { CrucibleModule } from './crucible/crucible.module';
+import { VideoChatModule } from './video-chat/video-chat.module';
 import { join } from 'path';
 
 @Global()
@@ -53,6 +54,7 @@ import { join } from 'path';
     WebArchiveModule,
     JobStateManagerModule,
     CrucibleModule,
+    VideoChatModule,
   ],
   controllers: [AppController],
   providers: [AppService],

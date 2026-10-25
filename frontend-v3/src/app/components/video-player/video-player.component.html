@@ -304,6 +304,8 @@
                   [chapters]="timelineChapters()"
                   [storyStarts]="timelineStoryStarts()"
                   [muteSections]="muteSections()"
+                  [proposals]="askProposals()"
+                  (proposalClick)="onAskProposalClick($event)"
                   [duration]="editorState().duration"
                   [currentTime]="editorState().currentTime"
                   [zoomState]="editorState().zoomState"
@@ -440,7 +442,10 @@
           (filterDeselectAll)="onFilterDeselectAll()"
           (filterSelectMarkers)="onFilterSelectMarkers()"
           (generateAnalysis)="onGenerateAnalysis($event)"
-          (transcriptSeek)="seekTo($event)">
+          (transcriptSeek)="seekTo($event)"
+          (askSeek)="seekTo($event)"
+          (askProposalsChange)="askProposals.set($event)"
+          (askMarkersApplied)="onAskMarkersApplied()">
         </app-analysis-panel>
       </div>
     }

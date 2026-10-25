@@ -43,18 +43,17 @@ import {
   AnchoredPassage,
   buildGenerateFlagsPrompt,
   chunkSentences,
-  chunkWords,
   FlagFinder,
   flagFinderOf,
   generateFlagsSchema,
   GENERATE_CHUNK_CHARS,
   GENERATE_MAX_OUTPUT_TOKENS,
   GENERATE_RANKER,
-  matchPassage,
   parseGeneratedPassages,
   resolveCategoryName,
   windowsFromPassages,
 } from './flag-generate';
+import { chunkWords, matchPassage } from './passage-anchor';
 import { buildFlagPlan } from '../scorer/flags/flag-options';
 import { safeJsonParse } from './json-utils';
 import { DatabaseService } from '../database/database.service';
