@@ -2,21 +2,26 @@
  * THE TOOL LOOP: a model reply, the tool calls in it run, their results sent
  * back, until a reply makes no call.
  *
- *   reply     the transport sends the conversation; the codec reads the reply
+ *   reply     the transport sends the conversation (and, in the native
+ *             format, the tools as definitions); the codec reads the reply
  *             into prose and calls;
  *   calls     each call is run by the tool it names. A call that could not be
  *             read, names no known tool, or whose tool throws is answered with
  *             why, so the model can call again; it does not end the answer;
- *   results   one round's results go back as a user turn (the codec's), and
- *             the model continues;
+ *   results   one round's results go back in the codec's messages (a user
+ *             turn of tags, or one `tool` message per native call), and the
+ *             model continues;
  *   end       a reply with no call ends it. The final text is every reply's
  *             prose in order (text written before a call stays). After
  *             `maxRounds` rounds of calls the next reply is the last: the
- *             results turn says so, and calls it still makes are not run.
+ *             results say so, and calls it still makes are not run (a native
+ *             trace answers them "not run", so it replays as a valid
+ *             conversation).
  *
  * The trace is every message after the user's (the model's raw replies and
  * the results it was sent): stored by the host and replayed in later turns
- * (history.ts), so the model remembers its own tool use.
+ * (history.ts, through the codec, which reads a trace stored in either
+ * format), so the model remembers its own tool use.
  *
  * The signal is checked before every model call and tool run and handed to
  * both; an abort rejects with ToolLoopAborted.
@@ -40,15 +45,15 @@ export class ToolLoopAborted extends Error {
 export interface ToolLoopOptions {
   transport: ChatTransport;
   tools: ReadonlyArray<Tool<any, any>>;
-  /** The host's system prompt; the codec's tools section is appended to it. */
+  /** The host's system prompt; the codec's tools section (the tag format's) is appended to it. */
   system: string;
-  /** Earlier turns, oldest first (history.ts replayHistory). */
+  /** Earlier turns, oldest first (history.ts replayHistory, with this loop's codec). */
   history?: ChatMessage[];
   userMessage: string;
   maxRounds?: number;
   signal?: AbortSignal;
   onEvent?: (event: ToolLoopEvent) => void;
-  /** The tool-call wire format; tag-codec's plain tags by default. */
+  /** The tool-call wire format: tag-codec's plain tags by default, or native-codec's structured calls. */
   codec?: ToolCallCodec;
 }
 
@@ -76,7 +81,9 @@ export async function runToolLoop(options: ToolLoopOptions): Promise<ToolLoopRes
       // A progress listener never breaks the loop.
     }
   };
-  const system = tools.length > 0 ? `${options.system}\n\n${codec.toolsPrompt(tools)}` : options.system;
+  const toolsPrompt = tools.length > 0 ? codec.toolsPrompt(tools) : '';
+  const system = toolsPrompt ? `${options.system}\n\n${toolsPrompt}` : options.system;
+  const definitions = tools.length > 0 ? codec.definitions?.(tools) : undefined;
   const base: ChatMessage[] = [{ role: 'system', content: system }, ...(options.history ?? []), { role: 'user', content: options.userMessage }];
   const trace: ChatMessage[] = [];
   const toolCalls: ToolCallRecord[] = [];
@@ -86,14 +93,15 @@ export async function runToolLoop(options: ToolLoopOptions): Promise<ToolLoopRes
   for (;;) {
     checkAborted(signal);
     emit({ type: 'model-call', round: rounds });
-    const reply = await options.transport([...base, ...trace], { signal });
+    const reply = await options.transport([...base, ...trace], { signal, ...(definitions === undefined ? {} : { tools: definitions }) });
     checkAborted(signal);
     usage.push(reply.usage ?? null);
-    trace.push({ role: 'assistant', content: reply.text });
-    const parsed = codec.parse(reply.text);
+    const parsed = codec.read(reply);
+    trace.push(parsed.message);
     const calls = parsed.calls;
     if (parsed.prose) prose.push(parsed.prose);
     if (calls.length === 0 || rounds >= maxRounds) {
+      if (calls.length > 0 && codec.unanswered) trace.push(...codec.unanswered(calls));
       emit({ type: 'done', rounds });
       return { finalText: prose.join('\n\n'), toolCalls, trace, usage, rounds };
     }
@@ -108,7 +116,7 @@ export async function runToolLoop(options: ToolLoopOptions): Promise<ToolLoopRes
       contents.push(record.content);
       emit({ type: 'tool-result', round: rounds, call: record });
     }
-    trace.push({ role: 'user', content: codec.responses(contents, rounds >= maxRounds ? LAST_ROUND_NOTE : undefined) });
+    trace.push(...codec.results(calls, contents, rounds >= maxRounds ? LAST_ROUND_NOTE : undefined));
   }
 }
 

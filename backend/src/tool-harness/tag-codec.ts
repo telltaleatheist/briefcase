@@ -5,7 +5,8 @@
  * lifts the call out of the reply into a structured `tool_calls` field; a
  * door that doesn't relay that field (Crucible today) then returns an empty
  * reply. Ordinary tags pass through every engine and upstream as text, and
- * every model follows them from the prompt:
+ * every model follows them from the prompt (the fallback for a model API
+ * without native tools; native-codec.ts is the other format):
  *
  *   tools     a "# Tools" section in the system prompt, each tool's function
  *             definition (the OpenAI `tools` entry shape) as one JSON line
@@ -21,16 +22,29 @@
  * open at the very end of the reply (cut off) are all read. A block that still
  * can't be read is a call with the reason, so the model can be told and call
  * again. The blocks (and fences left empty by them) are cut out of the prose.
+ *
+ * A trace stored in the native format replays as tags: an assistant message's
+ * structured calls become <tool_use> blocks after its text, and the `tool`
+ * messages after it one <tool_result> user turn, so a thread that began on a
+ * native model reads the same to a model that only has tags.
  */
 import { parseLenientJson } from './lenient-json';
-import type { ParsedToolCall, Tool, ToolCallCodec } from './types';
+import type { ChatMessage, ParsedToolCall, Tool, ToolCallCodec } from './types';
 
 const TOOL_CALL_BLOCK = /<tool_use>([\s\S]*?)(?:<\/tool_use>|$)/gi;
 
 /** A tag the reply stopped partway into ("<", "<tool_u", "</tool"): never prose. */
 const CUT_TAG = /<\/?(?:t(?:o(?:o(?:l(?:_(?:u(?:se?)?)?)?)?)?)?)?$/i;
 
-export const tagCodec: ToolCallCodec = {
+/** The tag format: the codec, plus its text-level halves (parse a reply's text, render a results turn). */
+export interface TagCodec extends ToolCallCodec {
+  /** A reply's prose (the calls cut out) and the calls in it, in order. */
+  parse(text: string): { prose: string; calls: ParsedToolCall[] };
+  /** The user turn carrying one round's results, in call order; `note` is appended when given. */
+  responses(contents: string[], note?: string): string;
+}
+
+export const tagCodec: TagCodec = {
   toolsPrompt(tools) {
     const lines = tools.map((tool) => JSON.stringify(functionDefinition(tool))).join('\n');
     return `# Tools
@@ -69,7 +83,39 @@ For each function call, return a json object with function name and arguments wi
     const blocks = contents.map((content) => `<tool_result>\n${content}\n</tool_result>`).join('\n');
     return note ? `${blocks}\n${note}` : blocks;
   },
+
+  read(reply) {
+    return { ...tagCodec.parse(reply.text), message: { role: 'assistant', content: reply.text } };
+  },
+
+  results(_calls, contents, note) {
+    return [{ role: 'user', content: tagCodec.responses(contents, note) }];
+  },
+
+  replay(trace) {
+    const out: ChatMessage[] = [];
+    for (let i = 0; i < trace.length; i++) {
+      const message = trace[i];
+      if (message.role === 'assistant' && message.toolCalls !== undefined && message.toolCalls.length > 0) {
+        const blocks = message.toolCalls.map((call) => toolUseBlock(call.name, parseLenientJson(call.arguments) ?? call.arguments));
+        out.push({ role: 'assistant', content: [message.content.trim(), ...blocks].filter(Boolean).join('\n') });
+      } else if (message.role === 'tool') {
+        const contents: string[] = [];
+        for (; i < trace.length && trace[i].role === 'tool'; i++) contents.push(trace[i].content);
+        i -= 1;
+        out.push({ role: 'user', content: tagCodec.responses(contents) });
+      } else {
+        out.push({ role: message.role, content: message.content });
+      }
+    }
+    return out;
+  },
 };
+
+/** One call as a <tool_use> block. */
+export function toolUseBlock(name: string, args: unknown): string {
+  return `<tool_use>\n${JSON.stringify({ name, arguments: args })}\n</tool_use>`;
+}
 
 /** A tool as the OpenAI `tools` entry (what a native-tools transport sends). */
 export function functionDefinition(tool: Pick<Tool<any, any>, 'name' | 'description' | 'parameters'>): Record<string, unknown> {
@@ -87,6 +133,6 @@ function readCall(body: string): ParsedToolCall {
   return { ok: true, name: call['name'].trim(), args };
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
+export function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }

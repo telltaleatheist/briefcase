@@ -1,11 +1,13 @@
 /**
  * The tool harness's transport for Briefcase (tool-harness/ ChatTransport): a
- * plain chat through Crucible's chat door. The harness puts the tools in the
- * system prompt and reads inline <tool_use> tags out of the reply, so
- * no response_format and no native `tools` are sent: replies are free prose.
- * Crucible refuses native `tools`/`tool_calls` on its upstreams today; when it
- * passes them through, a transport that sends them (with a matching codec)
- * replaces this one.
+ * chat through Crucible's chat door, in either of the harness's formats. With
+ * the native codec the loop hands it the tools as definitions: they are sent
+ * as `tools` (tool_choice auto), and the reply's structured calls come back as
+ * `toolCalls`, the assistant's calls and the `tool` results crossing in the
+ * next round's messages (Crucible 2.0.30+, every route). With the tag codec
+ * no tools are sent: the harness puts them in the system prompt and reads
+ * inline <tool_use> tags out of the reply. No response_format either way:
+ * replies are free prose (and Crucible refuses it beside tools).
  *
  * What crosses the wire is target.ts's rule, as for every Briefcase call: a
  * cloud upstream gets no temperature and no max_tokens; a local model and
@@ -28,25 +30,29 @@ export interface CrucibleTransportOptions {
 }
 
 export function crucibleTransport(chat: CrucibleChatService, options: CrucibleTransportOptions): ChatTransport {
-  return async (messages, { signal }) => {
+  return async (messages, { signal, tools }) => {
     const result = await chat.chat({
       provider: options.provider,
       model: options.model,
       messages,
+      ...(tools === undefined || tools.length === 0 ? {} : { tools, toolChoice: 'auto' }),
       temperature: temperatureForTask(),
       ...(options.contextTokens === undefined ? {} : { contextTokens: options.contextTokens }),
       ...(options.loadContext === undefined ? {} : { loadContext: options.loadContext }),
       ...(signal === undefined ? {} : { signal }),
     });
     const text = stripThinkTags(result.text);
-    // A model that falls back to its own native tool call (Qwen's <tool_call>
-    // special token) has the call lifted out of its reply by the engine, and
-    // Crucible doesn't relay `tool_calls`: what arrives is nothing. Said, not
-    // read as an empty answer.
-    if (result.finishReason === 'tool_calls' && !text.trim()) {
+    const toolCalls = result.toolCalls ?? [];
+    // The tag format on a Crucible before 2.0.30: a model that falls back to
+    // its own native tool call (Qwen's <tool_call> special token) has the call
+    // lifted out of its reply by the engine, and that Crucible doesn't relay
+    // `tool_calls`: what arrives is nothing. Said, not read as an empty answer.
+    // (2.0.30+ relays the calls when tools were sent, and returns a stray call
+    // as content when none were, so this no longer fires there.)
+    if (result.finishReason === 'tool_calls' && toolCalls.length === 0 && !text.trim()) {
       throw new CrucibleChatError(502, 'tool_call_lost', `${options.model} called a tool in its own native format, which Crucible doesn't pass back. Ask again.`);
     }
-    return { text, usage: result.usage };
+    return { text, ...(toolCalls.length === 0 ? {} : { toolCalls }), usage: result.usage };
   };
 }
 
@@ -54,11 +60,13 @@ export function crucibleTransport(chat: CrucibleChatService, options: CrucibleTr
  * TEMPORARY (claude-cli): the transport for a `claude-cli:` choice, the local
  * Claude Code CLI (a user-requested exception to Crucible-only AI). The
  * conversation is flattened into one `-p` prompt (claude-cli.service.ts); no
- * temperature, no max_tokens, nothing through Crucible.
+ * temperature, no max_tokens, nothing through Crucible. Always the tag codec:
+ * its history is replayed as tags, so no `tool` message reaches it.
  */
 export function claudeCliTransport(cli: ClaudeCliService, model: string): ChatTransport {
   return async (messages, { signal }) => {
-    const result = await cli.complete({ model, messages, ...(signal === undefined ? {} : { signal }) });
+    const turns = messages.map((m) => ({ role: m.role === 'tool' ? 'user' as const : m.role, content: m.content }));
+    const result = await cli.complete({ model, messages: turns, ...(signal === undefined ? {} : { signal }) });
     return { text: stripThinkTags(result.text), usage: result.usage };
   };
 }

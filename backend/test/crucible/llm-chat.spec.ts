@@ -8,9 +8,9 @@ import { Logger } from '@nestjs/common';
 import { CRUCIBLE_CLIENT_NAME } from '../../src/crucible/client-factory';
 import { CrucibleServersService } from '../../src/crucible/crucible-servers.service';
 import { CrucibleFieldMissing } from '../../src/crucible/errors';
-import { CrucibleChatService } from '../../src/crucible/llm/crucible-chat.service';
+import { CrucibleChatService, isToolsRefusal, NATIVE_TOOLS_VERSION } from '../../src/crucible/llm/crucible-chat.service';
 import { CrucibleBusyError, CrucibleChatCancelled, CrucibleChatError, CrucibleNoVenueError } from '../../src/crucible/llm/errors';
-import { CLOUD_FORBIDDEN_KEYS } from '../../src/crucible/llm/target';
+import { CLOUD_FORBIDDEN_KEYS, crucibleTargetOf } from '../../src/crucible/llm/target';
 import { startFakeCrucible, unusedLoopbackUrl, type FakeCrucible, type FakeCrucibleOptions } from '../fake-crucible/fake-crucible';
 import { harness, type Harness } from './harness';
 
@@ -581,6 +581,73 @@ describe('CrucibleChatService: one server', () => {
     const err = await chat.withModel('mac', 'local:qwen3.5-9b', async () => undefined, { loadContext: 131072 }).catch((e: unknown) => e);
     expect(err).toMatchObject({ code: 'context_over_limit' });
     expect(fake.resident()).toBeNull();
+  });
+
+  // ── native tools (2.0.30) ───────────────────────────────────────────────
+  const TOOLS = [{ type: 'function', function: { name: 'add_marker', description: 'Mark it.', parameters: { type: 'object', properties: {} } } }];
+
+  it('native tools: tools cross, and a reply of only calls reads as toolCalls with empty text (content null, finish tool_calls)', async () => {
+    await start({
+      version: NATIVE_TOOLS_VERSION,
+      chatReplies: { 'anthropic/claude-sonnet-5': { toolCalls: [{ id: 'toolu_01', name: 'add_marker', arguments: '{"title":"A"}' }, { id: 'toolu_02', name: 'add_marker', arguments: '{}' }] } },
+    });
+    const result = await chat.chat({
+      model: 'claude:claude-sonnet-5',
+      messages: [{ role: 'user', content: 'Mark it.' }, { role: 'assistant', content: '', toolCalls: [{ id: 'toolu_00', name: 'add_marker', arguments: '{}' }] }, { role: 'tool', toolCallId: 'toolu_00', content: 'placed' }],
+      tools: TOOLS,
+      toolChoice: 'auto',
+    });
+    expect(result).toMatchObject({ text: '', finishReason: 'tool_calls' });
+    expect(result.toolCalls).toEqual([{ id: 'toolu_01', name: 'add_marker', arguments: '{"title":"A"}' }, { id: 'toolu_02', name: 'add_marker', arguments: '{}' }]);
+    const [body] = fake.chatBodies();
+    expect(body).toMatchObject({ tools: TOOLS, tool_choice: 'auto' });
+    expect((body['messages'] as unknown[]).slice(1)).toEqual([
+      { role: 'assistant', content: null, tool_calls: [{ id: 'toolu_00', type: 'function', function: { name: 'add_marker', arguments: '{}' } }] },
+      { role: 'tool', tool_call_id: 'toolu_00', content: 'placed' },
+    ]);
+  });
+
+  it('a reply with no calls reads toolCalls as an empty list; a call without an id is refused by name', async () => {
+    await start({ chatReplies: { 'anthropic/claude-a': 'Plain.', 'anthropic/claude-b': { toolCalls: [{ id: '', name: 'add_marker', arguments: '{}' }] } } });
+    expect((await chat.chat({ model: 'anthropic/claude-a', prompt: 'x' })).toolCalls).toEqual([]);
+    const failure = await chat.chat({ model: 'anthropic/claude-b', prompt: 'x', tools: TOOLS }).catch((e) => e);
+    expect(failure).toMatchObject({ code: 'protocol_error' });
+    expect(failure.message).toMatch(/tool_calls\[0\]\.id/);
+  });
+
+  it('version gate: native tools on 2.0.30+, for local and upstream models alike; the tag format below it', async () => {
+    await start({ version: '2.0.29' });
+    expect(await chat.nativeToolsFor(crucibleTargetOf('local', 'qwen3.5-9b'))).toBe(false);
+    expect(await chat.nativeToolsFor(crucibleTargetOf('claude', 'claude-sonnet-5'))).toBe(false);
+    fake.close();
+    await start({ version: NATIVE_TOOLS_VERSION });
+    expect(await chat.nativeToolsFor(crucibleTargetOf('local', 'qwen3.5-9b'))).toBe(true);
+    expect(await chat.nativeToolsFor(crucibleTargetOf('claude', 'claude-sonnet-5'))).toBe(true);
+    expect(await chat.nativeToolsFor(crucibleTargetOf('ollama', 'llama3:8b'))).toBe(true);
+  });
+
+  it('tools refused for a model by name: the error says so, and that model (only) is the tag format from then on', async () => {
+    await start({ version: NATIVE_TOOLS_VERSION, resident: 'qwen3.5-9b', toolsUnsupported: ['qwen3.5-9b'] });
+    const spy = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+    try {
+      const failure = await chat.chat({ model: 'local:qwen3.5-9b', prompt: 'x', tools: TOOLS }).catch((e) => e);
+      expect(failure).toMatchObject({ code: 'tools_unsupported', status: 400 });
+      expect(isToolsRefusal(failure)).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await chat.nativeToolsFor(crucibleTargetOf('local', 'qwen3.5-9b'))).toBe(false);
+    expect(await chat.nativeToolsFor(crucibleTargetOf('local', 'qwen3.5-4b'))).toBe(true);
+    // Without tools the same model chats as ever.
+    expect((await chat.chat({ model: 'local:qwen3.5-9b', prompt: 'x' })).text).toBe('{"ok":true}');
+  });
+
+  it('isToolsRefusal: tools_unsupported, or upstream_field_unsupported naming a tool field; nothing else', () => {
+    expect(isToolsRefusal(new CrucibleChatError(400, 'tools_unsupported', 'x'))).toBe(true);
+    expect(isToolsRefusal(new CrucibleChatError(400, 'upstream_field_unsupported', 'x', 'mac', undefined, { fields: ['tools'] }))).toBe(true);
+    expect(isToolsRefusal(new CrucibleChatError(400, 'upstream_field_unsupported', 'x', 'mac', undefined, { fields: ['seed'] }))).toBe(false);
+    expect(isToolsRefusal(new CrucibleChatError(400, 'tools_with_response_format', 'x'))).toBe(false);
+    expect(isToolsRefusal(new Error('tools_unsupported'))).toBe(false);
   });
 
   it('structured output from a reasoning channel: content empty, reasoning carries the object', async () => {

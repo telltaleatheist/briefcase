@@ -10,6 +10,7 @@ import {
   buildChatBody,
   CLOUD_FORBIDDEN_KEYS,
   crucibleTargetOf,
+  CrucibleTargetError,
   responseFormatFor,
   storedChoice,
 } from '../../src/crucible/llm/target';
@@ -115,5 +116,56 @@ describe('buildChatBody: what crosses, per target', () => {
     expect(responseFormatFor(local, undefined)).toBeNull();
     expect(responseFormatFor(crucibleTargetOf('claude', 'c'), 'json')).toBeNull();
     expect(responseFormatFor(crucibleTargetOf('openai', 'g'), SCHEMA)).toBeNull();
+  });
+});
+
+describe('buildChatBody: native tools (Crucible 2.0.30+)', () => {
+  const TOOLS = [{ type: 'function', function: { name: 'add_marker', description: 'Mark a passage.', parameters: { type: 'object', properties: {} } } }];
+  const CONVERSATION = [
+    { role: 'system' as const, content: 'S' },
+    { role: 'user' as const, content: 'Mark Trump.' },
+    { role: 'assistant' as const, content: '', toolCalls: [{ id: 'toolu_01', name: 'add_marker', arguments: '{"title":"Trump"}' }, { id: 'toolu_02', name: 'add_marker', arguments: '{}' }] },
+    { role: 'tool' as const, toolCallId: 'toolu_01', content: 'placed' },
+    { role: 'tool' as const, toolCallId: 'toolu_02', content: 'not found' },
+    { role: 'assistant' as const, content: 'Here you go.', toolCalls: [{ id: 'c3', name: 'add_marker', arguments: '{}' }] },
+  ];
+
+  it.each([
+    ['claude', 'claude-sonnet-5'],
+    ['openai', 'gpt-5.1'],
+    ['ollama', 'qwen3.5:9b'],
+    ['local', 'qwen3.5-9b'],
+  ])('%s: tools and tool_choice cross, the assistant\'s calls as tool_calls (content null without text), each result as a tool message', (provider, model) => {
+    const body = buildChatBody(crucibleTargetOf(provider, model), { messages: CONVERSATION, tools: TOOLS, temperature: 0.3 });
+    expect(body['tools']).toEqual(TOOLS);
+    expect(body['tool_choice']).toBe('auto');
+    expect((body['messages'] as unknown[]).slice(2)).toEqual([
+      {
+        role: 'assistant', content: null, tool_calls: [
+          { id: 'toolu_01', type: 'function', function: { name: 'add_marker', arguments: '{"title":"Trump"}' } },
+          { id: 'toolu_02', type: 'function', function: { name: 'add_marker', arguments: '{}' } },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'toolu_01', content: 'placed' },
+      { role: 'tool', tool_call_id: 'toolu_02', content: 'not found' },
+      { role: 'assistant', content: 'Here you go.', tool_calls: [{ id: 'c3', type: 'function', function: { name: 'add_marker', arguments: '{}' } }] },
+    ]);
+  });
+
+  it('a cloud body with tools still carries no sampling key', () => {
+    const body = buildChatBody(crucibleTargetOf('claude', 'claude-sonnet-5'), { messages: CONVERSATION, tools: TOOLS, temperature: 0.3, maxTokens: 9 });
+    for (const key of CLOUD_FORBIDDEN_KEYS) expect(body).not.toHaveProperty(key);
+  });
+
+  it('no tools: no tools key, no tool_choice; a stated tool_choice crosses as said', () => {
+    const local = crucibleTargetOf('local', 'qwen3.5-9b');
+    const plain = buildChatBody(local, { messages: [{ role: 'user', content: 'x' }], tools: [] });
+    expect(plain).not.toHaveProperty('tools');
+    expect(plain).not.toHaveProperty('tool_choice');
+    expect(buildChatBody(local, { messages: [{ role: 'user', content: 'x' }], tools: TOOLS, toolChoice: 'none' })['tool_choice']).toBe('none');
+  });
+
+  it('tools beside a response format are refused before anything is sent (Crucible refuses tools_with_response_format)', () => {
+    expect(() => buildChatBody(crucibleTargetOf('local', 'qwen3.5-9b'), { messages: [{ role: 'user', content: 'x' }], tools: TOOLS, format: 'json' })).toThrow(CrucibleTargetError);
   });
 });

@@ -66,7 +66,8 @@ suite('VideoChatService on a library database', () => {
     if (dir) fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  async function setup(replies: Array<string | Error | ((req: any) => string)> = [], chatExtras: Record<string, unknown> = {}, extra: { readiness?: unknown; claudeCli?: unknown } = {}) {
+  type Reply = string | { text: string; toolCalls: Array<{ id: string; name: string; arguments: string }> };
+  async function setup(replies: Array<Reply | Error | ((req: any) => Reply)> = [], chatExtras: Record<string, unknown> = {}, extra: { readiness?: unknown; claudeCli?: unknown } = {}) {
     const { DatabaseService } = await import('../database/database.service');
     const { VideoChatService } = await import('./video-chat.service');
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'briefcase-ask-'));
@@ -83,8 +84,12 @@ suite('VideoChatService on a library database', () => {
         const next = replies[requests.length - 1];
         if (next === undefined) throw new Error(`no reply ${requests.length}`);
         if (next instanceof Error) throw next;
-        return { text: typeof next === 'function' ? next(req) : next, usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 }, finishReason: 'stop' };
+        const reply = typeof next === 'function' ? next(req) : next;
+        const shaped = typeof reply === 'string' ? { text: reply, toolCalls: [] } : reply;
+        return { ...shaped, usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 }, finishReason: shaped.toolCalls.length > 0 ? 'tool_calls' : 'stop' };
       },
+      // A Crucible before native tools unless a spec says otherwise: the tag format.
+      nativeToolsFor: async () => false,
       ...chatExtras,
     };
     const phases: string[] = [];
@@ -185,6 +190,55 @@ suite('VideoChatService on a library database', () => {
     const thread = service.createThread('v1', null);
     expect(await refusal(service.ask(thread.id, 'Hello?', 'claude-cli:claude-sonnet-5-5'))).toMatchObject({ status: 503, code: 'claude_cli_missing' });
     expect(await refusal(service.ask(thread.id, 'Hello?', 'claude:claude-sonnet-4-5'))).toMatchObject({ status: 409, code: 'crucible_required' });
+  });
+
+  // ── native tools (Crucible 2.0.30+) ──────────────────────────────────────
+  const trumpArgs = { title: 'Trump on the ruling', first_words: 'Then Trump posted about the ruling', last_words: 'a disgrace to the country', note: 'He attacks the judges.' };
+  const nativeTrump = { text: 'Yes, there is.', toolCalls: [{ id: 'toolu_01', name: 'add_marker', arguments: JSON.stringify(trumpArgs) }] };
+
+  it('native tools: add_marker goes as a definition, the structured call places the marker, its result goes back by id', async () => {
+    const { service, requests } = await setup([nativeTrump, 'Yes: "Trump on the ruling".'], { nativeToolsFor: async () => true });
+    const thread = service.createThread('v1', null);
+    const sent = await service.ask(thread.id, 'Is there a section about Trump?', 'claude:claude-sonnet-4-5');
+    expect(requests[0].tools).toEqual([expect.objectContaining({ type: 'function', function: expect.objectContaining({ name: 'add_marker' }) })]);
+    expect(requests[0].toolChoice).toBe('auto');
+    expect(requests[0].messages[0].content).not.toMatch(/# Tools|<tool_use>/);
+    expect(requests[1].messages.slice(-2)).toEqual([
+      { role: 'assistant', content: 'Yes, there is.', toolCalls: nativeTrump.toolCalls },
+      { role: 'tool', toolCallId: 'toolu_01', content: 'placed "Trump on the ruling" at 00:10:00–00:10:12' },
+    ]);
+    expect(sent.assistantMessage).toMatchObject({ content: 'Yes, there is.\n\nYes: "Trump on the ruling".' });
+    expect(sent.assistantMessage.markers).toEqual([expect.objectContaining({ title: 'Trump on the ruling', startSeconds: 600, endSeconds: 612 })]);
+  });
+
+  it('a model Crucible refuses tools for by name: the answer starts over in the tag format', async () => {
+    const { CrucibleChatError } = await import('../crucible/llm/errors');
+    const { service, requests } = await setup(
+      [new CrucibleChatError(400, 'tools_unsupported', 'qwen-x declares no tool-call format', 'mac'), `Yes, there is. ${trumpCall}`, 'Done.'],
+      { nativeToolsFor: async () => true },
+    );
+    const thread = service.createThread('v1', null);
+    const sent = await service.ask(thread.id, 'Is there a section about Trump?', 'claude:claude-sonnet-4-5');
+    expect(requests[0].tools).toHaveLength(1);
+    expect(requests[1].tools).toBeUndefined();
+    expect(requests[1].messages[0].content).toMatch(/# Tools/);
+    expect(sent.assistantMessage.markers).toHaveLength(1);
+  });
+
+  it('a thread answered in the tag format replays into a native answer as structured calls and tool results, no tags', async () => {
+    let native = false;
+    const { service, requests } = await setup([`Yes, there is. ${trumpCall}`, 'Yes: "Trump on the ruling".', 'It was late last night.'], { nativeToolsFor: async () => native });
+    const thread = service.createThread('v1', null);
+    await service.ask(thread.id, 'Is there a section about Trump?', 'claude:claude-sonnet-4-5');
+    native = true;
+    await service.ask(thread.id, 'When was that posted?', 'claude:claude-sonnet-4-5');
+    expect(requests[2].messages.slice(1)).toEqual([
+      { role: 'user', content: 'Is there a section about Trump?' },
+      { role: 'assistant', content: 'Yes, there is.', toolCalls: [{ id: 'replay_0_0', name: 'add_marker', arguments: JSON.stringify(trumpArgs) }] },
+      { role: 'tool', toolCallId: 'replay_0_0', content: 'placed "Trump on the ruling" at 00:10:00–00:10:12' },
+      { role: 'assistant', content: 'Yes: "Trump on the ruling".' },
+      { role: 'user', content: 'When was that posted?' },
+    ]);
   });
 
   it('a failure keeps the question, refuses by code, and the unanswered question is not replayed', async () => {

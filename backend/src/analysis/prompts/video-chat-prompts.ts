@@ -6,8 +6,9 @@
  * line; a marker is placed by quoting the passage's first and last words,
  * which Briefcase finds in the transcript (analysis/passage-anchor.ts). An
  * answer's markers share a `set`, the marker set they are applied into.
- * Replies are free prose; the tool harness (tool-harness/) appends the tools
- * section and reads the calls (inline <tool_use> tags, tool-harness/tag-codec.ts).
+ * Replies are free prose; the tool harness (tool-harness/) sends the tool
+ * natively (native-codec.ts) or appends the tools section and reads inline
+ * <tool_use> tags (tag-codec.ts).
  */
 
 export const ADD_MARKER_TOOL_NAME = 'add_marker';

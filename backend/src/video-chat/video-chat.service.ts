@@ -5,9 +5,10 @@
  * single timestamp and names a passage by its first and last words; those are
  * found in the transcript's sentences (analysis/passage-anchor.ts, the flags
  * pipeline's matcher) and the sentences' times are the marker's. The answer is
- * the tool harness's loop (tool-harness/: free prose, the tool called with
- * inline <tool_use> tags) composed of a Crucible transport
- * (video-chat-transport.ts) and the add_marker tool (add-marker-tool.ts).
+ * the tool harness's loop (tool-harness/: free prose, the tool called
+ * natively through Crucible 2.0.30+'s `tools`, else with inline <tool_use>
+ * tags) composed of a Crucible transport (video-chat-transport.ts) and the
+ * add_marker tool (add-marker-tool.ts).
  *
  * INTERACTIVE, NOT QUEUED. An answer is one HTTP request that may take
  * minutes, called straight on CrucibleChatService (never the task queue), and
@@ -64,7 +65,7 @@ import { HttpException, HttpStatus, Injectable, Logger, OnModuleDestroy } from '
 import { CrucibleUnreachable } from '@crucible/client';
 import { DatabaseService } from '../database/database.service';
 import { CrucibleReadinessService } from '../crucible/readiness.service';
-import { CrucibleChatService, KeptRunReleased, OLLAMA_CONTEXT_VERSION, type KeptRun } from '../crucible/llm/crucible-chat.service';
+import { CrucibleChatService, isToolsRefusal, KeptRunReleased, OLLAMA_CONTEXT_VERSION, type KeptRun } from '../crucible/llm/crucible-chat.service';
 import { CrucibleBusyError, CrucibleChatCancelled, CrucibleChatError, CrucibleNoVenueError } from '../crucible/llm/errors';
 import { CrucibleFieldMissing } from '../crucible/errors';
 import { crucibleUnavailableCause } from '../crucible/transport-failure';
@@ -76,7 +77,7 @@ import { estimateNumCtx, numCtxMaxForModel, parseProviderModel } from '../analys
 import { formatHms } from '../analysis/analysis-parts';
 import { buildVideoChatSystemPrompt } from '../analysis/prompts/video-chat-prompts';
 import { parseSrtSegments } from '../search/transcript-moments';
-import { tagCodec, replayHistory, runToolLoop, ToolLoopAborted, type StoredTurn, type ToolLoopEvent } from '../tool-harness';
+import { nativeCodec, tagCodec, replayHistory, runToolLoop, ToolLoopAborted, type StoredTurn, type ToolCallCodec, type ToolLoopEvent } from '../tool-harness';
 import { addMarkerTool, chatTranscript, type ChatTranscript, type PlacedMarker } from './add-marker-tool';
 import { claudeCliTransport, crucibleTransport } from './video-chat-transport';
 import { ClaudeCliError, ClaudeCliService, claudeCliModelOf } from '../claude-cli/claude-cli.service';
@@ -371,8 +372,11 @@ export class VideoChatService implements OnModuleDestroy {
     const choice = storedChoice({ provider: parsed.provider ?? '', model: parsed.model });
     const target = cliModel === null ? crucibleTargetOf(choice.provider, choice.model) : null;
     const tools = [addMarkerTool(transcript)];
-    const replayed = replayHistory(history);
-    const promptChars = [system, tagCodec.toolsPrompt(tools), question, ...replayed.map((m) => m.content)].reduce((sum, text) => sum + text.length, 0);
+    // The estimate counts the tools as the tag format's prompt section, in
+    // either format: it holds every tool's definition (what the native format
+    // sends as `tools`, and Crucible renders into the model's template) plus
+    // the calling instructions, so it is never under either.
+    const promptChars = [system, tagCodec.toolsPrompt(tools), question, ...replayHistory(history).map((m) => m.content)].reduce((sum, text) => sum + text.length, 0);
     const venue: Venue = target === null ? { kind: 'upstream' } : await this.venueOf(target);
     // A question for another model (or server) lets the held one go.
     if (venue.kind !== 'own-run' || this.hold?.server !== venue.server || this.hold?.model !== venue.model) {
@@ -403,10 +407,26 @@ export class VideoChatService implements OnModuleDestroy {
         const phase = event.type === 'model-call' ? 'thinking' : event.type === 'tool-call' ? 'placing-markers' : null;
         if (phase !== null && phase !== shown) this.status(threadId, (shown = phase));
       };
-      const loop = () => runToolLoop({
-        transport, tools, system, history: replayed, userMessage: question, maxRounds: CHAT_MAX_TOOL_ROUNDS, onEvent,
+      const run = (codec: ToolCallCodec) => runToolLoop({
+        transport, tools, system, history: replayHistory(history, codec), userMessage: question, maxRounds: CHAT_MAX_TOOL_ROUNDS, onEvent, codec,
         ...(signal === undefined ? {} : { signal }),
       });
+      // Native tools where the serving Crucible takes them (2.0.30+, every
+      // route), decided inside the run so it asks the server the run placed
+      // the model on; the tag format below that, and for claude-cli. A model
+      // Crucible refuses tools for by name (no tool format) is answered in the
+      // tag format, and remembered (nativeToolsFor): the refusal comes on the
+      // first call, before any tool ran, so the answer simply starts over.
+      const loop = async () => {
+        if (target === null || !(await this.chat.nativeToolsFor(target, undefined, signal))) return run(tagCodec);
+        try {
+          return await run(nativeCodec);
+        } catch (error) {
+          if (!isToolsRefusal(error)) throw error;
+          this.logger.log(`[${threadId}] ${value} takes no native tools; answering with tool tags`);
+          return run(tagCodec);
+        }
+      };
       if (venue.kind !== 'own-run') return loop();
       // Loaded in the run's session before the first turn (unless the hold has it), at the context it was sized for.
       return this.chat.withModel(undefined, choice.model, loop, {

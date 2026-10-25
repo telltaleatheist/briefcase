@@ -106,7 +106,7 @@ import {
   BUSY_REFUSAL_CODES,
   parseRetryAfter,
 } from './errors';
-import { CEILING_VERB, buildChatBody, ceilingWords, crucibleTargetOf, type ChatBodyInput, type CrucibleTarget, type UpstreamName } from './target';
+import { CEILING_VERB, buildChatBody, ceilingWords, crucibleTargetOf, type ChatBodyInput, type ChatBodyMessage, type ChatToolCall, type CrucibleTarget, type UpstreamName } from './target';
 import { CRUCIBLE_ANALYSIS_CONTEXT, crucibleChoiceForOllama, isPageReader, servedContextOf, type MappableModel } from './ollama-map';
 
 /**
@@ -176,9 +176,28 @@ export const OLLAMA_CONTEXT_VERSION = '1.0.24';
 const SETTINGS_CACHE_MS = 30_000;
 const MODELS_CACHE_MS = 15_000;
 
-export interface CrucibleChatMessage {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
+/**
+ * The first Crucible whose chat door takes native `tools` and answers with
+ * structured `tool_calls` for every route (local models in their trained
+ * format, anthropic/, openai/, ollama/), and passes a stray native call back
+ * as content when no tools were sent.
+ */
+export const NATIVE_TOOLS_VERSION = '2.0.30';
+
+/** A chat message: text, or an assistant's native calls and the `tool` messages answering them (target.ts). */
+export type CrucibleChatMessage = ChatBodyMessage;
+
+/**
+ * True when Crucible refused a chat's `tools` for its model by name: a local
+ * model whose manifest declares no tool format (`tools_unsupported`), or an
+ * upstream that cannot carry them (`upstream_field_unsupported` naming them).
+ */
+export function isToolsRefusal(error: unknown): boolean {
+  if (!(error instanceof CrucibleChatError)) return false;
+  if (error.code === 'tools_unsupported') return true;
+  if (error.code !== 'upstream_field_unsupported') return false;
+  const fields = (error.details as { fields?: unknown } | null)?.fields;
+  return Array.isArray(fields) && fields.some((field) => typeof field === 'string' && /tool/.test(field));
 }
 
 export interface BusyWait {
@@ -218,6 +237,15 @@ export interface CrucibleChatRequest {
   contextTokens?: number;
   /** Local models only: the context the model must be loaded with at least (load-model `params.context`). */
   loadContext?: number;
+  /**
+   * Native tools (OpenAI function definitions), for every route; the reply's
+   * calls come back as `toolCalls`. Only to a server at
+   * {@link NATIVE_TOOLS_VERSION} or newer ({@link nativeToolsFor}). Never with
+   * a responseFormat.
+   */
+  tools?: Array<Record<string, unknown>>;
+  /** OpenAI `tool_choice`; 'auto' when tools are sent and none is said. */
+  toolChoice?: string | Record<string, unknown>;
 }
 
 /** A chat's `usage`, each count null where the server did not state it (never an invented 0). */
@@ -228,7 +256,10 @@ export interface CrucibleChatUsage {
 }
 
 export interface CrucibleChatResult {
+  /** The reply's text; '' when it wrote none (`content: null`, as a reply that only calls tools may). */
   text: string;
+  /** The reply's native tool calls (`tool_calls`), in order; always an array, empty when it made none. */
+  toolCalls: ChatToolCall[];
   /** The model string that was sent. */
   model: string;
   target: CrucibleTarget;
@@ -385,6 +416,31 @@ function longerWait(a: BusyWait | undefined, b: BusyWait): BusyWait {
   return a !== undefined && a.forMs >= b.forMs ? a : b;
 }
 
+/**
+ * A reply's `tool_calls`, flattened: each entry's id, function name and
+ * arguments (a JSON string, as the chat format carries it; an object some
+ * engine sent instead is written back as one). Absent or null: none. An entry
+ * without an id or a name is refused by name, never guessed: its result could
+ * not be sent back to it.
+ */
+function readToolCalls(raw: unknown, refuse: (field: string) => Error): ChatToolCall[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) throw refuse('choices[0].message.tool_calls as a list');
+  return raw.map((entry: unknown, i) => {
+    const at = `choices[0].message.tool_calls[${i}]`;
+    const call = entry !== null && typeof entry === 'object' ? entry as Record<string, unknown> : null;
+    const fn = call?.['function'] !== null && typeof call?.['function'] === 'object' ? call['function'] as Record<string, unknown> : null;
+    if (call === null || typeof call['id'] !== 'string' || call['id'] === '') throw refuse(`${at}.id`);
+    if (fn === null || typeof fn['name'] !== 'string' || fn['name'] === '') throw refuse(`${at}.function.name`);
+    const args = fn['arguments'];
+    return {
+      id: call['id'],
+      name: fn['name'],
+      arguments: typeof args === 'string' ? args : args === undefined || args === null ? '' : JSON.stringify(args),
+    };
+  });
+}
+
 function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new CrucibleChatCancelled();
 }
@@ -420,6 +476,8 @@ export class CrucibleChatService implements OnModuleDestroy {
   private readonly mappingNoted = new Set<string>();
   /** `server\nollama/<tag>` whose `X-Crucible-Context` was already logged. */
   private readonly contextNoted = new Set<string>();
+  /** `server\nmodel` whose native `tools` that server refused by name ({@link isToolsRefusal}), for this process. */
+  private readonly toolsRefused = new Set<string>();
 
   /** The clock and the sleeper, replaceable by a spec. */
   now: () => number = Date.now;
@@ -630,6 +688,23 @@ export class CrucibleChatService implements OnModuleDestroy {
     }
   }
 
+  /**
+   * True when a chat with `target` may send native tools: the server it runs
+   * on is {@link NATIVE_TOOLS_VERSION} or newer, and has not refused tools for
+   * that model by name. A refusal is a robustness fallback, not a band-aid:
+   * a model with no tool format in its manifest (or an upstream that can't
+   * carry them) is a fact of that server, so the caller uses the prompt-level
+   * tag format for it, and the refusal is remembered (in memory, per server
+   * and model) so later chats don't ask again. Inside a run, the server is the
+   * one the run placed the model on.
+   */
+  async nativeToolsFor(target: CrucibleTarget, server?: string, signal?: AbortSignal): Promise<boolean> {
+    const chosen = await this.effectiveTarget(target, server, signal);
+    const venue = server ?? this.runs.getStore()?.placed.get(chosen.target.model) ?? chosen.server ?? await this.venueFor(chosen.target);
+    if (this.toolsRefused.has(`${venue}\n${chosen.target.model}`)) return false;
+    return this.serverAtLeast(venue, NATIVE_TOOLS_VERSION);
+  }
+
   /** True when `server` is at least `version` (a server whose version can't be read is not). */
   async serverAtLeast(server: string, version: string): Promise<boolean> {
     const running = await this.serverVersion(server);
@@ -702,8 +777,10 @@ export class CrucibleChatService implements OnModuleDestroy {
       schemaName: request.schemaName,
       thinking: request.thinking,
       contextTokens,
+      tools: request.tools,
+      toolChoice: request.toolChoice,
     } satisfies ChatBodyInput);
-    const promptChars = messages.reduce((sum, m) => sum + m.content.length, 0);
+    const promptChars = messages.reduce((sum, m) => sum + m.content.length + (m.toolCalls ?? []).reduce((n, c) => n + c.arguments.length, 0), 0);
     // A local chat may wait in Crucible's line (the default since 1.0.79):
     // behind another app's session when it is outside ours. Its wait is
     // bounded on the server, so a long one ends as a clean
@@ -759,6 +836,11 @@ export class CrucibleChatService implements OnModuleDestroy {
       // The chat door refusing because the card is someone else's right now
       // (a claim, another app's session): busy, the same as at the load. Never a failure.
       if (BUSY_REFUSAL_CODES.has(failure.code)) throw new CrucibleBusyError(server, failure.message);
+      // Tools refused for this model by name: remembered, so nativeToolsFor answers the tag format for it from now on.
+      if (request.tools !== undefined && request.tools.length > 0 && isToolsRefusal(failure)) {
+        this.toolsRefused.add(`${server}\n${target.model}`);
+        this.logger.log(`[${server}] ${target.model} takes no native tools (${failure.code}: ${failure.message}); its tools go in the prompt from now on`);
+      }
       throw failure;
     }
   }
@@ -800,6 +882,9 @@ export class CrucibleChatService implements OnModuleDestroy {
     if (code === 'upstream_unconfigured') {
       message = `${message} Add it on "${server}" in Settings › AI.`;
     }
+    if (code === 'tools_unsupported') {
+      message = `${message} (Crucible "${server}" has no tool-call format for that model.)`;
+    }
     if (code === 'upstream_field_unsupported') {
       // 1.0.24's Ollama translation refuses a field it cannot carry to /api/chat by name.
       message = `${message} (Crucible "${server}" cannot carry that field to Ollama.)`;
@@ -819,7 +904,8 @@ export class CrucibleChatService implements OnModuleDestroy {
     // content and its finish_reason. Each is refused BY NAME when absent,
     // never defaulted: an empty answer or a 'stop' nobody said would hide a
     // broken reply or a truncated one. `content: null` is the chat format's
-    // own "no text" and reads as ''.
+    // own "no text" and reads as '' (a reply that only calls tools,
+    // finish_reason `tool_calls`, has none); its `tool_calls` are read too.
     const refuse = (field: string): CrucibleChatError => new CrucibleChatError(502, 'protocol_error',
       `Crucible "${server}" answered a chat without ${field}, which Briefcase needs to read the reply.`, server);
     const choices = doc['choices'];
@@ -834,6 +920,7 @@ export class CrucibleChatService implements OnModuleDestroy {
     if (content !== null && typeof content !== 'string') throw refuse('choices[0].message.content');
     const finishReason = choice['finish_reason'];
     if (typeof finishReason !== 'string') throw refuse('choices[0].finish_reason');
+    const toolCalls = readToolCalls(message['tool_calls'], refuse);
     let text = content ?? '';
     let fromReasoning = false;
     // A reasoning model under a grammar can put the whole object in its
@@ -881,6 +968,7 @@ export class CrucibleChatService implements OnModuleDestroy {
     }
     return {
       text,
+      toolCalls,
       model: target.model,
       target,
       server,

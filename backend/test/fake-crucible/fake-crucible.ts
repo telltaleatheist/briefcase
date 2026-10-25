@@ -66,6 +66,12 @@
  * `generate` and `decide` classes and the `?class=&context_tokens=` sizing,
  * and an `ollama/` chat answers `X-Crucible-Context` on 1.0.24+.
  *
+ * 2.0.30 native tools: a canned reply may carry `toolCalls`, answered as
+ * `message.tool_calls` (content null when it states none, finish_reason
+ * `tool_calls`); `tools` for a model in `toolsUnsupported` is refused
+ * `400 tools_unsupported`, and `tools` beside a `response_format`
+ * `400 tools_with_response_format`.
+ *
  * 1.0.25 ("any Crucible that answers works") makes the SDK read every
  * INFORMATIONAL field as null when a server leaves it out. `omit` (see
  * {@link INFORMATIONAL_FIELDS}) strips named fields from this fake's answers —
@@ -182,10 +188,13 @@ export interface FakeModel {
 }
 
 /** A canned chat reply: fixed content, or computed from the request body. */
+/** A canned reply's native call: answered as a `tool_calls` entry. */
+export interface FakeToolCall { id: string; name: string; arguments: string }
+type FakeChatShape = { content?: string; reasoning?: string; finishReason?: string; toolCalls?: FakeToolCall[] };
 export type FakeChatReply =
   | string
-  | { content?: string; reasoning?: string; finishReason?: string }
-  | ((body: Record<string, unknown>) => string | { content?: string; reasoning?: string; finishReason?: string });
+  | FakeChatShape
+  | ((body: Record<string, unknown>) => string | FakeChatShape);
 
 /** A queue session this fake holds (1.0.76). */
 interface FakeSession {
@@ -451,6 +460,8 @@ export interface FakeCrucibleOptions {
   upstreamModels?: Record<string, string[]>;
   /** Canned chat replies by model string (`qwen3.5-9b`, `anthropic/claude-x`); `*` for any. */
   chatReplies?: Record<string, FakeChatReply>;
+  /** Models (chat model strings) with no tool format: `tools` for them is refused `400 tools_unsupported` (2.0.30). */
+  toolsUnsupported?: string[];
   /**
    * The asr models INSTALLED. Default: the catalog's installed asr rows. The
    * rest of the lineup is listed uninstalled.
@@ -1676,6 +1687,15 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
         return;
       }
     }
+    const tools = Array.isArray(body['tools']) && (body['tools'] as unknown[]).length > 0;
+    if (tools && body['response_format'] !== undefined) {
+      refusal(res, 400, 'tools_with_response_format', 'tools and response_format cannot be sent together');
+      return;
+    }
+    if (tools && (options.toolsUnsupported ?? []).includes(model)) {
+      refusal(res, 400, 'tools_unsupported', `${model} declares no tool-call format`, { model });
+      return;
+    }
     if (openSession !== null && openSession.client === ((req.headers['x-crucible-client'] as string | undefined) ?? null)) openSession.itemsRun += 1;
     if (named.chatDelayMs !== undefined) {
       const aborted = await new Promise<boolean>((resolve) => {
@@ -1694,8 +1714,10 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
     if (upstreamMatch?.[1] === 'anthropic' && !('max_tokens' in body)) sources['max_tokens'] = 'upstream default 4096';
     const kwargs = body['chat_template_kwargs'] as Record<string, unknown> | undefined;
     sources['thinking'] = kwargs && 'enable_thinking' in kwargs ? (upstreamMatch ? 'dropped' : 'request') : upstreamMatch ? 'engine' : 'manifest';
-    const message: Record<string, unknown> = { role: 'assistant', content: shaped.content ?? '' };
+    const calls = 'toolCalls' in shaped ? shaped.toolCalls ?? [] : [];
+    const message: Record<string, unknown> = { role: 'assistant', content: shaped.content ?? (calls.length > 0 ? null : '') };
     if (shaped.reasoning !== undefined) message['reasoning'] = shaped.reasoning;
+    if (calls.length > 0) message['tool_calls'] = calls.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: c.arguments } }));
     // 1.0.24: an ollama/ chat carries `context_tokens` to Ollama as options.num_ctx
     // and says what it sent; absent, the tag's own context. Older servers know nothing of it.
     const extraHeaders: Record<string, string> = {};
@@ -1710,7 +1732,7 @@ export async function startFakeCrucible(options: FakeCrucibleOptions = {}): Prom
       id: `chatcmpl-${randomBytes(4).toString('hex')}`,
       object: 'chat.completion',
       model,
-      choices: [{ index: 0, message, finish_reason: shaped.finishReason ?? 'stop' }],
+      choices: [{ index: 0, message, finish_reason: shaped.finishReason ?? (calls.length > 0 ? 'tool_calls' : 'stop') }],
       usage: { prompt_tokens: promptTokensOf(body), completion_tokens: 7, total_tokens: promptTokensOf(body) + 7 },
     }, { 'X-Crucible-Sampling': JSON.stringify(sources), ...extraHeaders });
   }

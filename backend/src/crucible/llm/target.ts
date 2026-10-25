@@ -49,6 +49,12 @@
  *     into a forced tool, and OpenAI refuses json_object on a prompt without the
  *     word "json" and json_schema on schemas that are not closed. Turning either
  *     on is a follow-up that needs testing per schema, not a side effect.
+ *   - `tools` (OpenAI function definitions) and `tool_choice` cross for every
+ *     route alike (Crucible 2.0.30+ writes each model's own format: a local
+ *     model's trained one, anthropic/'s tool_use, Ollama's native), as do an
+ *     assistant message's `tool_calls` and the `tool` messages answering them.
+ *     Never beside a response_format: Crucible refuses the pair
+ *     (`tools_with_response_format`), so asking for both is refused here.
  */
 
 export type UpstreamName = 'anthropic' | 'openai' | 'ollama';
@@ -188,9 +194,27 @@ export function isCloudTarget(target: CrucibleTarget): boolean {
   return target.upstream === 'anthropic' || target.upstream === 'openai';
 }
 
+/** A native tool call as Briefcase holds it: the OpenAI `tool_calls` entry, flattened. The id is opaque and goes back exactly. */
+export interface ChatToolCall {
+  id: string;
+  name: string;
+  /** A JSON string, as the chat format carries it. */
+  arguments: string;
+}
+
+/** One message of a chat: text, or (native tools) an assistant's calls and a `tool` message answering one. */
+export interface ChatBodyMessage {
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string;
+  /** Assistant only: the calls it made, sent back as `tool_calls`. */
+  toolCalls?: ChatToolCall[];
+  /** `tool` only: the call it answers, sent as `tool_call_id`. */
+  toolCallId?: string;
+}
+
 /** What a caller may ask for; `buildChatBody` decides what actually crosses. */
 export interface ChatBodyInput {
-  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+  messages: ChatBodyMessage[];
   temperature?: number;
   maxTokens?: number;
   /** Briefcase's structured-output request: 'json', or a JSON Schema object. */
@@ -201,6 +225,10 @@ export interface ChatBodyInput {
   thinking?: boolean;
   /** `ollama/` only: the window, sent as `context_tokens` (Ollama's num_ctx). */
   contextTokens?: number;
+  /** OpenAI `tools` entries ({type: 'function', function: {name, description, parameters}}), for every route. */
+  tools?: Array<Record<string, unknown>>;
+  /** OpenAI `tool_choice`; 'auto' when tools are sent and none is said. */
+  toolChoice?: string | Record<string, unknown>;
 }
 
 export type ResponseFormatBody =
@@ -218,7 +246,7 @@ export function responseFormatFor(target: CrucibleTarget, format: ChatBodyInput[
 export function buildChatBody(target: CrucibleTarget, input: ChatBodyInput): Record<string, unknown> {
   const body: Record<string, unknown> = {
     model: target.model,
-    messages: input.messages.map((m) => ({ role: m.role, content: m.content })),
+    messages: input.messages.map(messageBody),
     stream: false,
   };
   if (!isCloudTarget(target)) {
@@ -233,7 +261,25 @@ export function buildChatBody(target: CrucibleTarget, input: ChatBodyInput): Rec
   }
   const format = responseFormatFor(target, input.format, input.schemaName);
   if (format !== null) body['response_format'] = format;
+  if (input.tools !== undefined && input.tools.length > 0) {
+    if (input.format !== undefined) throw new CrucibleTargetError('A chat cannot ask for tools and a response format together (Crucible refuses tools_with_response_format).');
+    body['tools'] = input.tools;
+    body['tool_choice'] = input.toolChoice ?? 'auto';
+  }
   return body;
+}
+
+/** A message as the chat format carries it: an assistant's calls as `tool_calls` (content null when it wrote none), a result with its `tool_call_id`. */
+function messageBody(m: ChatBodyMessage): Record<string, unknown> {
+  if (m.role === 'assistant' && m.toolCalls !== undefined && m.toolCalls.length > 0) {
+    return {
+      role: 'assistant',
+      content: m.content === '' ? null : m.content,
+      tool_calls: m.toolCalls.map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.arguments } })),
+    };
+  }
+  if (m.role === 'tool') return { role: 'tool', tool_call_id: m.toolCallId ?? '', content: m.content };
+  return { role: m.role, content: m.content };
 }
 
 /** Keys that must never appear in a cloud body. The spec asserts on exactly this list. */
