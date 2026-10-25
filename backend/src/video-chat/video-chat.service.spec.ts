@@ -31,6 +31,32 @@ const SRT = [
   '4\n00:10:06,000 --> 00:10:12,000\nHe called the judges a disgrace to the country.',
 ].join('\n\n');
 
+/**
+ * CrucibleChatService.keepRun as a spec sees it: what ran in it, and its
+ * release (told to the holder as the real one tells it).
+ */
+function fakeKept(onReleased?: (reason: string) => void) {
+  const log = { runs: 0, released: [] as string[] };
+  let released = false;
+  const kept = {
+    get released() { return released; },
+    busy: false,
+    held: () => (log.runs > 0 ? [{ server: 'mac', model: 'qwen3.5-9b' }] : []),
+    run: async (fn: () => Promise<unknown>) => {
+      if (released) throw new Error('released');
+      log.runs += 1;
+      return fn();
+    },
+    release: async (reason: string) => {
+      if (released) return;
+      released = true;
+      log.released.push(reason);
+      onReleased?.(reason);
+    },
+  };
+  return { kept, log };
+}
+
 const trumpCall = `<tool_use>\n${JSON.stringify({ name: 'add_marker', arguments: { title: 'Trump on the ruling', first_words: 'Then Trump posted about the ruling', last_words: 'a disgrace to the country', note: 'He attacks the judges.' } })}\n</tool_use>`;
 
 suite('VideoChatService on a library database', () => {
@@ -137,7 +163,7 @@ suite('VideoChatService on a library database', () => {
     };
     const refuse = (name: string) => () => { touched.push(name); throw new Error(`Crucible ${name} was called`); };
     const { service, requests } = await setup([], {
-      effectiveTarget: refuse('effectiveTarget'), venueFor: refuse('venueFor'), withRun: refuse('withRun'), withModel: refuse('withModel'),
+      effectiveTarget: refuse('effectiveTarget'), venueFor: refuse('venueFor'), keepRun: refuse('keepRun'), withModel: refuse('withModel'),
     }, { readiness: { assertReadyNow: refuse('readiness') }, claudeCli });
     const thread = service.createThread('v1', null);
     const sent = await service.ask(thread.id, 'Is there a section about Trump?', 'claude-cli:claude-haiku-5-5');
@@ -185,7 +211,7 @@ suite('VideoChatService on a library database', () => {
       effectiveTarget: async () => local,
       venueFor: async () => 'mac',
       otherRunsOn: () => [],
-      withRun: (fn: () => Promise<unknown>) => fn(),
+      keepRun: () => fakeKept().kept,
       statedLocalContext: async () => ({ tokens: 2048 }),
       // A server that states no maximum: the context it loads at is the limit.
       maxLocalContext: async () => null,
@@ -210,7 +236,7 @@ suite('VideoChatService on a library database', () => {
         effectiveTarget: async () => local,
         venueFor: async () => 'mac',
         otherRunsOn: () => [],
-        withRun: (fn: () => Promise<unknown>) => fn(),
+        keepRun: () => fakeKept().kept,
         withModel: (_server: unknown, _model: string, fn: () => Promise<unknown>, options: { loadContext?: number }) => {
           held.push({ loadContext: options.loadContext });
           return fn();
@@ -322,6 +348,91 @@ suite('VideoChatService on a library database', () => {
     expect(service.getThread(thread.id).thread.title).toBe('Second?');
   });
 
+  /** Local models in Ask's hold: every kept run opened, and every model withModel was asked to hold. */
+  function heldModels() {
+    const kepts: Array<ReturnType<typeof fakeKept>> = [];
+    const holds: string[] = [];
+    return {
+      kepts,
+      holds,
+      extras: {
+        effectiveTarget: async (target: { model: string }) => ({ target: { model: target.model, route: 'local', upstream: null, bareModel: target.model }, server: null, mappedFrom: null }),
+        venueFor: async () => 'mac',
+        otherRunsOn: () => [],
+        keepRun: (_options: unknown, onReleased: (reason: string) => void) => {
+          const k = fakeKept(onReleased);
+          kepts.push(k);
+          return k.kept;
+        },
+        withModel: (_server: unknown, model: string, fn: () => Promise<unknown>) => { holds.push(model); return fn(); },
+        statedLocalContext: async () => ({ tokens: 32768 }),
+        maxLocalContext: async () => 131072,
+        modelsOn: async () => [],
+      },
+    };
+  }
+
+  it('the hold: the next question on the same model runs in the same kept run, without loading it again', async () => {
+    const held = heldModels();
+    const { service, phases } = await setup(['One.', 'Two.', 'Three.'], held.extras);
+    const a = service.createThread('v1', null);
+    const b = service.createThread('v1', null);
+    await service.ask(a.id, 'Budget?', 'local:qwen3.5-9b');
+    await service.ask(a.id, 'And then?', 'local:qwen3.5-9b');
+    // Another conversation on the same model shares it.
+    await service.ask(b.id, 'Trump?', 'local:qwen3.5-9b');
+    expect(held.kepts).toHaveLength(1);
+    expect(held.kepts[0].log).toEqual({ runs: 3, released: [] });
+    expect(phases).toEqual(['loading-model', 'thinking', 'done', 'thinking', 'done', 'thinking', 'done']);
+    service.onModuleDestroy();
+  });
+
+  it('the hold is let go after its idle window, and the next question opens another', async () => {
+    const held = heldModels();
+    const { service } = await setup(['One.', 'Two.'], held.extras);
+    service.holdIdleMs = 10;
+    const thread = service.createThread('v1', null);
+    await service.ask(thread.id, 'Budget?', 'local:qwen3.5-9b');
+    expect(held.kepts[0].log.released).toEqual([]);
+    await new Promise((r) => setTimeout(r, 40));
+    expect(held.kepts[0].log.released).toEqual(['no question for 0 s']);
+    await service.ask(thread.id, 'And then?', 'local:qwen3.5-9b');
+    expect(held.kepts).toHaveLength(2);
+    service.onModuleDestroy();
+  });
+
+  it('the hold yields when the queue starts a Crucible run: let go at once, and the next question opens another', async () => {
+    const held = heldModels();
+    const { service } = await setup(['One.', 'Two.'], held.extras);
+    service.holdIdleMs = 30;
+    const thread = service.createThread('v1', null);
+    await service.ask(thread.id, 'Budget?', 'local:qwen3.5-9b');
+    // What CrucibleChatService.withRun does to an idle kept run before the queue's task starts.
+    await held.kepts[0].kept.release('other Briefcase work wants Crucible');
+    await new Promise((r) => setTimeout(r, 50));
+    // Its idle clock was stopped with it: nothing is released twice.
+    expect(held.kepts[0].log.released).toEqual(['other Briefcase work wants Crucible']);
+    await service.ask(thread.id, 'And then?', 'local:qwen3.5-9b');
+    expect(held.kepts).toHaveLength(2);
+    expect(held.kepts[1].log.runs).toBe(1);
+    service.onModuleDestroy();
+    expect(held.kepts[1].log.released).toEqual(['Briefcase is quitting']);
+  });
+
+  it('a question for a different model lets the held one go before it runs', async () => {
+    const held = heldModels();
+    const { service } = await setup(['One.', 'Two.', 'Three.'], held.extras);
+    const thread = service.createThread('v1', null);
+    await service.ask(thread.id, 'Budget?', 'local:qwen3.5-9b');
+    await service.ask(thread.id, 'And then?', 'local:qwen3.5-4b');
+    expect(held.kepts).toHaveLength(2);
+    expect(held.kepts[0].log).toEqual({ runs: 1, released: ['a question needs another model'] });
+    expect(held.holds).toEqual(['qwen3.5-9b', 'qwen3.5-4b']);
+    // A cloud model needs no card: the held one goes too.
+    await service.ask(thread.id, 'Cloud?', 'claude:claude-sonnet-4-5');
+    expect(held.kepts[1].log.released).toEqual(['a question needs another model']);
+  });
+
   it('a local model on a server another Briefcase run holds with a different model: 503 crucible_busy, nothing loaded', async () => {
     const local = { target: { model: 'qwen3.5-9b', route: 'local', upstream: null, bareModel: 'qwen3.5-9b' }, server: null, mappedFrom: null };
     let ran = false;
@@ -329,7 +440,7 @@ suite('VideoChatService on a library database', () => {
       effectiveTarget: async () => local,
       venueFor: async () => 'mac',
       otherRunsOn: () => [{ model: 'qwen3.6-27b' }],
-      withRun: async () => { ran = true; },
+      keepRun: () => { ran = true; return fakeKept().kept; },
     });
     const thread = service.createThread('v1', null);
     const busy = await refusal(service.ask(thread.id, 'Where is the budget?', 'local:qwen3.5-9b'));
@@ -398,11 +509,66 @@ suite('VideoChatService on a library database', () => {
 
     expect(await refusal(Promise.resolve().then(() => service.setMarkerStatus(markerId, 'dismissed')))).toMatchObject({ status: 409, code: 'marker_applied' });
     expect(await refusal(Promise.resolve().then(() => service.apply(thread.id, ['nope'], 'Set')))).toMatchObject({ status: 404, code: 'marker_not_found' });
-    expect(await refusal(Promise.resolve().then(() => service.apply(thread.id, [markerId], ' ')))).toMatchObject({ status: 400 });
+    expect(await refusal(Promise.resolve().then(() => service.apply(thread.id, [], 'Set')))).toMatchObject({ status: 400 });
 
     // Deleting the conversation leaves the applied custom marker.
     service.deleteThread(thread.id);
     expect(database.getCustomMarkers('v1')).toHaveLength(1);
+  });
+
+  const call = (args: Record<string, string>) => `<tool_use>\n${JSON.stringify({ name: 'add_marker', arguments: args })}\n</tool_use>`;
+  const budget = { title: 'The budget fight', first_words: 'Today we start with the budget', last_words: 'budget fight in Congress' };
+  const trump = { title: 'Trump on the ruling', first_words: 'Then Trump posted about the ruling', last_words: 'a disgrace to the country' };
+
+  it('set names: one per answer, the first set the model gave across its rounds, tidied; none given, the thread title\'s', async () => {
+    const { service } = await setup([
+      // Round one names no set, round two does, and a later call's other name loses.
+      `${call(budget)}`,
+      `${call({ ...trump, set: ' political  fights. ' })} ${call({ title: 'The welcome', first_words: 'Welcome back to the show', last_words: 'the show, everybody', set: 'Other' })}`,
+      'Both are marked.',
+      `${call(trump)}`,
+      'Marked.',
+    ]);
+    const thread = service.createThread('v1', null);
+    const first = (await service.ask(thread.id, 'Mark the fights?', 'claude:claude-sonnet-4-5')).assistantMessage;
+    expect(first.markers.map((m) => m.setName)).toEqual(['Political fights', 'Political fights', 'Political fights']);
+    // No set: the thread's title (its first question) without the asking.
+    const second = (await service.ask(thread.id, 'And Trump?', 'claude:claude-sonnet-4-5')).assistantMessage;
+    expect(second.markers.map((m) => m.setName)).toEqual(['Fights']);
+    expect(service.getThread(thread.id).messages[1].markers[0].setName).toBe('Political fights');
+  });
+
+  it('apply with no set name: each marker goes into its own answer\'s set; one given still names the set for all', async () => {
+    const { service } = await setup([
+      `${call({ ...trump, set: 'Trump mentions' })}`, 'There.',
+      `${call({ ...budget, set: 'Budget talk' })}`, 'There.',
+      `${call({ ...budget, title: 'Budget again' })}`, 'There.',
+    ]);
+    const thread = service.createThread('v1', null);
+    const a = (await service.ask(thread.id, 'Trump?', 'claude:claude-sonnet-4-5')).assistantMessage.markers[0];
+    const b = (await service.ask(thread.id, 'Budget?', 'claude:claude-sonnet-4-5')).assistantMessage.markers[0];
+    const c = (await service.ask(thread.id, 'Budget once more?', 'claude:claude-sonnet-4-5')).assistantMessage.markers[0];
+    const applied = service.apply(thread.id, [a.id, b.id], undefined);
+    expect(applied.markers.map((m) => m.status)).toEqual(['applied', 'applied']);
+    expect(applied.customMarkers).toEqual(expect.arrayContaining([
+      expect.objectContaining({ title: 'Trump on the ruling', marker_set: 'Trump mentions' }),
+      expect.objectContaining({ title: 'The budget fight', marker_set: 'Budget talk' }),
+    ]));
+    expect(service.apply(thread.id, [c.id], 'Chosen').customMarkers).toEqual([expect.objectContaining({ title: 'Budget again', marker_set: 'Chosen' })]);
+  });
+
+  it('migration 32: a library from before set_name gets the column on open; its markers take the thread title\'s set', async () => {
+    const { service, database, libraryPath } = await setup([`${trumpCall}`, 'There.']);
+    const thread = service.createThread('v1', null);
+    await service.ask(thread.id, 'Is there a section where Trump is discussed?', 'claude:claude-sonnet-4-5');
+    database.closeDatabase();
+    const raw = new Database(libraryPath);
+    raw.exec('ALTER TABLE chat_markers DROP COLUMN set_name');
+    raw.close();
+    database.initializeDatabase(libraryPath);
+    const [marker] = service.getThread(thread.id).messages[1].markers;
+    expect(marker.setName).toBe('Section where Trump is discussed');
+    expect(service.apply(thread.id, [marker.id]).customMarkers).toEqual([expect.objectContaining({ marker_set: 'Section where Trump is discussed' })]);
   });
 
   it('migration 31: a library from before marker_set gets the column on open; hand-made markers have none', async () => {

@@ -6,7 +6,8 @@ import { HttpErrorResponse } from '@angular/common/http';
  * The wire types of /api/video-chat. The model has one tool, add_marker; the
  * backend resolves its quotes to times and returns the markers attached to the
  * assistant message. Those markers are PROPOSALS until the user applies them
- * (they become custom markers under a named marker set) or dismisses them.
+ * (they become custom markers in their answer's marker set, `setName`) or
+ * dismisses them.
  */
 export interface ChatThread {
   id: string;
@@ -29,6 +30,8 @@ export interface ChatMarker {
   endSeconds: number;
   status: ChatMarkerStatus;
   customMarkerId: string | null;
+  /** The marker set it is applied into: its answer's, named by the model (or from the thread's title). */
+  setName: string;
 }
 
 export interface ChatMessage {

@@ -10,12 +10,14 @@ import { WebsocketService } from '../../../../services/websocket.service';
 import { CrucibleReadinessService } from '../../../../services/crucible-readiness.service';
 import { AiModelOptionsService } from '../../../../services/ai-model-options.service';
 import { PipelinePresetsService } from '../../../../core/stores/pipeline-presets.service';
-import type { ChatMessage, ChatSendResult, ChatThread } from '../../../../models/video-chat.model';
+import type { ChatMarker, ChatMessage, ChatSendResult, ChatThread } from '../../../../models/video-chat.model';
 
 const thread = (id: string, title = ''): ChatThread =>
   ({ id, videoId: 'v1', title, model: 'local:max-27b', createdAt: '2026-10-25T10:00:00Z', updatedAt: '2026-10-25T10:00:00Z' });
 const message = (id: string, role: 'user' | 'assistant', content: string): ChatMessage =>
   ({ id, threadId: 't1', role, content, model: 'local:max-27b', markers: [], createdAt: '2026-10-25T10:00:00Z' });
+const marker = (id: string, messageId: string, setName: string, status: ChatMarker['status'] = 'proposed'): ChatMarker =>
+  ({ id, threadId: 't1', messageId, title: `Marker ${id}`, note: null, startSeconds: 600, endSeconds: 612, status, customMarkerId: status === 'applied' ? `c-${id}` : null, setName });
 
 /**
  * Stop: the pending bubble goes, the question is back in the box, the
@@ -189,5 +191,87 @@ describe('AskPanelComponent: Claude Code without Crucible', () => {
     flushMicrotasks();
     expect(requireReady).not.toHaveBeenCalled();
     expect(chat.sendMessage).toHaveBeenCalledWith('t9', 'Hi?', 'claude-cli:claude-haiku-5-5');
+  }));
+});
+
+/**
+ * Apply is one click: ✓ on a chip, "Apply all N" on an answer and "Apply all
+ * proposed" on the thread call apply at once, with no name to fill in; each
+ * marker goes into its answer's set, shown over the answer's chips.
+ */
+describe('AskPanelComponent: one-click apply', () => {
+  let fixture: ComponentFixture<AskPanelComponent>;
+  let panel: AskPanelComponent;
+  let chat: jasmine.SpyObj<VideoChatService>;
+  let applied: number;
+
+  beforeEach(() => {
+    const answerA = { ...message('a1', 'assistant', 'Trump is discussed twice.'), markers: [marker('k1', 'a1', 'Trump mentions'), marker('k2', 'a1', 'Trump mentions')] };
+    const answerB = { ...message('a2', 'assistant', 'One reaction.'), markers: [marker('k3', 'a2', 'Reaction moments')] };
+    chat = jasmine.createSpyObj<VideoChatService>('VideoChatService', ['listThreads', 'getThread', 'applyMarkers']);
+    chat.listThreads.and.returnValue(of([thread('t1', 'Trump?')]));
+    chat.getThread.and.returnValue(of({ thread: thread('t1', 'Trump?'), messages: [message('u1', 'user', 'Trump?'), answerA, message('u2', 'user', 'Reactions?'), answerB] }));
+    chat.applyMarkers.and.callFake((_threadId: string, ids: string[]) =>
+      of({ markers: [answerA, answerB].flatMap(m => m.markers).filter(k => ids.includes(k.id)).map(k => ({ ...k, status: 'applied' as const, customMarkerId: `c-${k.id}` })), customMarkers: [] }));
+    TestBed.configureTestingModule({
+      imports: [AskPanelComponent],
+      providers: [
+        { provide: VideoChatService, useValue: chat },
+        { provide: WebsocketService, useValue: { onVideoChatStatus: () => () => {} } },
+        { provide: CrucibleReadinessService, useValue: { ready: signal(true), requireReady: () => true, handleRefusal: () => null } },
+        { provide: AiModelOptionsService, useValue: { view: signal(null) } },
+        { provide: PipelinePresetsService, useValue: { lastChosenAiModel: signal('local:max-27b') } },
+      ],
+    });
+    TestBed.overrideComponent(AskPanelComponent, { set: { imports: [CommonModule, FormsModule], schemas: [CUSTOM_ELEMENTS_SCHEMA] } });
+    fixture = TestBed.createComponent(AskPanelComponent);
+    panel = fixture.componentInstance;
+    panel.videoId = 'v1';
+    applied = 0;
+    panel.markersApplied.subscribe(() => applied++);
+  });
+
+  const el = () => fixture.nativeElement as HTMLElement;
+  const open = () => {
+    void panel.loadThreads(true);
+    flushMicrotasks();
+    fixture.detectChanges();
+  };
+
+  it('each answer shows the set its markers go into', fakeAsync(() => {
+    open();
+    expect(Array.from(el().querySelectorAll('.chip-set')).map(n => n.textContent!.trim())).toEqual(['→ Trump mentions', '→ Reaction moments']);
+  }));
+
+  it('✓ applies that marker at once, with no name asked; it shows applied and the markers reload', fakeAsync(() => {
+    open();
+    (el().querySelector('.chip-act.apply') as HTMLButtonElement).click();
+    flushMicrotasks();
+    fixture.detectChanges();
+    expect(chat.applyMarkers).toHaveBeenCalledOnceWith('t1', ['k1']);
+    expect(el().querySelector('input[type=text]')).toBeNull();
+    expect(el().querySelectorAll('.chip.applied').length).toBe(1);
+    expect(applied).toBe(1);
+  }));
+
+  it('"Apply all N" on an answer sends that answer\'s proposals; "Apply all proposed" every one in the thread', fakeAsync(() => {
+    open();
+    const answerAll = el().querySelector('.message-actions .mini-btn') as HTMLButtonElement;
+    expect(answerAll.textContent!.trim()).toBe('Apply all 2');
+    answerAll.click();
+    flushMicrotasks();
+    expect(chat.applyMarkers).toHaveBeenCalledWith('t1', ['k1', 'k2']);
+
+    chat.applyMarkers.calls.reset();
+    panel.messages.update(list => list.map(m => ({ ...m, markers: m.markers.map(k => ({ ...k, status: 'proposed' as const, customMarkerId: null })) })));
+    fixture.detectChanges();
+    const threadAll = el().querySelector('.ask-subbar .mini-btn.accent') as HTMLButtonElement;
+    expect(threadAll.textContent!.trim()).toBe('Apply all proposed (3)');
+    threadAll.click();
+    flushMicrotasks();
+    fixture.detectChanges();
+    expect(chat.applyMarkers).toHaveBeenCalledOnceWith('t1', ['k1', 'k2', 'k3']);
+    expect(el().querySelectorAll('.chip.applied').length).toBe(3);
+    expect(el().querySelector('.ask-subbar .mini-btn.accent')).toBeNull();
   }));
 });

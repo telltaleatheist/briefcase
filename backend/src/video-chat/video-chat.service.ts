@@ -15,14 +15,14 @@
  *
  *   - a cloud or Ollama upstream is forwarded by Crucible, with no session;
  *   - a local model (a catalog model, a size ceiling, an ollama tag the server
- *     runs as its own model) gets its own Crucible run: one queue session for
- *     the whole answer, so the model is loaded once (said as 'loading-model')
- *     and nothing evicts it between tool rounds, closed when the answer
- *     settles. Its wait in Crucible's line is bounded (CHAT_LINE_WAIT_S, the
- *     session's maxWaitS); past it the server ends the wait and the answer is
- *     a 503 `crucible_busy`, as is any busy refusal (no busyWait is given, and
- *     the run does not park: parking is the queue's). A size ceiling is sized
- *     by the context its session loaded the pick at (as an analysis is, dc597d1);
+ *     runs as its own model) runs in Ask's own Crucible run: one queue session,
+ *     so the model is loaded once (said as 'loading-model') and nothing evicts
+ *     it between tool rounds. Its wait in Crucible's line is bounded
+ *     (CHAT_LINE_WAIT_S, the session's maxWaitS); past it the server ends the
+ *     wait and the answer is a 503 `crucible_busy`, as is any busy refusal (no
+ *     busyWait is given, and the run does not park: parking is the queue's). A
+ *     size ceiling is sized by the context its session loaded the pick at (as
+ *     an analysis is, dc597d1);
  *   - when another Briefcase run already holds that server (the queue's AI
  *     task, or another conversation's answer), a second session would not be
  *     ours to open: Crucible counts every request from this client as an item
@@ -30,6 +30,16 @@
  *     there the answer runs inside it, outside any run of its own (nothing to
  *     load or evict). With another model, the answer is
  *     refused `crucible_busy` rather than evict that run's model mid-task.
+ *
+ * THE HOLD. That run is KEPT after the answer (CrucibleChatService.keepRun),
+ * so the next question on the same model and server, in any conversation,
+ * finds the model loaded instead of reloading it. It is released after
+ * ASK_HOLD_IDLE_MS with no question, when a question needs another model or
+ * server, when Briefcase quits, and AT ONCE when other Briefcase work (the
+ * queue's task) starts a Crucible run: an open session holds the server for
+ * its client, so the queue never waits on an idle Ask. Its session asks for a
+ * short idle_s (ASK_HOLD_SESSION_IDLE_S), so a backend that dies leaves the
+ * card held for a minute and a half at most.
  *
  * THE LIBRARY. The library open at the question is the answer's: its database
  * path is read at the start, and the answer is written there
@@ -50,11 +60,11 @@
  * is refused 499 `cancelled`.
  */
 import { randomUUID } from 'crypto';
-import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { CrucibleUnreachable } from '@crucible/client';
 import { DatabaseService } from '../database/database.service';
 import { CrucibleReadinessService } from '../crucible/readiness.service';
-import { CrucibleChatService, OLLAMA_CONTEXT_VERSION } from '../crucible/llm/crucible-chat.service';
+import { CrucibleChatService, KeptRunReleased, OLLAMA_CONTEXT_VERSION, type KeptRun } from '../crucible/llm/crucible-chat.service';
 import { CrucibleBusyError, CrucibleChatCancelled, CrucibleChatError, CrucibleNoVenueError } from '../crucible/llm/errors';
 import { CrucibleFieldMissing } from '../crucible/errors';
 import { crucibleUnavailableCause } from '../crucible/transport-failure';
@@ -91,6 +101,10 @@ const CHAT_ROUND_RESERVE_TOKENS = 512;
 const CLOUD_CONTEXT_TOKENS = 128000;
 /** How long a cancel waits for its answer to settle (the question taken back, the run's session closed). */
 export const CHAT_CANCEL_SETTLE_MS = 10_000;
+/** How long Ask keeps its model loaded after an answer, for the next question. */
+export const ASK_HOLD_IDLE_MS = 5 * 60_000;
+/** The held session's idle_s: the touch keeps it open; a backend that died stops touching it. */
+export const ASK_HOLD_SESSION_IDLE_S = 90;
 
 /** A refusal with its HTTP status and `code` (the global filter carries `code` through). */
 export class VideoChatError extends HttpException {
@@ -124,14 +138,26 @@ export function chatLoadContext(needed: number, max: number): number {
   return Math.min(max, Math.ceil(roomy / 4096) * 4096);
 }
 
-/** Where an answer runs: forwarded, in a run of its own, or inside the queue's session. */
-type Venue = { kind: 'upstream' } | { kind: 'own-run' } | { kind: 'queue-session'; server: string };
+/** Where an answer runs: forwarded, in Ask's own (kept) run on a server, or inside the queue's session. */
+type Venue = { kind: 'upstream' } | { kind: 'own-run'; server: string; model: string } | { kind: 'queue-session'; server: string };
+
+/** Ask's kept run: the model it holds loaded between questions, and when it lets go. */
+interface AskHold {
+  kept: KeptRun;
+  server: string;
+  model: string;
+  idle: NodeJS.Timeout | null;
+}
 
 @Injectable()
-export class VideoChatService {
+export class VideoChatService implements OnModuleDestroy {
   private readonly logger = new Logger('VideoChat');
   /** Threads with an answer in flight (one at a time per thread): its stop, and when it has settled. */
   private readonly answering = new Map<string, { stop: AbortController; settled: Promise<void> }>();
+  /** The model kept loaded between questions (THE HOLD), or null. */
+  private hold: AskHold | null = null;
+  /** How long the hold outlives an answer ({@link ASK_HOLD_IDLE_MS}); a spec shortens it. */
+  holdIdleMs = ASK_HOLD_IDLE_MS;
 
   constructor(
     private readonly database: DatabaseService,
@@ -183,15 +209,15 @@ export class VideoChatService {
   }
 
   /**
-   * Apply proposals into custom_markers under the set `setName`: category
+   * Apply proposals into custom_markers, each under its answer's set name
+   * (ChatMarker.setName), or all under `setName` when one is given: category
    * 'custom' (the hand-made markers'), the note as the description, the range
    * as `HH:MM:SS - HH:MM:SS`. One already applied keeps its custom marker.
    */
-  apply(threadId: string, markerIds: unknown, setName: unknown): { markers: ChatMarker[]; customMarkers: unknown[] } {
+  apply(threadId: string, markerIds: unknown, setName?: unknown): { markers: ChatMarker[]; customMarkers: unknown[] } {
     const ids = Array.isArray(markerIds) ? markerIds.filter((id): id is string => typeof id === 'string' && id !== '') : [];
     const name = typeof setName === 'string' ? setName.trim() : '';
     if (ids.length === 0) throw new VideoChatError(HttpStatus.BAD_REQUEST, 'invalid_request', 'Name the markers to apply.');
-    if (!name) throw new VideoChatError(HttpStatus.BAD_REQUEST, 'invalid_request', 'Name the marker set.');
     return this.onLibrary((db) => {
       if (!store.getThread(db, threadId)) throw this.threadNotFound();
       const found = store.markersToApply(db, threadId, ids);
@@ -209,7 +235,7 @@ export class VideoChatService {
             title: m.title,
             description: m.note ?? undefined,
             category: 'custom',
-            markerSet: name,
+            markerSet: name || m.setName,
           });
           return store.markApplied(db, m.id, customMarkerId)!;
         }),
@@ -348,11 +374,16 @@ export class VideoChatService {
     const replayed = replayHistory(history);
     const promptChars = [system, tagCodec.toolsPrompt(tools), question, ...replayed.map((m) => m.content)].reduce((sum, text) => sum + text.length, 0);
     const venue: Venue = target === null ? { kind: 'upstream' } : await this.venueOf(target);
+    // A question for another model (or server) lets the held one go.
+    if (venue.kind !== 'own-run' || this.hold?.server !== venue.server || this.hold?.model !== venue.model) {
+      await this.releaseHold('a question needs another model');
+    }
 
     const needed = Math.ceil(promptChars / CHARS_PER_TOKEN) + CHAT_OUTPUT_RESERVE_TOKENS + CHAT_MAX_TOOL_ROUNDS * CHAT_ROUND_RESERVE_TOKENS;
 
+    const kept = venue.kind === 'own-run' ? this.holdFor(venue.server, venue.model) : null;
     const work = async () => {
-      if (venue.kind !== 'upstream') this.status(threadId, 'loading-model');
+      if (venue.kind !== 'upstream' && kept?.fresh !== false) this.status(threadId, 'loading-model');
       const window: ChatWindow = target === null ? { tokens: CLOUD_CONTEXT_TOKENS } : await this.windowOf(target, promptChars, needed, venue, signal);
       if (needed > window.tokens) {
         const most = window.maxTokens ?? window.tokens;
@@ -377,14 +408,14 @@ export class VideoChatService {
         ...(signal === undefined ? {} : { signal }),
       });
       if (venue.kind !== 'own-run') return loop();
-      // Loaded in the run's session before the first turn, at the context it was sized for.
+      // Loaded in the run's session before the first turn (unless the hold has it), at the context it was sized for.
       return this.chat.withModel(undefined, choice.model, loop, {
         provider: choice.provider,
         ...(window.loadContext === undefined ? {} : { loadContext: window.loadContext }),
         ...(signal === undefined ? {} : { signal }),
       });
     };
-    const result = venue.kind === 'own-run' ? await this.chat.withRun(work, { maxWaitS: CHAT_LINE_WAIT_S, localId: `ask:${threadId}` }) : await work();
+    const result = kept === null ? await work() : await this.inHold(kept.hold, work);
     const markers = result.toolCalls.flatMap((call) => (call.ok && call.data !== undefined ? [call.data as PlacedMarker] : []));
     return { message: result.finalText, markers, trace: result.trace, usage: result.usage, rounds: result.rounds };
   }
@@ -392,15 +423,23 @@ export class VideoChatService {
   /**
    * Where the answer runs. A local model on a server Briefcase's queue holds
    * runs in the queue's session when that session has the same model, and is
-   * refused busy when it has another; otherwise in a run of its own.
+   * refused busy when it has another; otherwise in Ask's own run (the hold).
    */
   private async venueOf(target: CrucibleTarget): Promise<Venue> {
     if (isCloudTarget(target)) return { kind: 'upstream' };
     const chosen = await this.chat.effectiveTarget(target);
     if (chosen.target.route === 'upstream') return { kind: 'upstream' };
     const server = chosen.server ?? await this.chat.venueFor(chosen.target);
+    const model = chosen.target.model;
+    // The hold is Ask's own run, never another's: used when it has this model
+    // here, else let go first (it would count as a run holding the server).
+    const hold = this.hold;
+    if (hold !== null && !hold.kept.released) {
+      if (hold.server === server && hold.model === model) return { kind: 'own-run', server, model };
+      await this.releaseHold('a question needs another model', hold);
+    }
     const others = this.chat.otherRunsOn(server);
-    if (others.length === 0) return { kind: 'own-run' };
+    if (others.length === 0) return { kind: 'own-run', server, model };
     if (others.some((o) => o.model === chosen.target.model)) return { kind: 'queue-session', server };
     const holding = others.find((o) => o.model !== null)?.model;
     throw new CrucibleBusyError(server,
@@ -459,7 +498,7 @@ export class VideoChatService {
     const info = (await this.chat.modelsOn(server, true)).find((m) => m.id === model);
     const resident = info?.resident === true ? info.maxModelLen ?? 0 : 0;
     if (resident >= needed) return { tokens: resident, loadContext: resident, maxTokens: max };
-    if (venue.kind !== 'own-run') {
+    if (venue.kind === 'queue-session') {
       return { ...loaded, refusal: `Briefcase's queue is using ${model} at that context right now; ask with a cloud model, or when that work is done.` };
     }
     if (needed > max) return { ...loaded, maxTokens: max };
@@ -492,6 +531,81 @@ export class VideoChatService {
     const wire = error instanceof CrucibleUnreachable ? error.message : crucibleUnavailableCause(error);
     if (wire !== null) return new VideoChatError(HttpStatus.SERVICE_UNAVAILABLE, 'crucible_unreachable', `Crucible isn't answering (${wire}).`);
     return new VideoChatError(HttpStatus.BAD_GATEWAY, 'chat_failed', `${model}: ${(error as Error).message}`);
+  }
+
+  // ── the hold ───────────────────────────────────────────────────────────
+
+  /**
+   * Ask's kept run for `model` on `server`: the hold when it has them, else a
+   * new one (its session opened by the answer's first local call). `fresh`:
+   * nothing is loaded in it yet.
+   */
+  private holdFor(server: string, model: string): { hold: AskHold; fresh: boolean } {
+    const current = this.hold;
+    if (current !== null && !current.kept.released && current.server === server && current.model === model) {
+      this.disarm(current);
+      return { hold: current, fresh: current.kept.held().length === 0 };
+    }
+    const kept = this.chat.keepRun(
+      { maxWaitS: CHAT_LINE_WAIT_S, idleS: ASK_HOLD_SESSION_IDLE_S, localId: 'ask' },
+      (reason) => {
+        if (this.hold?.kept !== kept) return;
+        this.disarm(this.hold);
+        this.hold = null;
+        this.logger.log(`[${server}] let ${model} go: ${reason}`);
+      },
+    );
+    const hold: AskHold = { kept, server, model, idle: null };
+    this.hold = hold;
+    return { hold, fresh: true };
+  }
+
+  /**
+   * An answer in the hold. Kept after it (the idle clock restarts) when it
+   * answered, stopped or was refused by Ask itself; let go when Crucible
+   * failed it (a busy line, a load that failed), so the next question starts clean.
+   */
+  private async inHold<T>(hold: AskHold, work: () => Promise<T>): Promise<T> {
+    try {
+      const result = await hold.kept.run(work);
+      this.arm(hold);
+      return result;
+    } catch (error) {
+      if (error instanceof KeptRunReleased) {
+        // Let go between the choice and the run (the queue started): no Crucible was touched.
+        throw new CrucibleBusyError(hold.server, 'Briefcase started other AI work on it just now');
+      }
+      // Stopped, or refused before Crucible was asked (a transcript too long): the model stays.
+      if (error instanceof ToolLoopAborted || error instanceof CrucibleChatCancelled || error instanceof VideoChatError) this.arm(hold);
+      else await this.releaseHold('the answer failed', hold);
+      throw error;
+    }
+  }
+
+  private arm(hold: AskHold): void {
+    this.disarm(hold);
+    if (this.hold !== hold || hold.kept.released) return;
+    hold.idle = setTimeout(() => void this.releaseHold(`no question for ${Math.round(this.holdIdleMs / 1000)} s`, hold), this.holdIdleMs);
+    hold.idle.unref?.();
+  }
+
+  private disarm(hold: AskHold): void {
+    if (hold.idle !== null) clearTimeout(hold.idle);
+    hold.idle = null;
+  }
+
+  /** Let the held model go (the session closed); `only`: when that is still the hold. */
+  private async releaseHold(reason: string, only?: AskHold): Promise<void> {
+    const hold = this.hold;
+    if (hold === null || (only !== undefined && hold !== only)) return;
+    this.disarm(hold);
+    this.hold = null;
+    await hold.kept.release(reason);
+  }
+
+  /** The quit (CrucibleChatService releases kept runs too; this stops the clock). */
+  onModuleDestroy(): void {
+    if (this.hold !== null) void this.releaseHold('Briefcase is quitting');
   }
 
   // ── plumbing ───────────────────────────────────────────────────────────

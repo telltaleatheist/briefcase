@@ -26,6 +26,8 @@ export interface ChatMarker {
   endSeconds: number;
   status: ChatMarkerStatus;
   customMarkerId: string | null;
+  /** The marker set it is applied into: its answer's, as the model named it (or from the thread's title). */
+  setName: string;
 }
 
 export interface ChatMessage {

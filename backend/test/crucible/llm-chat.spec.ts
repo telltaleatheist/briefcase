@@ -242,6 +242,65 @@ describe('CrucibleChatService: one server', () => {
     expect(fake.openSession()).toBeNull();
   });
 
+  it('a kept run: its session stays open between calls (idle_s asked), the model loads once, and its release closes it', async () => {
+    await start();
+    const reasons: string[] = [];
+    const kept = chat.keepRun({ idleS: 90, maxWaitS: 120 }, (reason) => reasons.push(reason));
+    const ask = () => kept.run(() => chat.withModel(undefined, 'qwen3.5-9b', () => chat.chat({ model: 'qwen3.5-9b', prompt: 'q' })));
+    await ask();
+    expect(fake.sessions.closed).toEqual([]);
+    expect(kept.held()).toEqual([{ server: 'mac', model: 'qwen3.5-9b' }]);
+    await ask();
+    expect(fake.requestsTo('/v1/queue/sessions', 'POST').map((r) => r.body)).toEqual([{ act: 'analysis', idle_s: 90, max_wait_s: 120 }]);
+    expect(fake.jobs.map((j) => j.model)).toEqual(['qwen3.5-9b']);
+    expect(fake.chatBodies()).toHaveLength(2);
+    expect(fake.openSession()).not.toBeNull();
+    await kept.release('done asking');
+    expect(fake.sessions.closed).toEqual([{ sessionId: 'ses-1', reason: 'client' }]);
+    expect(reasons).toEqual(['done asking']);
+    await expect(ask()).rejects.toThrow(/released/);
+    expect(await chat.runsSettled(100)).toBe(true);
+  });
+
+  it('a kept run yields to a new run (the queue\'s task): an idle one is closed before that run opens its session', async () => {
+    await start();
+    const reasons: string[] = [];
+    const kept = chat.keepRun({}, (reason) => reasons.push(reason));
+    await kept.run(() => chat.withModel(undefined, 'qwen3.5-9b', async () => undefined));
+    await chat.withRun(async () => {
+      // The kept run's session is gone before this one is asked for.
+      expect(fake.sessions.closed).toEqual([{ sessionId: 'ses-1', reason: 'client' }]);
+      await chat.chat({ model: 'qwen3.5-4b', prompt: 'task' });
+    });
+    expect(kept.released).toBe(true);
+    expect(reasons).toEqual(['other Briefcase work wants Crucible']);
+    expect(fake.sessions.opened.map((x) => x.sessionId)).toEqual(['ses-1', 'ses-2']);
+  });
+
+  it('a kept run with a call in flight yields as that call settles; the quit releases any left', async () => {
+    await start();
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const kept = chat.keepRun();
+    const inFlight = kept.run(() => chat.withModel(undefined, 'qwen3.5-9b', () => gate));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(kept.busy).toBe(true);
+    const task = chat.withRun(async () => 'ran');
+    await expect(task).resolves.toBe('ran');
+    expect(kept.released).toBe(false);
+    release();
+    await inFlight;
+    await new Promise((r) => setTimeout(r, 20));
+    expect(kept.released).toBe(true);
+    expect(fake.sessions.closed.map((x) => x.sessionId)).toEqual(['ses-1']);
+
+    const other = chat.keepRun();
+    await other.run(() => chat.withModel(undefined, 'qwen3.5-9b', async () => undefined));
+    chat.onModuleDestroy();
+    expect(await chat.runsSettled(1_000)).toBe(true);
+    expect(other.released).toBe(true);
+  });
+
   it('an already-resident model is used in the session without a load', async () => {
     await start({ resident: 'qwen3.5-9b' });
     await chat.withRun(() => chat.chat({ model: 'qwen3.5-9b', prompt: 'x' }));

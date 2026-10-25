@@ -27,6 +27,9 @@ import type { ParsedToolCall, Tool, ToolCallCodec } from './types';
 
 const TOOL_CALL_BLOCK = /<tool_use>([\s\S]*?)(?:<\/tool_use>|$)/gi;
 
+/** A tag the reply stopped partway into ("<", "<tool_u", "</tool"): never prose. */
+const CUT_TAG = /<\/?(?:t(?:o(?:o(?:l(?:_(?:u(?:se?)?)?)?)?)?)?)?$/i;
+
 export const tagCodec: ToolCallCodec = {
   toolsPrompt(tools) {
     const lines = tools.map((tool) => JSON.stringify(functionDefinition(tool))).join('\n');
@@ -50,6 +53,8 @@ For each function call, return a json object with function name and arguments wi
     for (const match of text.matchAll(TOOL_CALL_BLOCK)) calls.push(readCall(match[1]));
     const prose = text
       .replace(TOOL_CALL_BLOCK, '')
+      .trimEnd()
+      .replace(CUT_TAG, '')
       .replace(/<\/?tool_use>/gi, '')
       // A fence that only wrapped the tags is empty now.
       .replace(/```[a-z]*\s*```/gi, '')

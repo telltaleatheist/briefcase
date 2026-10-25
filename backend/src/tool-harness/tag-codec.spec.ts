@@ -72,4 +72,10 @@ describe('parseLenientJson', () => {
     expect(parseLenientJson('no json here')).toBeNull();
     expect(parseLenientJson('{"a": ')).toBeNull();
   });
+  it('a tag the reply stopped partway into is not prose', () => {
+    const call = '<tool_use>\n{"name": "square", "arguments": {"n": 2}}\n</tool_use>';
+    expect(tagCodec.parse(`${call}\n<`).prose).toBe('');
+    expect(tagCodec.parse(`Marked.\n${call}\n<tool_u`).prose).toBe('Marked.');
+    expect(tagCodec.parse('2 < 3').prose).toBe('2 < 3');
+  });
 });

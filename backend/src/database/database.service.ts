@@ -917,7 +917,8 @@ export class DatabaseService {
 
       -- Ask: a marker an answer placed, proposed until applied into
       -- custom_markers (custom_marker_id) or dismissed. Applied custom markers
-      -- outlive the conversation.
+      -- outlive the conversation. set_name: the marker set it is applied into,
+      -- one per answer.
       CREATE TABLE IF NOT EXISTS chat_markers (
         id TEXT PRIMARY KEY,
         thread_id TEXT NOT NULL,
@@ -931,6 +932,7 @@ export class DatabaseService {
         end_seconds REAL NOT NULL,
         status TEXT NOT NULL DEFAULT 'proposed',
         custom_marker_id TEXT,
+        set_name TEXT,
         created_at TEXT NOT NULL,
         FOREIGN KEY (thread_id) REFERENCES chat_threads(id) ON DELETE CASCADE,
         FOREIGN KEY (message_id) REFERENCES chat_messages(id) ON DELETE CASCADE,
@@ -2118,6 +2120,25 @@ export class DatabaseService {
         db.exec('ALTER TABLE custom_markers ADD COLUMN marker_set TEXT');
         this.saveDatabase();
         this.logger.log('Migration complete: marker_set column added to custom_markers');
+      }
+    } catch (migrationError: any) {
+      throw new Error(
+        `Library database migration failed: ${migrationError?.message || 'Unknown error'}. ` +
+        `Loading was aborted because continuing with an out-of-date schema would corrupt data. ` +
+        `Check that the library volume is mounted and writable, then reopen the library.`,
+      );
+    }
+
+    // Migration 32: chat_markers.set_name, the marker set an Ask answer's
+    // markers are applied into, named by the model with the answer. Additive
+    // and nullable: markers from before it take their thread's title
+    // (video-chat/chat-store.ts, fallbackSetName).
+    try {
+      const columns = db.prepare('PRAGMA table_info(chat_markers)').all() as Array<{ name: string }>;
+      if (columns.length > 0 && !columns.some((c) => c.name === 'set_name')) {
+        db.exec('ALTER TABLE chat_markers ADD COLUMN set_name TEXT');
+        this.saveDatabase();
+        this.logger.log('Migration complete: set_name column added to chat_markers');
       }
     } catch (migrationError: any) {
       throw new Error(

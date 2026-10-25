@@ -53,8 +53,9 @@ describe('VideoChatService', () => {
     expect(http.expectOne({ method: 'PATCH', url: `${base}/markers/m1` }).request.body).toEqual({ status: 'dismissed' });
     service.setMarkerStatus('m1', 'proposed').subscribe();
     expect(http.expectOne({ method: 'PATCH', url: `${base}/markers/m1` }).request.body).toEqual({ status: 'proposed' });
-    service.applyMarkers('t1', ['m1', 'm2'], 'Flood claims').subscribe();
+    // No set name: each marker goes into its answer's set.
+    service.applyMarkers('t1', ['m1', 'm2']).subscribe();
     expect(http.expectOne({ method: 'POST', url: `${base}/threads/t1/apply` }).request.body)
-      .toEqual({ markerIds: ['m1', 'm2'], setName: 'Flood claims' });
+      .toEqual({ markerIds: ['m1', 'm2'] });
   });
 });

@@ -22,17 +22,65 @@ export function threadTitleOf(question: string): string {
   return `${(space > THREAD_TITLE_CHARS / 2 ? cut.slice(0, space) : cut).trimEnd()}…`;
 }
 
+/** A marker set's name: cut at a word to about this many characters. */
+export const SET_NAME_CHARS = 40;
+
+const TRAILING_PUNCTUATION = /[\s.,;:!?…–—-]+$/;
+
+/**
+ * A set name as the model (or a title) gave it, tidied: one line, no wrapping
+ * quotes or end punctuation, cut at a word, in sentence case (the first letter
+ * capitalised, the rest as written, so names keep theirs). '' when nothing is left.
+ */
+export function tidySetName(raw: string): string {
+  let name = raw.replace(/\s+/g, ' ').trim().replace(/^["'`“”‘’]+|["'`“”‘’]+$/g, '').replace(TRAILING_PUNCTUATION, '').trim();
+  if (name.length > SET_NAME_CHARS) {
+    const cut = name.slice(0, SET_NAME_CHARS);
+    const space = cut.lastIndexOf(' ');
+    name = (space > SET_NAME_CHARS / 2 ? cut.slice(0, space) : cut).replace(TRAILING_PUNCTUATION, '');
+  }
+  return name ? name[0].toUpperCase() + name.slice(1) : '';
+}
+
+/** How a question asks for markers ("Can you find all the…", "Is there a…"), dropped from a title made into a set name. */
+const ASK_LEAD_IN = /^(?:(?:please|can you|could you|would you|will you|now)\s+)*(?:mark|find|show(?: me)?|list|highlight|point out|where(?:'s| is| are| does| do| did)?|is there|are there|what are|which are)(?:\s+(?:a|an|any|all|the|every))*\s+/i;
+
+/**
+ * A set name for an answer whose model named none (or for markers from before
+ * set names): the thread's title, its first sentence without the asking.
+ * "Is there a section where Trump is discussed?" is "Section where Trump is
+ * discussed". A heuristic; no model call.
+ */
+export function fallbackSetName(threadTitle: string): string {
+  const first = threadTitle.replace(/…$/, '').split(/[?.!]\s/)[0];
+  return tidySetName(first.replace(ASK_LEAD_IN, '')) || tidySetName(threadTitle) || 'Ask';
+}
+
+/** One set name for an answer's markers: the first `set` the model gave among them, tidied, else the thread title's. */
+export function answerSetName(markers: ReadonlyArray<Pick<PlacedMarker, 'set'>>, threadTitle: string): string {
+  for (const m of markers) {
+    const name = tidySetName(m.set ?? '');
+    if (name) return name;
+  }
+  return fallbackSetName(threadTitle);
+}
+
 interface ThreadRow { id: string; video_id: string; title: string | null; model: string | null; created_at: string; updated_at: string }
 interface MessageRow { id: string; thread_id: string; role: 'user' | 'assistant'; content: string; model: string | null; tool_trace_json: string | null; created_at: string }
 interface MarkerRow {
   id: string; thread_id: string; message_id: string; video_id: string; title: string; note: string | null;
   start_seconds: number; end_seconds: number; status: ChatMarkerStatus; custom_marker_id: string | null;
+  set_name: string | null; thread_title: string | null;
 }
+
+/** Marker rows with their thread's title (the set name of one stored without, from before set names). */
+const MARKERS = 'SELECT m.*, t.title AS thread_title FROM chat_markers m JOIN chat_threads t ON t.id = m.thread_id';
 
 const threadOf = (r: ThreadRow): ChatThread => ({ id: r.id, videoId: r.video_id, title: r.title ?? '', model: r.model, createdAt: r.created_at, updatedAt: r.updated_at });
 const markerOf = (r: MarkerRow): ChatMarker => ({
   id: r.id, threadId: r.thread_id, messageId: r.message_id, title: r.title, note: r.note,
   startSeconds: r.start_seconds, endSeconds: r.end_seconds, status: r.status, customMarkerId: r.custom_marker_id,
+  setName: r.set_name || fallbackSetName(r.thread_title ?? ''),
 });
 
 // ── threads ──────────────────────────────────────────────────────────────
@@ -84,23 +132,27 @@ export function deleteMessage(db: Database, messageId: string): void {
   db.prepare('DELETE FROM chat_messages WHERE id = ?').run(messageId);
 }
 
-/** An answer, its hidden trace and usage, and the markers it placed (as proposals), in one transaction. */
+/**
+ * An answer, its hidden trace and usage, and the markers it placed (as
+ * proposals, all under the answer's one set name), in one transaction.
+ */
 export function insertAnswer(
   db: Database,
   answer: { threadId: string; videoId: string; content: string; model: string; trace: TurnMessage[]; usage: unknown[]; markers: PlacedMarker[] },
   now = new Date().toISOString(),
 ): ChatMessage {
   const id = randomUUID();
+  const setName = answerSetName(answer.markers, getThread(db, answer.threadId)?.title ?? '');
   const addMarker = db.prepare(
-    `INSERT INTO chat_markers (id, thread_id, message_id, video_id, title, note, first_words, last_words, start_seconds, end_seconds, status, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'proposed', ?)`,
+    `INSERT INTO chat_markers (id, thread_id, message_id, video_id, title, note, first_words, last_words, start_seconds, end_seconds, status, set_name, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'proposed', ?, ?)`,
   );
   db.transaction(() => {
     db.prepare(
       'INSERT INTO chat_messages (id, thread_id, role, content, model, tool_trace_json, usage_json, created_at) VALUES (?, ?, \'assistant\', ?, ?, ?, ?, ?)',
     ).run(id, answer.threadId, answer.content, answer.model, JSON.stringify(answer.trace), JSON.stringify(answer.usage), now);
     for (const m of answer.markers) {
-      addMarker.run(randomUUID(), answer.threadId, id, answer.videoId, m.title, m.note, m.firstWords, m.lastWords, m.startSeconds, m.endSeconds, now);
+      addMarker.run(randomUUID(), answer.threadId, id, answer.videoId, m.title, m.note, m.firstWords, m.lastWords, m.startSeconds, m.endSeconds, setName, now);
     }
   })();
   return { id, threadId: answer.threadId, role: 'assistant', content: answer.content, model: answer.model, markers: markersOfMessage(db, id), createdAt: now };
@@ -110,7 +162,7 @@ export function insertAnswer(
 export function listMessages(db: Database, threadId: string): ChatMessage[] {
   const rows = db.prepare('SELECT * FROM chat_messages WHERE thread_id = ? ORDER BY created_at, rowid').all(threadId) as MessageRow[];
   const byMessage = new Map<string, ChatMarker[]>();
-  for (const marker of (db.prepare('SELECT * FROM chat_markers WHERE thread_id = ? ORDER BY start_seconds, rowid').all(threadId) as MarkerRow[]).map(markerOf)) {
+  for (const marker of (db.prepare(`${MARKERS} WHERE m.thread_id = ? ORDER BY m.start_seconds, m.rowid`).all(threadId) as MarkerRow[]).map(markerOf)) {
     const list = byMessage.get(marker.messageId);
     if (list) list.push(marker);
     else byMessage.set(marker.messageId, [marker]);
@@ -140,17 +192,17 @@ export function historyOf(db: Database, threadId: string): StoredTurn[] {
 // ── markers ──────────────────────────────────────────────────────────────
 
 function markersOfMessage(db: Database, messageId: string): ChatMarker[] {
-  return (db.prepare('SELECT * FROM chat_markers WHERE message_id = ? ORDER BY start_seconds, rowid').all(messageId) as MarkerRow[]).map(markerOf);
+  return (db.prepare(`${MARKERS} WHERE m.message_id = ? ORDER BY m.start_seconds, m.rowid`).all(messageId) as MarkerRow[]).map(markerOf);
 }
 
 export function getMarker(db: Database, markerId: string): ChatMarker | null {
-  const row = db.prepare('SELECT * FROM chat_markers WHERE id = ?').get(markerId) as MarkerRow | undefined;
+  const row = db.prepare(`${MARKERS} WHERE m.id = ?`).get(markerId) as MarkerRow | undefined;
   return row ? markerOf(row) : null;
 }
 
 /** The marker rows a thread holds among `ids`, with what applying them needs. */
 export function markersToApply(db: Database, threadId: string, ids: string[]): Array<ChatMarker & { videoId: string }> {
-  const get = db.prepare('SELECT * FROM chat_markers WHERE id = ? AND thread_id = ?');
+  const get = db.prepare(`${MARKERS} WHERE m.id = ? AND m.thread_id = ?`);
   return ids.flatMap((id) => {
     const row = get.get(id, threadId) as MarkerRow | undefined;
     return row ? [{ ...markerOf(row), videoId: row.video_id }] : [];

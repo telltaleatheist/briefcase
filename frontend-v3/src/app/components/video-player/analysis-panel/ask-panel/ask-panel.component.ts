@@ -24,6 +24,8 @@ import { AiModelOptionsService } from '../../../../services/ai-model-options.ser
 import { PipelinePresetsService } from '../../../../core/stores/pipeline-presets.service';
 import { AiModelSelectComponent } from '../../../ai-model-select/ai-model-select.component';
 import { isClaudeCliValue } from '../../../../models/ai-model-value';
+import { ElectronService } from '../../../../services/electron.service';
+import { renderChatMarkdown } from './chat-markdown';
 import {
   ChatMarker,
   ChatMessage,
@@ -55,19 +57,13 @@ interface PendingSend {
   stopping: boolean;
 }
 
-/** The inline "apply to marker set" form: which proposals, and where it opened ('thread', 'message:<id>', 'marker:<id>'). */
-interface ApplyForm {
-  key: string;
-  markerIds: string[];
-}
-
 /**
  * THE ASK TAB: a chat about this video's transcript.
  *
  * Threads per video (the newest opens), a message list, and a composer gated
  * on Crucible readiness. Markers the model placed arrive on assistant messages
- * as PROPOSALS: chips that seek, apply (into custom markers under a named
- * marker set) or dismiss (with undo). The current thread's proposals are
+ * as PROPOSALS: chips that seek, apply in one click (into custom markers, in
+ * the marker set the answer named) or dismiss (with undo). The current thread's proposals are
  * emitted to the player, which draws them as a ghost lane on the timeline.
  *
  * The component stays alive while other tabs are open (the host hides it), so
@@ -87,6 +83,7 @@ export class AskPanelComponent implements OnChanges, OnDestroy {
   readonly readiness = inject(CrucibleReadinessService);
   private readonly modelOptions = inject(AiModelOptionsService);
   private readonly presets = inject(PipelinePresetsService);
+  private readonly electron = inject(ElectronService);
 
   @Input() videoId?: string;
   /** The Ask tab is showing: threads load on the first showing for a video. */
@@ -124,9 +121,6 @@ export class AskPanelComponent implements OnChanges, OnDestroy {
     this.modelChoice() || this.presets.lastChosenAiModel() || this.modelOptions.view()?.analysisDefault || '');
 
   readonly showOnTimeline = signal(readShowOnTimeline());
-  readonly applyForm = signal<ApplyForm | null>(null);
-  readonly setName = signal('');
-  readonly applying = signal(false);
   readonly busyMarkerIds = signal<ReadonlySet<string>>(new Set());
   readonly confirmingDelete = signal(false);
 
@@ -157,6 +151,8 @@ export class AskPanelComponent implements OnChanges, OnDestroy {
 
   readonly formatRange = formatChatRange;
 
+  /** Answers rendered as Markdown, by their text (an answer never changes). */
+  private readonly rendered = new Map<string, string>();
   private loadedFor: string | null = null;
   private seq = 0;
   /** Stop: drops the pending send's request. */
@@ -196,7 +192,6 @@ export class AskPanelComponent implements OnChanges, OnDestroy {
     this.threadError.set('');
     this.sendError.set(null);
     this.actionError.set('');
-    this.applyForm.set(null);
     this.confirmingDelete.set(false);
     this.modelChoice.set('');
   }
@@ -235,7 +230,6 @@ export class AskPanelComponent implements OnChanges, OnDestroy {
   async openThread(threadId: string): Promise<void> {
     const seq = ++this.seq;
     this.currentThreadId.set(threadId);
-    this.applyForm.set(null);
     this.confirmingDelete.set(false);
     this.actionError.set('');
     this.threadError.set('');
@@ -271,7 +265,6 @@ export class AskPanelComponent implements OnChanges, OnDestroy {
     this.messages.set([]);
     this.threadLoading.set(false);
     this.threadError.set('');
-    this.applyForm.set(null);
     this.confirmingDelete.set(false);
     this.actionError.set('');
     this.modelChoice.set('');
@@ -413,6 +406,25 @@ export class AskPanelComponent implements OnChanges, OnDestroy {
     }
   }
 
+  /** An answer's Markdown as HTML, for [innerHTML] (which sanitizes it). User messages stay plain text. */
+  markdownOf(message: ChatMessage): string {
+    let html = this.rendered.get(message.content);
+    if (html === undefined) {
+      html = renderChatMarkdown(message.content);
+      this.rendered.set(message.content, html);
+    }
+    return html;
+  }
+
+  /** A link in an answer opens in the browser, never in the app's window. */
+  onBubbleClick(event: MouseEvent): void {
+    const link = (event.target as HTMLElement | null)?.closest?.('a');
+    if (!link) return;
+    event.preventDefault();
+    const href = link.getAttribute('href') ?? '';
+    if (/^https?:\/\//i.test(href)) void this.electron.openExternal(href);
+  }
+
   // ---- markers -------------------------------------------------------------
 
   onChipClick(marker: ChatMarker): void {
@@ -445,46 +457,43 @@ export class AskPanelComponent implements OnChanges, OnDestroy {
     }
   }
 
-  openApply(key: string, markerIds: string[]): void {
-    if (!markerIds.length) return;
-    this.actionError.set('');
-    this.applyForm.set({ key, markerIds });
-    this.setName.set(this.currentThread()?.title?.trim() || 'Ask');
+  /** The marker set an answer's markers go into (one per answer), shown over its chips. */
+  setNameOf(message: ChatMessage): string {
+    return (message.markers ?? []).find(k => k.setName)?.setName ?? '';
   }
 
-  openApplyThread(): void {
-    this.openApply('thread', this.proposals().map(k => k.id));
+  /** Every one of these proposals is being applied or dismissed already. */
+  allBusy(markers: ChatMarker[]): boolean {
+    return markers.every(k => this.isBusy(k));
   }
 
-  openApplyMessage(message: ChatMessage): void {
-    this.openApply(`message:${message.id}`, this.proposedOf(message).map(k => k.id));
+  applyMarker(marker: ChatMarker): Promise<void> {
+    return this.apply([marker]);
   }
 
-  cancelApply(): void {
-    this.applyForm.set(null);
+  applyMessage(message: ChatMessage): Promise<void> {
+    return this.apply(this.proposedOf(message));
   }
 
-  isApplyOpen(key: string): boolean {
-    return this.applyForm()?.key === key;
+  applyThread(): Promise<void> {
+    return this.apply(this.proposals());
   }
 
-  async confirmApply(): Promise<void> {
-    const form = this.applyForm();
+  /** One click: the proposals become custom markers, each in its answer's marker set. */
+  private async apply(markers: ChatMarker[]): Promise<void> {
     const threadId = this.currentThreadId();
-    const setName = this.setName().trim();
-    if (!form || !threadId || !setName || this.applying()) return;
-    this.applying.set(true);
-    this.markBusy(form.markerIds, true);
+    const ids = markers.filter(k => !this.isBusy(k)).map(k => k.id);
+    if (!threadId || !ids.length) return;
+    this.actionError.set('');
+    this.markBusy(ids, true);
     try {
-      const result = await firstValueFrom(this.chat.applyMarkers(threadId, form.markerIds, setName));
+      const result = await firstValueFrom(this.chat.applyMarkers(threadId, ids));
       this.mergeMarkers(result.markers ?? []);
-      this.applyForm.set(null);
       this.markersApplied.emit();
     } catch (error) {
       this.actionError.set(`Couldn't apply the markers: ${chatErrorMessage(error)}`);
     } finally {
-      this.applying.set(false);
-      this.markBusy(form.markerIds, false);
+      this.markBusy(ids, false);
     }
   }
 

@@ -62,6 +62,7 @@ export class VideoChatController {
     return this.chat.setMarkerStatus(markerId, body?.status);
   }
 
+  /** Proposals into custom markers, each in its answer's set; `setName`, when given, names one set for all. */
   @Post('threads/:threadId/apply')
   apply(@Param('threadId') threadId: string, @Body() body: { markerIds?: unknown; setName?: unknown }): { markers: ChatMarker[]; customMarkers: unknown[] } {
     return this.chat.apply(threadId, body?.markerIds, body?.setName);

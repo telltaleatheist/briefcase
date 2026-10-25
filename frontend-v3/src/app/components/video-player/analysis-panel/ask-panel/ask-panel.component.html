@@ -37,16 +37,13 @@
       Proposals on timeline
     </label>
     @if (proposals().length > 0 && currentThreadId()) {
-      <button type="button" class="mini-btn accent" (click)="openApplyThread()"
-        [disabled]="applying()"
-        title="Apply every proposed marker in this chat as custom markers">
+      <button type="button" class="mini-btn accent" (click)="applyThread()"
+        [disabled]="allBusy(proposals())"
+        title="Apply every proposed marker in this chat as custom markers, each in its answer's marker set">
         Apply all proposed ({{ proposals().length }})
       </button>
     }
   </div>
-  @if (isApplyOpen('thread')) {
-    <ng-container *ngTemplateOutlet="applyFormTpl"></ng-container>
-  }
 
   <!-- Messages -->
   <div class="message-list" #messageList>
@@ -71,9 +68,16 @@
 
     @for (message of messages(); track message.id) {
       <div class="message" [class.user]="message.role === 'user'" [class.assistant]="message.role === 'assistant'">
-        <div class="bubble">{{ message.content }}</div>
+        @if (message.role === 'assistant') {
+          <div class="bubble markdown" [innerHTML]="markdownOf(message)" (click)="onBubbleClick($event)"></div>
+        } @else {
+          <div class="bubble">{{ message.content }}</div>
+        }
 
         @if (markersOf(message).length) {
+          @if (setNameOf(message); as set) {
+            <div class="chip-set" [title]="'Applied markers go into the marker set ' + set">→ {{ set }}</div>
+          }
           <div class="chips">
             @for (marker of markersOf(message); track marker.id) {
               <div class="chip"
@@ -88,8 +92,8 @@
                   <span class="chip-time">{{ formatRange(marker.startSeconds, marker.endSeconds) }}</span>
                 </button>
                 @if (marker.status === 'proposed') {
-                  <button type="button" class="chip-act apply" (click)="openApply('marker:' + marker.id, [marker.id])"
-                    [disabled]="isBusy(marker) || applying()" title="Apply as a custom marker" aria-label="Apply marker">
+                  <button type="button" class="chip-act apply" (click)="applyMarker(marker)"
+                    [disabled]="isBusy(marker)" title="Apply as a custom marker" aria-label="Apply marker">
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg>
                   </button>
                   <button type="button" class="chip-act dismiss" (click)="dismiss(marker)"
@@ -102,21 +106,16 @@
                   </button>
                 }
               </div>
-              @if (isApplyOpen('marker:' + marker.id)) {
-                <ng-container *ngTemplateOutlet="applyFormTpl"></ng-container>
-              }
             }
           </div>
           @if (proposedOf(message).length > 1) {
             <div class="message-actions">
-              <button type="button" class="mini-btn" (click)="openApplyMessage(message)"
-                [disabled]="applying()">
+              <button type="button" class="mini-btn" (click)="applyMessage(message)"
+                [disabled]="allBusy(proposedOf(message))"
+                title="Apply every proposed marker in this answer as custom markers">
                 Apply all {{ proposedOf(message).length }}
               </button>
             </div>
-            @if (isApplyOpen('message:' + message.id)) {
-              <ng-container *ngTemplateOutlet="applyFormTpl"></ng-container>
-            }
           }
         }
       </div>
@@ -178,14 +177,3 @@
   </div>
 </div>
 
-<ng-template #applyFormTpl>
-  <form class="apply-form" (ngSubmit)="confirmApply()">
-    <label class="apply-label" for="ask-set-name">Marker set</label>
-    <input id="ask-set-name" type="text" class="apply-input" name="setName"
-      [ngModel]="setName()" (ngModelChange)="setName.set($event)" [disabled]="applying()" autofocus>
-    <button type="submit" class="mini-btn accent" [disabled]="applying() || !setName().trim()">
-      {{ applying() ? 'Applying…' : 'Apply ' + applyForm()!.markerIds.length }}
-    </button>
-    <button type="button" class="mini-btn" (click)="cancelApply()" [disabled]="applying()">Cancel</button>
-  </form>
-</ng-template>

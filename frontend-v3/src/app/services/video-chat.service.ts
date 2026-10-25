@@ -59,8 +59,8 @@ export class VideoChatService {
     return this.http.patch<ChatMarker>(`${this.base}/markers/${encodeURIComponent(markerId)}`, { status });
   }
 
-  /** Turn proposals into custom markers under the marker set `setName`. */
-  applyMarkers(threadId: string, markerIds: string[], setName: string): Observable<ChatApplyResult> {
-    return this.http.post<ChatApplyResult>(`${this.base}/threads/${encodeURIComponent(threadId)}/apply`, { markerIds, setName });
+  /** Turn proposals into custom markers, each in its answer's marker set (ChatMarker.setName). */
+  applyMarkers(threadId: string, markerIds: string[]): Observable<ChatApplyResult> {
+    return this.http.post<ChatApplyResult>(`${this.base}/threads/${encodeURIComponent(threadId)}/apply`, { markerIds });
   }
 }

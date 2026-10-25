@@ -67,9 +67,18 @@
  * CANCEL. The caller's `signal` aborts the open fetch, cancels an in-flight
  * load job, takes a waiting session out of the line, and ends any busy or
  * queue-full wait at once. A run's session is closed in its `finally`.
+ *
+ * A KEPT RUN ({@link CrucibleChatService.keepRun}) is a run left open between
+ * calls, so its model stays loaded for the next one (the Ask chat's hold
+ * between questions): its sessions stay open, touched, until its holder
+ * releases it. It never makes other work wait: a new top-level run (the
+ * queue's task) releases every idle kept run before it starts, and one with a
+ * call in flight right after that call. Its sessions are opened with a short
+ * idle_s, so a backend that dies leaves nothing held for long, and the quit
+ * releases it.
  */
 import { AsyncLocalStorage } from 'async_hooks';
-import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleDestroy, Optional } from '@nestjs/common';
 import {
   CrucibleBusy,
   CrucibleRefused,
@@ -306,6 +315,35 @@ export interface RunOptions {
    * For interactive work (the Ask chat) that must answer, not wait.
    */
   maxWaitS?: number;
+  /**
+   * The run's sessions close after this many seconds with nothing in flight
+   * and no touch (the session's `idleS`, 10..86400). Absent: the server's
+   * default, 300. The touch keeps a live run's open; a kept run asks for a
+   * short one, so a backend that died does not hold the card for long.
+   */
+  idleS?: number;
+}
+
+/** A run left open between calls ({@link CrucibleChatService.keepRun}). */
+export interface KeptRun {
+  /** Run `fn` inside the kept run: its sessions, the models it holds. Refused once released. */
+  run<T>(fn: () => Promise<T>): Promise<T>;
+  /** Close its sessions (the card is given back); settles once closed. Idempotent. */
+  release(reason: string): Promise<void>;
+  /** Released, or being released: {@link run} is refused. */
+  readonly released: boolean;
+  /** A call is in flight inside it. */
+  readonly busy: boolean;
+  /** The models it holds now, by server. */
+  held(): Array<{ server: string; model: string }>;
+}
+
+/** A kept run's {@link run} after its release. */
+export class KeptRunReleased extends Error {
+  constructor(readonly reason: string) {
+    super(`The kept Crucible run was released (${reason}).`);
+    this.name = 'KeptRunReleased';
+  }
 }
 
 interface RunScope {
@@ -370,7 +408,7 @@ function busyLineOfRefusal(err: unknown): string | null {
 export const RELOAD_BUSY_WAIT: Readonly<BusyWait> = { everyMs: 2_000, forMs: 60_000 };
 
 @Injectable()
-export class CrucibleChatService {
+export class CrucibleChatService implements OnModuleDestroy {
   private readonly logger = new Logger('CrucibleChat');
   private readonly runs = new AsyncLocalStorage<RunScope>();
   private readonly settingsCache = new Map<string, { at: number; configured: Record<UpstreamName, boolean> }>();
@@ -414,6 +452,8 @@ export class CrucibleChatService {
    */
   async withRun<T>(fn: () => Promise<T>, options: RunOptions = {}): Promise<T> {
     if (this.runs.getStore() !== undefined) return fn();
+    // An idle kept run would hold the server this run needs (one session per client): it yields first.
+    await this.yieldKeptRuns('other Briefcase work wants Crucible');
     const scope: RunScope = { held: new Map(), sessions: new Map(), placed: new Map(), mapped: new Map(), lock: Promise.resolve(), options, parked: null };
     this.liveScopes.add(scope);
     const run = (async () => {
@@ -428,6 +468,81 @@ export class CrucibleChatService {
     this.openRuns.add(settled);
     void settled.then(() => this.openRuns.delete(settled));
     return run;
+  }
+
+  /**
+   * A run kept open between calls, so its model stays loaded for the next
+   * (see the header): sessions opened in it stay open, touched, until
+   * {@link KeptRun.release}. Yields to any new top-level run
+   * ({@link withRun}): released at once when idle, else as its call settles.
+   * `onReleased` is told why, however it was released.
+   */
+  keepRun(options: RunOptions = {}, onReleased?: (reason: string) => void): KeptRun {
+    const scope: RunScope = { held: new Map(), sessions: new Map(), placed: new Map(), mapped: new Map(), lock: Promise.resolve(), options, parked: null };
+    this.liveScopes.add(scope);
+    let settle: () => void = () => undefined;
+    const settled = new Promise<void>((resolve) => { settle = resolve; });
+    this.openRuns.add(settled);
+    void settled.then(() => this.openRuns.delete(settled));
+    let releasing: Promise<void> | null = null;
+    let inFlight = 0;
+    let yieldReason: string | null = null;
+    const kept: KeptRun & { yieldTo(reason: string): Promise<void> } = {
+      get released() { return releasing !== null; },
+      get busy() { return inFlight > 0; },
+      held: () => [...scope.held.values()].filter((h) => !h.lost).map(({ server, model }) => ({ server, model })),
+      run: async <T>(fn: () => Promise<T>): Promise<T> => {
+        if (releasing !== null) throw new KeptRunReleased(yieldReason ?? 'released');
+        inFlight += 1;
+        try {
+          return await this.runs.run(scope, fn);
+        } finally {
+          inFlight -= 1;
+          if (inFlight === 0 && yieldReason !== null) void kept.release(yieldReason);
+        }
+      },
+      release: (reason: string): Promise<void> => {
+        releasing ??= (async () => {
+          yieldReason ??= reason;
+          this.keptRuns.delete(kept);
+          try {
+            await this.releaseScope(scope);
+          } finally {
+            this.liveScopes.delete(scope);
+            settle();
+            this.logger.log(`kept run released: ${reason}`);
+            try {
+              onReleased?.(reason);
+            } catch {
+              // A listener never breaks a release.
+            }
+          }
+        })();
+        return releasing;
+      },
+      // Idle: released now. A call in flight: released as it settles.
+      yieldTo: (reason: string): Promise<void> => {
+        if (inFlight === 0) return kept.release(reason);
+        yieldReason ??= reason;
+        return Promise.resolve();
+      },
+    };
+    this.keptRuns.add(kept);
+    return kept;
+  }
+
+  /** Kept runs not yet released. */
+  private readonly keptRuns = new Set<KeptRun & { yieldTo(reason: string): Promise<void> }>();
+
+  /** Every kept run gives the card back: the idle ones now, a busy one when its call settles. */
+  private async yieldKeptRuns(reason: string): Promise<void> {
+    if (this.keptRuns.size === 0) return;
+    await Promise.all([...this.keptRuns].map((kept) => kept.yieldTo(reason)));
+  }
+
+  /** The quit: kept runs are released, so {@link runsSettled} sees their sessions closed. */
+  onModuleDestroy(): void {
+    for (const kept of [...this.keptRuns]) void kept.release('Briefcase is quitting');
   }
 
   /** Every top-level run not yet settled (its release included). */
@@ -1248,6 +1363,7 @@ export class CrucibleChatService {
         act: opening.act,
         ...(opening.maxParamsB === undefined ? {} : { maxParamsB: opening.maxParamsB }),
         ...(scope.options.maxWaitS === undefined ? {} : { maxWaitS: scope.options.maxWaitS }),
+        ...(scope.options.idleS === undefined ? {} : { idleS: scope.options.idleS }),
         // 1.0.83: opening, but the card is held by a process Crucible does not own.
         onWaiting: (wait) => {
           waited = true;

@@ -27,6 +27,7 @@
     "angular-split": "^17.2.0",
     "briefcase": "file:..",
     "driver.js": "^1.4.0",
+    "marked": "18.0.14",
     "plyr": "^3.8.3",
     "rxjs": "^7.8.0",
     "socket.io-client": "^4.8.1",
