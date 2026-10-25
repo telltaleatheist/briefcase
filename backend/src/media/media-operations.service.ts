@@ -656,7 +656,7 @@ export class MediaOperationsService {
     videoId: string,
     options: {
       aiModel: string;
-      aiProvider?: 'local' | 'ollama' | 'claude' | 'openai';
+      aiProvider?: 'local' | 'ollama' | 'claude' | 'openai' | 'claude-cli';
       customInstructions?: string;
       parts?: AnalysisPart[];
       range?: AnalysisRange;
@@ -989,7 +989,7 @@ export class MediaOperationsService {
     videoId: string,
     options: {
       aiModel: string;
-      aiProvider?: 'local' | 'ollama' | 'claude' | 'openai';
+      aiProvider?: 'local' | 'ollama' | 'claude' | 'openai' | 'claude-cli';
     },
     jobId?: string,
   ): Promise<AnalyzeResult> {

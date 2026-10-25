@@ -23,6 +23,7 @@ import { CrucibleReadinessService } from '../../../../services/crucible-readines
 import { AiModelOptionsService } from '../../../../services/ai-model-options.service';
 import { PipelinePresetsService } from '../../../../core/stores/pipeline-presets.service';
 import { AiModelSelectComponent } from '../../../ai-model-select/ai-model-select.component';
+import { isClaudeCliValue } from '../../../../models/ai-model-value';
 import {
   ChatMarker,
   ChatMessage,
@@ -144,8 +145,15 @@ export class AskPanelComponent implements OnChanges, OnDestroy {
     return e && e.threadId === this.currentThreadId() ? e.message : '';
   });
 
+  /**
+   * Crucible is ready, or the model needs none. TEMPORARY (claude-cli): a
+   * claude-cli model is the local Claude Code CLI (the user's exception to
+   * Crucible-only AI), never picked for the user when Crucible is down.
+   */
+  readonly canAsk = computed(() => this.readiness.ready() || isClaudeCliValue(this.modelValue()));
+
   readonly canSend = computed(() =>
-    this.readiness.ready() && !this.pending() && !!this.videoId && !!this.modelValue() && this.draft().trim().length > 0);
+    this.canAsk() && !this.pending() && !!this.videoId && !!this.modelValue() && this.draft().trim().length > 0);
 
   readonly formatRange = formatChatRange;
 
@@ -296,8 +304,9 @@ export class AskPanelComponent implements OnChanges, OnDestroy {
     const content = this.draft().trim();
     const videoId = this.videoId;
     if (!content || !videoId || this.pending()) return;
-    if (!this.readiness.requireReady()) return;
     const model = this.modelValue();
+    // TEMPORARY (claude-cli): the local Claude Code CLI needs no Crucible.
+    if (!isClaudeCliValue(model) && !this.readiness.requireReady()) return;
     if (!model) {
       this.sendError.set({ threadId: this.currentThreadId(), message: 'Pick a model to ask with.' });
       return;

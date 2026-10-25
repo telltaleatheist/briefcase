@@ -14,6 +14,7 @@ import { CrucibleBusyError, CrucibleChatCancelled, CrucibleChatError, CrucibleNo
 import { crucibleUnavailableCause } from '../crucible/transport-failure';
 import { crucibleTargetOf, storedChoice, type CrucibleTarget } from '../crucible/llm/target';
 import { CRUCIBLE_ANALYSIS_CONTEXT } from '../crucible/llm/ollama-map';
+import { ClaudeCliError, ClaudeCliService, claudeCliModelOf } from '../claude-cli/claude-cli.service';
 
 /**
  * A Crucible busy with someone else's work, OUTSIDE a queue-admitted run (the
@@ -32,7 +33,7 @@ export const CRUCIBLE_BUSY_WAIT_MS = 30 * 60_000;
  * the serving Crucible's.
  */
 export interface AIProviderConfig {
-  provider: 'local' | 'ollama' | 'claude' | 'openai';
+  provider: 'local' | 'ollama' | 'claude' | 'openai' | 'claude-cli';
   model: string;
 }
 
@@ -120,7 +121,11 @@ export interface AIGenerateOverrides {
 export class AIProviderService {
   private readonly logger = new Logger(AIProviderService.name);
 
-  constructor(private readonly crucibleChat: CrucibleChatService) {}
+  constructor(
+    private readonly crucibleChat: CrucibleChatService,
+    // TEMPORARY (claude-cli): the user's exception to Crucible-only AI.
+    private readonly claudeCli: ClaudeCliService = new ClaudeCliService(),
+  ) {}
 
   /**
    * Run a multi-call job (one analysis) as ONE Crucible run: each local model
@@ -296,10 +301,58 @@ export class AIProviderService {
     // a cancellation; the other half is never starting the next one.
     ensureNotCancelled(overrides?.signal, `a ${task ?? 'generation'} call`);
 
+    // TEMPORARY (claude-cli): a claude-cli choice runs on the local Claude Code
+    // CLI, a user-requested exception to Crucible-only AI. It never touches
+    // Crucible, and nothing ever picks it unless the user did.
+    const cliModel = claudeCliModelOf(config.provider, config.model);
+    if (cliModel !== null) return this.generateViaClaudeCli(prompt, config, cliModel, task, overrides);
+
     // Per-task default, unless this particular call asked for its own.
     const temperature = overrides?.temperature ?? temperatureForTask(task);
 
     return this.generateViaCrucible(prompt, config, temperature, task, overrides);
+  }
+
+  /**
+   * TEMPORARY (claude-cli): one call on the local Claude Code CLI. No sampling
+   * parameter and no token ceiling cross (the CLI has no flag for either); a
+   * schema goes to `--json-schema`, 'json' is asked for in the prompt.
+   */
+  private async generateViaClaudeCli(
+    prompt: string,
+    config: AIProviderConfig,
+    model: string,
+    task: AITaskKind | undefined,
+    overrides: AIGenerateOverrides | undefined,
+  ): Promise<AIResponse> {
+    const signal = overrides?.signal;
+    this.logger.log(`Generating via Claude Code CLI: ${model}, task: ${task ?? 'unspecified'}`);
+    let result;
+    try {
+      result = await this.claudeCli.complete({
+        model,
+        messages: [{ role: 'user', content: prompt }],
+        ...(overrides?.format === undefined ? {} : { format: overrides.format }),
+        ...(signal === undefined ? {} : { signal }),
+      });
+    } catch (error) {
+      if (signal?.aborted || (error instanceof ClaudeCliError && error.code === 'cancelled')) {
+        throw new AnalysisCancelledError('Claude Code request cancelled: job was cancelled');
+      }
+      throw error;
+    }
+    const inputTokens = result.usage?.inputTokens ?? 0;
+    const outputTokens = result.usage?.outputTokens ?? 0;
+    return {
+      text: stripThinkTags(result.text),
+      tokensUsed: inputTokens + outputTokens,
+      inputTokens,
+      outputTokens,
+      estimatedCost: result.costUsd ?? 0,
+      provider: config.provider,
+      model: config.model,
+      doneReason: result.stopReason === 'max_tokens' ? 'length' : 'stop',
+    };
   }
 
   /**
@@ -430,6 +483,10 @@ export class AIProviderService {
    */
   async testProvider(config: AIProviderConfig): Promise<{ success: boolean; error?: string }> {
     const chat = this.crucibleChat;
+    // TEMPORARY (claude-cli): the local Claude Code CLI is there when its binary is.
+    if (claudeCliModelOf(config.provider, config.model) !== null) {
+      return this.claudeCli.available() ? { success: true } : { success: false, error: 'The Claude Code CLI (claude) was not found on this computer.' };
+    }
     try {
       const stored = storedChoice(config);
       const chosen = await chat.effectiveTarget(crucibleTargetOf(stored.provider, stored.model));

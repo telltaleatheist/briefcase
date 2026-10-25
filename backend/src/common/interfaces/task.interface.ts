@@ -89,7 +89,7 @@ export interface AnalyzeTask extends BaseTask {
   options?: {
     aiModel: string;
     /** `local` = a model in the Crucible server's own catalog; the rest are its upstreams. */
-    aiProvider?: 'local' | 'ollama' | 'claude' | 'openai';
+    aiProvider?: 'local' | 'ollama' | 'claude' | 'openai' | 'claude-cli';
     customInstructions?: string;
     /**
      * The parts to make: 'metadata' (title, description, tags), 'chapters',
@@ -106,7 +106,7 @@ export interface AnalyzeWebpageTask extends BaseTask {
   type: 'analyze-webpage';
   options?: {
     aiModel: string;
-    aiProvider?: 'local' | 'ollama' | 'claude' | 'openai';
+    aiProvider?: 'local' | 'ollama' | 'claude' | 'openai' | 'claude-cli';
   };
 }
 

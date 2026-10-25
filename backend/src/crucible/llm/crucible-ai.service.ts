@@ -42,6 +42,7 @@ import {
   type CeilingFacts,
   type UpstreamListing,
 } from './model-options';
+import { claudeCliGroup } from '../../claude-cli/claude-cli.service';
 
 export const AI_TASKS: readonly AiTaskName[] = ['chapter', 'flags', 'description', 'tags', 'title'];
 const UPSTREAM_LIST_CACHE_MS = 60_000;
@@ -100,10 +101,16 @@ export class CrucibleAiService {
   async models(explicit?: string, values: readonly string[] = []): Promise<AiModelsView> {
     const { server, reach, unavailable } = await this.connectedServer(explicit);
     const asked = [...new Set(values.map((v) => v.trim()).filter(Boolean))];
+    // TEMPORARY (claude-cli): the local Claude Code CLI, the user's exception to
+    // Crucible-only AI, is listed last with or without a Crucible, and a stored
+    // claude-cli value is its option. It is never the default.
+    const cli = claudeCliGroup();
+    const cliValues = optionValues([cli]);
+    const asCli = (value: string) => (cliValues.has(value) ? { value, option: value, note: null, unavailable: null } : null);
     if (server === null) {
       return {
-        server, local: false, reach, unavailable, upstreams: null, groups: [], analysisDefault: null,
-        resolved: asked.map((value) => ({ value, option: null, note: null, unavailable: unavailable ?? 'No Crucible server is answering.' })),
+        server, local: false, reach, unavailable, upstreams: null, groups: [cli], analysisDefault: null,
+        resolved: asked.map((value) => asCli(value) ?? { value, option: null, note: null, unavailable: unavailable ?? 'No Crucible server is answering.' }),
       };
     }
     const { facts, upstreams } = await this.optionFacts(server);
@@ -115,9 +122,9 @@ export class CrucibleAiService {
       reach,
       unavailable: null,
       upstreams,
-      groups: built.groups,
+      groups: [...built.groups, cli],
       analysisDefault: built.analysisDefault,
-      resolved: asked.map((value) => resolveStoredModel(value, facts, offered)),
+      resolved: asked.map((value) => asCli(value) ?? resolveStoredModel(value, facts, offered)),
     };
   }
 

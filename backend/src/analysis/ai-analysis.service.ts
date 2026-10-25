@@ -213,7 +213,7 @@ export interface AnalysisProgress {
 }
 
 export interface AnalysisOptions {
-  provider: 'local' | 'ollama' | 'openai' | 'claude';
+  provider: 'local' | 'ollama' | 'openai' | 'claude' | 'claude-cli';
   model: string;
   transcript: string;
   segments: Segment[];

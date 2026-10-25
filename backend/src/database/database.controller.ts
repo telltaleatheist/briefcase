@@ -2336,7 +2336,7 @@ export class DatabaseController {
   async startBatchAnalysis(
     @Body() options?: {
       aiModel?: string;
-      aiProvider?: 'local' | 'ollama' | 'claude' | 'openai';
+      aiProvider?: 'local' | 'ollama' | 'claude' | 'openai' | 'claude-cli';
       limit?: number;
       videoIds?: string[];
       transcribeOnly?: boolean;

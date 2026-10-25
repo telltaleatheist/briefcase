@@ -325,7 +325,7 @@ export class QueueController {
       includeTranscript?: boolean;
       includeAnalysis?: boolean;
       aiModel?: string;
-      aiProvider?: 'local' | 'ollama' | 'claude' | 'openai';
+      aiProvider?: 'local' | 'ollama' | 'claude' | 'openai' | 'claude-cli';
     },
   ) {
     if (!body.url) {

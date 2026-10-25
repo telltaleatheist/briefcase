@@ -22,13 +22,22 @@ class FakeReadiness {
 @Component({
   standalone: true,
   imports: [AiModelSelectComponent],
-  template: `<app-ai-model-select [value]="value()" [emptyLabel]="emptyLabel()" (valueChange)="picked.push($event)" />`,
+  template: `<app-ai-model-select [value]="value()" [emptyLabel]="emptyLabel()" [offerClaudeCliWithoutCrucible]="offerCli()" (valueChange)="picked.push($event)" />`,
 })
 class HostComponent {
   readonly value = signal('');
+  readonly offerCli = signal(false);
   readonly emptyLabel = signal<string | null>(null);
   readonly picked: string[] = [];
 }
+
+/** TEMPORARY (claude-cli): the local Claude Code CLI's group, as the backend lists it last. */
+const CLI_GROUP: AiModelsView['groups'][number] = {
+  kind: 'claude-cli', label: 'Claude Code (this computer)', error: null, options: [
+    { value: 'claude-cli:claude-sonnet-5-5', label: 'Sonnet 5.5 (Claude Code)', group: 'claude-cli', sizeB: null, resident: null, serverChoice: false },
+    { value: 'claude-cli:claude-haiku-5-5', label: 'Haiku 5.5 (Claude Code)', group: 'claude-cli', sizeB: null, resident: null, serverChoice: false },
+  ],
+};
 
 const resolved = (value: string, option: string | null, extra: Partial<AiResolvedValue> = {}): AiResolvedValue =>
   ({ value, option, note: null, unavailable: null, ...extra });
@@ -163,5 +172,39 @@ describe('AiModelSelectComponent', () => {
     answer = modelsView({ groups: [] });
     render('');
     expect(lines()[0]).toContain('owens-mac-studio offers no model that can analyse');
+  }));
+
+  // TEMPORARY (claude-cli): the local Claude Code CLI, the user's exception to Crucible-only AI.
+  it('lists the Claude Code models in their own group, and a pick of one is kept', fakeAsync(() => {
+    answer = modelsView({ groups: [...modelsView().groups, CLI_GROUP] });
+    render('claude-cli:claude-haiku-5-5');
+    expect(Array.from(select().querySelectorAll('optgroup')).map((g) => g.label)).toEqual(['On this Crucible', 'Claude Code (this computer)']);
+    expect(select().value).toBe('claude-cli:claude-haiku-5-5');
+    expect(fixture.componentInstance.picked).toEqual([]);
+  }));
+
+  it('a Claude Code model is never the replacement, even when the server offers nothing else', fakeAsync(() => {
+    answer = modelsView({ groups: [CLI_GROUP], analysisDefault: null, resolved: [resolved('local:gone', null, { unavailable: 'gone' })] });
+    render('local:gone');
+    expect(fixture.componentInstance.picked).toEqual([]);
+    expect(lines()[0]).toContain('offers no model that can analyse');
+  }));
+
+  it('while Crucible is not ready, only a host that asks keeps the Claude Code models pickable, and nothing is picked for it', fakeAsync(() => {
+    answer = modelsView({ server: null, groups: [CLI_GROUP], analysisDefault: null, unavailable: 'Crucible is not running.' });
+    readiness.view.set(readinessView());
+    render('local:max-27b');
+    expect(select().disabled).toBeTrue();
+
+    fixture.componentInstance.offerCli.set(true);
+    render('local:max-27b');
+    expect(select().disabled).toBeFalse();
+    expect(Array.from(select().querySelectorAll('optgroup')).map((g) => g.label)).toEqual(['Claude Code (this computer)']);
+    expect(select().value).toBe('');
+    expect(el().textContent).toContain('The Crucible on this computer is not running.');
+    expect(fixture.componentInstance.picked).toEqual([]);
+    select().value = 'claude-cli:claude-sonnet-5-5';
+    select().dispatchEvent(new Event('change'));
+    expect(fixture.componentInstance.picked).toEqual(['claude-cli:claude-sonnet-5-5']);
   }));
 });

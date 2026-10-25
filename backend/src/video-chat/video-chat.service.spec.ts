@@ -40,7 +40,7 @@ suite('VideoChatService on a library database', () => {
     if (dir) fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  async function setup(replies: Array<string | Error | ((req: any) => string)> = [], chatExtras: Record<string, unknown> = {}) {
+  async function setup(replies: Array<string | Error | ((req: any) => string)> = [], chatExtras: Record<string, unknown> = {}, extra: { readiness?: unknown; claudeCli?: unknown } = {}) {
     const { DatabaseService } = await import('../database/database.service');
     const { VideoChatService } = await import('./video-chat.service');
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'briefcase-ask-'));
@@ -65,8 +65,9 @@ suite('VideoChatService on a library database', () => {
     const service = new VideoChatService(
       database,
       chat as any,
-      { assertReadyNow: () => undefined } as any,
+      (extra.readiness ?? { assertReadyNow: () => undefined }) as any,
       { emitVideoChatStatus: (p: { phase: string }) => phases.push(p.phase) } as any,
+      ...(extra.claudeCli === undefined ? [] : [extra.claudeCli as any]),
     );
     return { database, service, requests, phases, libraryPath };
   }
@@ -122,6 +123,42 @@ suite('VideoChatService on a library database', () => {
       ['user', 'When was that posted?'],
     ]);
     expect(service.getThread(thread.id).messages.map((m) => m.role)).toEqual(['user', 'assistant', 'user', 'assistant']);
+  });
+
+  // TEMPORARY (claude-cli): the local Claude Code CLI, the user's exception to Crucible-only AI.
+  it('a claude-cli model answers through the CLI: Crucible is never touched, and its readiness is not required', async () => {
+    const touched: string[] = [];
+    const cliCalls: any[] = [];
+    const claudeCli = {
+      complete: async (req: any) => {
+        cliCalls.push(req);
+        return { text: cliCalls.length === 1 ? `Found it. ${trumpCall}` : 'It is "Trump on the ruling".', usage: { inputTokens: 100, outputTokens: 10 }, costUsd: 0.01, stopReason: 'end_turn' };
+      },
+    };
+    const refuse = (name: string) => () => { touched.push(name); throw new Error(`Crucible ${name} was called`); };
+    const { service, requests } = await setup([], {
+      effectiveTarget: refuse('effectiveTarget'), venueFor: refuse('venueFor'), withRun: refuse('withRun'), withModel: refuse('withModel'),
+    }, { readiness: { assertReadyNow: refuse('readiness') }, claudeCli });
+    const thread = service.createThread('v1', null);
+    const sent = await service.ask(thread.id, 'Is there a section about Trump?', 'claude-cli:claude-haiku-5-5');
+    expect(touched).toEqual([]);
+    expect(requests).toEqual([]);
+    expect(cliCalls).toHaveLength(2);
+    expect(cliCalls[0].model).toBe('claude-haiku-5-5');
+    expect(cliCalls[0].messages[0].role).toBe('system');
+    expect(cliCalls[1].messages.map((m: any) => m.role)).toEqual(['system', 'user', 'assistant', 'user']);
+    expect(sent.assistantMessage).toMatchObject({ content: 'Found it.\n\nIt is "Trump on the ruling".', model: 'claude-cli:claude-haiku-5-5' });
+    expect(sent.assistantMessage.markers).toEqual([expect.objectContaining({ title: 'Trump on the ruling', startSeconds: 600, endSeconds: 612 })]);
+  });
+
+  it('a claude-cli failure is refused by its own code; a Crucible model still needs readiness', async () => {
+    const { ClaudeCliError } = await import('../claude-cli/claude-cli.service');
+    const claudeCli = { complete: async () => { throw new ClaudeCliError('not_installed', 'The Claude Code CLI (claude) was not found on this computer.'); } };
+    const readiness = { assertReadyNow: () => { throw new HttpException({ code: 'crucible_required', message: 'Ask needs Crucible.' }, 409); } };
+    const { service } = await setup([], {}, { readiness, claudeCli });
+    const thread = service.createThread('v1', null);
+    expect(await refusal(service.ask(thread.id, 'Hello?', 'claude-cli:claude-sonnet-5-5'))).toMatchObject({ status: 503, code: 'claude_cli_missing' });
+    expect(await refusal(service.ask(thread.id, 'Hello?', 'claude:claude-sonnet-4-5'))).toMatchObject({ status: 409, code: 'crucible_required' });
   });
 
   it('a failure keeps the question, refuses by code, and the unanswered question is not replayed', async () => {

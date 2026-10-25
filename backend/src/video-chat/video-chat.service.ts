@@ -68,7 +68,8 @@ import { buildVideoChatSystemPrompt } from '../analysis/prompts/video-chat-promp
 import { parseSrtSegments } from '../search/transcript-moments';
 import { tagCodec, replayHistory, runToolLoop, ToolLoopAborted, type StoredTurn, type ToolLoopEvent } from '../tool-harness';
 import { addMarkerTool, chatTranscript, type ChatTranscript, type PlacedMarker } from './add-marker-tool';
-import { crucibleTransport } from './video-chat-transport';
+import { claudeCliTransport, crucibleTransport } from './video-chat-transport';
+import { ClaudeCliError, ClaudeCliService, claudeCliModelOf } from '../claude-cli/claude-cli.service';
 import * as store from './chat-store';
 import type { ChatMarker, ChatMessage, ChatThread, VideoChatPhase } from './video-chat.types';
 
@@ -137,6 +138,8 @@ export class VideoChatService {
     private readonly chat: CrucibleChatService,
     private readonly readiness: CrucibleReadinessService,
     private readonly websocket: WebSocketService,
+    // TEMPORARY (claude-cli): the user's exception to Crucible-only AI.
+    private readonly claudeCli: ClaudeCliService = new ClaudeCliService(),
   ) {}
 
   // ── threads ────────────────────────────────────────────────────────────
@@ -257,7 +260,9 @@ export class VideoChatService {
     this.answering.set(threadId, { stop, settled: new Promise<void>((resolve) => { settle = resolve; }) });
     const answerSignal = signal === undefined ? stop.signal : AbortSignal.any([signal, stop.signal]);
     try {
-      this.readiness.assertReadyNow('Ask');
+      // TEMPORARY (claude-cli): the local Claude Code CLI needs no Crucible, so
+      // a claude-cli question is not refused `crucible_required`.
+      if (claudeCliModelOf(undefined, choice) === null) this.readiness.assertReadyNow('Ask');
       const sentences = assembleSentences(parseSrtSegments(srt));
       if (sentences.length === 0) {
         throw new VideoChatError(HttpStatus.UNPROCESSABLE_ENTITY, 'no_transcript', 'This video has no transcript yet. Transcribe it first, then ask.');
@@ -333,18 +338,22 @@ export class VideoChatService {
     signal: AbortSignal | undefined,
   ): Promise<{ message: string; markers: PlacedMarker[]; trace: StoredTurn['trace']; usage: unknown[]; rounds: number }> {
     const parsed = parseProviderModel(value);
+    // TEMPORARY (claude-cli): a claude-cli choice skips Crucible entirely (a
+    // user-requested exception to Crucible-only AI): no target, no run, no
+    // session; forwarded like a cloud model, with a cloud model's window.
+    const cliModel = claudeCliModelOf(parsed.provider, parsed.model);
     const choice = storedChoice({ provider: parsed.provider ?? '', model: parsed.model });
-    const target = crucibleTargetOf(choice.provider, choice.model);
+    const target = cliModel === null ? crucibleTargetOf(choice.provider, choice.model) : null;
     const tools = [addMarkerTool(transcript)];
     const replayed = replayHistory(history);
     const promptChars = [system, tagCodec.toolsPrompt(tools), question, ...replayed.map((m) => m.content)].reduce((sum, text) => sum + text.length, 0);
-    const venue = await this.venueOf(target);
+    const venue: Venue = target === null ? { kind: 'upstream' } : await this.venueOf(target);
 
     const needed = Math.ceil(promptChars / CHARS_PER_TOKEN) + CHAT_OUTPUT_RESERVE_TOKENS + CHAT_MAX_TOOL_ROUNDS * CHAT_ROUND_RESERVE_TOKENS;
 
     const work = async () => {
       if (venue.kind !== 'upstream') this.status(threadId, 'loading-model');
-      const window = await this.windowOf(target, promptChars, needed, venue, signal);
+      const window: ChatWindow = target === null ? { tokens: CLOUD_CONTEXT_TOKENS } : await this.windowOf(target, promptChars, needed, venue, signal);
       if (needed > window.tokens) {
         const most = window.maxTokens ?? window.tokens;
         throw new VideoChatError(HttpStatus.UNPROCESSABLE_ENTITY, 'transcript_too_long',
@@ -352,7 +361,7 @@ export class VideoChatService {
           + (window.maxTokens === undefined ? 'takes' : 'can take at most')
           + ` (${most.toLocaleString('en-US')}). ${window.refusal ?? 'Pick a cloud model, or start a new conversation.'}`);
       }
-      const transport = crucibleTransport(this.chat, {
+      const transport = cliModel !== null ? claudeCliTransport(this.claudeCli, cliModel) : crucibleTransport(this.chat, {
         provider: choice.provider,
         model: choice.model,
         ...(window.contextTokens === undefined ? {} : { contextTokens: window.contextTokens }),
@@ -462,6 +471,12 @@ export class VideoChatService {
   /** A failure as the HTTP refusal the Ask tab reads: 409 Crucible, 422 the transcript, 503 not now, 502 the model. */
   private refusalOf(error: unknown, model: string): HttpException {
     if (error instanceof HttpException) return error;
+    // TEMPORARY (claude-cli): the local Claude Code CLI's failures, by name.
+    if (error instanceof ClaudeCliError) {
+      if (error.code === 'cancelled') return new VideoChatError(499 as HttpStatus, 'cancelled', 'The question was cancelled.');
+      if (error.code === 'not_installed') return new VideoChatError(HttpStatus.SERVICE_UNAVAILABLE, 'claude_cli_missing', error.message);
+      return new VideoChatError(HttpStatus.BAD_GATEWAY, `claude_cli_${error.code}`, error.message);
+    }
     if (error instanceof CrucibleTargetError) return new VideoChatError(HttpStatus.BAD_REQUEST, 'invalid_model', error.message);
     // Stopped, or the request went away: the Ask tab shows nothing for it, but the log says why it stopped.
     if (error instanceof ToolLoopAborted || error instanceof CrucibleChatCancelled) return new VideoChatError(499 as HttpStatus, 'cancelled', 'The question was cancelled.');

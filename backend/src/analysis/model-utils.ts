@@ -9,9 +9,11 @@
  *  - inline <think> stripping (belt-and-braces for thinking models)
  */
 
-export type AIProvider = 'local' | 'ollama' | 'claude' | 'openai';
+// TEMPORARY (claude-cli): `claude-cli` is the local Claude Code CLI, the user's
+// exception to Crucible-only AI (claude-cli/claude-cli.service.ts).
+export type AIProvider = 'local' | 'ollama' | 'claude' | 'openai' | 'claude-cli';
 
-const KNOWN_PROVIDERS: AIProvider[] = ['local', 'ollama', 'claude', 'openai'];
+const KNOWN_PROVIDERS: AIProvider[] = ['local', 'ollama', 'claude', 'openai', 'claude-cli'];
 
 export interface ParsedProviderModel {
   provider: AIProvider | undefined;

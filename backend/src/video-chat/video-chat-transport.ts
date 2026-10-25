@@ -15,6 +15,7 @@ import type { CrucibleChatService } from '../crucible/llm/crucible-chat.service'
 import { CrucibleChatError } from '../crucible/llm/errors';
 import { stripThinkTags, temperatureForTask } from '../analysis/model-utils';
 import type { ChatTransport } from '../tool-harness';
+import type { ClaudeCliService } from '../claude-cli/claude-cli.service';
 
 export interface CrucibleTransportOptions {
   /** The stored choice, read by target.ts. */
@@ -46,5 +47,18 @@ export function crucibleTransport(chat: CrucibleChatService, options: CrucibleTr
       throw new CrucibleChatError(502, 'tool_call_lost', `${options.model} called a tool in its own native format, which Crucible doesn't pass back. Ask again.`);
     }
     return { text, usage: result.usage };
+  };
+}
+
+/**
+ * TEMPORARY (claude-cli): the transport for a `claude-cli:` choice, the local
+ * Claude Code CLI (a user-requested exception to Crucible-only AI). The
+ * conversation is flattened into one `-p` prompt (claude-cli.service.ts); no
+ * temperature, no max_tokens, nothing through Crucible.
+ */
+export function claudeCliTransport(cli: ClaudeCliService, model: string): ChatTransport {
+  return async (messages, { signal }) => {
+    const result = await cli.complete({ model, messages, ...(signal === undefined ? {} : { signal }) });
+    return { text: stripThinkTags(result.text), usage: result.usage };
   };
 }

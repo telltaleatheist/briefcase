@@ -139,3 +139,55 @@ describe('AskPanelComponent: Stop', () => {
     flush();
   }));
 });
+
+/**
+ * TEMPORARY (claude-cli): a claude-cli model is the local Claude Code CLI, the
+ * user's exception to Crucible-only AI. Ask sends with it while Crucible is
+ * down; a Crucible model still needs Crucible; nothing picks it for the user.
+ */
+describe('AskPanelComponent: Claude Code without Crucible', () => {
+  let panel: AskPanelComponent;
+  let chat: jasmine.SpyObj<VideoChatService>;
+  let requireReady: jasmine.Spy;
+
+  beforeEach(() => {
+    chat = jasmine.createSpyObj<VideoChatService>('VideoChatService', ['listThreads', 'getThread', 'createThread', 'sendMessage', 'cancel', 'deleteThread']);
+    chat.listThreads.and.returnValue(of([]));
+    chat.createThread.and.returnValue(of(thread('t9')));
+    chat.sendMessage.and.returnValue(of({ userMessage: message('u1', 'user', 'Hi?'), assistantMessage: message('a1', 'assistant', 'Hello.') }));
+    requireReady = jasmine.createSpy('requireReady').and.returnValue(false);
+    TestBed.configureTestingModule({
+      imports: [AskPanelComponent],
+      providers: [
+        { provide: VideoChatService, useValue: chat },
+        { provide: WebsocketService, useValue: { onVideoChatStatus: () => () => {} } },
+        { provide: CrucibleReadinessService, useValue: { ready: signal(false), requireReady, handleRefusal: () => null } },
+        { provide: AiModelOptionsService, useValue: { view: signal(null) } },
+        { provide: PipelinePresetsService, useValue: { lastChosenAiModel: signal('local:max-27b') } },
+      ],
+    });
+    TestBed.overrideComponent(AskPanelComponent, { set: { imports: [CommonModule, FormsModule], schemas: [CUSTOM_ELEMENTS_SCHEMA] } });
+    const fixture = TestBed.createComponent(AskPanelComponent);
+    panel = fixture.componentInstance;
+    panel.videoId = 'v1';
+    panel.draft.set('Hi?');
+  });
+
+  it('a Crucible model can not send while Crucible is down', fakeAsync(() => {
+    expect(panel.canAsk()).toBeFalse();
+    expect(panel.canSend()).toBeFalse();
+    void panel.send();
+    flushMicrotasks();
+    expect(requireReady).toHaveBeenCalled();
+    expect(chat.sendMessage).not.toHaveBeenCalled();
+  }));
+
+  it('a Claude Code model sends without asking for Crucible', fakeAsync(() => {
+    panel.modelChoice.set('claude-cli:claude-haiku-5-5');
+    expect(panel.canSend()).toBeTrue();
+    void panel.send();
+    flushMicrotasks();
+    expect(requireReady).not.toHaveBeenCalled();
+    expect(chat.sendMessage).toHaveBeenCalledWith('t9', 'Hi?', 'claude-cli:claude-haiku-5-5');
+  }));
+});

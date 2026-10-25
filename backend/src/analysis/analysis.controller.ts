@@ -271,7 +271,7 @@ export class AnalysisController {
     videoId: string;
     videoTitle?: string;
     aiModel?: string;
-    aiProvider?: 'local' | 'ollama' | 'claude' | 'openai';
+    aiProvider?: 'local' | 'ollama' | 'claude' | 'openai' | 'claude-cli';
     forceReanalyze?: boolean;
     forceRetranscribe?: boolean;
     jobId?: string;  // Custom job ID from frontend (for tracking in processing queue)
@@ -317,12 +317,13 @@ export class AnalysisController {
       }
 
       // Extract provider from model name if present (e.g., "ollama:cogito:14b" -> provider="ollama", model="cogito:14b")
-      const knownProviders = ['ollama', 'openai', 'claude', 'local'] as const;
+      // TEMPORARY (claude-cli): the local Claude Code CLI (claude-cli/claude-cli.service.ts).
+      const knownProviders = ['ollama', 'openai', 'claude', 'local', 'claude-cli'] as const;
       const colonIndex = aiModel.indexOf(':');
       if (colonIndex > 0) {
         const possibleProvider = aiModel.substring(0, colonIndex);
         if (knownProviders.includes(possibleProvider as typeof knownProviders[number])) {
-          aiProvider = possibleProvider as 'local' | 'ollama' | 'openai' | 'claude';
+          aiProvider = possibleProvider as typeof knownProviders[number];
           aiModel = aiModel.substring(colonIndex + 1);
         }
       }

@@ -133,7 +133,7 @@ export function optionValueOf(crucibleModel: string): string {
 }
 
 /** The heading a group is drawn under. The server is named when it is not this computer's. */
-export function groupLabel(kind: AiOptionGroupKind, server: string, local: boolean): string {
+export function groupLabel(kind: Exclude<AiOptionGroupKind, 'claude-cli'>, server: string, local: boolean): string {
   if (kind === 'server') return local ? 'On this Crucible' : `On ${server}`;
   return `${UPSTREAM_WORDS[kind]} via Crucible${local ? '' : ` on ${server}`}`;
 }

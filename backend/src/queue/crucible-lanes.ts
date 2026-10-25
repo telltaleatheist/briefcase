@@ -63,6 +63,7 @@ import type { ServerReach } from '../crucible/wire/settings-wire';
 import type { Task } from '../common/interfaces/task.interface';
 import { CrucibleTranscriptionService } from '../crucible/asr/crucible-transcription.service';
 import { SCORER_LOAD_CONTEXT, SCORER_PREFERRED_MODEL } from '../scorer/crucible-scorer.service';
+import { claudeCliModelOf, claudeCliTarget, isClaudeCliTarget } from '../claude-cli/claude-cli.service';
 
 export const GPU_LANE_WIDTH = 1;
 export const CLOUD_LANE_WIDTH = 2;
@@ -271,6 +272,9 @@ export class CrucibleLanesService implements OnModuleInit, BeforeApplicationShut
   /** The Crucible target of an AI task's primary model. Throws a named error for a model that is not one. */
   targetOf(task: Task): CrucibleTarget {
     const options = (task.options ?? {}) as { aiModel?: string; aiProvider?: string };
+    // TEMPORARY (claude-cli): the local Claude Code CLI is not a Crucible model (the user's exception).
+    const cliModel = claudeCliModelOf(options.aiProvider, options.aiModel);
+    if (cliModel !== null) return claudeCliTarget(cliModel);
     const stored = storedChoice({ provider: options.aiProvider ?? '', model: options.aiModel ?? '' });
     return crucibleTargetOf(stored.provider || undefined, stored.model);
   }
@@ -284,14 +288,18 @@ export class CrucibleLanesService implements OnModuleInit, BeforeApplicationShut
     // GPU lane as that model (ollama-map.ts), leased like any local model.
     // A size ceiling stays a ceiling: the run's session is opened with it
     // (runAdmitted → withModel), and the server's pick is read there.
-    const target = chosen.ceilingB !== undefined ? chosen : (await this.chat.effectiveTarget(chosen)).target;
+    // TEMPORARY (claude-cli): a claude-cli analysis takes the cloud lane and
+    // needs no upstream on the server; the run still needs a Crucible that
+    // answers (the scorer stage), so the selected server's reach decides.
+    const cli = isClaudeCliTarget(chosen);
+    const target = cli || chosen.ceilingB !== undefined ? chosen : (await this.chat.effectiveTarget(chosen)).target;
     const answer: VenueAnswer = await decideVenue(target, {
       selected: () => this.servers.selected(),
       reach: async (server) => {
         const probe = await this.probes.reach(server);
         return { reach: probe.reach, message: probe.probe.outcome === 'ok' ? undefined : probe.probe.message };
       },
-      canServe: (server, t) => this.chat.canServe(server, t),
+      canServe: (server, t) => (cli ? Promise.resolve(true) : this.chat.canServe(server, t)),
     });
     if (answer.kind !== 'venue') return answer;
     const lane = target.route === 'upstream' ? CLOUD_LANE : gpuLaneOf(answer.server);
@@ -372,15 +380,18 @@ export class CrucibleLanesService implements OnModuleInit, BeforeApplicationShut
     const { server, target, signal } = admission;
     return this.chat.withRun(async () => {
       let reserved = false;
+      const held = async (): Promise<T> => {
+        reserved = true;
+        const result = await fn();
+        const parked = this.chat.parkedInRun();
+        const ok = typeof result === 'object' && result !== null && (result as { success?: unknown }).success === true;
+        if (parked !== null && !ok) throw new CrucibleParkedError(parked.server ?? server, parked.reason);
+        return result;
+      };
       try {
-        return await this.chat.withModel(server, target.model, async () => {
-          reserved = true;
-          const result = await fn();
-          const parked = this.chat.parkedInRun();
-          const ok = typeof result === 'object' && result !== null && (result as { success?: unknown }).success === true;
-          if (parked !== null && !ok) throw new CrucibleParkedError(parked.server ?? server, parked.reason);
-          return result;
-        }, {
+        // TEMPORARY (claude-cli): the local Claude Code CLI has nothing to load or hold on a server.
+        if (isClaudeCliTarget(target)) return await held();
+        return await this.chat.withModel(server, target.model, held, {
           signal,
           // The analysis engine reads its decisions from this same model at
           // SCORER_LOAD_CONTEXT. Reserved at its default window it is loaded

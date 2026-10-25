@@ -144,21 +144,22 @@
     </div>
   }
 
-  <!-- Composer -->
+  <!-- Composer. TEMPORARY (claude-cli): canAsk lets a claude-cli model ask without Crucible. -->
   <div class="composer">
     <textarea
       class="composer-input"
       rows="3"
-      [placeholder]="readiness.ready() ? 'Ask about this video. Enter sends, Shift+Enter adds a line.' : 'AI needs Crucible'"
+      [placeholder]="canAsk() ? 'Ask about this video. Enter sends, Shift+Enter adds a line.' : 'AI needs Crucible'"
       [ngModel]="draft()"
       (ngModelChange)="draft.set($event)"
       (keydown)="onComposerKeydown($event)"
-      [disabled]="!readiness.ready() || !!pending()"
+      [disabled]="!canAsk() || !!pending()"
       aria-label="Ask about this video"></textarea>
     <div class="composer-foot">
       <app-ai-model-select
         class="composer-model"
         ariaLabel="Model for this chat"
+        [offerClaudeCliWithoutCrucible]="true"
         [value]="modelValue()"
         (valueChange)="modelChoice.set($event)" />
       @if (pending(); as p) {

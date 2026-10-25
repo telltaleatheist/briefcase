@@ -39,6 +39,7 @@ import { isPathInsideRoots, pathsEqual } from '../common/utils/path-security.uti
 import * as path from 'path';
 import * as os from 'os';
 import { CrucibleReadinessService } from '../crucible/readiness.service';
+import { claudeCliModelOf } from '../claude-cli/claude-cli.service';
 
 @Controller('library')
 export class LibraryController {
@@ -2127,7 +2128,8 @@ export class LibraryController {
   @Post('analytics/generate-insights')
   async generateAIInsights(@Body() body: { aiProvider?: string; aiModel?: string }) {
     // An immediate AI call (no queue to park in): refused by name unless Crucible answers now.
-    this.readiness.assertReadyNow('Library insights');
+    // TEMPORARY (claude-cli): the local Claude Code CLI needs no Crucible (the user's exception).
+    if (claudeCliModelOf(body.aiProvider, body.aiModel) === null) this.readiness.assertReadyNow('Library insights');
     try {
       const activeLibrary = this.libraryManagerService.getActiveLibrary();
       if (!activeLibrary) {
@@ -2189,7 +2191,7 @@ export class LibraryController {
           HttpStatus.BAD_REQUEST,
         );
       }
-      const aiProvider = body.aiProvider as 'ollama' | 'claude' | 'openai';
+      const aiProvider = body.aiProvider as 'ollama' | 'claude' | 'openai' | 'claude-cli';
       const aiModel = body.aiModel;
       const aiResponse = await this.aiProviderService.generateText(
         prompt,

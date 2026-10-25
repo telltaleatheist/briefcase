@@ -45,7 +45,7 @@ export class AnalysisService implements OnModuleInit {
   async startBatchAnalysis(options: {
     videoIds?: string[]; // Specific video IDs to process
     aiModel?: string;
-    aiProvider?: 'local' | 'ollama' | 'claude' | 'openai';
+    aiProvider?: 'local' | 'ollama' | 'claude' | 'openai' | 'claude-cli';
     transcribeOnly?: boolean;
     forceReanalyze?: boolean;
     forceRetranscribe?: boolean;

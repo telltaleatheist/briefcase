@@ -8,8 +8,11 @@ import type { ServerReach } from './settings-wire';
 /**
  * WHERE AN OPTION COMES FROM, in the order the server presents them: the
  * server's own models (`server`), then each upstream it forwards to.
+ * TEMPORARY (claude-cli): `claude-cli` is the local Claude Code CLI, the
+ * user's exception to Crucible-only AI (claude-cli/claude-cli.service.ts),
+ * listed last and offered with or without a Crucible.
  */
-export type AiOptionGroupKind = 'server' | 'anthropic' | 'openai' | 'ollama';
+export type AiOptionGroupKind = 'server' | 'anthropic' | 'openai' | 'ollama' | 'claude-cli';
 
 /**
  * One pickable analysis model. `value` is Briefcase's stored spelling, the one
@@ -18,6 +21,7 @@ export type AiOptionGroupKind = 'server' | 'anthropic' | 'openai' | 'ollama';
  *   claude:<id>    Claude, forwarded by the server
  *   openai:<id>    OpenAI, forwarded by the server
  *   ollama:<tag>   Ollama, forwarded by the server
+ *   claude-cli:<id> TEMPORARY: the local Claude Code CLI, never Crucible
  */
 export interface AiModelOption {
   value: string;

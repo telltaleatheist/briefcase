@@ -19,6 +19,11 @@ import { CrucibleReadinessService } from '../../services/crucible-readiness.serv
  *     replacement is emitted, so what the host queues is what is shown.
  *   - While Crucible is not ready, it shows the readiness reason and the one
  *     door that repairs it (Start / Install / Connect), not a stale list.
+ *   - TEMPORARY (claude-cli): the backend lists the local Claude Code CLI's
+ *     models last (`claude-cli:`, the user's exception to Crucible-only AI).
+ *     They are never a replacement or a default. A host whose action needs no
+ *     Crucible for them (the Ask tab) sets `offerClaudeCliWithoutCrucible`, and
+ *     then they stay pickable while Crucible is not ready.
  *
  * `valueChange` emits on a pick, and when a stored value is replaced as above,
  * with the option's value (the Crucible spelling), or '' for the empty choice.
@@ -30,9 +35,31 @@ import { CrucibleReadinessService } from '../../services/crucible-readiness.serv
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (!readiness.ready()) {
-      <select class="ams-select" [attr.id]="selectId()" disabled [attr.aria-label]="ariaLabel()">
-        <option>AI needs Crucible</option>
-      </select>
+      @if (offerClaudeCliWithoutCrucible() && cliGroups().length > 0) {
+        <!-- TEMPORARY (claude-cli): only the Claude Code models, which need no Crucible. -->
+        <select
+          class="ams-select"
+          [attr.id]="selectId()"
+          [attr.aria-label]="ariaLabel()"
+          [ngModel]="shownWithoutCrucible()"
+          [disabled]="disabled()"
+          (ngModelChange)="pick($event)">
+          @if (!shownWithoutCrucible()) {
+            <option value="" disabled>AI needs Crucible</option>
+          }
+          @for (group of cliGroups(); track group.kind) {
+            <optgroup [label]="group.label">
+              @for (option of group.options; track option.value) {
+                <option [value]="option.value">{{ option.label }}</option>
+              }
+            </optgroup>
+          }
+        </select>
+      } @else {
+        <select class="ams-select" [attr.id]="selectId()" disabled [attr.aria-label]="ariaLabel()">
+          <option>AI needs Crucible</option>
+        </select>
+      }
       <p class="ams-line ams-warn">
         {{ readiness.reason() }}
         @if (readiness.doorLabel(); as door) {
@@ -112,6 +139,8 @@ export class AiModelSelectComponent {
   readonly emptyLabel = input<string | null>(null);
   readonly disabled = input(false);
   readonly selectId = input<string | null>(null);
+  /** TEMPORARY (claude-cli): keep the Claude Code models pickable while Crucible is not ready. */
+  readonly offerClaudeCliWithoutCrucible = input(false);
   readonly ariaLabel = input<string>('AI model');
 
   readonly valueChange = output<string>();
@@ -130,6 +159,16 @@ export class AiModelSelectComponent {
 
   readonly resolution = computed(() => this.store.resolution(this.value()));
 
+  /** TEMPORARY (claude-cli): the Claude Code group(s), and every other option (the Crucible ones). */
+  readonly cliGroups = computed(() => this.store.groups().filter((g) => g.kind === 'claude-cli' && g.options.length > 0));
+  readonly crucibleOptions = computed(() => this.store.options().filter((o) => o.group !== 'claude-cli'));
+
+  /** What the select shows while Crucible is not ready: the stored value when it is a Claude Code option, else the placeholder. */
+  readonly shownWithoutCrucible = computed(() => {
+    const value = (this.value() ?? '').trim();
+    return this.cliGroups().some((g) => g.options.some((o) => o.value === value)) ? value : '';
+  });
+
   /**
    * What the stored value becomes, once the server has answered for it; null
    * when it stays as it is (or it is not known yet). An option under another
@@ -145,7 +184,8 @@ export class AiModelSelectComponent {
     if (resolution === null) return null;
     if (resolution.option !== null) return resolution.option === value ? null : resolution.option;
     if (this.emptyLabel() !== null) return '';
-    const options = this.store.options();
+    // Never a Claude Code model (TEMPORARY, claude-cli): only the user picks one.
+    const options = this.crucibleOptions();
     const pick = this.store.view()?.analysisDefault;
     if (pick && options.some((o) => o.value === pick)) return pick;
     return options[0]?.value ?? null;
@@ -167,7 +207,7 @@ export class AiModelSelectComponent {
   readonly line = computed<{ text: string; warn: boolean; retry: boolean } | null>(() => {
     const error = this.store.error();
     if (error) return { text: error, warn: true, retry: true };
-    if (this.store.loaded() && this.store.options().length === 0) return { text: this.emptyReason(), warn: true, retry: false };
+    if (this.store.loaded() && this.crucibleOptions().length === 0) return { text: this.emptyReason(), warn: true, retry: false };
     return null;
   });
 

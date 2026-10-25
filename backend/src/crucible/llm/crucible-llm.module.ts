@@ -12,11 +12,14 @@ import { CrucibleAiController } from './crucible-ai.controller';
 import { CrucibleAiService } from './crucible-ai.service';
 import { CrucibleChatService } from './crucible-chat.service';
 import { LegacyApiKeys } from './legacy-api-keys';
+import { ClaudeCliService } from '../../claude-cli/claude-cli.service';
 
 @Module({
   imports: [CrucibleModule],
   controllers: [CrucibleAiController],
-  providers: [CrucibleChatService, CrucibleAiService, LegacyApiKeys],
-  exports: [CrucibleChatService, CrucibleAiService],
+  // TEMPORARY (claude-cli): ClaudeCliService, the local Claude Code CLI (the
+  // user's exception to Crucible-only AI), rides here so the analysis and Ask reach it.
+  providers: [CrucibleChatService, CrucibleAiService, LegacyApiKeys, ClaudeCliService],
+  exports: [CrucibleChatService, CrucibleAiService, ClaudeCliService],
 })
 export class CrucibleLlmModule {}

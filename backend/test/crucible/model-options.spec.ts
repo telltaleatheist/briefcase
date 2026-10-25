@@ -24,6 +24,9 @@ import { startFakeCrucible, type FakeCrucible } from '../fake-crucible/fake-cruc
 import { harness } from './harness';
 import { pairingHost, pairingLineFor } from './helpers';
 
+/** TEMPORARY (claude-cli): the local Claude Code CLI's group, listed last by CrucibleAiService.models. */
+const CLAUDE_CLI_GROUP = ['Claude Code (this computer)', ['claude-cli:claude-sonnet-5-5', 'claude-cli:claude-opus-5-5', 'claude-cli:claude-haiku-5-5']];
+
 function row(id: string, paramsB: number, extra: Partial<OptionModel> = {}): OptionModel {
   return {
     id, family: id.split('-')[0], paramsB, modalities: ['text'], backendSupported: true, installed: true,
@@ -259,7 +262,7 @@ describe('CrucibleAiService.models, end to end against the fake', () => {
     });
     const view = await ai.models(undefined, ['claude:claude-sonnet-5', 'local:qwen3.5-9b']);
     expect(view).toMatchObject({ server: 'mac', local: true, unavailable: null, analysisDefault: 'local:qwen3.5-9b' });
-    expect(view.groups.map((g) => [g.label, g.options.map((o) => o.value)])).toEqual([['On this Crucible', ['local:qwen3.5-9b']]]);
+    expect(view.groups.map((g) => [g.label, g.options.map((o) => o.value)])).toEqual([['On this Crucible', ['local:qwen3.5-9b']], CLAUDE_CLI_GROUP]);
     expect(view.resolved.map((r) => [r.value, r.option, r.unavailable !== null])).toEqual([
       ['claude:claude-sonnet-5', null, true],
       ['local:qwen3.5-9b', 'local:qwen3.5-9b', false],
@@ -281,7 +284,7 @@ describe('CrucibleAiService.models, end to end against the fake', () => {
     const ai = new CrucibleAiService(servers, h.probes, h.settings, chat, { keysForCopy: () => ({}) } as never, host);
 
     const before = await ai.models(undefined, ['claude:claude-sonnet-5']);
-    expect(before.groups.map((g) => g.label)).toEqual(['On this Crucible']);
+    expect(before.groups.map((g) => g.label)).toEqual(['On this Crucible', CLAUDE_CLI_GROUP[0]]);
     expect(before.resolved[0].unavailable).not.toBeNull();
 
     // What Settings › AI Analysis does with the key: written to the serving Crucible, never kept here.
@@ -291,6 +294,7 @@ describe('CrucibleAiService.models, end to end against the fake', () => {
     expect(after.groups.map((g) => [g.label, g.options.map((o) => o.value)])).toEqual([
       ['On this Crucible', ['local:qwen3.5-9b']],
       ['Claude via Crucible', ['claude:claude-sonnet-5']],
+      CLAUDE_CLI_GROUP,
     ]);
     expect(after.resolved[0]).toMatchObject({ value: 'claude:claude-sonnet-5', option: 'claude:claude-sonnet-5', unavailable: null });
 
@@ -317,6 +321,7 @@ describe('CrucibleAiService.models, end to end against the fake', () => {
       ['Claude via Crucible on mac', ['claude:claude-sonnet-5']],
       ['OpenAI via Crucible on mac', ['openai:gpt-5.1']],
       ['Ollama via Crucible on mac', ['ollama:qwen3:14b']],
+      CLAUDE_CLI_GROUP,
     ]);
     expect(view.resolved[0]).toMatchObject({ value: 'ollama:qwen3.5:9b', option: 'local:qwen3.5-9b' });
     expect(view.upstreams?.anthropic).toEqual({ configured: true, keyHint: '…1234' });
@@ -358,7 +363,8 @@ describe('CrucibleAiService.models, end to end against the fake', () => {
     const ai = new CrucibleAiService(servers, h.probes, h.settings, new CrucibleChatService(servers, h.factory, h.probes), { keysForCopy: () => ({}) } as never, pairingHost(null));
     const view = await ai.models(undefined, ['local:qwen3.5-9b']);
     expect(view.server).toBeNull();
-    expect(view.groups).toEqual([]);
+    // TEMPORARY (claude-cli): the local Claude Code CLI needs no Crucible, so its group stays.
+    expect(view.groups.map((g) => [g.label, g.options.map((o) => o.value)])).toEqual([CLAUDE_CLI_GROUP]);
     expect(view.unavailable).toMatch(/No Crucible server is connected/);
     expect(view.resolved).toEqual([{ value: 'local:qwen3.5-9b', option: null, note: null, unavailable: view.unavailable }]);
   });
