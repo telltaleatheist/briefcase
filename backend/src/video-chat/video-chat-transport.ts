@@ -60,8 +60,9 @@ export function crucibleTransport(chat: CrucibleChatService, options: CrucibleTr
  * TEMPORARY (claude-cli): the transport for a `claude-cli:` choice, the local
  * Claude Code CLI (a user-requested exception to Crucible-only AI). The
  * conversation is flattened into one `-p` prompt (claude-cli.service.ts); no
- * temperature, no max_tokens, nothing through Crucible. Always the tag codec:
- * its history is replayed as tags, so no `tool` message reaches it.
+ * temperature, no max_tokens, nothing through Crucible. Always the Claude
+ * codec (tool-format.ts): its history is replayed in that text format, so no
+ * `tool` message reaches it (one that did would go as a user turn).
  */
 export function claudeCliTransport(cli: ClaudeCliService, model: string): ChatTransport {
   return async (messages, { signal }) => {

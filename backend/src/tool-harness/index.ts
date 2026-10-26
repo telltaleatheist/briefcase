@@ -21,5 +21,6 @@ export type {
 export { DEFAULT_MAX_ROUNDS, LAST_ROUND_NOTE, runToolLoop, ToolLoopAborted, type ToolLoopOptions, type ToolLoopResult } from './loop';
 export { functionDefinition, tagCodec, toolUseBlock, type TagCodec } from './tag-codec';
 export { nativeCodec, NOT_RUN_RESULT } from './native-codec';
+export { claudeCodec, functionCallsBlock, type ClaudeCodec } from './claude-codec';
 export { replayHistory, type StoredTurn } from './history';
 export { parseLenientJson } from './lenient-json';

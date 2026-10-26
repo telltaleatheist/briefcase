@@ -132,6 +132,16 @@ codec's `replay` reads both into its own:
   its history to imitate.
 - **native → tags**: the calls become `<tool_use>` blocks after the text, and
   the `tool` messages one `<tool_result>` user turn.
+- **Claude format** (`claude-codec.ts`, for a Claude model reached as plain
+  text, e.g. `claude -p`): tools described and called in the
+  `<function_calls><invoke name=…><parameter name=…>` shape Claude was trained
+  on, results as one `<function_results>` turn (`<result><tool_name>…
+  <stdout>…`, or `<error>` for a call that couldn't be read). It replays native
+  and tag traces into that shape, and native replay reads it back. Its reader
+  is the tag codec's, so `<tool_use>` tags still count.
+
+Which format a model gets is the host's choice; Briefcase makes it in one
+place (`video-chat/tool-format.ts`).
 
 ## Rounds
 

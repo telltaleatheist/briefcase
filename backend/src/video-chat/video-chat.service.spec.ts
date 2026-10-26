@@ -178,6 +178,9 @@ suite('VideoChatService on a library database', () => {
     expect(cliCalls[0].model).toBe('claude-haiku-5-5');
     expect(cliCalls[0].messages[0].role).toBe('system');
     expect(cliCalls[1].messages.map((m: any) => m.role)).toEqual(['system', 'user', 'assistant', 'user']);
+    // Claude's own tool format (tool-format.ts): the tools in the prompt as <function_calls>, results as <function_results>.
+    expect(cliCalls[0].messages[0].content).toContain('<function_calls>\n<invoke name="$FUNCTION_NAME">');
+    expect(cliCalls[1].messages[3].content).toMatch(/^<function_results>\n<result>\n<tool_name>add_marker<\/tool_name>/);
     expect(sent.assistantMessage).toMatchObject({ content: 'Found it.\n\nIt is "Trump on the ruling".', model: 'claude-cli:claude-haiku-5-5' });
     expect(sent.assistantMessage.markers).toEqual([expect.objectContaining({ title: 'Trump on the ruling', startSeconds: 600, endSeconds: 612 })]);
   });

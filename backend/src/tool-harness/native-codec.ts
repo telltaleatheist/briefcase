@@ -17,7 +17,7 @@
  * takes back.
  *
  * A trace stored in the tag format (a thread from before native tools, or
- * from a tag-only model) replays as native messages: each assistant reply's
+ * from a tag-only model), or in the Claude format (claude-codec.ts), replays as native messages: each assistant reply's
  * <tool_use> blocks become structured calls (ids made up per turn, as stable
  * as the stored turn) beside its prose, and the <tool_result> turn after it
  * the matching `tool` messages. The model then sees one format only, its
@@ -31,7 +31,8 @@ import type { ChatMessage, NativeToolCall, ParsedToolCall, ToolCallCodec } from 
 /** The result a call the loop did not run is answered with. */
 export const NOT_RUN_RESULT = 'Not run: no more tool calls can be made in this answer.';
 
-const RESULT_BLOCK = /<tool_result>\n?([\s\S]*?)\n?<\/tool_result>/g;
+/** A result in a text-format trace: the tag format's <tool_result>, or the Claude format's <result>'s <stdout> or <error>. */
+const RESULT_BLOCK = /<tool_result>\n?([\s\S]*?)\n?<\/tool_result>|<result>\s*(?:<tool_name>[\s\S]*?<\/tool_name>\s*)?<stdout>\n?([\s\S]*?)\n?<\/stdout>\s*<\/result>|<error>\n?([\s\S]*?)\n?<\/error>/g;
 
 export const nativeCodec: ToolCallCodec = {
   toolsPrompt() {
@@ -110,9 +111,9 @@ function readNativeCall(call: NativeToolCall): ParsedToolCall {
   return { ok: true, id, name, args };
 }
 
-/** A tag-format results turn: each <tool_result>'s content, and the note after them. Null when it holds none. */
+/** A text-format results turn (tags or Claude's): each result's content, and the note after them. Null when it holds none. */
 function readResults(text: string): { contents: string[]; note: string } | null {
-  const contents = [...text.matchAll(RESULT_BLOCK)].map((match) => match[1]);
+  const contents = [...text.matchAll(RESULT_BLOCK)].map((match) => match[1] ?? match[2] ?? match[3]);
   if (contents.length === 0) return null;
-  return { contents, note: text.replace(RESULT_BLOCK, '').trim() };
+  return { contents, note: text.replace(RESULT_BLOCK, '').replace(/<\/?function_results>/g, '').trim() };
 }
