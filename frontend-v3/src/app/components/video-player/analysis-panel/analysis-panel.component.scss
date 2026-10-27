@@ -233,8 +233,10 @@
   transition: max-height 0.2s ease, padding 0.2s ease;
 
   &.expanded {
-    max-height: 200px;
-    // More chips than fit (marker sets add their own) scroll, not clip.
+    // Tall enough to show every chip (each marker set adds its own); only a
+    // list past that scrolls. macOS hides the scrollbar, so a short cap read
+    // as "the rest of the chips are missing".
+    max-height: 60vh;
     overflow-y: auto;
     padding-top: 8px;
   }
