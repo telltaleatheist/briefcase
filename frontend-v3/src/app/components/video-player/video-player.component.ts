@@ -68,7 +68,8 @@ export enum EditorTool {
  * Handed out per video in name order (colorSets), so the sets on one timeline
  * all differ.
  */
-const SET_COLORS = ['#22d3ee', '#a3e635', '#60a5fa', '#facc15', '#2dd4bf', '#4ade80', '#38bdf8', '#84cc16'];
+// The same 500/600 weight as the flag colors above, in the hues they don't use.
+const SET_COLORS = ['#3b82f6', '#10b981', '#14b8a6', '#0ea5e9', '#6366f1', '#22c55e', '#0891b2', '#2563eb'];
 
 function isKnownCategory(category: string | null | undefined): boolean {
   return !!CATEGORY_COLORS[(category ?? '').toLowerCase()];
