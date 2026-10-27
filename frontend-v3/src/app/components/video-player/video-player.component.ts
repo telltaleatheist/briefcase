@@ -61,6 +61,27 @@ export enum EditorTool {
   HIGHLIGHT = 'highlight'
 }
 
+/**
+ * Bright colors for categories the table doesn't know: a marker set, a
+ * highlights pass, a user's own category. Never the default gray, which
+ * disappears against the waveform, and none repeats a flag category's color.
+ * Handed out per video in name order (colorSets), so the sets on one timeline
+ * all differ.
+ */
+const SET_COLORS = ['#22d3ee', '#a3e635', '#60a5fa', '#facc15', '#2dd4bf', '#4ade80', '#38bdf8', '#84cc16'];
+
+function isKnownCategory(category: string | null | undefined): boolean {
+  return !!CATEGORY_COLORS[(category ?? '').toLowerCase()];
+}
+
+/** Colors the sections of categories the table doesn't know, distinct per video. */
+function colorSets<T extends { category: string; color: string }>(sections: T[]): T[] {
+  const unknown = [...new Set(sections.map(s => s.category).filter(c => c && c !== 'unknown' && !isKnownCategory(c)))]
+    .sort((a, b) => a.localeCompare(b));
+  const colorOf = new Map(unknown.map((c, i) => [c, SET_COLORS[i % SET_COLORS.length]] as const));
+  return sections.map(s => colorOf.has(s.category) ? { ...s, color: colorOf.get(s.category)! } : s);
+}
+
 // Category colors for different analysis types
 const CATEGORY_COLORS: Record<string, string> = {
   'shocking': '#f59e0b',          // Amber
@@ -1374,7 +1395,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
       nliScore: typeof section.nli_score === 'number' ? section.nli_score : null
     }));
 
-    this.sections.set(timelineSections);
+    this.sections.set(colorSets(timelineSections));
   }
 
   private processAnalysisFromDatabase(analysis: any, sections: any[]) {
@@ -1392,7 +1413,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
       nliScore: typeof section.nli_score === 'number' ? section.nli_score : null
     }));
 
-    this.sections.set(timelineSections);
+    this.sections.set(colorSets(timelineSections));
     this.hasAnalysis.set(true);
 
     // Set analysis data for sidebar
@@ -1517,7 +1538,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
         });
       }
 
-      this.sections.set(timelineSections);
+      this.sections.set(colorSets(timelineSections));
 
       // Set analysis data for sidebar
       this.analysisData.set({
@@ -3071,7 +3092,8 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
 
   // Get category color
   getCategoryColor(category: string): string {
-    return CATEGORY_COLORS[category.toLowerCase()] || CATEGORY_COLORS['default'];
+    const set = this.sections().find(s => s.category.toLowerCase() === category.toLowerCase());
+    return set?.color ?? CATEGORY_COLORS[category.toLowerCase()] ?? CATEGORY_COLORS['default'];
   }
 
   // Handle generate analysis button click
