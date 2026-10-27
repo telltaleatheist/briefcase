@@ -1,4 +1,4 @@
-import { Component, signal, computed, effect, ViewChild, ElementRef, OnInit, OnDestroy, inject, HostListener } from '@angular/core';
+import { Component, signal, computed, effect, untracked, ViewChild, ElementRef, OnInit, OnDestroy, inject, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Router, ActivatedRoute } from '@angular/router';
@@ -1308,6 +1308,9 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
         // Chapters don't exist, that's fine
       }
 
+      // Another tab became active while this loaded: its state isn't ours to set.
+      if (this.videoId() !== videoId) return;
+
       // Process chapters
       if (chaptersData.length > 0) {
         const timelineChapters: TimelineChapter[] = chaptersData.map((chapter: any) => ({
@@ -1336,6 +1339,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
       } catch {
         // Analysis doesn't exist, that's fine
       }
+      if (this.videoId() !== videoId) return;
 
       if (analysisData && !analysisData.error) {
         this.processAnalysisFromDatabase(analysisData, sections);
@@ -1659,6 +1663,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
 
   private updateCategoryFilters(sections: TimelineSection[]): void {
     const categories = new Map<string, CategoryFilter>();
+    const previous = new Map(untracked(() => this.categoryFilters()).map(f => [f.category, f.enabled] as const));
 
     sections.forEach(section => {
       const category = section.category.toLowerCase();
@@ -1667,7 +1672,8 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
           category,
           label: section.category,
           color: section.color,
-          enabled: true
+          // A reload keeps the chips the user turned off; a new category starts on.
+          enabled: previous.get(category) ?? true
         });
       }
     });
@@ -3155,6 +3161,10 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
     // Already open: show it, and go to the asked-for moment (a search hit).
     const existingTab = this.tabs().find(t => t.videoId === videoId);
     if (existingTab) {
+      // Opening the video already showing: reload its markers (switchTab does it for a background tab).
+      if (this.activeTabId() === existingTab.id && existingTab.isLoaded) {
+        this.loadAnalysisForVideo(videoId).catch(err => console.error('Failed to refresh markers:', err));
+      }
       if (startAt !== null && this.activeTabId() !== existingTab.id) {
         // Restoring the tab seeks to its saved playhead once its video loads.
         this.tabs.update(tabs => tabs.map(t => t.id === existingTab.id ? { ...t, editorState: { ...t.editorState, currentTime: startAt } } : t));
@@ -3216,6 +3226,10 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
     // If tab data isn't loaded yet, load it
     if (!tab.isLoaded) {
       this.loadVideoData(tab.videoId);
+    } else {
+      // Its markers may have changed while it sat in the background (Ask, a
+      // finished analysis, another window): show what is stored now.
+      this.loadAnalysisForVideo(tab.videoId).catch(err => console.error('Failed to refresh markers:', err));
     }
   }
 
