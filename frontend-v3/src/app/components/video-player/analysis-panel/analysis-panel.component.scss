@@ -234,6 +234,8 @@
 
   &.expanded {
     max-height: 200px;
+    // More chips than fit (marker sets add their own) scroll, not clip.
+    overflow-y: auto;
     padding-top: 8px;
   }
 }
