@@ -4,7 +4,7 @@
  * already use on whisper.cpp's output.
  */
 import { alignWordsToText, groupTranscriptCues, readCrucibleTranscript, renderSrt, srtTimestamp, transcriptToSrt } from '../../src/crucible/asr/crucible-transcript';
-import { parseSrt } from '../../src/scorer/flags/eval/flag-eval';
+import { parseSrtSegments } from '../../src/search/transcript-moments';
 
 function doc(segments: unknown[], extra: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -135,10 +135,10 @@ describe('transcript.json → SRT', () => {
       { start: 3605.5, end: 3610.25, text: 'Thanks for watching.' },
     ];
 
-    it('the analysis pipeline’s parser (and snap/flag-eval’s parseSrt) reads every cue back exactly', () => {
+    it('the analysis pipeline’s parser (and the Ask chat and flag stage’s parseSrtSegments) reads every cue back exactly', () => {
       const { srt } = transcriptToSrt(doc(SEGMENTS));
       expect(analysisParse(srt)).toEqual(expected);
-      expect(parseSrt(srt)).toEqual(expected);
+      expect(parseSrtSegments(srt)).toEqual(expected);
     });
 
     it('the transcript viewer and search find a timestamp line per cue', () => {

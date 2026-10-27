@@ -105,7 +105,7 @@ describe('the flag stage through Crucible', () => {
       // 24 s as marked, padded to a clip with the sentence before it.
       start_time: '00:10:00', end_time: '00:10:36', verdict: 'flag', ranker: 'highlights-v1',
     })]);
-    expect(result.sections[0].nli_score).toBeUndefined();
+    expect(result.sections[0]).not.toHaveProperty('nli_score');
     // The run's one session is closed at the end.
     expect(fake.sessions.closed.map((x) => x.sessionId)).toEqual(fake.sessions.opened.map((x) => x.sessionId));
   });

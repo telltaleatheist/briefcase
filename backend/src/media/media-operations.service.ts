@@ -846,12 +846,9 @@ export class MediaOperationsService {
             description: section.description,
             category: section.category,
             source: 'ai',
-            // See analysis.service's copy of this insert: the ranked flag path
-            // stores accepted AND rejected verdicts with their ranker scores;
-            // every other path leaves both undefined, which writes NULL and
-            // reads back as a legacy flag.
+            // A flag the flags model marked: verdict 'flag' (Confirmed),
+            // ranker 'highlights-v1', no score (nli_score stays NULL).
             verdict: section.verdict,
-            nliScore: section.nli_score,
             ranker: section.ranker,
           });
         }

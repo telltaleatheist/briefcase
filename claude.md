@@ -57,7 +57,7 @@ Briefcase/
 - `ffmpeg/ffmpeg.service.ts` - Video encoding, thumbnails, waveforms
 - `queue/` - Task queue with progress tracking
 - `crucible/` - The Crucible client: server registry and pairing, `readiness.service.ts` (ready / starting / unreachable / not-installed / not-configured, pushed on Socket.IO), `llm/` (chat), `asr/` (transcription)
-- `analysis/` - LLM-based video content analysis (snap engine in `scorer/`), all through Crucible
+- `analysis/` - LLM-based video content analysis (chapters on the snap engine in `scorer/`, flags in `flag-highlights.ts`), all through Crucible
 
 ### Key Components (frontend-v3/src/app/components/)
 - `cascade/` - Grid/list view for video library
@@ -130,7 +130,7 @@ The video editor (`components/video-editor/`) supports:
 
 1. Video added to queue with `ai-analyze` task
 2. Transcription runs as a Crucible `asr` job (no local whisper)
-3. Snap chapters/flags and text tasks run on Crucible (its own model, or Claude/OpenAI/Ollama upstreams through it)
+3. Chapters come from the snap scorer; flags are the clip-worthy moments the flags model marks, one ~15-minute stretch per question (`analysis/flag-highlights.ts`); text tasks run on Crucible (its own model, or Claude/OpenAI/Ollama upstreams through it)
 4. Analysis stored in `analysis` table as JSON
 5. Frontend displays sections on video timeline
 

@@ -1,6 +1,6 @@
 /**
- * The app's own Crucible services for the scorer's LIVE tools (snap-smoke.ts,
- * flags/eval/flag-eval.ts), wired by hand as CrucibleModule wires them. Since
+ * The app's own Crucible services for the scorer's LIVE tool (snap-smoke.ts),
+ * wired by hand as CrucibleModule wires them. Since
  * P7 Crucible's decision door is the only transport the scorer has.
  *
  * INTERRUPTED, A TOOL GIVES BACK WHAT IT HOLDS. A standalone tool has no Nest

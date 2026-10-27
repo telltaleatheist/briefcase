@@ -54,8 +54,8 @@ function fakeRun(opts: AnalysisOptions): AnalysisResult {
     ...(opts.range ? { range: opts.range } : {}),
     sections_count: flags.length,
     sections: flags.map((f) => ({
-      category: 'hate', description: f.what, start_time: hms(f.start), end_time: hms(f.start + 20), quotes: [],
-      verdict: 'flag' as const, nli_score: 0.9, ranker: 'snap-v1' as const,
+      category: 'hate', title: f.what, description: f.what, start_time: hms(f.start), end_time: hms(f.start + 20), quotes: [],
+      verdict: 'flag' as const, ranker: 'highlights-v1' as const,
     })),
     chapters: made.includes('chapters')
       ? [
@@ -209,6 +209,10 @@ suite('analyzeVideo replaces only the parts it made', () => {
       [650, 'user marker'],
       [1300, 'f-late'],
     ]);
+    // A new flag row: its own title, verdict 'flag' (Confirmed), ranker 'highlights-v1', no score.
+    expect(rows.find((s) => s.description === 'new in chapter')).toMatchObject({
+      title: 'new in chapter', category: 'hate', verdict: 'flag', ranker: 'highlights-v1', nli_score: null,
+    });
     expect(db.getAnalysis('v1')!.sections_count).toBe(3);
     const report = db.getAnalysis('v1')!.ai_analysis;
     expect(report.indexOf('old early')).toBeGreaterThan(-1);

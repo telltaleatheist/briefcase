@@ -18,7 +18,7 @@ import { startFakeCrucible, type FakeCrucible } from '../fake-crucible/fake-cruc
 import { harness, type Harness } from './harness';
 import { tempDir } from './helpers';
 
-const FLAG_SCHEMA = { type: 'object', properties: { flags: { type: 'array' } }, required: ['flags'] };
+const TAGS_SCHEMA = { type: 'object', properties: { flags: { type: 'array' } }, required: ['flags'] };
 
 const savedEnv = { ...process.env };
 let fake: FakeCrucible;
@@ -82,9 +82,8 @@ describe('generateText through Crucible: the provider mapping', () => {
  */
 const CALL_SITES: Array<{ site: string; task?: AITaskKind; overrides: AIGenerateOverrides; local: Record<string, unknown> }> = [
   { site: 'ai-analysis chapter', task: 'chapter', overrides: {}, local: { temperature: 0.15 } },
-  { site: 'ai-analysis flag verify', task: 'flags', overrides: { format: FLAG_SCHEMA }, local: { temperature: 0.15, response_format: { type: 'json_schema', json_schema: { name: 'flags', schema: FLAG_SCHEMA } } } },
   { site: 'ai-analysis description body', task: 'description', overrides: { temperature: 0.2 }, local: { temperature: 0.2 } },
-  { site: 'ai-analysis tags', task: 'tags', overrides: { format: FLAG_SCHEMA }, local: { temperature: 0.15, response_format: { type: 'json_schema', json_schema: { name: 'tags', schema: FLAG_SCHEMA } } } },
+  { site: 'ai-analysis tags', task: 'tags', overrides: { format: TAGS_SCHEMA }, local: { temperature: 0.15, response_format: { type: 'json_schema', json_schema: { name: 'tags', schema: TAGS_SCHEMA } } } },
   { site: 'ai-analysis title', task: 'title', overrides: {}, local: { temperature: 0.4 } },
   { site: 'ai-analysis title from webpage', task: 'title', overrides: {}, local: { temperature: 0.4 } },
   { site: 'library insights (no task, no apiKey)', task: undefined, overrides: {}, local: { temperature: 0.2 } },
@@ -147,14 +146,14 @@ describe('a whole analysis through Crucible', () => {
   ];
   const SEGMENTS = LINES.map((text, i) => ({ start: i * 30, end: i * 30 + 30, text }));
 
-  /** The snap engine's scorer stage, faked: two chapters, nothing ranked for flags. The LLM stages are what is under test. */
+  /** The snap engine's scorer stage, faked: two chapters. The LLM stages are what is under test. */
   function analysis(): AIAnalysisService {
     const snap = {
       run: async (): Promise<SnapStageResult> => ({
         transcript: null,
         model: 'qwen3.5-9b',
-        timings: { startMs: 0, prepareMs: 0, chaptersMs: 0, flagsMs: 0, totalMs: 0 },
-        labelMassGated: { chapters: 0, flags: 0, refine: 0, total: 0 },
+        timings: { startMs: 0, prepareMs: 0, chaptersMs: 0, totalMs: 0 },
+        labelMassGated: { chapters: 0, refine: 0, total: 0 },
         chapters: {
           chapters: [
             { startSeconds: 0, endSeconds: 60, title: 'Pasta', label: 'Pasta', sentenceRange: [0, 2], isAd: false },
@@ -163,7 +162,6 @@ describe('a whole analysis through Crucible', () => {
           outline: ['Pasta', 'Travel'], chunks: [], seams: [], timings: { outlineMs: 0, assignMs: 0, adsMs: 0, totalMs: 0 },
         },
         chapterTree: null,
-        flags: { windows: [], overflow: [], spans: [], ratingMap: {} as never, plan: [], notes: [], stats: { units: 4, spans: 0, verifyBudget: 0 } as never } as never,
       }),
     };
     return new AIAnalysisService(provider, snap as never, undefined);

@@ -34,22 +34,7 @@ import { isParked } from '../crucible/llm/errors';
 import { estimateNumCtx, numCtxMaxForModel, parseProviderModel, AITaskKind } from './model-utils';
 import { crucibleTargetOf, storedChoice } from '../crucible/llm/target';
 import { CRUCIBLE_OLLAMA_CONTEXT } from '../crucible/llm/ollama-map';
-import { assembleSentences, FlagWindow, RankedSentence, WindowCategory } from './flag-windows';
-import {
-  AnchoredPassage,
-  buildGenerateFlagsPrompt,
-  chunkSentences,
-  FlagFinder,
-  flagFinderOf,
-  generateFlagsSchema,
-  GENERATE_CHUNK_CHARS,
-  GENERATE_MAX_OUTPUT_TOKENS,
-  GENERATE_RANKER,
-  parseGeneratedPassages,
-  resolveCategoryName,
-  windowsFromPassages,
-} from './flag-generate';
-import { chunkWords, matchPassage } from './passage-anchor';
+import { assembleSentences } from './flag-windows';
 import {
   enabledCategories,
   findHighlights,
@@ -66,7 +51,6 @@ import { claudeCodec, tagCodec, ToolLoopAborted } from '../tool-harness';
 import { codecFor } from '../video-chat/tool-format';
 import { isToolsRefusal } from '../crucible/llm/crucible-chat.service';
 import { AnalysisCancelledError } from './cancellation';
-import { buildFlagPlan } from '../scorer/flags/flag-options';
 import { safeJsonParse } from './json-utils';
 import { DatabaseService } from '../database/database.service';
 import * as crypto from 'crypto';
@@ -75,8 +59,6 @@ import * as path from 'path';
 import { getBriefcaseConfigDir } from '../bridges/runtime-paths';
 import {
   buildChapterAnalysisPrompt,
-  buildFlagVerificationPrompt,
-  FLAG_VERIFICATION_PROMPT_VERSION,
   interpolatePrompt,
   HOOK_FROM_CHAPTERS_PROMPT,
   BODY_FROM_CHAPTERS_PROMPT,
@@ -93,7 +75,6 @@ import {
   AnalysisRange,
   analysisProgressBands,
   describeParts,
-  FLAGS_STAGE_WEIGHT,
   formatHms,
   partsToMake,
   resolveAnalysisParts,
@@ -105,7 +86,6 @@ import { ChapterTreeResult, nestAnalysisChapters } from '../scorer/chapters/chap
 import { storyTreeFromGroups } from '../scorer/chapters/story-chapters';
 import type { SnapChapter } from '../scorer/chapters/segmenter';
 import { groupStories, runtimePhrase, STORIES_MIN_VIDEO_SECONDS, STORY_GROUP_MAX_OUTPUT_TOKENS, Story } from './stories';
-import type { SnapFlagRankResult } from '../scorer/flags/snap-flag-ranker.service';
 import {
   buildChapterLines,
   buildHashtags,
@@ -139,42 +119,11 @@ export interface AnalyzedSection {
   start_time: string;
   end_time: string | null;
   quotes: Quote[];
-  /**
-   * The flag verifier's answer for this (passage, category).
-   *
-   * The ranked path emits BOTH: 'flag' for a passage the verifier accepted, and
-   * 'skip' for one it rejected as reported / quoted / questioned / opposed
-   * rather than asserted. Rejected passages are not discarded any more — they
-   * are stored and shown, ghosted, at the LOOSE filter position, because a
-   * capture-wide-then-filter pipeline that threw its rejections away could never
-   * show the user what it decided not to show them.
-   *
-   * ABSENT on everything that is not a flag (chapter sections, legacy rows
-   * from the retired discovery engine). Absent is read as 'flag' everywhere.
-   *
-   * 'candidate' is only ever READ: rows an earlier snap engine stored unverified
-   * past its verify budget. Every section is checked now, so none is written.
-   */
-  verdict?: 'flag' | 'skip' | 'candidate';
-  /**
-   * The ranker's score, 0-1, for the category this section carries — the
-   * number the display filter thresholds on. For ranker 'nli' an entailment
-   * probability; for 'snap-v1' the snap span score s_c (same column, told apart
-   * by `ranker`). Absent wherever there is no ranker score ('generate-v1': the
-   * model named the passage, it did not score it), and absent passes every
-   * filter.
-   */
-  nli_score?: number;
-  /**
-   * Which ranker produced the candidate: 'snap-v1' (the scorer's decide
-   * ranking) or 'generate-v1' (the model reading the transcript, flag-generate.ts).
-   * Absent on legacy rows. 'nli' rows predate P7 and are displayed, never produced.
-   */
-  ranker?: FlagRanker;
+  /** 'flag' on every flag the flags model marked (the UI's Confirmed). Absent on chapter sections. */
+  verdict?: 'flag';
+  /** Which finder made the flag: 'highlights-v1' (flag-highlights.ts). There is no score. */
+  ranker?: typeof HIGHLIGHTS_RANKER;
 }
-
-/** The rankers a flag row can name (see AnalyzedSection.ranker). */
-export type FlagRanker = 'nli' | 'snap-v1' | typeof GENERATE_RANKER | typeof HIGHLIGHTS_RANKER;
 
 export interface Chapter {
   sequence: number;
@@ -253,7 +202,7 @@ export interface AnalysisOptions {
    */
   parts?: AnalysisPart[];
   /**
-   * Flags only: the stretch of the video to rank and verify (one chapter). Only
+   * Flags only: the stretch of the video to find flags in (one chapter). Only
    * the transcript inside it is read; timestamps stay on the real timeline.
    */
   range?: AnalysisRange;
@@ -332,7 +281,7 @@ const JSON_PARSE_RETRIES = 2;
  * does the reading is what would silently truncate prompts, so the caps follow
  * the smallest context in play.
  *
- * Tasks are executed grouped by model (chaptering, then Pass 2b, then metadata
+ * Tasks are executed grouped by model (chaptering, then the flags, then metadata
  * ordered main-model-first), so each routed model loads once rather than being
  * swapped in and out per call.
  */
@@ -361,72 +310,6 @@ const RETIRED_TASKS: ReadonlySet<string> = new Set(['boundary']);
  * and why: Crucible forwards no num_ctx, so Ollama serves its 4K default).
  */
 export { CRUCIBLE_OLLAMA_CONTEXT };
-
-/**
- * JSON Schema for ONE flag-verification verdict: `{"verdict": "flag" | "skip"}`.
- *
- * THE CONSTRAINT INVERSION — read this before unconstraining it.
- *
- * Constraining the OLD open-ended flag DISCOVERY call (removed in P7) hurt:
- * recall 7.3 -> 5.7 of 11 and false positives 0.7 -> 3.0 per run, because the
- * suppressed reasoning was paying for the assert-vs-debunk judgment. That call
- * read a whole chapter, decided what was in it and produced a variable-length
- * list of quotes and categories. Reasoning was the work there.
- *
- * This call is the opposite shape: the candidate is already chosen, the claim is
- * already stated, and the answer is one of two tokens. It is
- * mechanical-with-a-test, the same class as boundary placement — and the
- * measurement inverts with the shape (final-score.txt, qwen3.8:27b, same 70
- * candidates, same prompt):
- *
- *   constrained    9/10 recall vs the hand audit,  2.90s/call median, 204s total
- *   UNCONSTRAINED  6/10 recall vs the hand audit, 20.30s/call median, 3,091s
- *
- * Unconstrained was WORSE on quality AND ~7x slower: given room to reason about
- * one line, the model talks itself out of real flags and into "misinformation"
- * mislabels. So this stage is constrained, with no opt-out.
- */
-const FLAG_VERIFICATION_SCHEMA: Record<string, unknown> = {
-  type: 'object',
-  properties: {
-    // verdict FIRST: the answer is committed before the justification is
-    // written, so the reason explains the call rather than steering it (the
-    // measurement above: room to reason before answering cost real flags).
-    verdict: { type: 'string', enum: ['flag', 'skip'] },
-    reason: { type: 'string' },
-  },
-  required: ['verdict', 'reason'],
-  additionalProperties: false,
-};
-
-/**
- * Share of the flag band the model's reading of the transcript takes, when it
- * finds the flags (flag-generate.ts); the checks take the rest.
- */
-const GENERATE_READ_SHARE = 0.5;
-
-/** The flag candidates the verifier stage checks, and where they came from. */
-interface FlagCandidates {
-  /** Verification windows, each checked once per category it carries. */
-  windows: FlagWindow[];
-  /** Stored on every row made from them. */
-  ranker: FlagRanker;
-  /** How they were found, for the log. */
-  summary: string;
-}
-
-/** Flag rating maps kept for offline tuning (saveFlagMap), newest first. */
-const FLAG_MAPS_KEPT = 30;
-
-/**
- * Output budget for one verification call, used only to SIZE num_ctx.
- *
- * A verdict is ~10 tokens of JSON and the constrained decode measured 27-30
- * output tokens end to end; 2048 is headroom, not an expectation. It keeps the
- * bucketed num_ctx at its floor so the stage pins one small context for every
- * call instead of paying an Ollama model reload per call.
- */
-const VERIFY_OUTPUT_BUDGET_TOKENS = 2048;
 
 /**
  * JSON Schema for tag extraction — the SAME `{people, topics}` shape the parser
@@ -576,14 +459,6 @@ function getModelLimits(contextTokens: number): ModelLimits {
 // SERVICE
 // =============================================================================
 
-/**
- * Whether a section belongs in the human-readable .txt report: accepted flags
- * and legacy/discovery rows (no verdict) only, never 'skip' or 'candidate'.
- */
-export function isReportedFinding(section: Pick<AnalyzedSection, 'verdict'>): boolean {
-  return !section.verdict || section.verdict === 'flag';
-}
-
 @Injectable()
 export class AIAnalysisService {
   private readonly logger = new Logger(AIAnalysisService.name);
@@ -592,7 +467,7 @@ export class AIAnalysisService {
 
   constructor(
     private readonly aiProviderService: AIProviderService,
-    /** The snap engine's scorer stage (chapters + flag ranking on Crucible's decision door). */
+    /** The snap engine's scorer stage (chapters on Crucible's decision door). */
     private readonly snapAnalysis: SnapAnalysisService,
     /**
      * OPTIONAL on purpose. This service is constructed directly by smoke
@@ -688,24 +563,6 @@ export class AIAnalysisService {
     }
   }
 
-  /**
-   * How the Analysis part finds its flag candidates (app-config.json
-   * `flagFinder`, Settings › AI Analysis "How flags are found"): the flags
-   * model reading the transcript ('generate', the default) or the scorer's
-   * decide ranking ('snap'). An unreadable config is the default, said once in
-   * the log. Never switched by the run itself: no AI fallbacks.
-   */
-  private loadFlagFinder(): FlagFinder {
-    try {
-      const configPath = this.appConfigPath();
-      const stored = fs.existsSync(configPath) ? JSON.parse(fs.readFileSync(configPath, 'utf8'))?.flagFinder : undefined;
-      return flagFinderOf(stored);
-    } catch (error) {
-      this.logger.warn(`[Flags] Finding flags the default way; the config could not be read: ${(error as Error).message}`);
-      return flagFinderOf(undefined);
-    }
-  }
-
   private loadTaskModelOverrides(): Partial<Record<AITaskKind, string>> {
     try {
       const configPath = this.appConfigPath();
@@ -761,9 +618,9 @@ export class AIAnalysisService {
   }
 
   /**
-   * Main entry point: analyse a transcript. The snap scorer stage (chapters
-   * and flag ranking), then Pass 2 (chapter summaries), Pass 2b (flag
-   * verification) and the metadata, all on Crucible (see the file header).
+   * Main entry point: analyse a transcript. The snap scorer stage (chapters),
+   * then Pass 2 (chapter summaries), the flag stage and the metadata (see the
+   * file header).
    */
   async analyzeTranscript(options: AnalysisOptions): Promise<AnalysisResult> {
     // A video with no speech has nothing for a model to read: what it is sent
@@ -963,9 +820,6 @@ export class AIAnalysisService {
       const makeChapters = made.includes('chapters');
       const makeFlags = made.includes('flags');
       const makeMetadata = made.includes('metadata');
-      // Flags are found by the flags model marking the clip-worthy moments
-      // (flag-highlights.ts); the scorer makes chapters only.
-      const flagsOnScorer = false;
       // The outline's top level: a video of 10 minutes or more has its
       // chapters grouped into stories after Pass 2 (stories.ts); a shorter one
       // is one story, and its outline stays flat.
@@ -975,12 +829,11 @@ export class AIAnalysisService {
       const bands = analysisProgressBands(
         {
           stories: groupStoriesStage,
-          engine: makeChapters || flagsOnScorer,
+          engine: makeChapters,
           summaries: makeChapters,
           flags: makeFlags,
           metadata: makeMetadata,
         },
-        { flags: FLAGS_STAGE_WEIGHT },
       );
       const runNotes: string[] = [];
       if (chaptersFirst) {
@@ -1130,17 +983,15 @@ export class AIAnalysisService {
       // =========================================================================
       // THE SCORER STAGE (snap, on Crucible's decision door)
       // =========================================================================
-      // The passes this run makes, in one scorer lease, BEFORE every LLM stage:
-      // chapters and flags together share the lease and the primed transcript;
-      // one alone runs only that pass; a metadata-only run on stored chapters
-      // never takes the scorer. There is no other engine: a stage it cannot
+      // The chapters, in one scorer lease, BEFORE every LLM stage; a run that
+      // makes no chapters (flags or metadata on stored chapters) never takes
+      // the scorer. There is no other engine: a stage it cannot
       // make throws (SnapEngineError, naming why) and fails the analysis; a
       // busy or silent server parks the task; a cancel propagates as a
       // cancellation and never falls into more work.
       const engineWarnings: string[] = [];
       let snapTree: ChapterTreeResult | null = null;
       let snapChapters: SnapChapter[] = [];
-      let flagRanking: SnapFlagRankResult | null = null;
       if (bands.engine) {
         const [engineStart, engineEnd] = bands.engine;
         sendProgress('analysis', engineStart, 'Starting the analysis engine...');
@@ -1150,9 +1001,6 @@ export class AIAnalysisService {
         );
         const snap = await this.snapAnalysis.run({
           segments,
-          categories: categories || [],
-          chapters: makeChapters,
-          flags: flagsOnScorer,
           windows,
           // No sub-chapters inside long chapters: the outline's second level is
           // the stories, made from these chapters after Pass 2.
@@ -1165,25 +1013,18 @@ export class AIAnalysisService {
         if (gated > 0) {
           engineWarnings.push(
             `${gated} of the analysis engine's answers were read as no evidence (the model put under 1% of its ` +
-              `probability on the answer letters); they did not move any chapter or flag.`,
+              `probability on the answer letters); they did not move any chapter.`,
           );
         }
-        if (makeChapters) {
-          snapChapters = snap.chapters?.chapters ?? [];
-          sendProgress('analysis', engineEnd, `Found ${snapChapters.length} chapter${snapChapters.length === 1 ? '' : 's'}`);
-        }
-        if (flagsOnScorer) {
-          flagRanking = snap.flags;
-          if (!flagRanking) throw new Error('the analysis engine returned no flag ranking');
-          this.saveFlagMap(flagRanking, segments, videoTitle, jobId);
-        }
+        snapChapters = snap.chapters?.chapters ?? [];
+        sendProgress('analysis', engineEnd, `Found ${snapChapters.length} chapter${snapChapters.length === 1 ? '' : 's'}`);
       }
 
       // The chapters: the scorer's outline + Viterbi path, the outline labels as titles.
       const boundaries = snapChapters.map((c) => c.startSeconds);
 
       // Calculate total API calls for accurate progress reporting: one summary
-      // call per chapter + one verification call per (window, category) + the
+      // call per chapter + one question per stretch of the flag stage + the
       // FOUR metadata calls (tags, description hook, description body, title),
       // for the stages this run makes.
       //
@@ -1195,19 +1036,11 @@ export class AIAnalysisService {
       // The scorer stage's decides are NOT counted: they are not generation
       // calls, and counting them would poison the ETA's average-call-time.
       let chapterCallCount = boundaries.length;
-      // Flag calls: one per (window, category) pair, known once the verifier
-      // stage has the ranking. Starts at ZERO — not at a one-per-chapter guess. Under capture-wide
-      // ranking the real number is routinely 10x a per-chapter estimate (83 vs
-      // 7 on the hour-long reference video), and a guess that wrong does not
-      // degrade gracefully: it made the bar sprint to 53% after a single
-      // chapter and then sit still. Unknown work claims no space until the
-      // ranker reports its actual count.
-      let flagCallCount = 0;
-      // Reading for flags: one call per transcript chunk, known once chunked.
+      // The flag stage: one question per stretch, known once the transcript is cut.
       let flagReadCallCount = 0;
       const metadataCallCount = makeMetadata ? 4 : 0;
       const recomputeTotalApiCalls = () => {
-        totalApiCalls = chapterCallCount + flagReadCallCount + flagCallCount + metadataCallCount;
+        totalApiCalls = chapterCallCount + flagReadCallCount + metadataCallCount;
       };
       recomputeTotalApiCalls();
       completedApiCalls = 0;
@@ -1216,9 +1049,9 @@ export class AIAnalysisService {
 
       // Progress is BANDED PER STAGE, not computed as a fraction of all calls.
       //
-      // A global call-fraction requires knowing the total up front, and the flag
-      // stage's total is unknowable until its ranker has run — so the bar used
-      // to lurch (26% -> 53% on one chapter of seven) and then stall when the
+      // A global call-fraction requires knowing the total up front, and a
+      // stage's total can be unknown until it starts — so the bar used to
+      // lurch (26% -> 53% on one chapter of seven) and then stall when the
       // real count arrived. Bands make each stage's share fixed and its motion
       // smooth: a stage that has not started occupies none of the bar, and a
       // stage that discovers more work slows down inside its own band instead
@@ -1344,15 +1177,8 @@ export class AIAnalysisService {
         );
       }
 
-      // Write the FINDINGS to the report. The ranked paths also return rows
-      // that are not findings: 'skip' (the verifier rejected that reading) and
-      // 'candidate' (snap: ranked but never verified). Those stay in the
-      // database, where the UI shows them only at the filter positions that ask
-      // for them; the .txt report has no such filter and no verdict column, so
-      // writing them would present them as confirmed flags.
-      for (const flag of flags) {
-        if (isReportedFinding(flag)) this.writeSectionToFile(outputFile, flag);
-      }
+      // Write the flags to the report.
+      for (const flag of flags) this.writeSectionToFile(outputFile, flag);
 
       // =========================================================================
       // Generate metadata FROM chapters
@@ -1497,7 +1323,7 @@ export class AIAnalysisService {
       const warnings = [...runNotes, ...engineWarnings, ...flagWarnings];
       return {
         sections_count: flags.length,
-        sections: flags,           // The verified flag sections (flags part)
+        sections: flags,           // The flags (flags part)
         // Chapter list with titles/summaries; a refined outline adds its parents.
         chapters: snapTree ? nestAnalysisChapters(chapters, snapTree.flat) : chapters,
         // Only a run that made metadata carries it: undefined = not attempted.
@@ -1629,225 +1455,6 @@ export class AIAnalysisService {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  // ===========================================================================
-  // PASS 2b (DEFAULT): ranked-then-verified flag extraction
-  // ===========================================================================
-
-  /**
-   * Read one verdict out of a verification response.
-   *
-   * The schema-constrained decode makes the JSON reliable, but this stays
-   * tolerant on purpose: cloud upstreams get the same prompt with NO schema (see
-   * crucible/llm/target.ts), so their answer is whatever prose the model chose
-   * to wrap the verdict in.
-   *
-   * Returns null when the text carries no verdict at all; the caller treats that
-   * as 'skip' plus a warning, never as a flag. An unreadable answer must not be
-   * able to accuse anybody.
-   */
-  private parseVerification(text: string): { verdict: 'flag' | 'skip'; reason: string | null } | null {
-    if (!text) return null;
-    const json = /"verdict"\s*:\s*"(flag|skip)"/i.exec(text);
-    if (json) {
-      let reason: string | null = null;
-      try {
-        const parsed = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)) as { reason?: unknown };
-        if (typeof parsed.reason === 'string' && parsed.reason.trim() !== '') reason = parsed.reason.trim();
-      } catch {
-        const quoted = /"reason"\s*:\s*"((?:[^"\\]|\\.)*)"/i.exec(text);
-        if (quoted && quoted[1].trim() !== '') reason = quoted[1].replace(/\\"/g, '"').trim();
-      }
-      return { verdict: json[1].toLowerCase() as 'flag' | 'skip', reason };
-    }
-
-    // A cloud upstream gets no schema and may answer in prose: the verdict word, and the prose as the reason.
-    const lower = text.trim().toLowerCase();
-    const hasFlag = lower.includes('flag');
-    const hasSkip = lower.includes('skip');
-    const prose = text.trim().length > 12 ? text.trim() : null;
-    if (hasFlag && !hasSkip) return { verdict: 'flag', reason: prose };
-    if (hasSkip && !hasFlag) return { verdict: 'skip', reason: prose };
-    return null;
-  }
-
-  /**
-   * Turn a window's ACCEPTED categories into ONE stored section.
-   *
-   * WHY ONE, when a window can have several verified categories. The operator's
-   * complaint about the previous shape was over-splitting: four back-to-back
-   * single-sentence flags for one moment. Emitting one section per verified
-   * category on the same passage is the same complaint in a different costume —
-   * three markers stacked on the same 20 seconds of timeline. So the section
-   * carries the STRONGEST verified category, and the others are named in the
-   * description after the quote as `[also: hate, extremism]`. Nothing is lost:
-   * `description` is the field both section lists and the timeline tooltip
-   * render, so the extra categories are on screen wherever the flag is.
-   *
-   * THIS MERGE IS WHY REJECTED CATEGORIES GET THEIR OWN ROWS INSTEAD (see
-   * buildSkipSections). A 'skip' is a statement about ONE claim against ONE
-   * passage — "the speaker is reporting this, not asserting it" — and merging
-   * several of them into one row would produce a ghost marker that means nothing
-   * in particular. Accepted verdicts merge because they describe the same
-   * moment; rejected verdicts do not, because each one names a different
-   * rejected reading of it.
-   *
-   * The SPAN is measured, never a fixed window: it runs from the first to the
-   * last sentence that fired a VERIFIED category, and the quote is that span
-   * read verbatim. Sentences that fired only a category the verifier rejected do
-   * not stretch the span, and the surrounding context the model was shown is not
-   * part of it — a viewer clicking the flag lands on the words that earned it.
-   *
-   * `nli_score` on the row is the PRIMARY category's ranker score, i.e. the
-   * strongest evidence in the window, because that is the number the STRICT and
-   * MODERATE filter positions are asking about: "how strong is the best reason
-   * this passage is on my timeline". A 'generate-v1' row has none (the model
-   * named the passage, it did not score it): the column stays NULL, and its
-   * primary category is the first the model named.
-   */
-  private buildWindowSections(
-    verified: Array<{ window: FlagWindow; categories: WindowCategory[] }>,
-    sentences: RankedSentence[],
-    ranker: FlagRanker,
-    /** The verifier's reason per accepted category (the section's description is its primary's). */
-    reasons: ReadonlyMap<WindowCategory, string | null> = new Map(),
-  ): AnalyzedSection[] {
-    const sections: AnalyzedSection[] = [];
-
-    for (const { categories } of verified) {
-      if (categories.length === 0) continue;
-      // Strongest first: `categories` arrives ordered by the ranker's per-
-      // category best score, and the primary is simply the survivor at the top.
-      const ranked = [...categories].sort((a, b) => b.score - a.score);
-      const primary = ranked[0];
-      const also = ranked.slice(1).map((c) => c.category);
-
-      const fired = ranked.flatMap((c) => c.sentenceIndices);
-      const from = Math.min(...fired);
-      const to = Math.max(...fired);
-      const text = sentences.slice(from, to + 1).map((sentence) => sentence.text).join(' ');
-
-      sections.push({
-        category: primary.category,
-        // The verifier's written reason for its strongest category; the quote
-        // when it gave none (a row from before prompt v4 in the cache). The
-        // passage itself is always in `quotes`.
-        description: `${reasons.get(primary) ?? `"${text}"`}${also.length > 0 ? ` [also: ${also.join(', ')}]` : ''}`,
-        start_time: this.formatDisplayTime(sentences[from].start),
-        end_time: this.formatDisplayTime(sentences[to].end),
-        quotes: [{ timestamp: this.formatDisplayTime(sentences[from].start), text }],
-        verdict: 'flag',
-        ...(ranker === GENERATE_RANKER ? {} : { nli_score: primary.score }),
-        ranker,
-      });
-    }
-
-    return sections;
-  }
-
-  /**
-   * Turn REJECTED (window, category) verdicts into stored sections — one row
-   * each, marked 'skip'.
-   *
-   * THIS IS THE HALF OF THE PIPELINE THAT USED TO BE THROWN AWAY. Under the
-   * operator's 2026-08-25 ruling the run captures at its widest and the dial
-   * becomes a display filter, and a filter can only filter what was kept. The
-   * LOOSE position shows these rows ghosted, labelled with the verifier's reason
-   * for rejecting them, so "what did the machine decide not to show me" is a
-   * question the UI can actually answer instead of a black box.
-   *
-   * ONE ROW PER (WINDOW, CATEGORY), unlike the accepted side — see
-   * buildWindowSections for why. The span is the sentences that fired THIS
-   * category, not the whole window, so a ghost marker sits on the words that
-   * scored rather than on the paragraph they were read in.
-   *
-   * A window can produce both: a passage that flags on `hate` and skips on
-   * `conspiracy` stores one flag row and one skip row over overlapping time.
-   * That is the honest record, and the filter is what separates them.
-   *
-   * DEGRADED CALLS ARE NOT WRITTEN HERE. A call that timed out, hit the token
-   * ceiling, or came back without a readable verdict is counted and logged, and
-   * the pipeline treats it as "not flagged" exactly as before — but it is NOT a
-   * rejection, and storing it as one would put words in the verifier's mouth and
-   * caption them "the verifier rejected this". Those candidates are simply
-   * absent from the record, and the run's log says how many.
-   */
-  private buildSkipSections(
-    rejected: Array<{ window: FlagWindow; category: WindowCategory }>,
-    sentences: RankedSentence[],
-    ranker: FlagRanker,
-    reasons: ReadonlyMap<WindowCategory, string | null> = new Map(),
-  ): AnalyzedSection[] {
-    const sections: AnalyzedSection[] = [];
-
-    for (const { window, category } of rejected) {
-      const fired =
-        category.sentenceIndices.length > 0
-          ? category.sentenceIndices
-          : [window.firedFrom, window.firedTo];
-      const from = Math.min(...fired);
-      const to = Math.max(...fired);
-      const text = sentences.slice(from, to + 1).map((sentence) => sentence.text).join(' ');
-
-      sections.push({
-        category: category.category,
-        // The verifier's reason for rejecting it (the quote when it gave none).
-        // The "verifier rejected this" caption is NOT baked in here: it is a
-        // rendering decision the UI makes from `verdict`.
-        description: reasons.get(category) ?? `"${text}"`,
-        start_time: this.formatDisplayTime(sentences[from].start),
-        end_time: this.formatDisplayTime(sentences[to].end),
-        quotes: [{ timestamp: this.formatDisplayTime(sentences[from].start), text }],
-        verdict: 'skip',
-        ...(ranker === GENERATE_RANKER ? {} : { nli_score: category.score }),
-        ranker,
-      });
-    }
-
-    return sections;
-  }
-
-  /**
-   * The stable identity of ONE verification question, for the verdict cache.
-   *
-   * EVERYTHING THE ANSWER DEPENDS ON IS IN THE HASH and nothing else is:
-   *
-   *   passage     the exact text the model reads, newline-joined as sent;
-   *   category    the label the claim is being tested under;
-   *   proposition the stance hypothesis the claim is stated as;
-   *   model       "provider:model" — a different grader is a different answer;
-   *   prompt      FLAG_VERIFICATION_PROMPT_VERSION, the template's identity.
-   *
-   * Timestamps, video id, window indices and sensitivity are deliberately OUT.
-   * They do not change the answer, and including any of them would invalidate
-   * the cache on exactly the re-runs it exists to make cheap — a re-transcribe
-   * that shifts every timestamp by 40ms, a widened capture that renumbers every
-   * window, a second video quoting the same passage.
-   *
-   * The parts are joined with a delimiter that cannot occur in any of them, so
-   * two different questions cannot collide by concatenation.
-   */
-  private verificationQuestionHash(
-    passage: string[],
-    categoryName: string,
-    proposition: string,
-    verifierModel: string,
-  ): string {
-    return crypto
-      .createHash('sha256')
-      .update(
-        [
-          FLAG_VERIFICATION_PROMPT_VERSION,
-          verifierModel,
-          categoryName,
-          proposition,
-          passage.join('\n'),
-          // U+0000 cannot appear in a prompt, a model name or a transcript,
-          // so no two different questions can collide by concatenation.
-        ].join('\u0000'),
-      )
-      .digest('hex');
-  }
-
   /**
    * THE FLAG STAGE (flag-highlights.ts): the flags model marks the clip-worthy
    * moments, one stretch of about 15 minutes per question, with add_marker in
@@ -1973,485 +1580,6 @@ export class AIAnalysisService {
   }
 
   /**
-   * Find the flag candidates by having the flags model READ THE TRANSCRIPT
-   * (flag-generate.ts): one call per chunk of about 8,000 characters, each
-   * asked for every passage where an enabled category may apply, answered as
-   * the passage's first and last words; those are found in the chunk's
-   * sentences, and the sentences' segment times are the passage's times.
-   *
-   * The calls run one after another on the model the `flags` task resolves to
-   * (Settings › AI Analysis, "Model per task": this is where the 9B and the 27B
-   * are compared), with thinking off and temperature 0 on a local model, the
-   * schema on local and ollama/, and nothing but the prompt to a cloud
-   * upstream (target.ts), whose answer is read tolerantly.
-   *
-   * A chunk whose call fails or whose answer holds nothing readable is counted
-   * and named in the job's warnings, and not asked again; one cut off at the
-   * token ceiling keeps the passages written before the cut and is named too.
-   * Every chunk failing fails the analysis with the real error (the stored
-   * flags stay). There is no fallback to the scorer, and a cancel or a park
-   * stops the run at once (stopsTheRun).
-   */
-  private async runGenerateFlagStage(
-    flagConfig: AIProviderConfig,
-    segments: Segment[],
-    categories: AnalysisCategory[],
-    /** The most transcript one call reads: GENERATE_CHUNK_CHARS, or less for a small context. */
-    chunkChars: number,
-    onTokens: ((response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void) | undefined,
-    /** Called as chunk `current` (1-based) of `total` starts. */
-    onChunk: (current: number, total: number) => void,
-    signal: AbortSignal | undefined,
-  ): Promise<{ windows: FlagWindow[]; warnings: string[]; summary: string }> {
-    const sentences = assembleSentences(segments);
-    const { plan, notes } = buildFlagPlan(categories);
-    for (const note of notes) this.logger.log(`[Flags] ${note}`);
-    const model = `${flagConfig.provider}:${flagConfig.model}`;
-    if (sentences.length === 0 || plan.length === 0) {
-      this.logger.warn(
-        `[Flags] Nothing to read for flags: ${sentences.length === 0 ? 'no sentences could be assembled from the transcript' : 'no category is enabled'}`,
-      );
-      return { windows: [], warnings: [], summary: 'nothing read' };
-    }
-
-    const names = plan.map((p) => p.category);
-    const chunks = chunkSentences(sentences, chunkChars);
-    const prompts = chunks.map((chunk) =>
-      buildGenerateFlagsPrompt(plan, sentences.slice(chunk.from, chunk.to + 1).map((sentence) => sentence.text).join('\n')),
-    );
-    const overrides: AIGenerateOverrides = {
-      // ONE num_ctx for every chunk (Ollama reloads on any change), sized from the largest prompt.
-      numCtx: estimateNumCtx(prompts.reduce((max, prompt) => Math.max(max, prompt.length), 0), flagConfig.model, GENERATE_MAX_OUTPUT_TOKENS),
-      temperature: 0,
-      thinking: false,
-      maxTokens: GENERATE_MAX_OUTPUT_TOKENS,
-      // Crosses for a Crucible catalog model and ollama/; a cloud upstream gets
-      // none (target.ts) and its answer is read by parseGeneratedPassages.
-      format: generateFlagsSchema(names),
-      signal,
-    };
-    this.logger.log(
-      `[Flags] Reading ${sentences.length} sentences for flags in ${chunks.length} chunk(s) of up to ${chunkChars} ` +
-        `characters on ${model}; categories: ${names.join(', ')}`,
-    );
-
-    const passages: AnchoredPassage[] = [];
-    /** Chunks with nothing usable, each named with its times and why. */
-    const failed: string[] = [];
-    /** Chunks cut off at the token ceiling (their passages before the cut are kept). */
-    const cut: string[] = [];
-    const perChunk: number[] = [];
-    let returned = 0;
-    let unmatched = 0;
-    let unnamed = 0;
-    const startedAt = Date.now();
-
-    for (let k = 0; k < chunks.length; k++) {
-      ensureNotCancelled(signal, `reading for flags, chunk ${k + 1}/${chunks.length}`);
-      onChunk(k + 1, chunks.length);
-      const chunk = chunks[k];
-      const label = `chunk ${k + 1} (${formatHms(sentences[chunk.from].start)}-${formatHms(sentences[chunk.to].end)})`;
-
-      let text: string;
-      let truncated: boolean;
-      try {
-        const response = await this.aiProviderService.generateText(prompts[k], flagConfig, 'flags', overrides);
-        onTokens?.(response);
-        text = response.text;
-        truncated = response.doneReason === 'length';
-      } catch (error) {
-        // A cancel or a park is never a failed chunk: it stops the run.
-        if (stopsTheRun(error)) throw error;
-        failed.push(`${label}: ${(error as Error).message}`);
-        perChunk.push(0);
-        this.logger.warn(`[Flags] ${label} could not be read: ${(error as Error).message}`);
-        continue;
-      }
-
-      const answer = parseGeneratedPassages(text);
-      if (answer === null) {
-        failed.push(
-          `${label}: ${truncated ? 'the answer was cut off at the token limit before a whole passage was written' : 'the answer held no passages that could be read'}`,
-        );
-        perChunk.push(0);
-        this.logger.warn(`[Flags] ${label}: no readable passages in the answer${truncated ? ' (cut off at the token limit)' : ''}: ${text.slice(0, 200)}`);
-        continue;
-      }
-      if (truncated) cut.push(label);
-
-      const words = chunkWords(sentences.slice(chunk.from, chunk.to + 1));
-      let found = 0;
-      let lost = answer.invalid;
-      for (const passage of answer.passages) {
-        const named = [...new Set(passage.categories.map((c) => resolveCategoryName(c, names)).filter((c): c is string => c !== null))];
-        if (named.length === 0) {
-          unnamed++;
-          this.logger.debug(`[Flags] ${label}: a passage named no enabled category (${JSON.stringify(passage.categories)}); dropped`);
-          continue;
-        }
-        const hit = matchPassage(words, passage.firstWords, passage.lastWords);
-        if (!hit) {
-          lost++;
-          this.logger.debug(
-            `[Flags] ${label}: passage not found in the transcript, dropped: ${JSON.stringify(passage.firstWords)} … ${JSON.stringify(passage.lastWords)}`,
-          );
-          continue;
-        }
-        passages.push({ from: chunk.from + hit.from, to: chunk.from + hit.to, categories: named });
-        found++;
-      }
-      const count = answer.passages.length + answer.invalid;
-      returned += count;
-      unmatched += lost;
-      perChunk.push(count);
-      // The count per chunk is the thing to watch: a mid-size model asked to
-      // list everything in a long input tends to stop after the first few.
-      this.logger.log(
-        `[Flags] ${label}, ${chunk.chars} chars: ${count} passage(s) returned, ${found} found in the transcript` +
-          (lost > 0 ? `, ${lost} not found (dropped)` : '') +
-          (truncated ? ' — CUT OFF at the token limit, passages after the cut were not written' : ''),
-      );
-    }
-
-    if (failed.length === chunks.length) {
-      throw new Error(
-        `no part of the transcript could be read for flags — all ${chunks.length} chunk(s) failed. Last failure: ${failed[failed.length - 1]}`,
-      );
-    }
-
-    const warnings: string[] = [];
-    if (failed.length > 0) {
-      warnings.push(
-        `Flags: ${failed.length} of ${chunks.length} transcript chunks could not be read, so no flags were looked for in them: ${failed.join('; ')}`,
-      );
-    }
-    if (cut.length > 0) {
-      warnings.push(
-        `Flags: ${cut.length} of ${chunks.length} transcript chunks reached the model's output limit (${GENERATE_MAX_OUTPUT_TOKENS} tokens); ` +
-          `passages after the cut were not read: ${cut.join('; ')}`,
-      );
-    }
-    if (unmatched > 0) {
-      warnings.push(
-        `Flags: ${unmatched} of the ${returned} passages the model marked could not be found in the transcript ` +
-          `(their first or last words did not match) and were dropped.`,
-      );
-    }
-
-    const windows = windowsFromPassages(sentences, passages, plan);
-    this.logger.log(
-      `[Flags] Read ${chunks.length} chunk(s) in ${((Date.now() - startedAt) / 1000).toFixed(1)}s on ${model}: ` +
-        `${returned} passage(s) returned (per chunk: ${perChunk.join(', ')}), ${passages.length} found in the transcript, ` +
-        `${unmatched} dropped as not found, ${unnamed} naming no enabled category, ${failed.length} chunk(s) failed, ` +
-        `${cut.length} cut off -> ${windows.length} sections to check`,
-    );
-    return {
-      windows,
-      warnings,
-      summary: `${GENERATE_RANKER}: ${passages.length} passages found by ${model} reading ${chunks.length} chunk(s)`,
-    };
-  }
-
-  /**
-   * The flag verifier stage: ask one question per (window, category) of the
-   * candidates (the snap ranking's, or the passages the flags model marked
-   * reading the transcript), and STORE EVERY ANSWER.
-   *
-   * THE RULING BEHIND IT (operator, 2026-08-25):
-   *
-   *   "really, we should find all the loose flags and organize them, and the
-   *    knob can be a filter afterward that filters out loosely paired ones,
-   *    moderate, or strictly paired ones... all the work will be done anyway,
-   *    and itll be a UI component that filters out loose pairings rather than
-   *    defining what the actual run does before it runs."
-   *
-   * So this stage takes NO sensitivity. It asks the calibrated question (see
-   * FLAG_VERIFICATION_PROMPT_VERSION) and returns BOTH the accepted and the
-   * rejected verdicts as sections carrying `verdict` and the ranker's score.
-   * Which of them a user sees is decided afterwards, client-side, instantly,
-   * and reversibly.
-   *
-   * VERIFICATION ORDER IS DESCENDING WINDOW SCORE, and that is a durability
-   * property, not a cosmetic one: a run killed halfway has already answered and
-   * cached its most trustworthy questions, so the resume is cheap AND the
-   * findings that survive an interruption are the ones most worth having.
-   *
-   * A per-call problem does not throw: a verification the model answered
-   * unreadably, or past its token limit, is that (window, category) left
-   * unflagged with a warning, NOT a recordFailure (one bad answer must not push
-   * a run toward TOO_MANY_FAILURES across hundreds of tiny calls). A TOTAL
-   * failure is recorded once, for the stage. A cancel, and Crucible parking
-   * the run, are never absorbed here (stopsTheRun): they stop the whole run.
-   */
-  private async runRankedFlagStage(
-    flagConfig: AIProviderConfig,
-    segments: Segment[],
-    recordFailure: (what: string) => void,
-    onTokens: ((response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void) | undefined,
-    onFlagProgress: ((current: number, total: number) => void) | undefined,
-    onFlagStatus: ((message: string) => void) | undefined,
-    signal: AbortSignal | undefined,
-    /**
-     * The windows to check: the snap engine's ranking (strength-first, each a
-     * section of at most ~90 s, made by the scorer before any LLM stage ran),
-     * or the model's passages (runGenerateFlagStage, in transcript order).
-     * EVERY window is checked (past the snap verify budget too): a check is one
-     * short call, and every section gets its justification.
-     */
-    candidates: FlagCandidates,
-  ): Promise<{
-    sections: AnalyzedSection[];
-    /** (section, category) questions asked, cache hits included. */
-    checks: number;
-    /** Checks with no usable verdict (token ceiling, no verdict, a failed call). */
-    unusable: number;
-  }> {
-    const sentences = assembleSentences(segments);
-    if (sentences.length === 0) {
-      this.logger.warn('[Pass 2b] No sentences could be assembled from the transcript');
-      return { sections: [], checks: 0, unusable: 0 };
-    }
-
-    const ranker = candidates.ranker;
-    const verifierModel = `${flagConfig.provider}:${flagConfig.model}`;
-    const passageOf = (window: FlagWindow) =>
-      sentences.slice(window.contextFrom, window.contextTo + 1).map((s) => s.text);
-
-    const windows: FlagWindow[] = candidates.windows;
-    onFlagStatus?.(`Checking ${windows.length} flag section${windows.length === 1 ? '' : 's'}...`);
-    ensureNotCancelled(signal, 'flag verification');
-
-    // One call per (window, category) — a passage where three categories fired
-    // costs three questions, not one per (sentence, category) pair. Windows
-    // arrive strongest first and each window's categories strongest first, so
-    // the calls run in descending score: a run stopped halfway has checked,
-    // and cached, its most trustworthy findings.
-    const jobs: Array<{
-      window: FlagWindow;
-      category: WindowCategory;
-      passage: string[];
-      prompt: string;
-    }> = [];
-    for (const window of windows) {
-      const passage = passageOf(window);
-      for (const category of window.categories) {
-        jobs.push({
-          window,
-          category,
-          passage,
-          prompt: buildFlagVerificationPrompt(passage, category.category, category.proposition),
-        });
-      }
-    }
-
-    this.logger.log(
-      `[Pass 2b] ${sentences.length} sentences (${candidates.summary}) -> ${windows.length} sections / ` +
-      `${jobs.length} checks on ${verifierModel}. ` +
-      `Every answer is stored with its reason; the Confirmed / All filter chooses what is shown.`,
-    );
-
-    onFlagProgress?.(0, jobs.length);
-    if (jobs.length === 0) return { sections: [], checks: 0, unusable: 0 };
-
-    // ONE num_ctx for every verification call in the stage, sized from the
-    // largest prompt. Ollama fully reloads the model on ANY num_ctx change, and
-    // these prompts differ only by the length of their passage — per-call sizing
-    // would buy reloads and nothing else.
-    const numCtx = estimateNumCtx(
-      jobs.reduce((max, job) => Math.max(max, job.prompt.length), 0),
-      flagConfig.model,
-      VERIFY_OUTPUT_BUDGET_TOKENS,
-    );
-
-    const overrides = {
-      numCtx,
-      temperature: 0,
-      signal,
-      // The schema crosses for a Crucible catalog model and ollama/; a cloud
-      // upstream gets none (target.ts) and answers the same prompt in prose,
-      // parsed by parseVerification.
-      format: FLAG_VERIFICATION_SCHEMA,
-    };
-
-    // Accepted categories per window, with the verifier's reason for each.
-    const verifiedByWindow = new Map<FlagWindow, WindowCategory[]>();
-    const reasons = new Map<WindowCategory, string | null>();
-    const rejected: Array<{ window: FlagWindow; category: WindowCategory }> = [];
-    let flaggedCalls = 0;
-    let skipped = 0;
-    let degraded = 0;
-    /** Why the last failed call failed, so a stage where every call failed says why. */
-    let lastCallError = '';
-    let cacheHits = 0;
-    const cachePresent = this.databaseService?.isInitialized?.() === true;
-    const startedAt = Date.now();
-
-    if (!cachePresent) {
-      this.logger.log(
-        '[Pass 2b] Verdict cache unavailable (no open library database) — every question goes to the model.',
-      );
-    }
-
-    const record = (window: FlagWindow, category: WindowCategory, verdict: 'flag' | 'skip', reason: string | null): void => {
-      reasons.set(category, reason);
-      if (verdict === 'flag') {
-        flaggedCalls++;
-        const list = verifiedByWindow.get(window);
-        if (list) list.push(category);
-        else verifiedByWindow.set(window, [category]);
-      } else {
-        skipped++;
-        rejected.push({ window, category });
-      }
-    };
-
-    for (let i = 0; i < jobs.length; i++) {
-      // A run can make dozens of these calls: aborting the open one without
-      // this check would simply start the next.
-      ensureNotCancelled(signal, `flag verification ${i + 1}/${jobs.length}`);
-
-      const { window, category, passage, prompt } = jobs[i];
-      const where = `${this.formatDisplayTime(sentences[window.firedFrom].start)} (${category.category})`;
-      const questionHash = this.verificationQuestionHash(
-        passage,
-        category.category,
-        category.proposition,
-        verifierModel,
-      );
-
-      // ---- cache lookup: a hit skips the model, and says so in the log.
-      const cached = cachePresent ? this.databaseService!.getFlagVerdict(questionHash) : null;
-      if (cached) {
-        cacheHits++;
-        this.databaseService!.recordFlagVerdictHit(questionHash);
-        this.logger.log(
-          `[Pass 2b] CACHE HIT ${where} -> ${cached.verdict} (first asked ${cached.created_at}, ` +
-          `hit ${cached.hit_count + 1}x, q ${questionHash.slice(0, 12)}) — no model call`,
-        );
-        record(window, category, cached.verdict, cached.reason ?? null);
-        onFlagProgress?.(i + 1, jobs.length);
-        continue;
-      }
-
-      try {
-        const response = await this.aiProviderService.generateText(prompt, flagConfig, 'flags', overrides);
-        onTokens?.(response);
-
-        if (response.doneReason === 'length') {
-          degraded++;
-          this.logger.warn(
-            `[Pass 2b] Verification hit the token ceiling at ${where} — not flagged, and NOT recorded ` +
-            `as a rejection`,
-          );
-        } else {
-          const answer = this.parseVerification(response.text);
-          if (answer === null) {
-            degraded++;
-            this.logger.warn(
-              `[Pass 2b] No verdict in the verification answer at ${where} — not flagged, and NOT ` +
-              `recorded as a rejection`,
-            );
-          } else {
-            // Only real verdicts are cached. A degraded call has no answer to
-            // remember, and caching "no answer" would make a transient hiccup
-            // permanent for that question.
-            if (cachePresent) {
-              this.databaseService!.putFlagVerdict({
-                questionHash,
-                category: category.category,
-                verifierModel,
-                promptVersion: FLAG_VERIFICATION_PROMPT_VERSION,
-                verdict: answer.verdict,
-                reason: answer.reason,
-              });
-            }
-            record(window, category, answer.verdict, answer.reason);
-          }
-        }
-      } catch (error) {
-        // A cancelled call is not a degraded verdict. Counting it as one would
-        // also let the loop continue to the next candidate.
-        if (stopsTheRun(error)) throw error;
-        degraded++;
-        lastCallError = (error as Error).message;
-        this.logger.warn(
-          `[Pass 2b] Verification call failed at ${where}: ${(error as Error).message} — not flagged, ` +
-          `and NOT recorded as a rejection`,
-        );
-      }
-      onFlagProgress?.(i + 1, jobs.length);
-    }
-
-    const wallSeconds = (Date.now() - startedAt) / 1000;
-    const modelCalls = jobs.length - cacheHits;
-    this.logger.log(
-      `[Pass 2b] Checked ${jobs.length} (section, category) pairs across ${windows.length} sections in ` +
-      `${wallSeconds.toFixed(1)}s (${(wallSeconds / jobs.length).toFixed(2)}s/pair): ` +
-      `${flaggedCalls} flag, ${skipped} skip, ${degraded} unusable. ` +
-      `Cache: ${cacheHits}/${jobs.length} hits (${((cacheHits / jobs.length) * 100).toFixed(1)}%), ` +
-      `${modelCalls} model call(s)` +
-      (cachePresent ? `, ${this.databaseService!.countFlagVerdicts()} question(s) now cached` : ''),
-    );
-
-    // Every single call failing is a broken stage, not a quiet result. Report it
-    // ONCE, so the job's failure accounting sees it without being flooded.
-    if (degraded === jobs.length) {
-      recordFailure(
-        `Pass 2b flag verification produced no usable verdicts across all ${jobs.length} calls` +
-          (lastCallError ? ` (last error: ${lastCallError})` : ''),
-      );
-    }
-
-    // Each window is its own section (a long span was already cut into pieces
-    // of about a minute: the user would "rather have 10 1-minute sections than
-    // one 30-minute section"), in the order the video plays.
-    const verified = windows
-      .filter((window) => verifiedByWindow.has(window))
-      .map((window) => ({ window, categories: verifiedByWindow.get(window)! }));
-    const flagSections = this.buildWindowSections(verified, sentences, ranker, reasons);
-    const skipSections = this.buildSkipSections(rejected, sentences, ranker, reasons);
-    // Flags before rejections at the same timestamp, so a list rendered in
-    // stored order puts the finding above the rejected reading of it.
-    const sections = [...flagSections, ...skipSections].sort(
-      (a, b) =>
-        this.parseDisplayTime(a.start_time) - this.parseDisplayTime(b.start_time) ||
-        (a.verdict === 'skip' ? 1 : 0) - (b.verdict === 'skip' ? 1 : 0),
-    );
-
-    this.logger.log(
-      `[Pass 2b] ${flaggedCalls} accepted (section, category) verdicts -> ${flagSections.length} flag sections; ` +
-      `${skipSections.length} rejected verdicts stored (shown at the All filter position)`,
-    );
-    return { sections, checks: jobs.length, unusable: degraded };
-  }
-
-  /**
-   * Keep this run's flag rating map, in the shape `flag-eval --from-maps` reads,
-   * so the span thresholds can be tuned offline on real videos without the GPU:
-   * `<config dir>/flag-maps/<job>.json`, the newest FLAG_MAPS_KEPT kept. A map
-   * that can't be written is a warning, never a failed analysis.
-   */
-  private saveFlagMap(ranking: SnapFlagRankResult, segments: Segment[], videoTitle: string, jobId: string | undefined): void {
-    try {
-      const dir = path.join(getBriefcaseConfigDir(), 'flag-maps');
-      fs.mkdirSync(dir, { recursive: true });
-      const id = (jobId ?? `run-${Date.now()}`).replace(/[^A-Za-z0-9._-]+/g, '_');
-      const saved = {
-        videoId: id, title: videoTitle, db: '', rows: [],
-        sentences: assembleSentences(segments), plan: ranking.plan, ratingMap: ranking.ratingMap, stats: ranking.stats,
-      };
-      fs.writeFileSync(path.join(dir, `${id}.json`), JSON.stringify(saved));
-      const files = fs.readdirSync(dir).filter((f) => f.endsWith('.json'))
-        .map((f) => ({ f, t: fs.statSync(path.join(dir, f)).mtimeMs }))
-        .sort((x, y) => y.t - x.t);
-      for (const { f } of files.slice(FLAG_MAPS_KEPT)) fs.rmSync(path.join(dir, f), { force: true });
-      this.logger.log(`[Pass 2b] Flag rating map saved: ${path.join(dir, `${id}.json`)}`);
-    } catch (err) {
-      this.logger.warn(`[Pass 2b] The flag rating map could not be saved (${(err as Error).message}).`);
-    }
-  }
-
-  /**
    * STORIES: one call on the chapter model groups the chapters (times, titles,
    * Pass 2 summaries, sponsor marks) into stories (stories.ts). On a Crucible
    * catalog model: thinking off, temperature 0 (a cloud upstream is sent the
@@ -2514,9 +1642,9 @@ export class AIAnalysisService {
 
   /**
    * PASS 2: Analyze each chapter with full context. The LLM writes each
-   * chapter's summary; the title is the scorer's outline label. Flag
-   * verification (Pass 2b) is its own stage (runRankedFlagStage), run by
-   * analyzeTranscriptRun only when the run makes flags.
+   * chapter's summary; the title is the scorer's outline label. The flags
+   * are their own stage (runHighlightsFlagStage), run by analyzeTranscriptRun
+   * only when the run makes flags.
    */
   private async analyzeChaptersPass2(
     config: AIProviderConfig,
@@ -2632,8 +1760,8 @@ export class AIAnalysisService {
         continue;
       }
 
-      // Flag verification deliberately does NOT happen here — see Pass 2b in
-      // analyzeTranscriptRun. Running it inline would alternate chapter/flags
+      // The flags deliberately do NOT happen here — see the flag stage in
+      // analyzeTranscriptRun. Running them inline would alternate chapter/flags
       // per iteration, which reloads a model between every call the moment the
       // two tasks are routed to different models.
 

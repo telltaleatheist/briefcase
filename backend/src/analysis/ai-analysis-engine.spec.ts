@@ -36,8 +36,8 @@ function snapResult(over: Partial<SnapStageResult> = {}): SnapStageResult {
   return {
     transcript: null,
     model: 'fake-qwen',
-    timings: { startMs: 0, prepareMs: 0, chaptersMs: 0, flagsMs: 0, totalMs: 0 },
-    labelMassGated: { chapters: 0, flags: 0, refine: 0, total: 0 },
+    timings: { startMs: 0, prepareMs: 0, chaptersMs: 0, totalMs: 0 },
+    labelMassGated: { chapters: 0, refine: 0, total: 0 },
     chapters: {
       chapters: [
         { startSeconds: 0, endSeconds: 60, title: 'Pasta day', label: 'Pasta day', sentenceRange: [0, 6], isAd: false },
@@ -48,7 +48,6 @@ function snapResult(over: Partial<SnapStageResult> = {}): SnapStageResult {
       seams: [],
       timings: { outlineMs: 0, assignMs: 0, adsMs: 0, totalMs: 0 },
     },
-    flags: null,
     ...over,
   } as SnapStageResult;
 }
@@ -157,7 +156,7 @@ describe('AIAnalysisService: chapters from the scorer, flags from the flags mode
     const h = new Harness();
     const res = await h.service().analyzeTranscript(options());
     expect(h.snapRuns).toHaveLength(1);
-    expect(h.snapRuns[0]).toMatchObject({ chapters: true, flags: false });
+    expect(h.snapRuns[0]).toHaveProperty('segments');
     expect(h.snapRuns[0].signal).toBeDefined();
 
     // Chapters: the scorer's boundaries and outline labels; the LLM wrote only summaries.
@@ -264,7 +263,7 @@ describe('AIAnalysisService: chapters from the scorer, flags from the flags mode
 
   it('answers under the label-mass gate are counted and said on the job, never silent', async () => {
     const h = new Harness();
-    h.snapRun = async () => snapResult({ labelMassGated: { chapters: 2, flags: 0, refine: 0, total: 2 } });
+    h.snapRun = async () => snapResult({ labelMassGated: { chapters: 2, refine: 0, total: 2 } });
     const res = await h.service().analyzeTranscript(options());
     expect(res.warnings).toEqual([expect.stringMatching(/^2 of the analysis engine's answers were read as no evidence/)]);
   });
@@ -300,7 +299,7 @@ describe('AIAnalysisService: chapters from the scorer, flags from the flags mode
     writeAppConfig({ flagFinder: 'snap' });
     const h = new Harness();
     const res = await h.service().analyzeTranscript(options());
-    expect(h.snapRuns[0]).toMatchObject({ flags: false });
+    expect(h.snapRuns).toHaveLength(1);
     expect(res.sections.map((s) => s.ranker)).toEqual(['highlights-v1']);
   });
 
@@ -350,7 +349,7 @@ describe('AIAnalysisService: the parts a run makes', () => {
     const h = new Harness();
     const res = await h.service().analyzeTranscript(options());
     expect(h.snapRuns).toHaveLength(1);
-    expect(h.snapRuns[0]).toMatchObject({ chapters: true, flags: false });
+    expect(h.snapRuns[0]).toHaveProperty('segments');
     expect(res.parts).toEqual(['chapters', 'flags', 'metadata']);
     expect(res.sections).toHaveLength(1);
   });
@@ -359,7 +358,7 @@ describe('AIAnalysisService: the parts a run makes', () => {
     const h = new Harness();
     const res = await h.service().analyzeTranscript({ ...options(), parts: ['flags', 'chapters'] });
     expect(h.snapRuns).toHaveLength(1);
-    expect(h.snapRuns[0]).toMatchObject({ chapters: true, flags: false });
+    expect(h.snapRuns[0]).toHaveProperty('segments');
     expect(res.parts).toEqual(['chapters', 'flags']);
     expect(res.chapters).toHaveLength(2);
     expect(res.sections.length).toBeGreaterThan(0);
@@ -370,7 +369,7 @@ describe('AIAnalysisService: the parts a run makes', () => {
   it('chapters alone: only the chapter pass and the summaries', async () => {
     const h = new Harness();
     const res = await h.service().analyzeTranscript({ ...options(), parts: ['chapters'] });
-    expect(h.snapRuns[0]).toMatchObject({ chapters: true, flags: false });
+    expect(h.snapRuns[0]).toHaveProperty('segments');
     expect(new Set(tasks(h))).toEqual(new Set(['chapter']));
     expect(res.parts).toEqual(['chapters']);
     expect(res.chapters.map((c) => c.title)).toEqual(['Pasta day', 'Summer travel']);
@@ -406,7 +405,7 @@ describe('AIAnalysisService: the parts a run makes', () => {
   it('metadata alone on a video with no chapters makes its chapters first, and the job says so', async () => {
     const h = new Harness();
     const res = await h.service().analyzeTranscript({ ...options(), parts: ['metadata'], existingChapters: [] });
-    expect(h.snapRuns[0]).toMatchObject({ chapters: true, flags: false });
+    expect(h.snapRuns[0]).toHaveProperty('segments');
     expect(res.parts).toEqual(['chapters', 'metadata']);
     expect(res.chapters.map((c) => c.title)).toEqual(['Pasta day', 'Summer travel']);
     expect(h.generated.find((g) => g.task === 'tags')!.prompt).toContain('Pasta day: A summary of it.');
@@ -545,7 +544,7 @@ describe('AIAnalysisService: stories are the chapters grouped', () => {
     const base = h.answer;
     h.answer = async (prompt, task) =>
       grouping({ prompt }) ? { text: groupingAnswers.shift() ?? '', inputTokens: 1, outputTokens: 1 } : base(prompt, task);
-    h.snapRun = async () => snapResult({ chapters: chapterRun(list), flags: null });
+    h.snapRun = async () => snapResult({ chapters: chapterRun(list) });
     return h;
   }
 

@@ -2,24 +2,21 @@
  * TIME WINDOWS: one scorer question per stretch of the video, not per sentence.
  *
  * The user, 2026-09-28: a four-hour show took about two hours to analyse on the
- * Mac (one decide question per sentence for chapters, one per three for flags,
- * ~1.1 s each, one after another), and "we could make the steps 1 minute, 1.5
- * minute sliding window". So chapters and flags can ask about WINDOWS of the
- * transcript instead: each window holds the units that start within
- * `windowSeconds` of its own start, and a new window starts every
- * `stepSeconds`. At 90 s / 60 s neighbouring windows share 30 s, and every
- * unit is in one or two of them.
+ * Mac (one decide question per sentence, ~1.1 s each, one after another), and
+ * "we could make the steps 1 minute, 1.5 minute sliding window". So the
+ * chapter pass can ask about WINDOWS of the transcript instead: each window
+ * holds the units that start within `windowSeconds` of its own start, and a
+ * new window starts every `stepSeconds`. At 90 s / 60 s neighbouring windows
+ * share 30 s, and every unit is in one or two of them.
  *
  * Everything after the questions is unchanged: each UNIT still gets a row, the
- * mean of the answers of the windows it is in (its probabilities averaged, as
- * the flag ranker has always averaged its overlapping groups). So Viterbi, the
- * ad check, chunk stitching, flag spans and the verifier all work on units as
- * before; the rows are simply constant across each stretch the same windows
- * cover, which puts every boundary on a 30 s grid (at 90 / 60).
+ * mean of the answers of the windows it is in (its probabilities averaged). So
+ * Viterbi, the ad check and chunk stitching all work on units as before; the
+ * rows are simply constant across each stretch the same windows cover, which
+ * puts every boundary on a 30 s grid (at 90 / 60).
  *
  * What it costs: a short remark inside a window has to show in the answer
- * about the whole window. Measure it against per-sentence questions on a
- * reference video before trusting it for flags (the setting keeps both).
+ * about the whole window.
  */
 
 /** Window length and the step between window starts, in seconds. */

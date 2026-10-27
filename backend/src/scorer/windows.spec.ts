@@ -3,7 +3,6 @@ import { Logger } from '@nestjs/common';
 
 import type { RankedSentence } from '../analysis/flag-windows';
 import { runSnapChapters, type ChapterScorer } from './chapters/snap-chapter.service';
-import { SnapFlagRanker, type FlagScorer } from './flags/snap-flag-ranker.service';
 import type { ChoiceAnswer, ChoiceQuestion, DecideRequest, DecideResponse, GenerateResult } from './scorer.types';
 import { DEFAULT_TIME_WINDOWS, readWindowsSetting, timeWindows, unitMeans, windowsOf } from './windows';
 
@@ -114,40 +113,5 @@ describe('chapters asked per window', () => {
     expect(asked.every((q) => q.name.startsWith('w'))).toBe(true);
     expect(result.chapters.map((c) => c.title)).toEqual(['Cooking', 'Travel']);
     expect(Math.abs(result.chapters[1].startSeconds - 300)).toBeLessThanOrEqual(30);
-  });
-});
-
-describe('flags asked per window', () => {
-  beforeAll(() => Logger.overrideLogger(false));
-
-  it('ask one group question per window, and a flagged window still becomes a span on the real timeline', async () => {
-    // Ten minutes, a 6 s sentence each; the demonizing talk runs 04:00-05:00.
-    const sentences: RankedSentence[] = Array.from({ length: 100 }, (_, i) => ({
-      start: i * 6,
-      end: i * 6 + 6,
-      text: i >= 40 && i < 50 ? `Those people are communists and enemies, point ${i}.` : `Here is an ordinary remark about gardening, number ${i}.`,
-    }));
-    const requests: DecideRequest[] = [];
-    const scorer: FlagScorer = {
-      async decide(req) {
-        requests.push(req);
-        const answers: DecideResponse['answers'] = {};
-        for (const q of req.questions as ChoiceQuestion[]) {
-          const hit = /communists/.test(passageOf(q));
-          answers[q.name] = choice(q, q.options.map((o) => (o.name === 'political-demonization' ? (hit ? 0.85 : 0.01) : o.name === 'none' ? (hit ? 0.14 : 0.98) : 0.001)));
-        }
-        return respond(answers);
-      },
-    };
-    const res = await new SnapFlagRanker().rank(sentences, [{ name: 'political-demonization' }], { scorer, windows: DEFAULT_TIME_WINDOWS });
-    const asked = requests.flatMap((r) => r.questions);
-    expect(asked.length).toBe(timeWindows(res.ratingMap.units, 0, res.ratingMap.units.length, DEFAULT_TIME_WINDOWS).length);
-    expect(asked.length).toBeLessThan(12);
-    expect(res.ratingMap).toMatchObject({ windowSeconds: 90, stepSeconds: 60 });
-    expect(res.windows.length).toBeGreaterThan(0);
-    const flagged = res.windows.flatMap((w) => [sentences[w.contextFrom].start, sentences[w.contextTo].end]);
-    // The span sits over the demonizing minute, on the 30 s grid the windows draw.
-    expect(Math.min(...flagged)).toBeGreaterThanOrEqual(240 - 60);
-    expect(Math.max(...flagged)).toBeLessThanOrEqual(300 + 60);
   });
 });

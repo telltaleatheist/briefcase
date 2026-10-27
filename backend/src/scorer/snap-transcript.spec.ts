@@ -1,10 +1,9 @@
 import { beforeAll, describe, expect, it } from '@jest/globals';
 import { Logger } from '@nestjs/common';
 
+import { assembleSentences } from '../analysis/flag-windows';
 import { runSnapChapters } from './chapters/snap-chapter.service';
-import { SnapFlagRanker } from './flags/snap-flag-ranker.service';
 import {
-  ChatMessage,
   ChoiceAnswer,
   ChoiceQuestion,
   DecideRequest,
@@ -14,9 +13,9 @@ import {
 } from './scorer.types';
 import { buildSnapTranscript, chunkTranscript } from './snap-transcript';
 
-/** Records every decide state; answers anything (flags: all "none"; chapters: the first section). */
+/** Records every decide state; answers anything (the first section). */
 class RecordingScorer {
-  readonly states: Array<{ state: string; pass: 'chapters' | 'flags' }> = [];
+  readonly states: string[] = [];
 
   async generate(): Promise<GenerateResult> {
     return { text: 'Cooking\nTravel', promptTokens: 0, completionTokens: 0, finishReason: 'stop', model: 'fake' };
@@ -24,7 +23,6 @@ class RecordingScorer {
 
   async decide(req: DecideRequest): Promise<DecideResponse> {
     const answers: DecideResponse['answers'] = {};
-    let pass: 'chapters' | 'flags' = 'chapters';
     for (const q of req.questions) {
       if (q.type === 'yesno') {
         const a: YesNoAnswer = {
@@ -35,18 +33,16 @@ class RecordingScorer {
         continue;
       }
       const cq = q as ChoiceQuestion;
-      if (cq.name.startsWith('g:')) pass = 'flags';
       const names = cq.options.map((o) => o.name);
-      const pick = names.includes('none') ? names.indexOf('none') : 0;
-      const probs = names.map((_, k) => (k === pick ? 0.97 : 0.03 / (names.length - 1)));
+      const probs = names.map((_, k) => (k === 0 ? 0.97 : 0.03 / (names.length - 1)));
       const a: ChoiceAnswer = {
-        type: 'choice', choice: names[pick], confidence: 0.97, options: names,
+        type: 'choice', choice: names[0], confidence: 0.97, options: names,
         probabilities: Object.fromEntries(names.map((n, k) => [n, probs[k]])),
         logProbs: probs.map(Math.log), rawLogProbs: probs.map(Math.log), labelMass: 0.99,
       };
       answers[q.name] = a;
     }
-    this.states.push({ state: req.state as string, pass });
+    this.states.push(req.state as string);
     return { model: 'fake', answers, timingMs: { total: 1, perQuestion: {} }, tokens: { perQuestion: {}, images: 0 } };
   }
 }
@@ -60,61 +56,33 @@ function segments(n: number) {
   }));
 }
 
-const CATEGORIES = [{ name: 'hate' }, { name: 'conspiracy' }];
-
-async function bothPasses(nSegments: number, layout: 'prefix' | 'inline', chunking?: { maxSingleTokens: number; maxCoreTokens: number; overlapTokens: number }) {
-  const t = await buildSnapTranscript(segments(nSegments), { chunking });
-  const scorer = new RecordingScorer();
-  await runSnapChapters(scorer, t.units, { chunkPlan: t.chunks, totalSeconds: t.totalSeconds });
-  await new SnapFlagRanker().rank(t.sentences, CATEGORIES, {
-    scorer,
-    layout,
-    unitList: t.units,
-    chunkPlan: t.flagChunks,
-  });
-  return { t, scorer };
-}
-
-describe('one transcript for both snap passes (plan §3.2)', () => {
+describe('one transcript for the chapter pass (plan §3.2)', () => {
   beforeAll(() => Logger.overrideLogger(false));
 
-  it('flag units index the same sentences the verifier stage uses, with segment times', async () => {
-    const t = await buildSnapTranscript(segments(12));
+  it('units index the transcript sentences, with segment times', async () => {
+    const segs = segments(12);
+    const t = await buildSnapTranscript(segs);
+    const sentences = assembleSentences(segs);
     expect(t.units.length).toBeGreaterThan(0);
     for (const u of t.units) {
-      expect(t.sentences[u.sentenceFrom].start).toBe(u.start);
-      expect(t.sentences[u.sentenceTo].end).toBe(u.end);
+      expect(sentences[u.sentenceFrom].start).toBe(u.start);
+      expect(sentences[u.sentenceTo].end).toBe(u.end);
     }
-    expect(t.flagChunks).toEqual([{ coreFrom: 0, coreTo: t.units.length, contextFrom: 0, contextTo: t.units.length }]);
   });
 
-  it('prefix layout: every flag state starts with the byte-identical chapter state, then only the legend', async () => {
-    const { t, scorer } = await bothPasses(12, 'prefix');
-    const chapterStates = new Set(scorer.states.filter((s) => s.pass === 'chapters').map((s) => s.state));
-    const flagStates = new Set(scorer.states.filter((s) => s.pass === 'flags').map((s) => s.state));
-    expect(chapterStates.size).toBe(1);
-    expect(flagStates.size).toBe(1);
-    const chapter = [...chapterStates][0];
-    const flag = [...flagStates][0];
-    expect(chapter).toBe(chunkTranscript(t, 0));
-    expect(flag.startsWith(chapter + '\n\n')).toBe(true);
-    expect(flag.slice(chapter.length + 2).startsWith('Categories (the options in the questions below):')).toBe(true);
+  it('every chapter question is asked against its chunk\'s transcript text', async () => {
+    const t = await buildSnapTranscript(segments(12));
+    const scorer = new RecordingScorer();
+    await runSnapChapters(scorer, t.units, { chunkPlan: t.chunks, totalSeconds: t.totalSeconds });
+    expect(new Set(scorer.states)).toEqual(new Set([chunkTranscript(t, 0)]));
   });
 
-  it('inline layout: the chapter and flag states are identical', async () => {
-    const { scorer } = await bothPasses(12, 'inline');
-    const states = new Set(scorer.states.map((s) => s.state));
-    expect(states.size).toBe(1);
-  });
-
-  it('chunked: chunk k has the same transcript text in both passes', async () => {
-    const { t, scorer } = await bothPasses(120, 'prefix', { maxSingleTokens: 400, maxCoreTokens: 300, overlapTokens: 60 });
+  it('chunked: chunk k\'s questions are asked against chunk k\'s text', async () => {
+    const t = await buildSnapTranscript(segments(120), { chunking: { maxSingleTokens: 400, maxCoreTokens: 300, overlapTokens: 60 } });
     expect(t.chunks.length).toBeGreaterThan(1);
+    const scorer = new RecordingScorer();
+    await runSnapChapters(scorer, t.units, { chunkPlan: t.chunks, totalSeconds: t.totalSeconds });
     const expected = t.chunks.map((_, k) => chunkTranscript(t, k));
-    const chapterStates = [...new Set(scorer.states.filter((s) => s.pass === 'chapters').map((s) => s.state))];
-    const flagStates = [...new Set(scorer.states.filter((s) => s.pass === 'flags').map((s) => s.state))];
-    expect(chapterStates).toEqual(expected);
-    expect(flagStates.length).toBe(expected.length);
-    flagStates.forEach((s, k) => expect(s.startsWith(expected[k] + '\n\n')).toBe(true));
+    expect([...new Set(scorer.states)]).toEqual(expected);
   });
 });

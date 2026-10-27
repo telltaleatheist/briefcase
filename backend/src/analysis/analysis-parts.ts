@@ -125,31 +125,25 @@ export type Band = [number, number];
 export interface AnalysisProgressBands {
   /** Grouping the chapters into stories: one call on the chapter model (videos of 10 minutes or more). */
   stories: Band | null;
-  /** The scorer stage (chapter outline and/or flag ranking). */
+  /** The scorer stage (the chapter outline). */
   engine: Band | null;
   /** Pass 2: one summary per chapter. */
   summaries: Band | null;
-  /** Pass 2b: every flag section checked. */
+  /** The flag stage: the flags model marks the clip-worthy moments, one stretch per question. */
   flags: Band | null;
   /** Tags, description, title. */
   metadata: Band | null;
 }
 
 /**
- * Each stage's weight on the 3-98% stretch of the bar. With every stage but
- * the stories running these are exactly the bands the pipeline always had:
- * engine 3-70, summaries 71-80, flags 80-92, metadata 92-98. The stories stage
- * (one call over the chapter list, videos of 10 minutes or more) comes after
- * the summaries it reads.
+ * Each stage's weight on the 3-98% stretch of the bar. The flag stage reads
+ * the whole transcript, one stretch of about 15 minutes per question
+ * (flag-highlights.ts), so it takes a large share; with every stage but the
+ * stories running the bands are engine 3-59, summaries 60-68, flags 68-93,
+ * metadata 93-98. The stories stage (one call over the chapter list, videos
+ * of 10 minutes or more) comes after the summaries it reads.
  */
-const STAGE_WEIGHTS = { stories: 2, engine: 67, summaries: 10, flags: 12, metadata: 6 } as const;
-
-/**
- * The flag stage's weight: the flags model reads the whole transcript, one
- * stretch of about 15 minutes per question (flag-highlights.ts), so it takes
- * a large share of a run.
- */
-export const FLAGS_STAGE_WEIGHT = 30;
+const STAGE_WEIGHTS = { stories: 2, engine: 67, summaries: 10, flags: 30, metadata: 6 } as const;
 const BAR_START = 3;
 const BAR_END = 98;
 
@@ -160,15 +154,9 @@ const BAR_END = 98;
  */
 export function analysisProgressBands(
   run: { stories?: boolean; engine: boolean; summaries: boolean; flags: boolean; metadata: boolean },
-  /**
-   * A stage's weight when it is not its usual share: the flag stage when the
-   * model reads the transcript for flags (flag-generate.ts), which is then the
-   * flag stage's work rather than the engine's.
-   */
-  weights: Partial<Record<keyof typeof STAGE_WEIGHTS, number>> = {},
 ): AnalysisProgressBands {
   const order = ['engine', 'summaries', 'stories', 'flags', 'metadata'] as const;
-  const weight = (stage: (typeof order)[number]) => weights[stage] ?? STAGE_WEIGHTS[stage];
+  const weight = (stage: (typeof order)[number]) => STAGE_WEIGHTS[stage];
   const total = order.reduce((sum, stage) => sum + (run[stage] ? weight(stage) : 0), 0);
   const bands: AnalysisProgressBands = { stories: null, engine: null, summaries: null, flags: null, metadata: null };
   if (total === 0) return bands;

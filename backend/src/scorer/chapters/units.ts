@@ -19,9 +19,10 @@
  *      of the sentence(s) it lies in.
  *
  * Every unit records the inclusive range of `assembleSentences` sentences it
- * overlaps (`sentenceFrom..sentenceTo`). The flag pipeline indexes windows,
- * verifier passages and stored sections by SENTENCE, so a flag span over units
- * maps back to whole sentences through it. Chapters only use the unit times.
+ * overlaps (`sentenceFrom..sentenceTo`), as it is cut from them. Chapters
+ * only use the unit times. (The scorer's flag ranking, which mapped its spans
+ * back to sentences through these indices, is gone; the indices are kept as
+ * the record of how each unit was cut.)
  *
  * Nothing interpolates: when a sentence starts mid-segment its start is that
  * segment's start (early by up to one segment, the right direction for a marker).

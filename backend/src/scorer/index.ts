@@ -1,7 +1,7 @@
 /**
  * Scorer - decisions from text without generating any (a port of snap), read
  * off Crucible's decision door (CrucibleScorerService). Snap is Briefcase's
- * analysis engine: chapters and flag ranking run through it.
+ * chapter engine: the chapters run through it.
  *
  * Usage (inside one scorer lease):
  *   await crucibleScorer.withScorer(async (scorer) => {

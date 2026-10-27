@@ -4,7 +4,7 @@
  * from the transcript; those are matched (fuzzily) to the transcript's
  * sentences here, and the times are those sentences' segment times.
  *
- * Shared by the flags the model finds reading the transcript (flag-generate.ts)
+ * Shared by the flags the model marks (flag-highlights.ts)
  * and the markers the Ask chat places (video-chat/). Pure: no I/O, no Nest.
  */
 import type { RankedSentence } from './flag-windows';

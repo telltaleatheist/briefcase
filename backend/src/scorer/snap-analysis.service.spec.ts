@@ -2,7 +2,6 @@ import { beforeAll, describe, expect, it } from '@jest/globals';
 import { Logger } from '@nestjs/common';
 
 import { AnalysisCancelledError, isCancellation } from '../analysis/cancellation';
-import { SnapFlagRanker } from './flags/snap-flag-ranker.service';
 import type { CrucibleScorerService } from './crucible-scorer.service';
 import { SnapAnalysisService, SnapEngineError, SnapStageProgress } from './snap-analysis.service';
 import type { ScorerHandle } from './scorer-handle';
@@ -16,7 +15,7 @@ import {
   YesNoAnswer,
 } from './scorer.types';
 
-/** Chapters: sentences mentioning a section's first word pick it. Flags: "communists" is demonization. */
+/** Chapters: sentences mentioning a section's first word pick it. */
 class FakeHandle {
   readonly decides: DecideRequest[] = [];
   generates = 0;
@@ -59,13 +58,9 @@ class FakeHandle {
       const cq = q as ChoiceQuestion;
       const sentence = /(?:Sentence|Passage) from the transcript above: "(.*)"/.exec(cq.instructions)![1].toLowerCase();
       const names = cq.options.map((o) => o.name);
-      let pick: number;
-      if (cq.name.startsWith('g:')) pick = sentence.includes('communists') ? names.indexOf('political-demonization') : names.indexOf('none');
-      else {
-        // Topic sections only (never the ad/plug item): an unmatched sentence leans to section 1.
-        const topic = (d: string) => !d.startsWith('An ad') && sentence.includes(d.split(' ')[0].toLowerCase());
-        pick = Math.max(0, cq.options.findIndex((opt) => topic(opt.description)));
-      }
+      // Topic sections only (never the ad/plug item): an unmatched sentence leans to section 1.
+      const topic = (d: string) => !d.startsWith('An ad') && sentence.includes(d.split(' ')[0].toLowerCase());
+      const pick = Math.max(0, cq.options.findIndex((opt) => topic(opt.description)));
       const probs = names.map((_, k) => (k === pick ? 0.95 : 0.05 / (names.length - 1)));
       const a: ChoiceAnswer = {
         type: 'choice', choice: names[pick], confidence: 0.95, options: names,
@@ -103,65 +98,55 @@ function segments() {
   return lines.map((text, i) => ({ start: i * 10, end: i * 10 + 10, text }));
 }
 
-const CATEGORIES = [{ name: 'political-demonization' }, { name: 'conspiracy' }];
-
 describe('SnapAnalysisService', () => {
   beforeAll(() => Logger.overrideLogger(false));
 
-  it('runs chapters then flags in ONE scorer lease over one transcript, with monotonic progress', async () => {
+  it('runs the chapter pass in ONE scorer lease over one transcript, with monotonic progress', async () => {
     const fake = new FakeHandle();
     const { server, leases } = fakeServer(fake);
     const events: SnapStageProgress[] = [];
-    const res = await new SnapAnalysisService(server, new SnapFlagRanker()).run({
+    const res = await new SnapAnalysisService(server).run({
       segments: segments(),
-      categories: CATEGORIES,
-      chapters: true,
-      flags: true,
       chapterOptions: { switchCost: 2 },
       onProgress: (p) => events.push(p),
     });
     expect(leases()).toBe(1);
     expect(res.model).toBe('fake-qwen');
-    expect(res.labelMassGated).toEqual({ chapters: 0, flags: 0, refine: 0, total: 0 });
+    expect(res.labelMassGated).toEqual({ chapters: 0, refine: 0, total: 0 });
     expect(res.chapters!.chapters.map((c) => c.title)).toEqual(['Cooking pasta', 'Travel plans']);
     expect(res.chapters!.chapters[1].startSeconds).toBe(30);
-    expect(res.flags!.spans.map((sp) => sp.categories[0].category)).toEqual(['political-demonization']);
-    // Both passes asked about the same units.
-    expect(res.flags!.ratingMap.units).toBe(res.transcript!.units);
     for (let i = 1; i < events.length; i++) expect(events[i].fraction).toBeGreaterThanOrEqual(events[i - 1].fraction);
     expect(events[events.length - 1]).toMatchObject({ stage: 'done', fraction: 1 });
     expect(events.some((e) => e.stage === 'chapters')).toBe(true);
-    expect(events.some((e) => e.stage === 'flags')).toBe(true);
   });
 
   it('a scorer that cannot start fails the run BY NAME: there is no other engine', async () => {
     const fake = new FakeHandle();
     const { server } = fakeServer(fake, new ScorerError('engine_unreachable', 'Crucible "mac" stayed busy'));
-    const err = await new SnapAnalysisService(server, new SnapFlagRanker()).run({
-      segments: segments(), categories: CATEGORIES, chapters: true, flags: true, chapterOptions: { switchCost: 2 },
+    const err = await new SnapAnalysisService(server).run({
+      segments: segments(), chapterOptions: { switchCost: 2 },
     }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(SnapEngineError);
     expect((err as SnapEngineError).stage).toBe('start');
     expect((err as Error).message).toMatch(/stayed busy/);
   });
 
-  it('a one-item outline (a single-topic video) is one chapter spanning the video; flags still run', async () => {
+  it('a one-item outline (a single-topic video) is one chapter spanning the video', async () => {
     const fake = new FakeHandle();
     fake.outline = 'Just one section';
     const { server } = fakeServer(fake);
-    const res = await new SnapAnalysisService(server, new SnapFlagRanker()).run({
-      segments: segments(), categories: CATEGORIES, chapters: true, flags: true, chapterOptions: { switchCost: 2 },
+    const res = await new SnapAnalysisService(server).run({
+      segments: segments(), chapterOptions: { switchCost: 2 },
     });
     expect(res.chapters!.chapters.map((c) => [c.title, c.startSeconds])).toEqual([['Just one section', 0]]);
-    expect(res.flags!.spans.length).toBe(1);
   });
 
   it('an outline with no usable item fails the chapters BY NAME', async () => {
     const fake = new FakeHandle();
     fake.outline = '\n - \n';
     const { server } = fakeServer(fake);
-    const err = await new SnapAnalysisService(server, new SnapFlagRanker()).run({
-      segments: segments(), categories: CATEGORIES, chapters: true, flags: true, chapterOptions: { switchCost: 2 },
+    const err = await new SnapAnalysisService(server).run({
+      segments: segments(), chapterOptions: { switchCost: 2 },
     }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(SnapEngineError);
     expect((err as SnapEngineError).stage).toBe('chapters');
@@ -172,36 +157,23 @@ describe('SnapAnalysisService', () => {
     const fake = new FakeHandle();
     fake.failOn = () => new ScorerError('engine_unreachable', 'POST /v1/decide: connection refused');
     const { server } = fakeServer(fake);
-    const err = await new SnapAnalysisService(server, new SnapFlagRanker()).run({
-      segments: segments(), categories: CATEGORIES, chapters: true, flags: true, chapterOptions: { switchCost: 2 },
+    const err = await new SnapAnalysisService(server).run({
+      segments: segments(), chapterOptions: { switchCost: 2 },
     }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(SnapEngineError);
     expect((err as Error).message).toMatch(/connection refused/);
     expect(fake.decides).toHaveLength(1);
   });
 
-  it('a flag-pass engine error fails the run by name (the chapters are not shipped without their flags)', async () => {
-    const fake = new FakeHandle();
-    fake.failOn = (req) => (req.questions[0].name.startsWith('g:') ? new ScorerError('engine_error', 'boom') : null);
-    const { server } = fakeServer(fake);
-    const err = await new SnapAnalysisService(server, new SnapFlagRanker()).run({
-      segments: segments(), categories: CATEGORIES, chapters: true, flags: true, chapterOptions: { switchCost: 2 },
-    }).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(SnapEngineError);
-    expect((err as SnapEngineError).stage).toBe('flags');
-    expect((err as Error).message).toMatch(/boom/);
-  });
-
   it('answers under the label-mass gate are counted per pass, never silently', async () => {
     const fake = new FakeHandle();
-    fake.gate = (name) => name === 's0' || name.startsWith('g:');
+    fake.gate = (name) => name === 's0';
     const { server } = fakeServer(fake);
-    const res = await new SnapAnalysisService(server, new SnapFlagRanker()).run({
-      segments: segments(), categories: CATEGORIES, chapters: true, flags: true, chapterOptions: { switchCost: 2 },
+    const res = await new SnapAnalysisService(server).run({
+      segments: segments(), chapterOptions: { switchCost: 2 },
     });
     expect(res.labelMassGated.chapters).toBe(1);
-    expect(res.labelMassGated.flags).toBe(res.flags!.stats.groupQuestions);
-    expect(res.labelMassGated.total).toBe(res.labelMassGated.chapters + res.labelMassGated.flags);
+    expect(res.labelMassGated.total).toBe(res.labelMassGated.chapters + res.labelMassGated.refine);
   });
 
   it('cancel during chaptering throws a cancellation and asks nothing more', async () => {
@@ -209,12 +181,12 @@ describe('SnapAnalysisService', () => {
     const controller = new AbortController();
     fake.onDecide = (n) => n === 1 && controller.abort();
     const { server } = fakeServer(fake);
-    const err = await new SnapAnalysisService(server, new SnapFlagRanker())
-      .run({ segments: segments(), categories: CATEGORIES, chapters: true, flags: true, signal: controller.signal })
+    const err = await new SnapAnalysisService(server)
+      .run({ segments: segments(), signal: controller.signal })
       .catch((e) => e);
     expect(err).toBeInstanceOf(AnalysisCancelledError);
     expect(isCancellation(err)).toBe(true);
-    expect(fake.decides.every((d) => !d.questions[0].name.startsWith('g:'))).toBe(true);
+    expect(fake.decides).toHaveLength(1);
   });
 
   it("an aborted in-flight request (the scorer's own 'cancelled') is a cancellation, not a failure", async () => {
@@ -225,8 +197,8 @@ describe('SnapAnalysisService', () => {
       return new ScorerError('cancelled', 'decide was cancelled');
     };
     const { server } = fakeServer(fake);
-    const err = await new SnapAnalysisService(server, new SnapFlagRanker())
-      .run({ segments: segments(), categories: CATEGORIES, chapters: false, flags: true, signal: controller.signal })
+    const err = await new SnapAnalysisService(server)
+      .run({ segments: segments(), signal: controller.signal })
       .catch((e) => e);
     expect(isCancellation(err)).toBe(true);
   });
@@ -246,13 +218,13 @@ describe('SnapAnalysisService', () => {
       p.includes('Travel') && p.includes('Cooking') ? 'Cooking pasta\nTravel plans' : p.includes('boil') ? 'Boil water\nSauce stirring' : 'Just one';
     const REFINE = { longUnits: 8, longSeconds: 1e9, minUnits: 4, maxDepth: 2 };
 
-    it('refines long chapters AFTER the flag pass, on the section state, with monotone progress', async () => {
+    it('refines long chapters on the section state, with monotone progress', async () => {
       const fake = new FakeHandle();
       fake.outlineFor = outlineFor;
       const { server, leases } = fakeServer(fake);
       const events: SnapStageProgress[] = [];
-      const res = await new SnapAnalysisService(server, new SnapFlagRanker()).run({
-        segments: longSegments(), categories: CATEGORIES, chapters: true, flags: true,
+      const res = await new SnapAnalysisService(server).run({
+        segments: longSegments(),
         refineOptions: REFINE, onProgress: (p) => events.push(p),
       });
       expect(leases()).toBe(1);
@@ -267,9 +239,7 @@ describe('SnapAnalysisService', () => {
       ]);
       const units = res.transcript!.units;
       const cooking = units.slice(0, 21).map((u) => u.text).join('\n');
-      const firstRefine = fake.decides.findIndex((d) => d.state === cooking);
-      const lastFlag = fake.decides.map((d) => d.questions[0].name.startsWith('g:')).lastIndexOf(true);
-      expect(firstRefine).toBeGreaterThan(lastFlag);
+      expect(fake.decides.some((d) => d.state === cooking)).toBe(true);
       for (let i = 1; i < events.length; i++) expect(events[i].fraction).toBeGreaterThanOrEqual(events[i - 1].fraction);
       expect(events.some((e) => e.stage === 'refine')).toBe(true);
       expect(events[events.length - 1]).toMatchObject({ stage: 'done', fraction: 1 });
@@ -278,8 +248,8 @@ describe('SnapAnalysisService', () => {
     it('a short video runs no refinement and gets a flat one-level tree', async () => {
       const fake = new FakeHandle();
       const { server } = fakeServer(fake);
-      const res = await new SnapAnalysisService(server, new SnapFlagRanker()).run({
-        segments: segments(), categories: CATEGORIES, chapters: true, flags: true, chapterOptions: { switchCost: 2 },
+      const res = await new SnapAnalysisService(server).run({
+        segments: segments(), chapterOptions: { switchCost: 2 },
       });
       expect(fake.generates).toBe(1);
       expect(res.chapterTree!.flat.map((c) => [c.title, c.level, c.isLeaf])).toEqual([
@@ -296,13 +266,12 @@ describe('SnapAnalysisService', () => {
       fake.failOn = (req) => (cookingState && req.state === cookingState ? new ScorerError('engine_error', 'boom') : null);
       const units = (await import('./chapters/units')).assembleUnits(longSegments());
       cookingState = units.slice(0, 21).map((u) => u.text).join('\n');
-      const res = await new SnapAnalysisService(server, new SnapFlagRanker()).run({
-        segments: longSegments(), categories: CATEGORIES, chapters: true, flags: true, refineOptions: REFINE,
+      const res = await new SnapAnalysisService(server).run({
+        segments: longSegments(), refineOptions: REFINE,
       });
       expect(res.chapterTreeError).toMatch(/refinement failed: .*boom/);
       expect(res.chapters!.chapters).toHaveLength(2);
       expect(res.chapterTree!.depth).toBe(1);
-      expect(res.flags).not.toBeNull();
     });
 
     it('cancel during refinement throws a cancellation', async () => {
@@ -310,9 +279,9 @@ describe('SnapAnalysisService', () => {
       fake.outlineFor = outlineFor;
       const controller = new AbortController();
       const { server } = fakeServer(fake);
-      const err = await new SnapAnalysisService(server, new SnapFlagRanker())
+      const err = await new SnapAnalysisService(server)
         .run({
-          segments: longSegments(), categories: CATEGORIES, chapters: true, flags: true, refineOptions: REFINE,
+          segments: longSegments(), refineOptions: REFINE,
           signal: controller.signal,
           onProgress: (p) => p.stage === 'refine' && controller.abort(),
         })
@@ -321,47 +290,4 @@ describe('SnapAnalysisService', () => {
     });
   });
 
-  it('flags only: no outline is written', async () => {
-    const fake = new FakeHandle();
-    const { server } = fakeServer(fake);
-    const res = await new SnapAnalysisService(server, new SnapFlagRanker()).run({
-      segments: segments(), categories: CATEGORIES, chapters: false, flags: true,
-    });
-    expect(fake.generates).toBe(0);
-    expect(res.chapters).toBeNull();
-    expect(res.flags!.spans.length).toBe(1);
-  });
-
-  it("flags only on one chapter three hours in: its units only, on the video's real timeline, budget for its own length", async () => {
-    const fake = new FakeHandle();
-    const { server, leases } = fakeServer(fake);
-    const late = segments().map((s) => ({ ...s, start: s.start + 3 * 3600, end: s.end + 3 * 3600 }));
-    const res = await new SnapAnalysisService(server, new SnapFlagRanker()).run({
-      segments: late, categories: CATEGORIES, chapters: false, flags: true,
-    });
-    expect(leases()).toBe(1);
-    expect(fake.generates).toBe(0);
-    expect(res.transcript!.units[0].start).toBe(3 * 3600);
-    // Every time is inside the chapter's own stretch (3 h to 3 h + 60 s), never from zero.
-    const span = res.flags!.spans[0];
-    expect(span.start).toBeGreaterThanOrEqual(3 * 3600);
-    expect(span.end).toBeLessThanOrEqual(3 * 3600 + 60);
-    const window = [...res.flags!.windows, ...res.flags!.overflow][0];
-    const fired = res.transcript!.sentences.slice(window.firedFrom, window.firedTo + 1).map((x) => x.text).join(' ');
-    expect(fired).toContain('communists');
-    expect(res.transcript!.sentences[window.firedFrom].start).toBeGreaterThanOrEqual(3 * 3600);
-    // A minute of transcript is a minute's budget (the floor), not three hours' worth.
-    expect(res.flags!.stats.verifyBudget).toBe(20);
-  });
-
-  it('chapters only: no flag question is asked', async () => {
-    const fake = new FakeHandle();
-    const { server } = fakeServer(fake);
-    const res = await new SnapAnalysisService(server, new SnapFlagRanker()).run({
-      segments: segments(), categories: CATEGORIES, chapters: true, flags: false, chapterOptions: { switchCost: 2 },
-    });
-    expect(res.flags).toBeNull();
-    expect(res.chapters!.chapters.map((c) => c.title)).toEqual(['Cooking pasta', 'Travel plans']);
-    expect(fake.decides.every((r) => r.questions.every((q) => !q.name.startsWith('g:')))).toBe(true);
-  });
 });

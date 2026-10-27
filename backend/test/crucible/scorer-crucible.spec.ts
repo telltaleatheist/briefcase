@@ -5,7 +5,7 @@
  * that the transport swap moved no logic — the chapter and flag pipelines send
  * the same questions over the wire they hand the seam — and the transport's
  * own duties: report mode with Briefcase's floor applied client-side, the
- * label-mass gate, one lease across a whole chapters + flags pass, a park on a
+ * label-mass gate, one lease across a whole chapter pass, a park on a
  * busy card inside a queue run, cancel mid-pass, decide_not_served and every
  * other "can't" failing BY NAME with no fallback, and 26 options.
  */
@@ -21,7 +21,6 @@ import type { SentenceUnit } from '../../src/scorer/chapters/units';
 import * as crucibleDecide from '../../src/scorer/crucible-decide';
 import { DECIDE_TOP_K_MARGIN, LABEL_MASS_GATE, floorAnswer, toWireRequest } from '../../src/scorer/crucible-decide';
 import { COUNT_PIECE_CHARS, CrucibleScorerService, SCORER_LOAD_CONTEXT, countPieces, pickDecideModel } from '../../src/scorer/crucible-scorer.service';
-import { SnapFlagRanker } from '../../src/scorer/flags/snap-flag-ranker.service';
 import { SnapAnalysisService, SnapEngineError } from '../../src/scorer/snap-analysis.service';
 import type { ScorerHandle } from '../../src/scorer/scorer-handle';
 import { ScorerError, type ChoiceAnswer, type DecideRequest, type DecideResponse, type ScorerQuestion } from '../../src/scorer/scorer.types';
@@ -316,26 +315,23 @@ describe('the transport swap moves no logic', () => {
 
 describe('one lease across the pass, and every "can\'t" by name', () => {
   function snap(scorer: CrucibleScorerService) {
-    return { service: new SnapAnalysisService(scorer, new SnapFlagRanker()) };
+    return { service: new SnapAnalysisService(scorer) };
   }
   const segments = () => unitsOf(VIDEO).map((u) => ({ start: u.start, end: u.end, text: u.text }));
-  const CATEGORIES = [{ name: 'political-demonization' }, { name: 'conspiracy' }];
 
-  it('chapters + flags hold ONE session with the 9B, loaded at the scorer\'s window, closed at the end; every decide rides it', async () => {
+  it('the chapter pass holds ONE session with the 9B, loaded at the scorer\'s window, closed at the end; every decide rides it', async () => {
     const { fake, scorer } = await started();
     const underLease: boolean[] = [];
     fake.setDecideProbs((q) => (underLease.push(fake.openSession() !== null && fake.resident() === 'qwen3.5-9b'), rawProbs(q)));
     const { service } = snap(scorer);
     const asked = jest.spyOn(crucibleDecide, 'toWireRequest');
-    const res = await service.run({ segments: segments(), categories: CATEGORIES, chapters: true, flags: true });
-    // Flags as well as chapters: every question the pipelines asked crossed verbatim.
+    const res = await service.run({ segments: segments() });
+    // Every question the pipeline asked crossed verbatim.
     const bodies = fake.decideBodies();
     expect(asked.mock.calls).toHaveLength(bodies.length);
     bodies.forEach((b, i) => expect(wireContent(b)).toEqual(seamContent(asked.mock.calls[i][1])));
-    expect(bodies.some((b) => Object.keys(b['questions'] as object).some((n) => n.startsWith('g:')))).toBe(true);
     asked.mockRestore();
     expect(res.chapters?.chapters.length).toBeGreaterThan(1);
-    expect(res.flags).not.toBeNull();
     expect(res.model).toBe('qwen3.5-9b');
     expect(fake.jobs.filter((j) => j.type === 'load-model').map((j) => [j.model, j.params['context']])).toEqual([['qwen3.5-9b', SCORER_LOAD_CONTEXT]]);
     expect(fake.sessions.opened).toHaveLength(1);
@@ -348,7 +344,7 @@ describe('one lease across the pass, and every "can\'t" by name', () => {
     const { fake, chat, scorer } = await started();
     fake.inject({ queueLine: { positions: [1], then: { removed: 'expired' } } });
     const { service } = snap(scorer);
-    const err = await chat.withRun(() => service.run({ segments: segments(), categories: CATEGORIES, chapters: true, flags: true }), { parkOnBusy: true })
+    const err = await chat.withRun(() => service.run({ segments: segments() }), { parkOnBusy: true })
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(CrucibleParkedError);
     expect(fake.decideBodies()).toHaveLength(0);
@@ -365,7 +361,7 @@ describe('one lease across the pass, and every "can\'t" by name', () => {
     let parked: unknown = null;
     const err = await chat.withRun(async () => {
       try {
-        return await service.run({ segments: segments(), categories: CATEGORIES, chapters: true, flags: false });
+        return await service.run({ segments: segments() });
       } finally {
         parked = chat.parkedInRun();
       }
@@ -388,7 +384,7 @@ describe('one lease across the pass, and every "can\'t" by name', () => {
     });
     const { service } = snap(scorer);
     const t = Date.now();
-    const err = await service.run({ segments: segments(), categories: CATEGORIES, chapters: true, flags: true, signal: controller.signal }).catch((e: unknown) => e);
+    const err = await service.run({ segments: segments(), signal: controller.signal }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(AnalysisCancelledError);
     expect(Date.now() - t).toBeLessThan(3_000);
     expect(fake.sessions.opened).toHaveLength(1);
@@ -398,7 +394,7 @@ describe('one lease across the pass, and every "can\'t" by name', () => {
   it('decide_not_served (more options than the engine\'s cap) fails the stage BY NAME: there is no other engine', async () => {
     const { scorer } = await started({ decideMaxOptions: 2 });
     const { service } = snap(scorer);
-    const err = await service.run({ segments: segments(), categories: CATEGORIES, chapters: true, flags: true }).catch((e: unknown) => e);
+    const err = await service.run({ segments: segments() }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(SnapEngineError);
     expect((err as Error).message).toMatch(/decide_not_served/);
   });
@@ -411,7 +407,7 @@ describe('one lease across the pass, and every "can\'t" by name', () => {
     ] as FakeCrucibleOptions[]) {
       const { fake, scorer } = await started(options);
       const { service } = snap(scorer);
-      const err = await service.run({ segments: segments(), categories: CATEGORIES, chapters: true, flags: true }).catch((e: unknown) => e);
+      const err = await service.run({ segments: segments() }).catch((e: unknown) => e);
       expect(err).toBeInstanceOf(SnapEngineError);
       expect((err as Error).message).toMatch(/Download it|does not serve decisions|1\.0\.24 or newer/);
       expect(fake.jobs).toHaveLength(0);
