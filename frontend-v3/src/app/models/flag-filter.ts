@@ -53,6 +53,11 @@
  * the verifier's reason, so ALL shows them all. A saved 'review' reads as
  * CONFIRMED.)
  *
+ * FLAGS FROM THE HIGHLIGHTS FINDER (2026-10-26, ranker 'highlights-v1') are
+ * all 'flag' rows with no score: the model marks only the moments worth a
+ * clip, and there is no verifier and so no rejections. They show at both
+ * positions; the rejections ALL adds exist only on videos analysed before.
+ *
  * LEGACY AND DISCOVERY ROWS ALWAYS PASS. A row written before verdicts were
  * stored, or by the discovery fallback path (which has no per-candidate score
  * and produces no rejected candidates), carries a null verdict and a null score.
@@ -71,8 +76,8 @@ export const FLAG_FILTER_LABEL: Record<FlagFilter, string> = {
 };
 
 export const FLAG_FILTER_DESCRIPTION: Record<FlagFilter, string> = {
-  confirmed: 'Everything the verifier confirmed as asserted by the speaker, with its reason.',
-  all: 'Every passage the analysis flagged, including what the verifier rejected.',
+  confirmed: 'Every flag the analysis found, with why (on older analyses, what their verifier confirmed).',
+  all: 'Every flag, plus what an older analysis\'s verifier rejected (shown faded).',
 };
 
 /**

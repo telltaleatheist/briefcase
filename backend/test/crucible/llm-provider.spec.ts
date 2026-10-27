@@ -276,8 +276,9 @@ describe('a whole analysis through Crucible', () => {
     const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(function (this: unknown, message: unknown) { warned.push(String(message)); });
     try {
       const service = analysis();
-      await service.analyzeTranscript({ ...options('qwen3:14b'), provider: 'ollama' as never });
-      await service.analyzeTranscript({ ...options('qwen3:14b'), provider: 'ollama' as never });
+      // Chapters and metadata: the flag stage's prompt alone is more than a 4K window holds (it refuses by name).
+      await service.analyzeTranscript({ ...options('qwen3:14b'), provider: 'ollama' as never, parts: ['chapters', 'metadata'] });
+      await service.analyzeTranscript({ ...options('qwen3:14b'), provider: 'ollama' as never, parts: ['chapters', 'metadata'] });
     } finally {
       spy.mockRestore();
       warnSpy.mockRestore();

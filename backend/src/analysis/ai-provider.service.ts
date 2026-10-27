@@ -7,7 +7,7 @@ import {
   stripThinkTags,
 } from './model-utils';
 import { AnalysisCancelledError, ensureNotCancelled } from './cancellation';
-import { CrucibleChatService, OLLAMA_CONTEXT_VERSION, type CrucibleChatResult } from '../crucible/llm/crucible-chat.service';
+import { CrucibleChatService, isToolsRefusal, OLLAMA_CONTEXT_VERSION, type CrucibleChatResult } from '../crucible/llm/crucible-chat.service';
 import { CrucibleUnreachable } from '@crucible/client';
 import { CrucibleFieldMissing } from '../crucible/errors';
 import { CrucibleBusyError, CrucibleChatCancelled, CrucibleChatError, CrucibleNoVenueError, CrucibleParkedError } from '../crucible/llm/errors';
@@ -15,6 +15,10 @@ import { crucibleUnavailableCause } from '../crucible/transport-failure';
 import { crucibleTargetOf, storedChoice, type CrucibleTarget } from '../crucible/llm/target';
 import { CRUCIBLE_ANALYSIS_CONTEXT } from '../crucible/llm/ollama-map';
 import { ClaudeCliError, ClaudeCliService, claudeCliModelOf } from '../claude-cli/claude-cli.service';
+import { CLOUD_CONTEXT_TOKENS, fitContext, type FittedContext } from '../crucible/llm/context-fit';
+import { claudeCliTransport, crucibleTransport } from '../video-chat/video-chat-transport';
+import { toolFormatFor, type ToolFormat } from '../video-chat/tool-format';
+import type { ChatTransport } from '../tool-harness';
 
 /**
  * A Crucible busy with someone else's work, OUTSIDE a queue-admitted run (the
@@ -286,6 +290,114 @@ export class AIProviderService {
     const outputCost = (outputTokens / 1_000_000) * pricing.output;
 
     return inputCost + outputCost;
+  }
+
+  /**
+   * The context a tool-using stage gets for calls that need `needed` tokens
+   * (crucible/llm/context-fit.ts, the Ask chat's sizing): a cloud model's or
+   * claude-cli's large window; an `ollama/` num_ctx; a local model's loaded or
+   * stated context, widened (a load at a bigger context, up to its maximum)
+   * when the calls need more. Call it inside the run the calls are made in.
+   */
+  async fitToolContext(config: AIProviderConfig, options: { promptChars: number; needed: number; reserveTokens: number; signal?: AbortSignal }): Promise<FittedContext> {
+    if (claudeCliModelOf(config.provider, config.model) !== null) return { tokens: CLOUD_CONTEXT_TOKENS };
+    let target: CrucibleTarget;
+    try {
+      const stored = storedChoice(config);
+      target = crucibleTargetOf(stored.provider, stored.model);
+    } catch (error) {
+      throw new Error(`Crucible: ${(error as Error).message}`);
+    }
+    try {
+      return await fitContext(this.crucibleChat, target, { ...options, log: (message) => this.logger.log(message) });
+    } catch (error) {
+      if (options.signal?.aborted) throw new AnalysisCancelledError('Crucible request cancelled: job was cancelled');
+      throw this.crucibleFailure(error, null, 'sizing the flag stage');
+    }
+  }
+
+  /**
+   * A tool-harness transport for a stage that uses tools (the flag stage's
+   * add_marker), and the tool-call format the model is given
+   * (video-chat/tool-format.ts): Claude's own for claude-cli, native tools on a
+   * Crucible that takes them (2.0.30+), plain tags otherwise. Failures come
+   * out as analysis sees them: a cancel as AnalysisCancelledError, a busy or
+   * silent Crucible inside a queue run as a park; a refusal of native tools as
+   * it is (the caller answers with tags instead). Each call's tokens go to
+   * `onTokens`.
+   */
+  async toolChat(
+    config: AIProviderConfig,
+    options: {
+      /** Local models only: the reply's ceiling, thinking, and the context to load at. */
+      maxTokens?: number;
+      thinking?: boolean;
+      loadContext?: number;
+      /** `ollama/` only: num_ctx. */
+      contextTokens?: number;
+      temperature?: number;
+      signal?: AbortSignal;
+      onTokens?: (response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void;
+    },
+  ): Promise<{ transport: ChatTransport; format: ToolFormat }> {
+    const cliModel = claudeCliModelOf(config.provider, config.model);
+    const signal = options.signal;
+    if (cliModel !== null) {
+      const inner = claudeCliTransport(this.claudeCli, cliModel);
+      const transport: ChatTransport = async (messages, opts) => {
+        ensureNotCancelled(signal, 'a flag stage call');
+        try {
+          const reply = await inner(messages, { ...opts, ...(signal === undefined ? {} : { signal }) });
+          const usage = reply.usage as { inputTokens?: number; outputTokens?: number } | null | undefined;
+          options.onTokens?.({ inputTokens: usage?.inputTokens ?? 0, outputTokens: usage?.outputTokens ?? 0 });
+          return reply;
+        } catch (error) {
+          if (signal?.aborted || (error instanceof ClaudeCliError && error.code === 'cancelled')) {
+            throw new AnalysisCancelledError('Claude Code request cancelled: job was cancelled');
+          }
+          throw error;
+        }
+      };
+      return { transport, format: toolFormatFor({ claudeCli: true, nativeTools: false }) };
+    }
+    let target: CrucibleTarget;
+    let stored: AIProviderConfig;
+    try {
+      stored = storedChoice(config);
+      target = crucibleTargetOf(stored.provider, stored.model);
+    } catch (error) {
+      throw new Error(`Crucible: ${(error as Error).message}`);
+    }
+    let nativeTools: boolean;
+    try {
+      nativeTools = await this.crucibleChat.nativeToolsFor(target, undefined, signal);
+    } catch (error) {
+      if (signal?.aborted) throw new AnalysisCancelledError('Crucible request cancelled: job was cancelled');
+      throw this.crucibleFailure(error, null, 'the flag stage');
+    }
+    const inner = crucibleTransport(this.crucibleChat, {
+      provider: stored.provider,
+      model: stored.model,
+      ...(options.contextTokens === undefined ? {} : { contextTokens: options.contextTokens }),
+      ...(options.loadContext === undefined ? {} : { loadContext: options.loadContext }),
+      ...(options.maxTokens === undefined ? {} : { maxTokens: options.maxTokens }),
+      ...(options.thinking === undefined ? {} : { thinking: options.thinking }),
+      ...(options.temperature === undefined ? {} : { temperature: options.temperature }),
+    });
+    const transport: ChatTransport = async (messages, opts) => {
+      ensureNotCancelled(signal, 'a flag stage call');
+      try {
+        const reply = await inner(messages, { ...opts, ...(signal === undefined ? {} : { signal }) });
+        const usage = reply.usage as { promptTokens?: number | null; completionTokens?: number | null } | null | undefined;
+        options.onTokens?.({ inputTokens: usage?.promptTokens ?? 0, outputTokens: usage?.completionTokens ?? 0 });
+        return reply;
+      } catch (error) {
+        if (signal?.aborted) throw new AnalysisCancelledError('Crucible request cancelled: job was cancelled');
+        if (isToolsRefusal(error)) throw error;
+        throw this.crucibleFailure(error, null, 'the flag stage');
+      }
+    };
+    return { transport, format: toolFormatFor({ claudeCli: false, nativeTools }) };
   }
 
   /**

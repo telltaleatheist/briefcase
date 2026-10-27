@@ -1,27 +1,23 @@
 /**
- * AI Analysis Service — the snap engine, then the LLM stages, all on Crucible.
+ * AI Analysis Service — the snap engine's chapters, then the LLM stages, all on
+ * Crucible (or the local Claude Code CLI, when the user picked it).
  *
  *   Scorer stage (SnapAnalysisService, Crucible's decision door): the whole
- *           video's chapters (outline + assignment + Viterbi + ad check), and
- *           the flag ranking when flags are found by the scorer, in one lease.
+ *           video's chapters (outline + assignment + Viterbi + ad check).
  *   Pass 2: each chapter's summary from the LLM (the outline gave its title).
  *   Stories: the outline's top level (stories.ts): one call on the `chapter`
  *           model groups the chapters, with their summaries, into stories.
  *           Under 10 minutes, or when it is one story, the outline stays flat.
- *   Flags:  the candidates are found by the flags model reading the transcript
- *           in ~8,000-character chunks (flag-generate.ts, the default), or by
- *           the scorer's decide ranking in the scorer stage ("How flags are
- *           found", app-config `flagFinder`).
- *   Pass 2b: each flag section checked by the LLM, which answers flag or skip
- *           with a written reason (the section's description).
+ *   Flags:  the clip-worthy moments, marked by the flags model with add_marker
+ *           one stretch of about 15 minutes per question (flag-highlights.ts).
  *
  * Metadata (description, tags, title) is generated from chapter summaries.
  *
  * A run makes the PARTS it is asked for (analysis-parts.ts: metadata, chapters,
  * flags; all three when unsaid) and only the stages they need: chapters alone
- * is the scorer's chapter pass + Pass 2; flags alone is the scorer's flag pass +
- * Pass 2b, over the whole video or one chapter's range; metadata alone is
- * written from the video's stored chapters (made first when it has none).
+ * is the scorer's chapter pass + Pass 2; flags alone is the flag stage, over
+ * the whole video or one chapter's range; metadata alone is written from the
+ * video's stored chapters (made first when it has none).
  *
  * A video with no speech (speech-presence.ts) makes no model calls: each part
  * it makes stores the no-speech placeholder (noSpeechResult).
@@ -54,6 +50,22 @@ import {
   windowsFromPassages,
 } from './flag-generate';
 import { chunkWords, matchPassage } from './passage-anchor';
+import {
+  enabledCategories,
+  findHighlights,
+  HIGHLIGHT_MAX_OUTPUT_TOKENS,
+  HIGHLIGHT_REPLY_RESERVE_TOKENS,
+  highlightReason,
+  highlightsSystemPrompt,
+  highlightToolDefinition,
+  HIGHLIGHTS_RANKER,
+  planTranscript,
+  wholeTranscriptTokens,
+} from './flag-highlights';
+import { claudeCodec, tagCodec, ToolLoopAborted } from '../tool-harness';
+import { codecFor } from '../video-chat/tool-format';
+import { isToolsRefusal } from '../crucible/llm/crucible-chat.service';
+import { AnalysisCancelledError } from './cancellation';
 import { buildFlagPlan } from '../scorer/flags/flag-options';
 import { safeJsonParse } from './json-utils';
 import { DatabaseService } from '../database/database.service';
@@ -81,7 +93,7 @@ import {
   AnalysisRange,
   analysisProgressBands,
   describeParts,
-  GENERATE_FLAGS_STAGE_WEIGHT,
+  FLAGS_STAGE_WEIGHT,
   formatHms,
   partsToMake,
   resolveAnalysisParts,
@@ -121,6 +133,8 @@ export interface Quote {
 
 export interface AnalyzedSection {
   category: string;
+  /** The flag's own name ("Calls Democrats demonic"), stored as the row's title. Absent: the category is the title (rows from before the highlights finder). */
+  title?: string;
   description: string;
   start_time: string;
   end_time: string | null;
@@ -160,7 +174,7 @@ export interface AnalyzedSection {
 }
 
 /** The rankers a flag row can name (see AnalyzedSection.ranker). */
-export type FlagRanker = 'nli' | 'snap-v1' | typeof GENERATE_RANKER;
+export type FlagRanker = 'nli' | 'snap-v1' | typeof GENERATE_RANKER | typeof HIGHLIGHTS_RANKER;
 
 export interface Chapter {
   sequence: number;
@@ -949,10 +963,9 @@ export class AIAnalysisService {
       const makeChapters = made.includes('chapters');
       const makeFlags = made.includes('flags');
       const makeMetadata = made.includes('metadata');
-      // How flags are found: the flags model reading the transcript, or the
-      // scorer's ranking (Settings › AI Analysis). Only the second takes the scorer.
-      const flagFinder: FlagFinder | null = makeFlags ? this.loadFlagFinder() : null;
-      const flagsOnScorer = flagFinder === 'snap';
+      // Flags are found by the flags model marking the clip-worthy moments
+      // (flag-highlights.ts); the scorer makes chapters only.
+      const flagsOnScorer = false;
       // The outline's top level: a video of 10 minutes or more has its
       // chapters grouped into stories after Pass 2 (stories.ts); a shorter one
       // is one story, and its outline stays flat.
@@ -967,7 +980,7 @@ export class AIAnalysisService {
           flags: makeFlags,
           metadata: makeMetadata,
         },
-        flagFinder === 'generate' ? { flags: GENERATE_FLAGS_STAGE_WEIGHT } : {},
+        { flags: FLAGS_STAGE_WEIGHT },
       );
       const runNotes: string[] = [];
       if (chaptersFirst) {
@@ -976,7 +989,7 @@ export class AIAnalysisService {
       this.logger.log(
         `[Analysis] Making ${describeParts(made)}` +
           (range ? ` inside ${formatHms(range.start)}-${formatHms(range.end)} (${segments.length} segments)` : '') +
-          (flagFinder ? ` (flags found by ${flagFinder === 'generate' ? 'the model reading the transcript' : 'the scorer'})` : '') +
+          (makeFlags ? ' (flags: the clip-worthy moments, marked by the flags model)' : '') +
           (makeMetadata && !makeChapters ? ` from the ${storedChapters.length} stored chapters` : '') +
           (chaptersFirst ? ' (chapters first: the video has none to write metadata from)' : ''),
       );
@@ -1035,9 +1048,10 @@ export class AIAnalysisService {
         return tag !== null && !crucibleStandIn.get(tag);
       };
       const crucibleOllamaSized = new Map<string, boolean>();
+      // The flag stage sizes itself (fitToolContext: the whole transcript when
+      // it fits, else one stretch per question), so only chapters are sized here.
       const rawTranscriptTasks: AITaskKind[] = [
         ...(makeChapters ? (['chapter'] as const) : []),
-        ...(makeFlags ? (['flags'] as const) : []),
       ];
       {
         // Only the stages this run makes are sized: a metadata-only run reads no raw transcript.
@@ -1286,9 +1300,9 @@ export class AIAnalysisService {
       }
 
       // =========================================================================
-      // PASS 2b: flag verification, as its own phase, after every chapter, so
-      // each model loads once even when 'flags' is routed to a different model
-      // than 'chapter'.
+      // FLAGS: the clip-worthy moments, marked by the flags model one stretch
+      // at a time (flag-highlights.ts), as its own phase after every chapter,
+      // so each model loads once even when 'flags' is routed to another model.
       // =========================================================================
       let flags: AnalyzedSection[] = [];
       const flagWarnings: string[] = [];
@@ -1297,88 +1311,27 @@ export class AIAnalysisService {
         const flagConfig = this.resolveTaskConfig(aiConfig, 'flags', taskModels);
         // The flag stage is the expensive one: never entered on a cancelled run.
         ensureNotCancelled(signal, 'the flag stage');
-
-        // The candidates the verifier checks: the snap ranker's windows (ranked
-        // before any LLM stage ran), or the passages the flags model marks
-        // reading the transcript, here, in the first part of the flag band.
-        let candidates: FlagCandidates;
-        let checkBand: [number, number] = flagBand;
-        if (flagFinder === 'generate') {
-          const readEnd = Math.round(flagBand[0] + GENERATE_READ_SHARE * (flagBand[1] - flagBand[0]));
-          const readBand: [number, number] = [flagBand[0], readEnd];
-          checkBand = [readEnd, flagBand[1]];
-          // A flags model with a smaller context than a chunk reads smaller chunks.
-          const flagsLimit = perTaskLimits.find((x) => x.task === 'flags')!.limits.maxChapterChars;
-          const found = await this.runGenerateFlagStage(
-            flagConfig,
-            segments,
-            categories || [],
-            Math.min(GENERATE_CHUNK_CHARS, flagsLimit),
-            trackTokens,
-            (current, total) => {
-              if (total !== flagReadCallCount) {
-                flagReadCallCount = total;
-                recomputeTotalApiCalls();
-              }
-              completedApiCalls = chapterCallCount + current - 1;
-              lastProgress = bandProgress(readBand, current - 1, total);
-              sendProgress('analysis', lastProgress, `Reading for flags: chunk ${current}/${total}...`);
-            },
-            signal,
-          );
-          flagWarnings.push(...found.warnings);
-          candidates = { windows: found.windows, ranker: GENERATE_RANKER, summary: found.summary };
-        } else {
-          candidates = {
-            windows: [...flagRanking!.windows, ...flagRanking!.overflow],
-            ranker: 'snap-v1',
-            summary:
-              `snap scorer ranking of ${flagRanking!.stats.units} units, ${flagRanking!.stats.spans} spans, ` +
-              `verify budget ${flagRanking!.stats.verifyBudget}`,
-          };
-        }
-
-        const stage = await this.runRankedFlagStage(
+        lastProgress = flagBand[0];
+        sendProgress('analysis', lastProgress, 'Finding the clip-worthy moments...');
+        const stage = await this.runHighlightsFlagStage(
           flagConfig,
           segments,
-          recordFailure,
+          categories || [],
+          videoTitle,
           trackTokens,
           (current, total) => {
-            if (total !== flagCallCount) {
-              flagCallCount = total;
+            if (total !== flagReadCallCount) {
+              flagReadCallCount = total;
               recomputeTotalApiCalls();
             }
-            completedApiCalls = chapterCallCount + flagReadCallCount + current;
-            lastProgress = bandProgress(checkBand, current, total);
-            sendProgress('analysis', lastProgress, `Verifying flag candidates ${current}/${total}...`);
-          },
-          // A message at the CURRENT percentage, not counted in totalApiCalls.
-          (message) => {
-            // The candidates are known by now, at the START of the check band:
-            // no verification has happened yet, and the check count is about
-            // to become known.
-            lastProgress = checkBand[0];
-            sendProgress('analysis', lastProgress, message);
+            completedApiCalls = chapterCallCount + current - 1;
+            lastProgress = bandProgress(flagBand, current - 1, total);
+            sendProgress('analysis', lastProgress, `Finding flags: stretch ${current}/${total}...`);
           },
           signal,
-          candidates,
         );
         flags = stage.sections;
-        this.logger.log(
-          `[Pass 2b] ranked + verified (${candidates.summary}) — ` +
-            `${flags.length} sections (${flags.filter((r) => r.verdict === 'flag').length} flag, ` +
-            `${flags.filter((r) => r.verdict === 'skip').length} ghosted rejections, ` +
-            `${flags.filter((r) => r.verdict === 'candidate').length} unverified candidates)`,
-        );
-        // Every check failing is a broken stage. When flags are all this run
-        // makes, completing would replace the stored flags with nothing: fail
-        // with the real reason, and the previous flags stay.
-        if (!makeChapters && !makeMetadata && stage.checks > 0 && stage.unusable === stage.checks) {
-          throw new Error(
-            `no flag section could be checked — every verification call failed.` +
-              (lastFailureReason ? ` Last failure: ${lastFailureReason}` : ''),
-          );
-        }
+        flagWarnings.push(...stage.warnings);
       }
       lastProgress = bands.metadata?.[0] ?? lastProgress;
       if (makeChapters || makeFlags) {
@@ -1893,6 +1846,130 @@ export class AIAnalysisService {
         ].join('\u0000'),
       )
       .digest('hex');
+  }
+
+  /**
+   * THE FLAG STAGE (flag-highlights.ts): the flags model marks the clip-worthy
+   * moments, one stretch of about 15 minutes per question, with add_marker in
+   * the tool-call format it was trained on (tool-format.ts). The whole
+   * transcript goes once in the system prompt when it fits the model's
+   * context (a local model is loaded big enough for it, up to its maximum:
+   * fitToolContext); otherwise each question carries its stretch with a
+   * minute of context on each side, in stretches cut smaller while they
+   * don't fit. Local models get a reply ceiling and thinking off.
+   *
+   * Each marker is one flag row: verdict 'flag' (shown at Confirmed), ranker
+   * 'highlights-v1', no score, its category, its title, and "title — why" as
+   * its reason. A stretch whose question fails is named in the job's
+   * warnings; all of them failing fails the analysis (the stored flags stay).
+   * A cancel or a park stops the run as it is; a Crucible that refuses
+   * native tools for the model is answered with tags instead.
+   */
+  private async runHighlightsFlagStage(
+    flagConfig: AIProviderConfig,
+    segments: Segment[],
+    categories: AnalysisCategory[],
+    videoTitle: string,
+    onTokens: ((response: { inputTokens?: number; outputTokens?: number; estimatedCost?: number }) => void) | undefined,
+    /** Called as stretch `current` (1-based) of `total` starts. */
+    onWindow: (current: number, total: number) => void,
+    signal: AbortSignal | undefined,
+  ): Promise<{ sections: AnalyzedSection[]; warnings: string[] }> {
+    const sentences = assembleSentences(segments);
+    const enabled = enabledCategories(categories);
+    const model = `${flagConfig.provider}:${flagConfig.model}`;
+    if (sentences.length === 0 || enabled.length === 0) {
+      this.logger.warn(
+        `[Flags] Nothing to look for flags in: ${sentences.length === 0 ? 'no sentences could be assembled from the transcript' : 'no category is enabled'}`,
+      );
+      return { sections: [], warnings: [] };
+    }
+
+    // Sizing: the system prompt without the transcript, plus the tools section
+    // a text format appends (Claude's, the longer of the two), plus the transcript.
+    const input = { sentences, categories: enabled, videoTitle };
+    const systemChars = highlightsSystemPrompt(input, 'window').length
+      + claudeCodec.toolsPrompt([{ ...highlightToolDefinition(enabled.map((c) => c.name.trim())), execute: async () => ({ content: '' }) }]).length;
+    const transcriptChars = sentences.reduce((sum, sentence) => sum + sentence.text.length + 1, 0);
+    const fitted = await this.aiProviderService.fitToolContext(flagConfig, {
+      promptChars: systemChars + transcriptChars,
+      needed: wholeTranscriptTokens(systemChars, sentences),
+      reserveTokens: HIGHLIGHT_REPLY_RESERVE_TOKENS,
+      ...(signal === undefined ? {} : { signal }),
+    });
+    const plan = planTranscript(sentences, systemChars, fitted.tokens);
+    if (plan === null) {
+      throw new Error(
+        `${model}'s context (${fitted.tokens.toLocaleString('en-US')} tokens) is too small to read even a 3-minute stretch of transcript for flags. Pick a model with a larger context for the flags.`,
+      );
+    }
+    this.logger.log(
+      `[Flags] Marking the clip-worthy moments on ${model}: ${sentences.length} sentences, ` +
+        (plan.mode === 'whole'
+          ? `the whole transcript in the system prompt (about ${plan.neededTokens.toLocaleString('en-US')} of ${fitted.tokens.toLocaleString('en-US')} tokens)`
+          : `each question carrying its stretch (the whole transcript needs more than ${fitted.tokens.toLocaleString('en-US')} tokens)`) +
+        `, stretches of up to ${Math.round(plan.windowSeconds / 60)} minutes; categories: ${enabled.map((c) => c.name).join(', ')}`,
+    );
+
+    const { transport, format } = await this.aiProviderService.toolChat(flagConfig, {
+      maxTokens: HIGHLIGHT_MAX_OUTPUT_TOKENS,
+      thinking: false,
+      ...(fitted.loadContext === undefined ? {} : { loadContext: fitted.loadContext }),
+      ...(fitted.contextTokens === undefined ? {} : { contextTokens: fitted.contextTokens }),
+      ...(signal === undefined ? {} : { signal }),
+      ...(onTokens === undefined ? {} : { onTokens }),
+    });
+    const startedAt = Date.now();
+    const run = (codec: ReturnType<typeof codecFor>) =>
+      findHighlights(
+        { ...input, plan },
+        {
+          transport,
+          codec,
+          ...(signal === undefined ? {} : { signal }),
+          stops: (error) => stopsTheRun(error) || isToolsRefusal(error),
+          onWindow,
+          log: (message) => this.logger.log(`[Flags] ${message}`),
+        },
+      );
+    let result: Awaited<ReturnType<typeof findHighlights>>;
+    try {
+      try {
+        result = await run(codecFor(format));
+      } catch (error) {
+        if (format !== 'native' || !isToolsRefusal(error)) throw error;
+        this.logger.log(`[Flags] ${model} takes no native tools; marking with tool tags`);
+        result = await run(tagCodec);
+      }
+    } catch (error) {
+      if (error instanceof ToolLoopAborted) throw new AnalysisCancelledError('The flag stage was cancelled: job was cancelled');
+      throw error;
+    }
+
+    const sections: AnalyzedSection[] = result.markers.map((marker) => {
+      const text = sentences.slice(marker.from, marker.to + 1).map((sentence) => sentence.text).join(' ');
+      return {
+        category: marker.category,
+        title: marker.title,
+        description: highlightReason(marker),
+        start_time: this.formatDisplayTime(marker.start),
+        end_time: this.formatDisplayTime(marker.end),
+        quotes: [{ timestamp: this.formatDisplayTime(marker.start), text }],
+        verdict: 'flag',
+        ranker: HIGHLIGHTS_RANKER,
+      };
+    });
+    const warnings: string[] = [];
+    if (result.failed.length > 0) {
+      warnings.push(
+        `Flags: ${result.failed.length} of ${result.windows} stretches of the transcript could not be read, so no flags were looked for in them: ${result.failed.join('; ')}`,
+      );
+    }
+    this.logger.log(
+      `[Flags] ${sections.length} flag(s) from ${result.windows} stretch(es) in ${((Date.now() - startedAt) / 1000).toFixed(1)}s on ${model} ` +
+        `(${format} tool calls, ${result.modelCalls} model call(s), ${result.notPlaced} call(s) not placed, ${result.failed.length} stretch(es) failed)`,
+    );
+    return { sections, warnings };
   }
 
   /**

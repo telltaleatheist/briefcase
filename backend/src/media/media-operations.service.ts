@@ -842,7 +842,7 @@ export class MediaOperationsService {
             startSeconds,
             endSeconds,
             timestampText: `${section.start_time}${section.end_time ? ' - ' + section.end_time : ''}`,
-            title: section.category,
+            title: section.title ?? section.category,
             description: section.description,
             category: section.category,
             source: 'ai',

@@ -66,15 +66,15 @@ import { HttpException, HttpStatus, Injectable, Logger, OnModuleDestroy } from '
 import { CrucibleUnreachable } from '@crucible/client';
 import { DatabaseService } from '../database/database.service';
 import { CrucibleReadinessService } from '../crucible/readiness.service';
-import { CrucibleChatService, isToolsRefusal, KeptRunReleased, OLLAMA_CONTEXT_VERSION, type KeptRun } from '../crucible/llm/crucible-chat.service';
+import { CrucibleChatService, isToolsRefusal, KeptRunReleased, type KeptRun } from '../crucible/llm/crucible-chat.service';
 import { CrucibleBusyError, CrucibleChatCancelled, CrucibleChatError, CrucibleNoVenueError } from '../crucible/llm/errors';
 import { CrucibleFieldMissing } from '../crucible/errors';
 import { crucibleUnavailableCause } from '../crucible/transport-failure';
 import { CrucibleTargetError, crucibleTargetOf, isCloudTarget, storedChoice, type CrucibleTarget } from '../crucible/llm/target';
-import { CRUCIBLE_OLLAMA_CONTEXT } from '../crucible/llm/ollama-map';
+import { chatLoadContext, CLOUD_CONTEXT_TOKENS, fitContext, type FittedContext } from '../crucible/llm/context-fit';
 import { WebSocketService } from '../common/websocket.service';
 import { assembleSentences } from '../analysis/flag-windows';
-import { estimateNumCtx, numCtxMaxForModel, parseProviderModel } from '../analysis/model-utils';
+import { parseProviderModel } from '../analysis/model-utils';
 import { formatHms } from '../analysis/analysis-parts';
 import { buildVideoChatSystemPrompt } from '../analysis/prompts/video-chat-prompts';
 import { parseSrtSegments } from '../search/transcript-moments';
@@ -100,8 +100,6 @@ const CHARS_PER_TOKEN = 3.5;
 /** Room kept for the model's reply, and for each tool round's reply and results. */
 const CHAT_OUTPUT_RESERVE_TOKENS = 4096;
 const CHAT_ROUND_RESERVE_TOKENS = 512;
-/** A cloud model's window, as the analysis takes it (claude/openai have large windows). */
-const CLOUD_CONTEXT_TOKENS = 128000;
 /** How long a cancel waits for its answer to settle (the question taken back, the run's session closed). */
 export const CHAT_CANCEL_SETTLE_MS = 10_000;
 /** How long Ask keeps its model loaded after an answer, for the next question. */
@@ -117,29 +115,11 @@ export class VideoChatError extends HttpException {
   }
 }
 
-/** The model's window for this answer, and what the calls are sent so it holds. */
-interface ChatWindow {
-  tokens: number;
-  /** `ollama/` upstream: the num_ctx to send. */
-  contextTokens?: number;
-  /** A local model: the context to load it at, at least. */
-  loadContext?: number;
-  /** A local model: the most it can be loaded at (max_context), when the server states it. */
-  maxTokens?: number;
-  /** What a refusal suggests instead, when not the usual (a cloud model, a new conversation). */
-  refusal?: string;
-}
+/** The model's window for this answer, and what the calls are sent so it holds (crucible/llm/context-fit.ts). */
+type ChatWindow = FittedContext;
 
-/**
- * The context a local model is loaded at for an answer that needs `needed`
- * tokens: room for follow-ups too (a quarter more, at least 8K), in steps of
- * 4096, never past `max`, so a conversation that grows a little is not a reload
- * per question.
- */
-export function chatLoadContext(needed: number, max: number): number {
-  const roomy = Math.max(Math.ceil(needed * 1.25), needed + 8192);
-  return Math.min(max, Math.ceil(roomy / 4096) * 4096);
-}
+/** The context a local model is loaded at for an answer (crucible/llm/context-fit.ts). */
+export { chatLoadContext };
 
 /** Where an answer runs: forwarded, in Ask's own (kept) run on a server, or inside the queue's session. */
 type Venue = { kind: 'upstream' } | { kind: 'own-run'; server: string; model: string } | { kind: 'queue-session'; server: string };
@@ -474,64 +454,19 @@ export class VideoChatService implements OnModuleDestroy {
   }
 
   /**
-   * The model's context for this answer, never a guess: a cloud model's large
-   * window; an `ollama/` upstream's num_ctx cap (Ollama's default on a
-   * Crucible older than 1.0.24, which forwards none); a local model's
-   * context as its session loaded it (a size ceiling), or as the server states
-   * it (its served context, or the host's ceiling it is then loaded at),
-   * widened when the answer needs more ({@link widened}). Called inside the
-   * answer's run, so a ceiling's session opens here.
+   * The model's context for this answer, never a guess (crucible/llm/context-fit.ts):
+   * widened when the answer needs more, except inside the queue's own session.
+   * Called inside the answer's run, so a ceiling's session opens here.
    */
   private async windowOf(target: CrucibleTarget, promptChars: number, needed: number, venue: Venue, signal: AbortSignal | undefined): Promise<ChatWindow> {
-    if (isCloudTarget(target)) return { tokens: CLOUD_CONTEXT_TOKENS };
-    const chosen = await this.chat.effectiveTarget(target, undefined, signal);
-    const model = chosen.target;
-    if (model.route === 'upstream') {
-      const server = await this.chat.venueFor(model);
-      if (!(await this.chat.serverAtLeast(server, OLLAMA_CONTEXT_VERSION))) return { tokens: CRUCIBLE_OLLAMA_CONTEXT };
-      const reserve = CHAT_OUTPUT_RESERVE_TOKENS + CHAT_MAX_TOOL_ROUNDS * CHAT_ROUND_RESERVE_TOKENS;
-      return { tokens: numCtxMaxForModel(model.bareModel), contextTokens: estimateNumCtx(promptChars, model.bareModel, reserve) };
-    }
-    const server = chosen.server ?? await this.chat.venueFor(model);
-    let loaded: ChatWindow;
-    if (chosen.context !== undefined) loaded = { tokens: chosen.context, loadContext: chosen.context };
-    else if (chosen.loadContext !== undefined) loaded = { tokens: chosen.loadContext, loadContext: chosen.loadContext };
-    else {
-      const stated = await this.chat.statedLocalContext(server, model.model);
-      if (stated === null || !(stated.tokens > 0)) {
-        if (!(await this.chat.modelsOn(server)).some((m) => m.id === model.model)) {
-          throw new CrucibleChatError(404, 'unknown_model', `"${model.model}" is not a model Crucible "${server}" knows. Pick one from its catalog.`, server);
-        }
-        throw new CrucibleFieldMissing(server, `a context for ${model.model} (maxModelLen / contextDefault on GET /v1/models, or its context_ceilings row on GET /v1/capability)`, 'fit the transcript to it');
-      }
-      loaded = { tokens: stated.tokens, ...(stated.loadAt === undefined ? {} : { loadContext: stated.loadAt }) };
-    }
-    return needed > loaded.tokens ? this.widened(loaded, server, model.model, needed, venue) : loaded;
-  }
-
-  /**
-   * A local model whose loaded (or default) context is under what the answer
-   * needs, sized up to it: the context it is resident at now when that holds
-   * the answer, else loaded at {@link chatLoadContext}, up to the model's
-   * maximum (max_context). The load is the run's (withModel → makeResident
-   * reloads a resident model that is too small; a size ceiling's pick too,
-   * over the context its session opened it at). Inside the queue's session the
-   * model is that run's, so it is never reloaded for an answer. A server that
-   * states no maximum leaves the window as it was (refused as too long).
-   */
-  private async widened(loaded: ChatWindow, server: string, model: string, needed: number, venue: Venue): Promise<ChatWindow> {
-    const max = await this.chat.maxLocalContext(server, model);
-    if (max === null) return loaded;
-    const info = (await this.chat.modelsOn(server, true)).find((m) => m.id === model);
-    const resident = info?.resident === true ? info.maxModelLen ?? 0 : 0;
-    if (resident >= needed) return { tokens: resident, loadContext: resident, maxTokens: max };
-    if (venue.kind === 'queue-session') {
-      return { ...loaded, refusal: `Briefcase's queue is using ${model} at that context right now; ask with a cloud model, or when that work is done.` };
-    }
-    if (needed > max) return { ...loaded, maxTokens: max };
-    const loadContext = chatLoadContext(needed, max);
-    this.logger.log(`[${server}] ${model}: the answer needs about ${needed} tokens, over the ${loaded.tokens} it loads at; loading it at ${loadContext} (its maximum is ${max})`);
-    return { tokens: loadContext, loadContext, maxTokens: max };
+    return fitContext(this.chat, target, {
+      promptChars,
+      needed,
+      reserveTokens: CHAT_OUTPUT_RESERVE_TOKENS + CHAT_MAX_TOOL_ROUNDS * CHAT_ROUND_RESERVE_TOKENS,
+      inQueueSession: venue.kind === 'queue-session',
+      ...(signal === undefined ? {} : { signal }),
+      log: (message) => this.logger.log(message),
+    });
   }
 
   /** A failure as the HTTP refusal the Ask tab reads: 409 Crucible, 422 the transcript, 503 not now, 502 the model. */

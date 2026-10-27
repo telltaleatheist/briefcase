@@ -6,16 +6,17 @@ import * as path from 'path';
 
 import { AIAnalysisService, AnalysisOptions } from './ai-analysis.service';
 import { AnalysisCancelledError, isCancellation } from './cancellation';
-import type { FlagWindow, WindowCategory } from './flag-windows';
 import { SnapEngineError, type SnapStageRequest, type SnapStageResult } from '../scorer/snap-analysis.service';
-import { CrucibleParkedError } from '../crucible/llm/errors';
+import { CrucibleChatError, CrucibleParkedError } from '../crucible/llm/errors';
+import type { ChatMessage, TransportReply } from '../tool-harness';
 
 /**
- * The snap engine wiring in AIAnalysisService.analyzeTranscript, end to end
- * with fakes: no model, no scorer, no network. Snap is the only engine (P7):
- * a stage it cannot make fails the analysis by name, a busy Crucible parks it,
- * and nothing falls back to another path. The config dir is a temp dir
- * (APPDATA), so the developer's real app-config is never read.
+ * The analysis pipeline in AIAnalysisService.analyzeTranscript, end to end
+ * with fakes: no model, no scorer, no network. The scorer makes the chapters
+ * (snap is their only engine: a stage it cannot make fails the analysis by
+ * name, a busy Crucible parks it); the flags are the clip-worthy moments the
+ * flags model marks with add_marker (flag-highlights.ts). The config dir is a
+ * temp dir (APPDATA), so the developer's real app-config is never read.
  */
 
 const LINES = [
@@ -30,27 +31,8 @@ const LINES = [
 ];
 const SEGMENTS = LINES.map((text, i) => ({ start: i * 10, end: i * 10 + 10, text }));
 
-function wcat(category: string, score: number, sentences: number[]): WindowCategory {
-  return {
-    category, proposition: `${category} proposition`, score, sentenceIndex: sentences[0], text: LINES[sentences[0]],
-    start: sentences[0] * 10, end: sentences[0] * 10 + 10, sentenceIndices: sentences, rescued: false,
-  };
-}
-
-function swin(from: number, to: number, spanIds: number[], cats: WindowCategory[]): FlagWindow {
-  return {
-    contextFrom: Math.max(0, from - 1), contextTo: Math.min(LINES.length - 1, to + 1), firedFrom: from, firedTo: to,
-    categories: cats, score: Math.max(...cats.map((c) => c.score)), spanIds, strength: -3, heat: 1,
-  } as FlagWindow;
-}
-
-/** Two chapters, and one long span verified as two sub-passages plus one over-budget window. */
+/** Two chapters from the scorer. */
 function snapResult(over: Partial<SnapStageResult> = {}): SnapStageResult {
-  const inBudget = [
-    swin(2, 3, [0], [wcat('political-demonization', 0.93, [2]), wcat('dehumanization', 0.9, [3])]),
-    swin(4, 5, [0], [wcat('political-demonization', 0.8, [4])]),
-  ];
-  const overflow = [swin(7, 7, [1], [wcat('conspiracy', 0.6, [7])])];
   return {
     transcript: null,
     model: 'fake-qwen',
@@ -66,32 +48,43 @@ function snapResult(over: Partial<SnapStageResult> = {}): SnapStageResult {
       seams: [],
       timings: { outlineMs: 0, assignMs: 0, adsMs: 0, totalMs: 0 },
     },
-    flags: {
-      windows: inBudget as any,
-      overflow: overflow as any,
-      spans: [],
-      ratingMap: {} as any,
-      plan: [],
-      notes: [],
-      stats: { units: 8, spans: 2, verifyBudget: 3 } as any,
-    },
+    flags: null,
     ...over,
-  };
+  } as SnapStageResult;
 }
+
+/** One add_marker call in Claude's format. */
+const invoke = (args: Record<string, string>) =>
+  `<function_calls>\n<invoke name="add_marker">\n${Object.entries(args).map(([k, v]) => `<parameter name="${k}">${v}</parameter>`).join('\n')}\n</invoke>\n</function_calls>`;
+
+/** The flags model's default answer: one moment (lines 2-5), then its closing line. */
+const MARK_RANT = invoke({
+  title: 'Calls opponents vermin', category: 'political-demonization', why: 'He calls them communists, vermin and traitors.',
+  first_words: 'Those people are communists and enemies', last_words: 'everything we love if we let them',
+});
 
 class Harness {
   generated: Array<{ prompt: string; task: string; overrides?: Record<string, unknown> }> = [];
   snapRuns: SnapStageRequest[] = [];
   /** Crucible runs (queue sessions) opened. */
   runsOpened = 0;
+  /** What the flag stage asked for: its context fit and its tool chat. */
+  fitted: Array<Record<string, unknown>> = [];
+  toolChats: Array<Record<string, unknown>> = [];
+  /** Every flag-stage call's messages. */
+  flagCalls: ChatMessage[][] = [];
   snapRun: (req: SnapStageRequest) => Promise<SnapStageResult> = async () => snapResult();
-  /** Replaceable: every LLM call's answer. */
-  answer: (prompt: string, task: string) => Promise<{ text: string; inputTokens: number; outputTokens: number; doneReason?: string }> = async (_prompt, task) => ({
-    text: task === 'flags'
-      ? '{"verdict":"flag","reason":"The speaker calls them communists and vermin as their own view."}'
-      : '{"title":"LLM title","summary":"A summary of it.","people":[],"topics":["cooking"],"hook":"A hook.","body":"A body."}',
+  /** Replaceable: every non-tool LLM call's answer. */
+  answer: (prompt: string, task: string) => Promise<{ text: string; inputTokens: number; outputTokens: number; doneReason?: string }> = async () => ({
+    text: '{"title":"LLM title","summary":"A summary of it.","people":[],"topics":["cooking"],"hook":"A hook.","body":"A body."}',
     inputTokens: 1, outputTokens: 1,
   });
+  /** Replaceable: the flags model's reply to a flag-stage call (n counts calls from 1). */
+  flagReply: (messages: ChatMessage[], n: number) => Promise<TransportReply> = async (messages) =>
+    ({ text: messages.length === 2 ? `<candidates>1. the rant</candidates>\n${MARK_RANT}` : 'Calls opponents vermin' });
+  /** The context the flag stage is told it has, and the tool format. */
+  context: Record<string, unknown> = { tokens: 128000 };
+  format: 'claude' | 'native' | 'tags' = 'claude';
 
   service(): AIAnalysisService {
     const provider = {
@@ -106,6 +99,21 @@ class Harness {
       crucibleOllamaStandInChoice: async () => null,
       crucibleOllamaTakesContext: async () => true,
       crucibleContextWindow: async () => 32768,
+      fitToolContext: async (_cfg: unknown, options: Record<string, unknown>) => {
+        this.fitted.push(options);
+        return this.context;
+      },
+      toolChat: async (_cfg: unknown, options: Record<string, unknown>) => {
+        this.toolChats.push(options);
+        const transport = async (messages: ChatMessage[]) => {
+          const signal = options['signal'] as AbortSignal | undefined;
+          if (signal?.aborted) throw new AnalysisCancelledError('cancelled');
+          this.flagCalls.push(messages);
+          this.generated.push({ prompt: messages[messages.length - 1].content, task: 'flags' });
+          return this.flagReply(messages, this.flagCalls.length);
+        };
+        return { transport, format: this.format };
+      },
     };
     const snap = {
       run: (req: SnapStageRequest) => {
@@ -128,11 +136,11 @@ function writeAppConfig(config: Record<string, unknown>): void {
 function options(): AnalysisOptions {
   return {
     provider: 'claude', model: 'claude-test', transcript: LINES.join(' '), segments: SEGMENTS,
-    outputFile: path.join(tmp, 'analysis.txt'), categories: [{ name: 'political-demonization' } as any],
+    outputFile: path.join(tmp, 'analysis.txt'), categories: [{ name: 'political-demonization', description: 'Calls opponents communists.' } as any],
   };
 }
 
-describe('AIAnalysisService: snap is the analysis engine', () => {
+describe('AIAnalysisService: chapters from the scorer, flags from the flags model', () => {
   beforeAll(() => {
     Logger.overrideLogger(false);
     jest_silence();
@@ -140,18 +148,16 @@ describe('AIAnalysisService: snap is the analysis engine', () => {
   beforeEach(() => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'engine-spec-'));
     process.env.APPDATA = tmp; // app-config reads land in the temp dir
-    // These cases are the scorer's flag path ("How flags are found": Scorer).
-    writeAppConfig({ flagFinder: 'snap' });
   });
   afterAll(() => {
     process.env = savedEnv;
   });
 
-  it('every section is checked (past the old budget too), each keeps its own row, and the reason is its description', async () => {
+  it('each marked moment is one flag row: its category, title and "title — why" reason, verdict flag, ranker highlights-v1, padded to a clip', async () => {
     const h = new Harness();
     const res = await h.service().analyzeTranscript(options());
     expect(h.snapRuns).toHaveLength(1);
-    expect(h.snapRuns[0]).toMatchObject({ chapters: true, flags: true });
+    expect(h.snapRuns[0]).toMatchObject({ chapters: true, flags: false });
     expect(h.snapRuns[0].signal).toBeDefined();
 
     // Chapters: the scorer's boundaries and outline labels; the LLM wrote only summaries.
@@ -160,46 +166,56 @@ describe('AIAnalysisService: snap is the analysis engine', () => {
       ['00:01:00', 'Summer travel', 'A summary of it.'],
     ]);
 
-    // One check per (section, category): 2 + 1 + 1, the overflow window included.
-    expect(h.generated.filter((g) => g.task === 'flags')).toHaveLength(4);
-    const flags = res.sections.filter((s) => s.verdict === 'flag');
-    expect(flags.map((s) => [s.start_time, s.end_time, s.category, s.ranker])).toEqual([
-      ['00:00:20', '00:00:40', 'political-demonization', 'snap-v1'],
-      ['00:00:40', '00:00:50', 'political-demonization', 'snap-v1'],
-      ['00:01:10', '00:01:20', 'conspiracy', 'snap-v1'],
-    ]);
-    expect(flags[0].description).toBe('The speaker calls them communists and vermin as their own view. [also: dehumanization]');
-    // The passage itself is still stored, as the quote.
-    expect(flags[0].quotes[0].text).toContain('communists');
-    expect(res.sections.some((s) => s.verdict === 'candidate')).toBe(false);
+    expect(res.sections).toEqual([{
+      category: 'political-demonization',
+      title: 'Calls opponents vermin',
+      description: 'Calls opponents vermin — He calls them communists, vermin and traitors.',
+      start_time: '00:00:20',
+      end_time: '00:01:00',
+      quotes: [{ timestamp: '00:00:20', text: LINES.slice(2, 6).join(' ') }],
+      verdict: 'flag',
+      ranker: 'highlights-v1',
+    }]);
+    expect(res.sections[0]).not.toHaveProperty('nli_score');
     expect(res.warnings).toBeUndefined();
+
+    // One question (the 80 s video is one stretch) and its closing reply, on the flags model's tool chat:
+    // the whole transcript in the system prompt, the stretch named in the question.
+    expect(h.flagCalls).toHaveLength(2);
+    expect(h.flagCalls[0][0].content).toContain(`TRANSCRIPT:\n${LINES.join('\n')}`);
+    expect(h.flagCalls[0][0].content).toContain('- political-demonization: Calls opponents communists.');
+    expect(h.flagCalls[0][1].content).toContain(`from the sentence "${LINES[0]}" to the sentence "${LINES[7]}"`);
+    // The report holds the flag.
+    expect(fs.readFileSync(path.join(tmp, 'analysis.txt'), 'utf8')).toContain('Calls opponents vermin');
   });
 
-  it('a rejection is stored with its reason (shown at All), and the .txt report holds findings only', async () => {
+  it('a local model: the stage asks for its context fit, then a reply ceiling, thinking off and the load context it was fitted at', async () => {
     const h = new Harness();
-    const svc = h.service();
-    const base = h.answer;
-    h.answer = async (prompt, task) =>
-      task === 'flags' && !prompt.includes('communists')
-        ? { text: '{"verdict":"skip","reason":"The speaker is describing a train delay, not asserting a plot."}', inputTokens: 1, outputTokens: 1 }
-        : base(prompt, task);
-    const res = await svc.analyzeTranscript(options());
-    const skips = res.sections.filter((s) => s.verdict === 'skip');
-    expect(skips.length).toBeGreaterThan(0);
-    expect(skips[0].description).toBe('The speaker is describing a train delay, not asserting a plot.');
-
-    const report = fs.readFileSync(path.join(tmp, 'analysis.txt'), 'utf8');
-    expect(report).toContain('communists'); // the accepted flag
-    expect(report).not.toContain('deep state'); // the rejection
+    h.context = { tokens: 65536, loadContext: 65536, maxTokens: 131072 };
+    await h.service().analyzeTranscript({ ...options(), provider: 'local', model: 'qwen3.5-9b', parts: ['flags'] });
+    expect(h.fitted).toHaveLength(1);
+    expect(h.fitted[0]['needed']).toBeGreaterThan(9000);
+    expect(h.toolChats[0]).toMatchObject({ maxTokens: 6144, thinking: false, loadContext: 65536 });
   });
 
-  it('a verdict with no reason (a prose answer) keeps the quote as the description', async () => {
+  it('a context too small for even a 3-minute stretch fails the flags by name', async () => {
     const h = new Harness();
-    const base = h.answer;
-    h.answer = async (prompt, task) => (task === 'flags' ? { text: '{"verdict":"flag"}', inputTokens: 1, outputTokens: 1 } : base(prompt, task));
-    const res = await h.service().analyzeTranscript(options());
-    const flag = res.sections.find((s) => s.verdict === 'flag' && s.category === 'conspiracy')!;
-    expect(flag.description).toBe('"The deep state rigged the train timetable, folks."');
+    h.context = { tokens: 4096 };
+    const err = await h.service().analyzeTranscript({ ...options(), parts: ['flags'] }).catch((e) => e);
+    expect((err as Error).message).toMatch(/context \(4,096 tokens\) is too small to read even a 3-minute stretch of transcript for flags/);
+    expect(h.flagCalls).toHaveLength(0);
+  });
+
+  it('a Crucible that refuses native tools for the model is answered with tool tags instead', async () => {
+    const h = new Harness();
+    h.format = 'native';
+    h.flagReply = async (messages, n) => {
+      if (n === 1) throw new CrucibleChatError(400, 'tools_unsupported', 'qwen-x declares no tool format');
+      return { text: messages.length === 2 ? `<tool_use>\n${JSON.stringify({ name: 'add_marker', arguments: { title: 'T', category: 'political-demonization', why: 'w', first_words: 'Those people are communists and enemies', last_words: 'traitor to this great nation' } })}\n</tool_use>` : 'T' };
+    };
+    const res = await h.service().analyzeTranscript({ ...options(), parts: ['flags'] });
+    expect(res.sections.map((s) => s.title)).toEqual(['T']);
+    expect(h.flagCalls[1][0].content).toContain('<tool_use>');
   });
 
   it('a stage the engine cannot make fails the analysis BY NAME: no other engine, no LLM call', async () => {
@@ -223,16 +239,14 @@ describe('AIAnalysisService: snap is the analysis engine', () => {
     expect(h.generated).toHaveLength(0);
   });
 
-  it('a park mid-verification stops the whole run (never a quietly degraded flag)', async () => {
+  it('a park while finding flags stops the whole run (never a quietly skipped stretch)', async () => {
     const h = new Harness();
-    const base = h.answer;
-    h.answer = async (prompt, task) => {
-      if (task === 'flags') throw new CrucibleParkedError('mac', "Crucible on mac isn't answering.");
-      return base(prompt, task);
+    h.flagReply = async () => {
+      throw new CrucibleParkedError('mac', "Crucible on mac isn't answering.");
     };
     const err = await h.service().analyzeTranscript({ ...options(), jobId: 'job-q' }).catch((e) => e);
     expect(err).toBeInstanceOf(CrucibleParkedError);
-    expect(h.generated.filter((g) => g.task === 'flags')).toHaveLength(1);
+    expect(h.flagCalls).toHaveLength(1);
     expect(h.generated.some((g) => g.task === 'tags' || g.task === 'description' || g.task === 'title')).toBe(false);
   });
 
@@ -250,9 +264,9 @@ describe('AIAnalysisService: snap is the analysis engine', () => {
 
   it('answers under the label-mass gate are counted and said on the job, never silent', async () => {
     const h = new Harness();
-    h.snapRun = async () => snapResult({ labelMassGated: { chapters: 2, flags: 3, refine: 0, total: 5 } });
+    h.snapRun = async () => snapResult({ labelMassGated: { chapters: 2, flags: 0, refine: 0, total: 2 } });
     const res = await h.service().analyzeTranscript(options());
-    expect(res.warnings).toEqual([expect.stringMatching(/^5 of the analysis engine's answers were read as no evidence/)]);
+    expect(res.warnings).toEqual([expect.stringMatching(/^2 of the analysis engine's answers were read as no evidence/)]);
   });
 
   it('sub-chapters that could not be refined keep the top-level chapters and say so', async () => {
@@ -275,11 +289,19 @@ describe('AIAnalysisService: snap is the analysis engine', () => {
   });
 
   it("a stored taskModels.boundary (the retired classic placement task) is read and ignored", async () => {
-    writeAppConfig({ flagFinder: 'snap', taskModels: { boundary: 'ollama:qwen3.5:4b' } });
+    writeAppConfig({ taskModels: { boundary: 'ollama:qwen3.5:4b' } });
     const h = new Harness();
     const res = await h.service().analyzeTranscript(options());
     expect(res.chapters).toHaveLength(2);
     expect(h.generated.some((g) => g.task === 'boundary')).toBe(false);
+  });
+
+  it('a stored flagFinder (the retired "How flags are found" setting) is ignored: the flags model marks the flags', async () => {
+    writeAppConfig({ flagFinder: 'snap' });
+    const h = new Harness();
+    const res = await h.service().analyzeTranscript(options());
+    expect(h.snapRuns[0]).toMatchObject({ flags: false });
+    expect(res.sections.map((s) => s.ranker)).toEqual(['highlights-v1']);
   });
 
   it('a cancel inside the scorer stage is a cancellation: no LLM call', async () => {
@@ -314,7 +336,6 @@ describe('AIAnalysisService: the parts a run makes', () => {
   beforeEach(() => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'engine-parts-spec-'));
     process.env.APPDATA = tmp;
-    writeAppConfig({ flagFinder: 'snap' });
   });
 
   const tasks = (h: Harness) => h.generated.map((g) => g.task);
@@ -325,19 +346,20 @@ describe('AIAnalysisService: the parts a run makes', () => {
     { sequence: 2, start_time: '00:01:00', end_time: '00:01:20', title: 'Stored travel', summary: 'Summer plans.' },
   ];
 
-  it('no parts named is all three, chapters and flags sharing one scorer lease', async () => {
+  it('no parts named is all three: the scorer for chapters only, the flags from the flags model', async () => {
     const h = new Harness();
     const res = await h.service().analyzeTranscript(options());
     expect(h.snapRuns).toHaveLength(1);
-    expect(h.snapRuns[0]).toMatchObject({ chapters: true, flags: true });
+    expect(h.snapRuns[0]).toMatchObject({ chapters: true, flags: false });
     expect(res.parts).toEqual(['chapters', 'flags', 'metadata']);
+    expect(res.sections).toHaveLength(1);
   });
 
-  it('chapters and flags together: one scorer run for both, no metadata', async () => {
+  it('chapters and flags together, no metadata', async () => {
     const h = new Harness();
     const res = await h.service().analyzeTranscript({ ...options(), parts: ['flags', 'chapters'] });
     expect(h.snapRuns).toHaveLength(1);
-    expect(h.snapRuns[0]).toMatchObject({ chapters: true, flags: true });
+    expect(h.snapRuns[0]).toMatchObject({ chapters: true, flags: false });
     expect(res.parts).toEqual(['chapters', 'flags']);
     expect(res.chapters).toHaveLength(2);
     expect(res.sections.length).toBeGreaterThan(0);
@@ -347,7 +369,6 @@ describe('AIAnalysisService: the parts a run makes', () => {
 
   it('chapters alone: only the chapter pass and the summaries', async () => {
     const h = new Harness();
-    h.snapRun = async () => snapResult({ flags: null });
     const res = await h.service().analyzeTranscript({ ...options(), parts: ['chapters'] });
     expect(h.snapRuns[0]).toMatchObject({ chapters: true, flags: false });
     expect(new Set(tasks(h))).toEqual(new Set(['chapter']));
@@ -355,17 +376,17 @@ describe('AIAnalysisService: the parts a run makes', () => {
     expect(res.chapters.map((c) => c.title)).toEqual(['Pasta day', 'Summer travel']);
     expect(res.sections).toEqual([]);
     expect(res.tags).toBeUndefined();
+    expect(h.toolChats).toHaveLength(0);
   });
 
-  it('flags alone: only the flag pass and the checks, no chapter or metadata call', async () => {
+  it('flags alone: no scorer, no chapter or metadata call; only the flags model', async () => {
     const h = new Harness();
-    h.snapRun = async () => snapResult({ chapters: null });
     const res = await h.service().analyzeTranscript({ ...options(), parts: ['flags'] });
-    expect(h.snapRuns[0]).toMatchObject({ chapters: false, flags: true });
+    expect(h.snapRuns).toHaveLength(0);
     expect(new Set(tasks(h))).toEqual(new Set(['flags']));
     expect(res.parts).toEqual(['flags']);
     expect(res.chapters).toEqual([]);
-    expect(res.sections.filter((s) => s.verdict === 'flag')).toHaveLength(3);
+    expect(res.sections.filter((s) => s.verdict === 'flag')).toHaveLength(1);
   });
 
   it("metadata alone is written from the video's stored chapters, with no scorer at all", async () => {
@@ -384,7 +405,6 @@ describe('AIAnalysisService: the parts a run makes', () => {
 
   it('metadata alone on a video with no chapters makes its chapters first, and the job says so', async () => {
     const h = new Harness();
-    h.snapRun = async () => snapResult({ flags: null });
     const res = await h.service().analyzeTranscript({ ...options(), parts: ['metadata'], existingChapters: [] });
     expect(h.snapRuns[0]).toMatchObject({ chapters: true, flags: false });
     expect(res.parts).toEqual(['chapters', 'metadata']);
@@ -393,37 +413,31 @@ describe('AIAnalysisService: the parts a run makes', () => {
     expect(res.warnings).toEqual(['Chapters were made first: metadata is written from chapter summaries, and this video had none.']);
   });
 
-  it('flags and metadata on stored chapters: the flag pass alone in the scorer, metadata from the stored chapters', async () => {
+  it('flags and metadata on stored chapters: no scorer, metadata from the stored chapters', async () => {
     const h = new Harness();
-    h.snapRun = async () => snapResult({ chapters: null });
     const res = await h.service().analyzeTranscript({ ...options(), parts: ['flags', 'metadata'], existingChapters: stored });
-    expect(h.snapRuns[0]).toMatchObject({ chapters: false, flags: true });
+    expect(h.snapRuns).toHaveLength(0);
     expect(tasks(h).includes('chapter')).toBe(false);
     expect(res.parts).toEqual(['flags', 'metadata']);
     expect(h.generated.find((g) => g.task === 'title')!.prompt).toContain('Stored travel');
   });
 
-  it("one chapter's flags: only its transcript is scored and checked, and every time is on the video's timeline", async () => {
+  it("one chapter's flags: only its transcript is read, and every time is on the video's timeline", async () => {
     const h = new Harness();
-    h.snapRun = async (req) => {
-      // The scorer sees lines 2-5 (20 s to 60 s); its sentence indices are into them.
-      expect(req.segments.map((s) => s.start)).toEqual([20, 30, 40, 50]);
-      const window = {
-        contextFrom: 0, contextTo: 3, firedFrom: 0, firedTo: 1,
-        categories: [{ ...wcat('political-demonization', 0.9, [0, 1]), start: 20, end: 40 }],
-        score: 0.9, spanIds: [0], strength: -3, heat: 1,
-      } as FlagWindow;
-      return snapResult({ chapters: null, flags: { ...snapResult().flags!, windows: [window] as any, overflow: [] } });
-    };
+    h.flagReply = async (messages) => ({
+      text: messages.length === 2
+        ? invoke({ title: 'Vermin', category: 'political-demonization', why: 'w', first_words: 'They are vermin and they should', last_words: 'all be thrown out' })
+        : 'Vermin',
+    });
     const res = await h.service().analyzeTranscript({ ...options(), parts: ['flags'], range: { start: 20, end: 60, label: 'Rant' } });
     expect(res.range).toEqual({ start: 20, end: 60, label: 'Rant' });
-    expect(res.sections.map((s) => [s.start_time, s.end_time, s.verdict])).toEqual([['00:00:20', '00:00:40', 'flag']]);
-    expect(res.sections[0].quotes[0].text).toBe(`${LINES[2]} ${LINES[3]}`);
-    // The checker read the chapter's passage, not the video's start.
-    const checked = h.generated.filter((g) => g.task === 'flags');
-    expect(checked).toHaveLength(1);
-    expect(checked[0].prompt).toContain('communists');
-    expect(checked[0].prompt).not.toContain('pasta day');
+    // Line 3 alone is 10 s: padded with whole sentences inside the range (two before for one after).
+    expect(res.sections.map((s) => [s.start_time, s.end_time, s.verdict])).toEqual([['00:00:20', '00:00:50', 'flag']]);
+    expect(res.sections[0].quotes[0].text).toBe(`${LINES[2]} ${LINES[3]} ${LINES[4]}`);
+    // The flags model read the chapter's transcript, not the video's start.
+    expect(h.flagCalls[0][0].content).toContain(LINES[2]);
+    expect(h.flagCalls[0][0].content).not.toContain(LINES[0]);
+    expect(h.flagCalls[0][0].content).not.toContain(LINES[6]);
   });
 
   it('a range that is not a flags-only run, or holds no transcript, fails by name', async () => {
@@ -435,14 +449,21 @@ describe('AIAnalysisService: the parts a run makes', () => {
     expect(h.snapRuns).toHaveLength(0);
   });
 
-  it('flags alone with every check failing fails (the stored flags stay), never an empty success', async () => {
+  it('flags alone with every stretch failing fails (the stored flags stay), never an empty success', async () => {
     const h = new Harness();
-    h.snapRun = async () => snapResult({ chapters: null });
-    h.answer = async () => {
-      throw new Error('Crucible http_500: the verifier fell over');
+    h.flagReply = async () => {
+      throw new Error('Crucible http_500: the flags model fell over');
     };
     const err = await h.service().analyzeTranscript({ ...options(), parts: ['flags'] }).catch((e) => e);
-    expect((err as Error).message).toMatch(/no flag section could be checked.*the verifier fell over/);
+    expect((err as Error).message).toMatch(/no stretch of the transcript could be asked about.*the flags model fell over/);
+  });
+
+  it('a stretch with nothing clip-worthy is no flags and no warning: an empty answer is an answer', async () => {
+    const h = new Harness();
+    h.flagReply = async () => ({ text: 'Nothing clip-worthy in this stretch.' });
+    const res = await h.service().analyzeTranscript({ ...options(), parts: ['flags'] });
+    expect(res.sections).toEqual([]);
+    expect(res.warnings).toBeUndefined();
   });
 
   it('metadata alone with neither tags nor description fails (the stored metadata stays)', async () => {
@@ -455,30 +476,26 @@ describe('AIAnalysisService: the parts a run makes', () => {
   });
 
   it('progress: a skipped stage takes no share, the bar only moves forward, and it ends at 100', async () => {
-    const run = async (extra: Partial<AnalysisOptions>, snap?: Partial<SnapStageResult>) => {
+    const run = async (extra: Partial<AnalysisOptions>) => {
       const h = new Harness();
       h.snapRun = async (req) => {
         req.onProgress?.({ stage: 'chapters', fraction: 0.5, message: 'half' });
         req.onProgress?.({ stage: 'done', fraction: 1, message: 'done' });
-        return snapResult(snap);
+        return snapResult();
       };
       const seen: number[] = [];
       await h.service().analyzeTranscript({ ...options(), ...extra, onProgress: (p) => seen.push(p.progress) });
       return seen;
     };
     for (const seen of [
-      await run({ parts: ['flags'] }, { chapters: null }),
-      await run({ parts: ['chapters'] }, { flags: null }),
+      await run({ parts: ['flags'] }),
+      await run({ parts: ['chapters'] }),
       await run({ parts: ['metadata'], existingChapters: stored }),
       await run({}),
     ]) {
       expect(seen[seen.length - 1]).toBe(100);
       for (let i = 1; i < seen.length; i++) expect(seen[i]).toBeGreaterThanOrEqual(seen[i - 1]);
     }
-    // Flags alone: the engine fills 3-84, the checks 84-98 (no chapter or metadata band).
-    const flags = await run({ parts: ['flags'] }, { chapters: null });
-    expect(flags).toContain(84);
-    expect(flags.filter((p) => p > 84 && p < 100).length).toBeGreaterThan(0);
     // Metadata alone starts at 3 and fills the bar.
     const metadata = await run({ parts: ['metadata'], existingChapters: stored });
     expect(metadata).toEqual([0, 3, 35, 66, 100]);
@@ -487,222 +504,13 @@ describe('AIAnalysisService: the parts a run makes', () => {
   it('a cancel during a flags-only run is a cancellation, with no metadata or chapter call after it', async () => {
     const h = new Harness();
     const svc = h.service();
-    h.snapRun = async () => snapResult({ chapters: null });
-    h.answer = async (_prompt, task) => {
+    h.flagReply = async () => {
       svc.cancelAnalysis('job-parts');
-      return { text: '{"verdict":"flag","reason":"r"}', inputTokens: 1, outputTokens: 1, task } as any;
+      return { text: MARK_RANT };
     };
     const err = await svc.analyzeTranscript({ ...options(), parts: ['flags'], jobId: 'job-parts' }).catch((e) => e);
     expect(isCancellation(err)).toBe(true);
     expect(tasks(h)).toEqual(['flags']);
-  });
-});
-
-describe('AIAnalysisService: the model reads the transcript for flags (the default)', () => {
-  beforeAll(() => {
-    Logger.overrideLogger(false);
-    jest_silence();
-  });
-  beforeEach(() => {
-    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'engine-generate-spec-'));
-    process.env.APPDATA = tmp; // no app-config: the default, generate
-  });
-
-  const isReading = (prompt: string) => prompt.startsWith('Read this part of a video transcript');
-  const reads = (h: Harness) => h.generated.filter((g) => g.task === 'flags' && isReading(g.prompt));
-  const checks = (h: Harness) => h.generated.filter((g) => g.task === 'flags' && !isReading(g.prompt));
-  const passages = (...items: Array<[string, string, string[]]>) =>
-    JSON.stringify({ passages: items.map(([first_words, last_words, categories]) => ({ first_words, last_words, categories })) });
-
-  /** The reading answer, and a verifier that flags everything. */
-  function generateHarness(reading: (prompt: string, n: number) => { text: string; doneReason?: string } | Promise<never>): Harness {
-    const h = new Harness();
-    const base = h.answer;
-    let n = 0;
-    h.answer = async (prompt, task) => {
-      if (task === 'flags' && isReading(prompt)) {
-        const r = await reading(prompt, ++n);
-        return { inputTokens: 1, outputTokens: 1, ...r };
-      }
-      return base(prompt, task);
-    };
-    h.snapRun = async () => snapResult({ flags: null });
-    return h;
-  }
-
-  it('reads the transcript on the flags model, finds each passage in it, checks it, and stores it as generate-v1 with its real times', async () => {
-    const h = generateHarness(() => ({
-      text: passages(
-        ['Those people are communists and enemies', 'traitor to this great nation', ['political-demonization']],
-        ['The deep state rigged the', 'train timetable folks', ['political-demonization']],
-      ),
-    }));
-    const res = await h.service().analyzeTranscript(options());
-
-    // The scorer still makes the chapters, and asks no flag question.
-    expect(h.snapRuns).toHaveLength(1);
-    expect(h.snapRuns[0]).toMatchObject({ chapters: true, flags: false });
-
-    // One reading call (the whole transcript fits one chunk), sentence per line, local-model settings.
-    expect(reads(h)).toHaveLength(1);
-    const read = reads(h)[0];
-    expect(read.prompt).toContain(`${LINES[2]}\n${LINES[3]}`);
-    expect(read.prompt).toContain('- political-demonization: Calls political opponents communists');
-    expect(read.overrides).toMatchObject({ temperature: 0, thinking: false, maxTokens: 4096 });
-    expect((read.overrides!.format as any).properties.passages.items.properties.categories.items.enum).toEqual(['political-demonization']);
-
-    // Two passages -> two windows -> one check each (the verifier prompt, unchanged).
-    expect(checks(h)).toHaveLength(2);
-    expect(checks(h)[0].prompt).toMatch(/^Transcript passage\./);
-    const flags = res.sections.filter((s) => s.verdict === 'flag');
-    expect(flags.map((s) => [s.start_time, s.end_time, s.category, s.ranker, s.nli_score])).toEqual([
-      ['00:00:20', '00:00:50', 'political-demonization', 'generate-v1', undefined],
-      ['00:01:10', '00:01:20', 'political-demonization', 'generate-v1', undefined],
-    ]);
-    expect(flags[0].quotes[0].text).toBe(LINES.slice(2, 5).join(' '));
-    expect('nli_score' in flags[0]).toBe(false);
-    expect(res.warnings).toBeUndefined();
-  });
-
-  it('a passage whose words are not in the transcript is dropped and counted, never guessed', async () => {
-    const h = generateHarness(() => ({
-      text: passages(
-        ['They are vermin and they', 'should all be thrown out', ['political-demonization']],
-        ['The moon landing was staged by', 'the government in a studio', ['political-demonization']],
-      ),
-    }));
-    const res = await h.service().analyzeTranscript({ ...options(), parts: ['flags'] });
-    expect(res.sections.map((s) => s.start_time)).toEqual(['00:00:30']);
-    expect(res.warnings).toEqual([
-      'Flags: 1 of the 2 passages the model marked could not be found in the transcript (their first or last words did not match) and were dropped.',
-    ]);
-  });
-
-  it('a cloud model gets no schema-bound answer: its prose-wrapped JSON is read all the same', async () => {
-    const h = generateHarness(() => ({
-      text: 'Sure! Here is what I found:\n```json\n' + passages(['The deep state rigged the train', 'timetable, folks.', ['Political demonization']]) + '\n```',
-    }));
-    const res = await h.service().analyzeTranscript({ ...options(), parts: ['flags'] });
-    expect(res.sections.map((s) => [s.start_time, s.category])).toEqual([['00:01:10', 'political-demonization']]);
-  });
-
-  /** 60 lines of ~150 characters: more than one 8,000-character chunk. */
-  const LONG = Array.from({ length: 120 }, (_u, i) => `Line ${i} is about the weather and the garden and nothing else at all, said slowly and at some length for the tape ${'z'.repeat(40)}.`);
-  const longOptions = (): AnalysisOptions => ({
-    ...options(),
-    parts: ['flags'],
-    segments: LONG.map((text, i) => ({ start: i * 10, end: i * 10 + 10, text })),
-    transcript: LONG.join(' '),
-  });
-
-  it('a long transcript is read chunk by chunk, one after another, and the bar says which chunk', async () => {
-    const h = generateHarness((prompt) => {
-      const first = /Line (\d+) is/.exec(prompt.split('TRANSCRIPT:\n')[1])![1];
-      return { text: passages([`Line ${first} is about the weather`, `Line ${first} is about the weather`, ['political-demonization']]) };
-    });
-    const messages: string[] = [];
-    const res = await h.service().analyzeTranscript({ ...longOptions(), onProgress: (p) => messages.push(p.message) });
-    const n = reads(h).length;
-    expect(n).toBeGreaterThan(1);
-    for (let k = 1; k <= n; k++) expect(messages).toContain(`Reading for flags: chunk ${k}/${n}...`);
-    // Chunks overlap by two lines and cut at lines.
-    const firstLines = reads(h).map((r) => Number(/Line (\d+) is/.exec(r.prompt.split('TRANSCRIPT:\n')[1])![1]));
-    const lastLines = reads(h).map((r) => Number([...r.prompt.matchAll(/Line (\d+) is/g)].at(-1)![1]));
-    for (let k = 1; k < n; k++) expect(firstLines[k]).toBe(lastLines[k - 1] - 1);
-    expect(res.sections.length).toBeGreaterThan(0);
-    expect(res.sections.every((s) => s.ranker === 'generate-v1')).toBe(true);
-  });
-
-  it('a chunk that fails, or comes back unreadable, is named in the warnings and not asked again; the rest stand', async () => {
-    const h = generateHarness((_prompt, n) => {
-      if (n === 1) throw new Error('Crucible http_500: the engine fell over');
-      if (n === 2) return { text: 'I am not able to help with that.' };
-      return { text: passages(['Line', 'Line', ['political-demonization']]) };
-    });
-    const res = await h.service().analyzeTranscript(longOptions());
-    const n = reads(h).length;
-    expect(n).toBeGreaterThan(2);
-    expect(res.warnings![0]).toMatch(
-      new RegExp(`^Flags: 2 of ${n} transcript chunks could not be read, so no flags were looked for in them: chunk 1 \\(00:00:00-00:\\d\\d:\\d\\d\\): Crucible http_500: the engine fell over; chunk 2 \\(.*\\): the answer held no passages that could be read$`),
-    );
-  });
-
-  it('a reply cut off at the token limit keeps its whole passages, and the job says which chunk was cut', async () => {
-    const h = generateHarness(() => ({
-      text: '{"passages":[{"first_words":"They are vermin and they","last_words":"thrown out","categories":["political-demonization"]},{"first_words":"Every one of',
-      doneReason: 'length',
-    }));
-    const res = await h.service().analyzeTranscript({ ...options(), parts: ['flags'] });
-    expect(res.sections.map((s) => s.start_time)).toEqual(['00:00:30']);
-    expect(res.warnings).toEqual([
-      "Flags: 1 of 1 transcript chunks reached the model's output limit (4096 tokens); passages after the cut were not read: chunk 1 (00:00:00-00:01:20)",
-    ]);
-  });
-
-  it('every chunk failing fails the analysis with the real error (the stored flags stay); no scorer is asked instead', async () => {
-    const h = generateHarness(() => {
-      throw new Error('Crucible http_500: out of memory');
-    });
-    const err = await h.service().analyzeTranscript({ ...options(), parts: ['flags'] }).catch((e) => e);
-    expect((err as Error).message).toMatch(/no part of the transcript could be read for flags — all 1 chunk\(s\) failed\. Last failure: chunk 1 .*out of memory/);
-    expect(h.snapRuns).toHaveLength(0);
-    expect(checks(h)).toHaveLength(0);
-  });
-
-  it('a cancel while reading stops at once: no further chunk, no check, a cancellation', async () => {
-    const h = new Harness();
-    const svc = h.service();
-    h.answer = async () => {
-      svc.cancelAnalysis('job-read');
-      return { text: passages(['Line 0 is about', 'Line 0 is about', ['political-demonization']]), inputTokens: 1, outputTokens: 1 };
-    };
-    const err = await svc.analyzeTranscript({ ...longOptions(), jobId: 'job-read' }).catch((e) => e);
-    expect(isCancellation(err)).toBe(true);
-    expect(reads(h)).toHaveLength(1);
-    expect(checks(h)).toHaveLength(0);
-  });
-
-  it('a park while reading is not a failed chunk: it stops the run and goes up as it is', async () => {
-    const h = generateHarness(() => {
-      throw new CrucibleParkedError('mac', "Crucible on mac isn't answering.");
-    });
-    const err = await h.service().analyzeTranscript({ ...options(), parts: ['flags'], jobId: 'job-park' }).catch((e) => e);
-    expect(err).toBeInstanceOf(CrucibleParkedError);
-  });
-
-  it("one chapter's range: only its transcript is read, and the flag stays on the video's timeline", async () => {
-    const h = generateHarness(() => ({ text: passages(['They are vermin', 'thrown out', ['political-demonization']]) }));
-    const res = await h.service().analyzeTranscript({ ...options(), parts: ['flags'], range: { start: 20, end: 60, label: 'Rant' } });
-    const transcript = reads(h)[0].prompt.split('TRANSCRIPT:\n')[1];
-    expect(transcript.split('\n')).toEqual(LINES.slice(2, 6));
-    expect(res.sections.map((s) => [s.start_time, s.end_time])).toEqual([['00:00:30', '00:00:40']]);
-    expect(res.range).toEqual({ start: 20, end: 60, label: 'Rant' });
-  });
-
-  it('the setting switches between the two: Scorer runs the decide ranking and no reading call', async () => {
-    fs.mkdirSync(path.join(tmp, 'briefcase'), { recursive: true });
-    fs.writeFileSync(path.join(tmp, 'briefcase', 'app-config.json'), JSON.stringify({ flagFinder: 'snap' }));
-    const snap = new Harness();
-    const snapRes = await snap.service().analyzeTranscript({ ...options(), parts: ['flags'] });
-    expect(snap.snapRuns[0]).toMatchObject({ chapters: false, flags: true });
-    expect(reads(snap)).toHaveLength(0);
-    expect(snapRes.sections.every((s) => s.ranker === 'snap-v1' && typeof s.nli_score === 'number')).toBe(true);
-
-    fs.writeFileSync(path.join(tmp, 'briefcase', 'app-config.json'), JSON.stringify({ flagFinder: 'generate' }));
-    const gen = generateHarness(() => ({ text: passages(['They are vermin', 'thrown out', ['political-demonization']]) }));
-    await gen.service().analyzeTranscript({ ...options(), parts: ['flags'] });
-    expect(gen.snapRuns).toHaveLength(0); // flags alone: the scorer is not taken at all
-    expect(reads(gen)).toHaveLength(1);
-  });
-
-  it('progress: flags alone fills the bar with reading then checking, only forward, ending at 100', async () => {
-    const h = generateHarness(() => ({ text: passages(['They are vermin', 'thrown out', ['political-demonization']]) }));
-    const seen: Array<[number, string]> = [];
-    await h.service().analyzeTranscript({ ...options(), parts: ['flags'], onProgress: (p) => seen.push([p.progress, p.message]) });
-    for (let i = 1; i < seen.length; i++) expect(seen[i][0]).toBeGreaterThanOrEqual(seen[i - 1][0]);
-    expect(seen.find(([, m]) => m === 'Reading for flags: chunk 1/1...')![0]).toBe(3);
-    expect(seen.find(([, m]) => m.startsWith('Verifying flag candidates 1/1'))![0]).toBe(98);
-    expect(seen.at(-1)![0]).toBe(100);
   });
 });
 
@@ -714,7 +522,6 @@ describe('AIAnalysisService: stories are the chapters grouped', () => {
   beforeEach(() => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'engine-stories-spec-'));
     process.env.APPDATA = tmp;
-    writeAppConfig({ flagFinder: 'snap' });
   });
 
   // A 20-minute show, a sentence every 20 s.

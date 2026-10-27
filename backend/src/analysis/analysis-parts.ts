@@ -7,8 +7,8 @@
  *   chapters  the outline: the scorer's chapters, one LLM summary each, then
  *             the chapters grouped into stories by one LLM call
  *             (analysis/stories.ts; a video under 10 minutes is one story).
- *   flags     the "Analysis" in the UI: snap flag ranking, then the LLM check of
- *             every flag section with its written reason.
+ *   flags     the "Analysis" in the UI: the clip-worthy moments, marked by the
+ *             flags model one stretch at a time (flag-highlights.ts).
  *
  * A job carries the parts it asked for in its task options. A job queued before
  * parts existed (and quick-add, and the batch API) carries none and makes all
@@ -145,11 +145,11 @@ export interface AnalysisProgressBands {
 const STAGE_WEIGHTS = { stories: 2, engine: 67, summaries: 10, flags: 12, metadata: 6 } as const;
 
 /**
- * The flag stage's weight when the model reads the transcript for flags: one
- * generation per ~8,000 characters, then the checks, so it takes over the flag
- * scan's share of the engine's time.
+ * The flag stage's weight: the flags model reads the whole transcript, one
+ * stretch of about 15 minutes per question (flag-highlights.ts), so it takes
+ * a large share of a run.
  */
-export const GENERATE_FLAGS_STAGE_WEIGHT = 30;
+export const FLAGS_STAGE_WEIGHT = 30;
 const BAR_START = 3;
 const BAR_END = 98;
 

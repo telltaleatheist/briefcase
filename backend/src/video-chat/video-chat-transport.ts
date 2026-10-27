@@ -27,6 +27,12 @@ export interface CrucibleTransportOptions {
   contextTokens?: number;
   /** A local model: the context it is loaded at, at least. */
   loadContext?: number;
+  /** A local model: the reply's token ceiling (cloud upstreams are never sent one, target.ts). */
+  maxTokens?: number;
+  /** A local model: thinking on or off (absent: the model's default). */
+  thinking?: boolean;
+  /** The temperature for a local model or `ollama/` (absent: the unspecified-task default). */
+  temperature?: number;
 }
 
 export function crucibleTransport(chat: CrucibleChatService, options: CrucibleTransportOptions): ChatTransport {
@@ -36,9 +42,11 @@ export function crucibleTransport(chat: CrucibleChatService, options: CrucibleTr
       model: options.model,
       messages,
       ...(tools === undefined || tools.length === 0 ? {} : { tools, toolChoice: 'auto' }),
-      temperature: temperatureForTask(),
+      temperature: options.temperature ?? temperatureForTask(),
       ...(options.contextTokens === undefined ? {} : { contextTokens: options.contextTokens }),
       ...(options.loadContext === undefined ? {} : { loadContext: options.loadContext }),
+      ...(options.maxTokens === undefined ? {} : { maxTokens: options.maxTokens }),
+      ...(options.thinking === undefined ? {} : { thinking: options.thinking }),
       ...(signal === undefined ? {} : { signal }),
     });
     const text = stripThinkTags(result.text);
