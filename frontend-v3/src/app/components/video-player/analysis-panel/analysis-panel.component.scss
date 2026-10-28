@@ -100,6 +100,27 @@
   }
 }
 
+// Pop out / pop in: the panel in its own window or in Scout's sidebar
+.window-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin-left: 6px;
+  color: var(--text-secondary, #6c757d);
+  background: var(--bg-card, #fff);
+  border: 1px solid var(--border-color, #dee2e6);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+
+  &:hover {
+    color: var(--text-primary, #212529);
+    border-color: var(--text-tertiary, #adb5bd);
+  }
+}
+
 // Copy-transcript button (sits beside the Segments/Plain toggle)
 .copy-transcript-btn {
   flex: 0 0 auto;

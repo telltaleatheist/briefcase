@@ -1,4 +1,4 @@
-import { Component, signal, computed, effect, untracked, ViewChild, ElementRef, OnInit, OnDestroy, inject, HostListener } from '@angular/core';
+import { Component, signal, computed, effect, untracked, ViewChild, ElementRef, OnInit, OnDestroy, inject, HostListener, NgZone } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Router, ActivatedRoute } from '@angular/router';
@@ -38,6 +38,7 @@ import { ChatMarker } from '../../models/video-chat.model';
 
 // Sub-components
 import { MediaDisplayComponent } from './media-display/media-display.component';
+import { SidebarWindow } from './sidebar-window';
 import { AnalysisPanelComponent } from './analysis-panel/analysis-panel.component';
 import { TimelineRulerComponent } from './timeline/timeline-ruler/timeline-ruler.component';
 import { TimelinePlayheadComponent } from './timeline/timeline-playhead/timeline-playhead.component';
@@ -164,6 +165,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
   private websocketService = inject(WebsocketService);
   private readiness = inject(CrucibleReadinessService);
   private pipelinePresets = inject(PipelinePresetsService);
+  private zone = inject(NgZone);
 
   private readonly API_BASE = getApiBase();
   private readonly MAX_TABS = 15;
@@ -187,6 +189,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
 
   @ViewChild(MediaDisplayComponent) videoPlayer?: MediaDisplayComponent;
   @ViewChild('videoPlayerArea', { static: false }) videoPlayerArea?: ElementRef<HTMLDivElement>;
+  @ViewChild('analysisSidebar') private analysisSidebar?: ElementRef<HTMLDivElement>;
 
   // Keyboard shortcuts
   @HostListener('document:keydown', ['$event'])
@@ -755,6 +758,9 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
   // Tracks a manual sidebar toggle so the "collapse when empty" default
   // doesn't override the user's explicit choice.
   private sidebarUserOverride = false;
+  // The sidebar popped out into its own window (see sidebar-window.ts).
+  sidebarPoppedOut = signal(false);
+  private sidebarWindow: SidebarWindow | null = null;
 
   // Timeline resizing
   timelineHeight = signal(150); // Compact default to match the slimmer waveform track
@@ -774,6 +780,11 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
   private wasPlaying = false;
 
   constructor() {
+    // The popped-out sidebar's window is titled after the open video.
+    effect(() => {
+      if (this.sidebarPoppedOut()) this.sidebarWindow?.setTitle(this.sidebarWindowTitle());
+    });
+
     // Initialize category filters from sections with error handling
     effect(() => {
       try {
@@ -1568,6 +1579,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
   ngOnDestroy() {
     // Show the side navigation when leaving the editor
     this.navService.showNav();
+    this.sidebarWindow?.close();
     this.stopPlayback();
 
     // Clean up websocket subscriptions
@@ -2494,6 +2506,37 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
   toggleAnalysisSidebar() {
     this.sidebarUserOverride = true;
     this.showAnalysisSidebar.update(v => !v);
+  }
+
+  // Move the sidebar into its own window, leaving the video Scout's full width.
+  popOutSidebar() {
+    const element = this.analysisSidebar?.nativeElement;
+    if (!element || this.sidebarWindow) return;
+    // The window's own listeners are outside Angular's zone.
+    this.sidebarWindow = SidebarWindow.open(element, this.sidebarWindowTitle(), {
+      closed: () => this.zone.run(() => this.dockSidebar(false)),
+      keydown: event => this.zone.run(() => this.handleKeyboardEvent(event)),
+    });
+    if (this.sidebarWindow) this.sidebarPoppedOut.set(true);
+  }
+
+  // The window's pop-in button: back in Scout, slid out.
+  popInSidebar() {
+    this.sidebarWindow?.close();
+    this.dockSidebar(true);
+  }
+
+  // The sidebar is back in Scout: slid out after a pop in, slid in after the
+  // user closed its window (the toggle shows it again).
+  private dockSidebar(show: boolean) {
+    this.sidebarWindow = null;
+    this.sidebarPoppedOut.set(false);
+    this.sidebarUserOverride = true;
+    this.showAnalysisSidebar.set(show);
+  }
+
+  private sidebarWindowTitle(): string {
+    return `${this.metadata().filename} — Analysis`;
   }
 
   // Collapse the sidebar by default when the video has no analysis or

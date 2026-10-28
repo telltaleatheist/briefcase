@@ -267,6 +267,16 @@
   }
 }
 
+// The sidebar in its own window fills it. Scout's narrow-width rules (below)
+// see that window's width, so this outranks them.
+.analysis-sidebar.windowed {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  border: none;
+}
+
 .sidebar-header {
   padding: $spacing-lg;
   background: var(--bg-secondary);

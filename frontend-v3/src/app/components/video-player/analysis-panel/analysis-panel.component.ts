@@ -95,6 +95,12 @@ export class AnalysisPanelComponent implements OnChanges {
   @Output() askProposalsChange = new EventEmitter<ChatMarker[]>();
   /** Ask: proposals were applied as custom markers (reload them). */
   @Output() askMarkersApplied = new EventEmitter<void>();
+  /** The panel is in its own window (popped out of Scout) rather than Scout's sidebar. */
+  @Input() poppedOut = false;
+  /** Move the panel into its own window. */
+  @Output() popOut = new EventEmitter<void>();
+  /** Close the panel's window and show it in Scout's sidebar again. */
+  @Output() popIn = new EventEmitter<void>();
 
   // "Follow cursor": when enabled, the list scrolls to (and highlights) the
   // item containing the current playback position — chapter, category section,

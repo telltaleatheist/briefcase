@@ -5,6 +5,9 @@ import * as path from 'path';
 import { AppConfig } from '../config/app-config';
 import { ServerConfig } from '../config/server-config';
 
+/** The frame name Scout opens its popped-out sidebar under (frontend: sidebar-window.ts). */
+const SIDEBAR_WINDOW_NAME = 'scout-sidebar';
+
 /**
  * Editor group info for tracking window groups
  */
@@ -238,6 +241,7 @@ export class WindowService {
 
     log.info(`Opening editor window: ${editorUrl}`);
     this.attachEditorFailureHandlers(editorWindow);
+    this.allowSidebarWindow(editorWindow, iconPath);
     // Closing an editor before it finishes loading rejects with ERR_ABORTED
     // (-3). Genuine failures are still surfaced by attachEditorFailureHandlers /
     // did-fail-load; here we only prevent the abort from bubbling up as an
@@ -276,6 +280,28 @@ export class WindowService {
     });
 
     return editorWindow;
+  }
+
+  /**
+   * Scout pops its analysis sidebar out into its own window: a same-origin
+   * about:blank child it opens with window.open and fills itself (see the
+   * frontend's sidebar-window.ts). This gives that window its options; any
+   * other window.open keeps Electron's default. Electron closes the child
+   * with its opener.
+   */
+  private allowSidebarWindow(editorWindow: BrowserWindow, iconPath: string): void {
+    editorWindow.webContents.setWindowOpenHandler(({ frameName }) => {
+      if (frameName !== SIDEBAR_WINDOW_NAME) return { action: 'allow' };
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          minWidth: 320,
+          minHeight: 400,
+          autoHideMenuBar: true,
+          icon: iconPath,
+        },
+      };
+    });
   }
 
   /**
@@ -662,6 +688,7 @@ export class WindowService {
     const editorUrl = `http://${host}:${this.frontendPort}/editor?${params.toString()}`;
 
     this.attachEditorFailureHandlers(editorWindow);
+    this.allowSidebarWindow(editorWindow, iconPath);
     // Closing an editor before it finishes loading rejects with ERR_ABORTED
     // (-3). Genuine failures are still surfaced by attachEditorFailureHandlers /
     // did-fail-load; here we only prevent the abort from bubbling up as an
