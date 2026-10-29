@@ -383,7 +383,10 @@ export class AnalysisPanelComponent implements OnChanges {
     const text = this.plainTranscript();
     if (!text) return;
     try {
-      await navigator.clipboard.writeText(text);
+      // The clipboard of the window the panel is in: popped out, Scout's own
+      // document isn't focused and its clipboard refuses the write.
+      const view = this.host.nativeElement.ownerDocument.defaultView ?? window;
+      await view.navigator.clipboard.writeText(text);
       this.transcriptCopied.set(true);
       setTimeout(() => this.transcriptCopied.set(false), 1500);
     } catch (err) {
