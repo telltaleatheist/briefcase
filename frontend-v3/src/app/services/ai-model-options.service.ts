@@ -19,6 +19,11 @@ import { WebsocketService } from './websocket.service';
  * and when a server finishes preparing Briefcase's models (a pull landed).
  * Stored values a picker shows are tracked, so a legacy spelling
  * (`ollama:qwen3.8:27b`) resolves to the option it runs as.
+ *
+ * One root copy serves every picker, listing the selected server's models. A
+ * host that runs on a server of its own (the Ask tab's server picker)
+ * provides its own copy in its `providers` and sets {@link setServer}; the
+ * pickers inside it then list that server's models.
  */
 @Injectable({ providedIn: 'root' })
 export class AiModelOptionsService {
@@ -26,6 +31,8 @@ export class AiModelOptionsService {
   private readonly readiness = inject(CrucibleReadinessService);
 
   readonly view = signal<AiModelsView | null>(null);
+  /** The server whose models are listed; null: the selected server. */
+  readonly server = signal<string | null>(null);
   readonly loading = signal(false);
   /** Why the options could not be read (the backend's sentence), or null. */
   readonly error = signal<string | null>(null);
@@ -80,6 +87,13 @@ export class AiModelOptionsService {
     }
   }
 
+  /** List `name`'s models (null: the selected server's), read again when it changes. */
+  setServer(name: string | null): void {
+    if (this.server() === name) return;
+    this.server.set(name);
+    if (this.active) void this.refresh();
+  }
+
   /** Read the options again (after a settings save, say). */
   async refresh(): Promise<void> {
     this.active = true;
@@ -100,7 +114,7 @@ export class AiModelOptionsService {
   private async load(): Promise<void> {
     this.loading.set(true);
     try {
-      this.view.set(await firstValueFrom(this.crucible.aiModels(undefined, [...this.tracked])));
+      this.view.set(await firstValueFrom(this.crucible.aiModels(this.server() ?? undefined, [...this.tracked])));
       this.error.set(null);
     } catch (error) {
       this.error.set((error as CrucibleRefusal)?.message ?? "Couldn't list the Crucible server's models.");

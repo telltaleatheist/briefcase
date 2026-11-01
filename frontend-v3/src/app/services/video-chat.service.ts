@@ -41,8 +41,9 @@ export class VideoChatService {
     return this.http.delete<{ ok: true }>(`${this.base}/threads/${encodeURIComponent(threadId)}`);
   }
 
-  sendMessage(threadId: string, content: string, model: string): Observable<ChatSendResult> {
-    return this.http.post<ChatSendResult>(`${this.base}/threads/${encodeURIComponent(threadId)}/messages`, { content, model });
+  /** `server`: the Crucible server to answer on (null: the selected one). */
+  sendMessage(threadId: string, content: string, model: string, server: string | null = null): Observable<ChatSendResult> {
+    return this.http.post<ChatSendResult>(`${this.base}/threads/${encodeURIComponent(threadId)}/messages`, { content, model, ...(server ? { server } : {}) });
   }
 
   /**

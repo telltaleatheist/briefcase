@@ -10,12 +10,24 @@ import { WebsocketService } from '../../../../services/websocket.service';
 import { CrucibleReadinessService } from '../../../../services/crucible-readiness.service';
 import { AiModelOptionsService } from '../../../../services/ai-model-options.service';
 import { PipelinePresetsService } from '../../../../core/stores/pipeline-presets.service';
+import { CrucibleService } from '../../../../services/crucible.service';
 import type { ChatMarker, ChatMessage, ChatSendResult, ChatThread } from '../../../../models/video-chat.model';
 
 const thread = (id: string, title = ''): ChatThread =>
   ({ id, videoId: 'v1', title, model: 'local:max-27b', createdAt: '2026-10-25T10:00:00Z', updatedAt: '2026-10-25T10:00:00Z' });
 const message = (id: string, role: 'user' | 'assistant', content: string): ChatMessage =>
   ({ id, threadId: 't1', role, content, model: 'local:max-27b', markers: [], createdAt: '2026-10-25T10:00:00Z' });
+/** The registry as GET /crucible/servers answers it. */
+const serversView = (names: string[], selected: string | null) =>
+  ({ servers: [], routing: { servers: names.map(name => ({ name, selected: name === selected })), selected, missing: null }, discovered: null });
+const crucibleWith = (names: string[], selected: string | null) => ({ list: () => of(serversView(names, selected)) });
+const websocketStub = { onVideoChatStatus: () => () => {}, onCrucibleServersChanged: () => () => {} };
+/** The panel provides its own model options (scoped to its server): the stub goes in the component's providers. */
+const modelOptionsStub = () => ({ view: signal(null), setServer: jasmine.createSpy('setServer') });
+const pickerOnly = (modelOptions: unknown) => ({
+  set: { imports: [CommonModule, FormsModule], schemas: [CUSTOM_ELEMENTS_SCHEMA], providers: [{ provide: AiModelOptionsService, useValue: modelOptions }] },
+});
+
 const marker = (id: string, messageId: string, setName: string, status: ChatMarker['status'] = 'proposed'): ChatMarker =>
   ({ id, threadId: 't1', messageId, title: `Marker ${id}`, note: null, startSeconds: 600, endSeconds: 612, status, customMarkerId: status === 'applied' ? `c-${id}` : null, setName });
 
@@ -48,14 +60,14 @@ describe('AskPanelComponent: Stop', () => {
       imports: [AskPanelComponent],
       providers: [
         { provide: VideoChatService, useValue: chat },
-        { provide: WebsocketService, useValue: { onVideoChatStatus: () => () => {} } },
+        { provide: WebsocketService, useValue: websocketStub },
+        { provide: CrucibleService, useValue: crucibleWith(['mac'], 'mac') },
         { provide: CrucibleReadinessService, useValue: { ready: signal(true), requireReady: () => true, handleRefusal: () => null } },
-        { provide: AiModelOptionsService, useValue: { view: signal(null) } },
         { provide: PipelinePresetsService, useValue: { lastChosenAiModel: signal('local:max-27b') } },
       ],
     });
     // The model picker is not under test.
-    TestBed.overrideComponent(AskPanelComponent, { set: { imports: [CommonModule, FormsModule], schemas: [CUSTOM_ELEMENTS_SCHEMA] } });
+    TestBed.overrideComponent(AskPanelComponent, pickerOnly(modelOptionsStub()));
     fixture = TestBed.createComponent(AskPanelComponent);
     panel = fixture.componentInstance;
     panel.videoId = 'v1';
@@ -162,13 +174,13 @@ describe('AskPanelComponent: Claude Code without Crucible', () => {
       imports: [AskPanelComponent],
       providers: [
         { provide: VideoChatService, useValue: chat },
-        { provide: WebsocketService, useValue: { onVideoChatStatus: () => () => {} } },
+        { provide: WebsocketService, useValue: websocketStub },
+        { provide: CrucibleService, useValue: crucibleWith(['mac'], 'mac') },
         { provide: CrucibleReadinessService, useValue: { ready: signal(false), requireReady, handleRefusal: () => null } },
-        { provide: AiModelOptionsService, useValue: { view: signal(null) } },
         { provide: PipelinePresetsService, useValue: { lastChosenAiModel: signal('local:max-27b') } },
       ],
     });
-    TestBed.overrideComponent(AskPanelComponent, { set: { imports: [CommonModule, FormsModule], schemas: [CUSTOM_ELEMENTS_SCHEMA] } });
+    TestBed.overrideComponent(AskPanelComponent, pickerOnly(modelOptionsStub()));
     const fixture = TestBed.createComponent(AskPanelComponent);
     panel = fixture.componentInstance;
     panel.videoId = 'v1';
@@ -190,7 +202,7 @@ describe('AskPanelComponent: Claude Code without Crucible', () => {
     void panel.send();
     flushMicrotasks();
     expect(requireReady).not.toHaveBeenCalled();
-    expect(chat.sendMessage).toHaveBeenCalledWith('t9', 'Hi?', 'claude-cli:claude-haiku-5-5');
+    expect(chat.sendMessage).toHaveBeenCalledWith('t9', 'Hi?', 'claude-cli:claude-haiku-5-5', null);
   }));
 });
 
@@ -217,13 +229,13 @@ describe('AskPanelComponent: one-click apply', () => {
       imports: [AskPanelComponent],
       providers: [
         { provide: VideoChatService, useValue: chat },
-        { provide: WebsocketService, useValue: { onVideoChatStatus: () => () => {} } },
+        { provide: WebsocketService, useValue: websocketStub },
+        { provide: CrucibleService, useValue: crucibleWith(['mac'], 'mac') },
         { provide: CrucibleReadinessService, useValue: { ready: signal(true), requireReady: () => true, handleRefusal: () => null } },
-        { provide: AiModelOptionsService, useValue: { view: signal(null) } },
         { provide: PipelinePresetsService, useValue: { lastChosenAiModel: signal('local:max-27b') } },
       ],
     });
-    TestBed.overrideComponent(AskPanelComponent, { set: { imports: [CommonModule, FormsModule], schemas: [CUSTOM_ELEMENTS_SCHEMA] } });
+    TestBed.overrideComponent(AskPanelComponent, pickerOnly(modelOptionsStub()));
     fixture = TestBed.createComponent(AskPanelComponent);
     panel = fixture.componentInstance;
     panel.videoId = 'v1';
@@ -275,3 +287,124 @@ describe('AskPanelComponent: one-click apply', () => {
     expect(el().querySelector('.ask-subbar .mini-btn.accent')).toBeNull();
   }));
 });
+
+/**
+ * The server picker: Ask's own server, left of the model picker, never the
+ * queue's. It follows the selected server until the viewer picks another
+ * (remembered), the model picker lists that server's models, and the send
+ * names it. One server: shown, disabled. A claude-cli model: disabled, no server sent.
+ */
+describe('AskPanelComponent: the server picker', () => {
+  let fixture: ComponentFixture<AskPanelComponent>;
+  let panel: AskPanelComponent;
+  let chat: jasmine.SpyObj<VideoChatService>;
+  let modelOptions: ReturnType<typeof modelOptionsStub>;
+
+  function build(names: string[], selected: string | null, model = 'local:max-27b'): void {
+    chat = jasmine.createSpyObj<VideoChatService>('VideoChatService', ['listThreads', 'getThread', 'createThread', 'sendMessage', 'cancel', 'deleteThread']);
+    chat.listThreads.and.returnValue(of([thread('t1', 'Earlier?')]));
+    chat.getThread.and.returnValue(of({ thread: thread('t1', 'Earlier?'), messages: [] }));
+    chat.sendMessage.and.returnValue(of({ userMessage: message('u', 'user', 'Q?'), assistantMessage: message('a', 'assistant', 'A.') }));
+    modelOptions = modelOptionsStub();
+    TestBed.configureTestingModule({
+      imports: [AskPanelComponent],
+      providers: [
+        { provide: VideoChatService, useValue: chat },
+        { provide: WebsocketService, useValue: websocketStub },
+        { provide: CrucibleService, useValue: crucibleWith(names, selected) },
+        { provide: CrucibleReadinessService, useValue: { ready: signal(true), requireReady: () => true, handleRefusal: () => null } },
+        { provide: PipelinePresetsService, useValue: { lastChosenAiModel: signal(model) } },
+      ],
+    });
+    TestBed.overrideComponent(AskPanelComponent, pickerOnly(modelOptions));
+    fixture = TestBed.createComponent(AskPanelComponent);
+    panel = fixture.componentInstance;
+    panel.videoId = 'v1';
+  }
+
+  beforeEach(() => localStorage.removeItem('briefcase-ask-server'));
+  afterEach(() => localStorage.removeItem('briefcase-ask-server'));
+
+  const select = () => fixture.nativeElement.querySelector('.server-select') as HTMLSelectElement;
+
+  /** ngModel writes the select's value and disabled state a tick after the change detection that set them. */
+  const settle = () => {
+    flushMicrotasks();
+    fixture.detectChanges();
+    flush();
+    fixture.detectChanges();
+  };
+
+  it('starts on the selected server; a pick lists its models, is remembered, and names it on the send', fakeAsync(() => {
+    build(['mac', 'pc'], 'pc');
+    settle();
+    expect(panel.askServer()).toBe('pc');
+    expect(select().disabled).toBeFalse();
+    expect(modelOptions.setServer).toHaveBeenCalledWith(null);
+
+    panel.pickServer('mac');
+    fixture.detectChanges();
+    expect(panel.askServer()).toBe('mac');
+    expect(localStorage.getItem('briefcase-ask-server')).toBe('mac');
+    expect(modelOptions.setServer).toHaveBeenCalledWith('mac');
+
+    void panel.loadThreads(true);
+    flushMicrotasks();
+    panel.draft.set('Q?');
+    void panel.send();
+    flush();
+    expect(chat.sendMessage).toHaveBeenCalledWith('t1', 'Q?', 'local:max-27b', 'mac');
+
+    // Back to the selected one: nothing remembered, nothing sent, the selected server's list.
+    panel.pickServer('pc');
+    fixture.detectChanges();
+    expect(localStorage.getItem('briefcase-ask-server')).toBeNull();
+    expect(modelOptions.setServer).toHaveBeenCalledWith(null);
+  }));
+
+  it('a remembered pick is used again; one no longer registered falls back to the selected server', fakeAsync(() => {
+    localStorage.setItem('briefcase-ask-server', 'mac');
+    build(['mac', 'pc'], 'pc');
+    flushMicrotasks();
+    fixture.detectChanges();
+    expect(panel.askServer()).toBe('mac');
+
+    localStorage.setItem('briefcase-ask-server', 'gone');
+    TestBed.resetTestingModule();
+    build(['mac', 'pc'], 'pc');
+    flushMicrotasks();
+    fixture.detectChanges();
+    expect(panel.askServer()).toBe('pc');
+  }));
+
+  it('one registered server: shown, disabled', fakeAsync(() => {
+    build(['mac'], 'mac');
+    settle();
+    expect(select().disabled).toBeTrue();
+    expect(select().value).toBe('mac');
+  }));
+
+  it('a claude-cli model: disabled, and no server is sent', fakeAsync(() => {
+    localStorage.setItem('briefcase-ask-server', 'mac');
+    build(['mac', 'pc'], 'pc');
+    void panel.loadThreads(true);
+    settle();
+    expect(select().disabled).toBeFalse();
+    panel.modelChoice.set('claude-cli:claude-haiku-5-5');
+    settle();
+    expect(select().disabled).toBeTrue();
+    panel.draft.set('Q?');
+    void panel.send();
+    flush();
+    expect(chat.sendMessage).toHaveBeenCalledWith('t1', 'Q?', 'claude-cli:claude-haiku-5-5', null);
+  }));
+
+  it('Send sits to the right of the question box, on its row', fakeAsync(() => {
+    build(['mac'], 'mac');
+    flushMicrotasks();
+    fixture.detectChanges();
+    const row = fixture.nativeElement.querySelector('.composer-row') as HTMLElement;
+    expect(Array.from(row.children).map(c => c.className.split(' ')[0])).toEqual(['composer-input', 'send-btn']);
+  }));
+});
+

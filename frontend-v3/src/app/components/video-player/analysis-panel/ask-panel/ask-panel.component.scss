@@ -375,7 +375,15 @@ $proposal: var(--ask-proposal, #38bdf8);
   background: var(--bg-secondary);
 }
 
+.composer-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
 .composer-input {
+  flex: 1;
+  min-width: 0;
   width: 100%;
   box-sizing: border-box;
   resize: vertical;
@@ -398,6 +406,22 @@ $proposal: var(--ask-proposal, #38bdf8);
   display: flex;
   align-items: flex-start;
   gap: 8px;
+}
+
+.server-select {
+  flex: 0 1 auto;
+  max-width: 40%;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 12.5px;
+
+  &:focus { outline: none; border-color: var(--primary-orange, #ff6b35); }
+  &:disabled { opacity: 0.65; }
 }
 
 .composer-model {

@@ -19,6 +19,10 @@ describe('video-chat model helpers', () => {
     expect(chatPhaseLabel('loading-model')).toBe('Loading model…');
     expect(chatPhaseLabel('thinking')).toBe('Thinking…');
     expect(chatPhaseLabel('placing-markers')).toBe('Placing markers…');
+    expect(chatPhaseLabel('searching', 'Trump')).toBe('Searching “Trump”…');
+    expect(chatPhaseLabel('reading', '00:42:10–00:50:30')).toBe('Reading 00:42:10–00:50:30…');
+    expect(chatPhaseLabel('reading', 'the outline')).toBe('Reading the outline…');
+    expect(chatPhaseLabel('searching')).toBe('Searching…');
     expect(chatPhaseLabel(null)).toBe('Sending…');
   });
 
@@ -26,14 +30,15 @@ describe('video-chat model helpers', () => {
     const err = (status: number, error: unknown) => new HttpErrorResponse({ status, error });
     expect(isChatCancelled(err(499, { code: 'cancelled', message: 'The question was cancelled.' }))).toBeTrue();
     expect(isChatCancelled(err(499, null))).toBeTrue();
-    expect(isChatCancelled(err(422, { code: 'transcript_too_long' }))).toBeFalse();
+    expect(isChatCancelled(err(422, { code: 'context_too_small' }))).toBeFalse();
     expect(isChatCancelled(new Error('cancelled'))).toBeFalse();
   });
 
   it("uses the backend's sentence for 409 / 422 / 5xx", () => {
     const err = (status: number, error: unknown) => new HttpErrorResponse({ status, error });
     expect(chatErrorMessage(err(409, { code: 'crucible_required', message: 'Crucible is not running.' }))).toBe('Crucible is not running.');
-    expect(chatErrorMessage(err(422, { code: 'transcript_too_long', message: 'Too long: 400k tokens.' }))).toBe('Too long: 400k tokens.');
+    expect(chatErrorMessage(err(422, { code: 'context_too_small', message: 'Too small: 4,096 tokens.' }))).toBe('Too small: 4,096 tokens.');
+    expect(chatErrorMessage(err(422, { code: 'context_too_small' }))).toContain('too small');
     expect(chatErrorMessage(err(422, { code: 'no_transcript' }))).toContain('no transcript');
     expect(chatErrorMessage(err(502, { code: 'upstream', message: 'The model crashed.' }))).toBe('The model crashed.');
     expect(chatErrorMessage(err(500, null))).toContain('500');

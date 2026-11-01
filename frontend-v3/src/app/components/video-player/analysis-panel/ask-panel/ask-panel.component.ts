@@ -25,6 +25,7 @@ import { PipelinePresetsService } from '../../../../core/stores/pipeline-presets
 import { AiModelSelectComponent } from '../../../ai-model-select/ai-model-select.component';
 import { isClaudeCliValue } from '../../../../models/ai-model-value';
 import { ElectronService } from '../../../../services/electron.service';
+import { CrucibleService } from '../../../../services/crucible.service';
 import { renderChatMarkdown } from './chat-markdown';
 import {
   ChatMarker,
@@ -38,6 +39,8 @@ import {
 } from '../../../../models/video-chat.model';
 
 const SHOW_ON_TIMELINE_KEY = 'briefcase-ask-proposals-on-timeline';
+/** The Crucible server Ask runs on, as this viewer last picked it ('' or absent: the selected server). */
+const ASK_SERVER_KEY = 'briefcase-ask-server';
 
 function readShowOnTimeline(): boolean {
   try {
@@ -47,12 +50,22 @@ function readShowOnTimeline(): boolean {
   }
 }
 
+function readAskServer(): string {
+  try {
+    return localStorage.getItem(ASK_SERVER_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
 /** A send on its way: the thread it went to (null while a new chat's thread is being made), and its phase. */
 interface PendingSend {
   videoId: string;
   threadId: string | null;
   content: string;
   phase: ChatPhase | null;
+  /** The phase's pattern or range ('searching', 'reading'). */
+  detail?: string;
   /** Stop was pressed: the bubble is gone and the question is back in the box; the send is winding down. */
   stopping: boolean;
 }
@@ -69,11 +82,22 @@ interface PendingSend {
  * The component stays alive while other tabs are open (the host hides it), so
  * a send in flight and the timeline's proposals survive a tab switch. Threads
  * load the first time the tab is shown for a video.
+ *
+ * THE SERVER PICKER, left of the model picker, chooses the Crucible server
+ * Ask runs on, for Ask alone: the queue keeps the server selected in
+ * Settings (the user runs the queue on one card and asks on another). It
+ * starts on the selected server and follows it until the viewer picks
+ * another, which is remembered here. The model picker lists what the chosen
+ * server serves: the panel provides its own AiModelOptionsService, scoped to
+ * that server. One registered server: shown, disabled. A claude-cli model
+ * (TEMPORARY) runs on this computer, not on a server: the picker is disabled
+ * and no server is sent.
  */
 @Component({
   selector: 'app-ask-panel',
   standalone: true,
   imports: [CommonModule, FormsModule, AiModelSelectComponent],
+  providers: [AiModelOptionsService],
   templateUrl: './ask-panel.component.html',
   styleUrls: ['./ask-panel.component.scss'],
 })
@@ -84,6 +108,7 @@ export class AskPanelComponent implements OnChanges, OnDestroy {
   private readonly modelOptions = inject(AiModelOptionsService);
   private readonly presets = inject(PipelinePresetsService);
   private readonly electron = inject(ElectronService);
+  private readonly crucible = inject(CrucibleService);
 
   @Input() videoId?: string;
   /** The Ask tab is showing: threads load on the first showing for a video. */
@@ -117,6 +142,17 @@ export class AskPanelComponent implements OnChanges, OnDestroy {
 
   /** The model picked for this chat ('' = the default below). */
   readonly modelChoice = signal('');
+
+  /** The registered Crucible servers, and the one selected in Settings (the queue's). */
+  readonly servers = signal<string[]>([]);
+  readonly selectedServer = signal<string | null>(null);
+  /** The server this viewer picked for Ask ('' = the selected one). */
+  readonly serverChoice = signal(readAskServer());
+  /** The server Ask runs on: the viewer's pick while it is registered, else the selected one. */
+  readonly askServer = computed(() => {
+    const picked = this.serverChoice();
+    return picked && this.servers().includes(picked) ? picked : this.selectedServer();
+  });
   readonly modelValue = computed(() =>
     this.modelChoice() || this.presets.lastChosenAiModel() || this.modelOptions.view()?.analysisDefault || '');
 
@@ -133,7 +169,7 @@ export class AskPanelComponent implements OnChanges, OnDestroy {
     const p = this.pending();
     return !!p && !p.stopping && p.videoId === this.videoId && p.threadId === this.currentThreadId();
   });
-  readonly statusLine = computed(() => chatPhaseLabel(this.pending()?.phase ?? null));
+  readonly statusLine = computed(() => chatPhaseLabel(this.pending()?.phase ?? null, this.pending()?.detail));
   readonly sendErrorHere = computed(() => {
     const e = this.sendError();
     return e && e.threadId === this.currentThreadId() ? e.message : '';
@@ -145,6 +181,14 @@ export class AskPanelComponent implements OnChanges, OnDestroy {
    * Crucible-only AI), never picked for the user when Crucible is down.
    */
   readonly canAsk = computed(() => this.readiness.ready() || isClaudeCliValue(this.modelValue()));
+
+  /** TEMPORARY (claude-cli): the Claude Code CLI runs here, on no server. */
+  readonly serverPickerDisabled = computed(() => this.servers().length < 2 || isClaudeCliValue(this.modelValue()) || !!this.pending());
+  readonly serverPickerTitle = computed(() => {
+    if (isClaudeCliValue(this.modelValue())) return 'Claude Code runs on this computer, not on a Crucible server';
+    if (this.servers().length < 2) return 'The only Crucible server Briefcase knows';
+    return 'The Crucible server Ask runs on (the queue keeps the one selected in Settings)';
+  });
 
   readonly canSend = computed(() =>
     this.canAsk() && !this.pending() && !!this.videoId && !!this.modelValue() && this.draft().trim().length > 0);
@@ -158,11 +202,20 @@ export class AskPanelComponent implements OnChanges, OnDestroy {
   /** Stop: drops the pending send's request. */
   private readonly stop$ = new Subject<void>();
   private readonly offStatus: () => void;
+  private readonly offServers: () => void;
 
   constructor() {
     this.offStatus = this.websocket.onVideoChatStatus(event => {
       const p = this.pending();
-      if (p && p.threadId === event.threadId) this.pending.set({ ...p, phase: event.phase });
+      if (p && p.threadId === event.threadId) this.pending.set({ ...p, phase: event.phase, detail: event.detail });
+    });
+    void this.loadServers();
+    this.offServers = this.websocket.onCrucibleServersChanged(() => void this.loadServers());
+    // The model picker lists the Ask server's models (no pick: the selected server's, as everywhere else).
+    effect(() => {
+      const picked = this.serverChoice();
+      const server = picked && this.servers().includes(picked) ? picked : null;
+      untracked(() => this.modelOptions.setServer(server));
     });
     effect(() => {
       const shown = this.showOnTimeline() ? this.proposals() : [];
@@ -179,6 +232,7 @@ export class AskPanelComponent implements OnChanges, OnDestroy {
 
   ngOnDestroy(): void {
     this.offStatus();
+    this.offServers();
     this.proposalsChange.emit([]);
   }
 
@@ -194,6 +248,29 @@ export class AskPanelComponent implements OnChanges, OnDestroy {
     this.actionError.set('');
     this.confirmingDelete.set(false);
     this.modelChoice.set('');
+  }
+
+  /** The registered servers and the selected one; unreadable, the picker keeps what it showed. */
+  private async loadServers(): Promise<void> {
+    try {
+      const view = await firstValueFrom(this.crucible.list());
+      this.servers.set(view.routing.servers.map(s => s.name));
+      this.selectedServer.set(view.routing.selected);
+    } catch {
+      // The picker shows the last list; a send still goes to a server the backend knows.
+    }
+  }
+
+  /** The viewer picks Ask's server: remembered; the selected server's own name means "follow the selected one". */
+  pickServer(name: string): void {
+    const choice = name === this.selectedServer() ? '' : name;
+    this.serverChoice.set(choice);
+    try {
+      if (choice) localStorage.setItem(ASK_SERVER_KEY, choice);
+      else localStorage.removeItem(ASK_SERVER_KEY);
+    } catch {
+      // Remembering is a convenience: the pick holds for this session.
+    }
   }
 
   /** Read the video's threads; `openLatest` opens the newest (or a new chat when there is none). */
@@ -330,7 +407,10 @@ export class AskPanelComponent implements OnChanges, OnDestroy {
         if (p) this.pending.set({ ...p, threadId });
       }
 
-      const result = await firstValueFrom(this.chat.sendMessage(threadId, content, model).pipe(takeUntil(this.stop$)));
+      // A pick of the selected server sends none, so the backend's own choice holds.
+      const picked = this.serverChoice();
+      const server = isClaudeCliValue(model) || !picked || !this.servers().includes(picked) ? null : picked;
+      const result = await firstValueFrom(this.chat.sendMessage(threadId, content, model, server).pipe(takeUntil(this.stop$)));
       if (this.videoId !== videoId) return;
       // Answered before Stop could land: the answer stands, and the question is not given back twice.
       if (this.pending()?.stopping && this.draft().trim() === content) this.draft.set('');

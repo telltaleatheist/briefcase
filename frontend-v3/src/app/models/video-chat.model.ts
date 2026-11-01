@@ -3,8 +3,9 @@ import { HttpErrorResponse } from '@angular/common/http';
 /**
  * ASK: a chat about one video's transcript (the Ask tab in Scout).
  *
- * The wire types of /api/video-chat. The model has one tool, add_marker; the
- * backend resolves its quotes to times and returns the markers attached to the
+ * The wire types of /api/video-chat. The model reads the transcript with
+ * tools (outline, search, read) and marks with add_marker; the backend
+ * resolves its quotes to times and returns the markers attached to the
  * assistant message. Those markers are PROPOSALS until the user applies them
  * (they become custom markers in their answer's marker set, `setName`) or
  * dismisses them.
@@ -59,21 +60,26 @@ export interface ChatApplyResult {
   customMarkers: unknown[];
 }
 
-export type ChatPhase = 'loading-model' | 'thinking' | 'placing-markers' | 'done' | 'error';
+/** Where an answer is; 'searching' and 'reading' while the model takes in what it just searched for or read. */
+export type ChatPhase = 'loading-model' | 'thinking' | 'searching' | 'reading' | 'placing-markers' | 'done' | 'error';
 
 /** The `video-chat:status` socket event: where a send is while the HTTP request waits. */
 export interface VideoChatStatus {
   threadId: string;
   phase: ChatPhase;
+  /** 'searching': the pattern; 'reading': the page's `HH:MM:SS–HH:MM:SS`, or 'the outline'. */
+  detail?: string;
 }
 
 export const VIDEO_CHAT_STATUS_EVENT = 'video-chat:status';
 
 /** The status line under a waiting thread. */
-export function chatPhaseLabel(phase: ChatPhase | null): string {
+export function chatPhaseLabel(phase: ChatPhase | null, detail?: string): string {
   switch (phase) {
     case 'loading-model': return 'Loading model…';
     case 'thinking': return 'Thinking…';
+    case 'searching': return detail ? `Searching “${detail}”…` : 'Searching…';
+    case 'reading': return detail ? `Reading ${detail}…` : 'Reading…';
     case 'placing-markers': return 'Placing markers…';
     default: return 'Sending…';
   }
@@ -109,7 +115,7 @@ export function chatErrorMessage(error: unknown): string {
     if (error.status === 0) return "Briefcase's backend could not be reached. Try again.";
     if (body?.code === 'crucible_required') return body.message || 'AI needs Crucible, and it is not ready.';
     if (body?.code === 'no_transcript') return body.message || 'This video has no transcript yet. Transcribe it first, then ask.';
-    if (body?.code === 'transcript_too_long') return body.message || "This video's transcript is too long for the model.";
+    if (body?.code === 'context_too_small') return body.message || "The model's context is too small to read this video.";
     if (typeof body?.message === 'string' && body.message) return body.message;
     if (typeof error.error === 'string' && error.error) return error.error;
     return `The request failed (${error.status}${error.statusText ? ' ' + error.statusText : ''}).`;
