@@ -78,6 +78,9 @@ import { ContextMenuAction, ContextMenuPosition } from '../../models/file.model'
       border-radius: $radius-md;
       box-shadow: $shadow-xl;
       min-width: 200px;
+      max-height: calc(100vh - 16px);
+      overflow-y: auto;
+      overscroll-behavior: contain;
       padding: $spacing-xs;
       animation: contextMenuAppear 0.15s ease-out;
     }
@@ -151,6 +154,11 @@ import { ContextMenuAction, ContextMenuPosition } from '../../models/file.model'
       border-radius: $radius-md;
       box-shadow: $shadow-xl;
       min-width: 200px;
+      /* Never taller than the window: a long list scrolls inside the
+         submenu so every item through the last one can be reached. */
+      max-height: calc(100vh - 16px);
+      overflow-y: auto;
+      overscroll-behavior: contain;
       padding: $spacing-xs;
       animation: contextMenuAppear 0.15s ease-out;
     }
@@ -276,15 +284,48 @@ export class ContextMenuComponent implements AfterViewChecked, OnChanges {
       const menuRect = this.menuElement?.nativeElement.getBoundingClientRect();
 
       if (menuRect) {
-        // Position submenu to the right of the menu item
-        const x = menuRect.right + 5;
-        const y = rect.top;
-
-        this.submenuPosition.set({ x, y });
+        // Start to the right of the menu item, then fit it on-screen once it
+        // has rendered and its real size is known.
+        this.submenuPosition.set({ x: menuRect.right + 5, y: rect.top });
+        this.cdr.detectChanges();
+        this.fitSubmenu(menuRect, rect.top);
       }
     } else {
       this.hoveredAction.set(null);
     }
+  }
+
+  /**
+   * Keep the submenu inside the viewport. Shifts it up when it would run off
+   * the bottom edge (its height is capped to the window in CSS, so a long list
+   * scrolls instead) and flips it to the left of the menu near the right edge.
+   */
+  private fitSubmenu(menuRect: DOMRect, itemTop: number) {
+    const submenu = this.submenuElement?.nativeElement;
+    if (!submenu) {
+      return;
+    }
+
+    const padding = 8;
+    const viewportHeight = window.innerHeight;
+    const viewportWidth = window.innerWidth;
+    const { width, height } = submenu.getBoundingClientRect();
+
+    let x = menuRect.right + 5;
+    if (x + width > viewportWidth - padding) {
+      x = Math.max(padding, menuRect.left - width - 5);
+    }
+
+    let y = itemTop;
+    if (y + height > viewportHeight - padding) {
+      y = viewportHeight - height - padding;
+    }
+    if (y < padding) {
+      y = padding;
+    }
+
+    this.submenuPosition.set({ x, y });
+    submenu.scrollTop = 0;
   }
 
   onActionClick(action: ContextMenuAction) {
