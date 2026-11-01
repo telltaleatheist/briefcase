@@ -68,6 +68,10 @@ export interface QueueJob {
   parkedReason?: string;
   lane?: string;          // 'gpu:<server>' | 'cloud'
   venue?: string;         // server name the job was admitted to
+  // A started job with nothing running yet (backend status 'pending'): the
+  // backend's phase line, e.g. "Waiting in queue...", so the row reads as
+  // waiting its turn rather than stalled. Cleared once a task starts.
+  waitingPhase?: string;
 
   // Trim opener: seconds to trim from the start of the video after download
   trimStartTime?: number;
@@ -112,6 +116,7 @@ export function createQueueJob(partial: Partial<QueueJob> & { title: string }): 
     parkedReason: partial.parkedReason,
     lane: partial.lane,
     venue: partial.venue,
+    waitingPhase: partial.waitingPhase,
   };
 }
 

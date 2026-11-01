@@ -64,6 +64,15 @@ describe('QueueService parked jobs and lanes', () => {
         id: 'b1', status: 'pending', displayName: 'Parked video', videoId: 'v1', currentTaskIndex: 0,
         tasks: [{ type: 'transcribe' }], createdAt: '2026-09-23T00:00:00Z',
         parkedReason: 'Waiting for mac: bookforge is using it.', lane: 'gpu:mac',
+        currentPhase: 'Waiting for mac: bookforge is using it.',
+      }, {
+        id: 'b2', status: 'pending', displayName: 'Waiting video', videoId: 'v2', currentTaskIndex: 0,
+        tasks: [{ type: 'ai-analyze' }], createdAt: '2026-09-23T00:00:00Z',
+        lane: 'gpu:mac', currentPhase: 'Waiting in queue...',
+      }, {
+        id: 'b3', status: 'paused', displayName: 'Staged video', videoId: 'v3', currentTaskIndex: 0,
+        tasks: [{ type: 'transcribe' }], createdAt: '2026-09-23T00:00:00Z',
+        currentPhase: 'Paused — waiting to start',
       }],
     });
     http.expectOne(r => r.url.endsWith('/queue/lanes')).flush({ success: true, ...lanes(true) });
@@ -75,13 +84,22 @@ describe('QueueService parked jobs and lanes', () => {
     localStorage.removeItem(STORAGE_KEY);
   });
 
-  const job = () => service.allJobs().find(j => j.backendJobId === 'b1')!;
+  const byBackendId = (id: string) => service.allJobs().find(j => j.backendJobId === id)!;
+  const job = () => byBackendId('b1');
 
-  it('carries parkedReason and lane from GET /queue/jobs, and the job stays pending', () => {
+  it('carries parkedReason and lane from GET /queue/jobs; a parked job is started, not staged', () => {
     expect(job().parkedReason).toBe('Waiting for mac: bookforge is using it.');
     expect(job().lane).toBe('gpu:mac');
-    expect(job().state).toBe('pending');
-    expect(service.pendingJobs().length).toBe(1);
+    expect(job().state).toBe('processing');
+  });
+
+  it('a started job waiting for its lane is processing with its phase line; only a paused job is staged', () => {
+    expect(byBackendId('b2').state).toBe('processing');
+    expect(byBackendId('b2').waitingPhase).toBe('Waiting in queue...');
+    expect(byBackendId('b3').state).toBe('pending');
+    expect(byBackendId('b3').waitingPhase).toBeUndefined();
+    expect(service.pendingJobs().map(j => j.backendJobId)).toEqual(['b3']);
+    expect(service.processingJobs().length).toBe(2);
   });
 
   it('task.unparked clears the reason; task.parked sets it without failing the job', () => {
@@ -90,13 +108,14 @@ describe('QueueService parked jobs and lanes', () => {
 
     ws.handlers['task.parked']({ jobId: 'b1', reason: 'Crucible on mac isn\'t answering.', server: 'mac', timestamp: 'now' });
     expect(job().parkedReason).toBe('Crucible on mac isn\'t answering.');
-    expect(job().state).toBe('pending');
+    expect(job().state).toBe('processing');
     expect(job().errorMessage).toBeUndefined();
   });
 
   it('task.started clears the reason and records lane and venue', () => {
     ws.handlers['task.started']({ jobId: 'b1', taskId: 't', type: 'transcribe', pool: 'gpu', lane: 'gpu:mac', venue: 'mac' });
     expect(job().parkedReason).toBeUndefined();
+    expect(job().waitingPhase).toBeUndefined();
     expect(job().venue).toBe('mac');
     expect(job().state).toBe('processing');
   });

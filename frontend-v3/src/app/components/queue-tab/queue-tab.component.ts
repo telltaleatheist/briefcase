@@ -178,7 +178,7 @@ export class QueueTabComponent {
           ...(job.trimEndTime ? [`trimend:${job.trimEndTime}`] : []),
         ],
         titleLoading: job.titleResolved === false,
-        statusNote: this.parkedNote(job)
+        statusNote: this.waitingNote(job)
       }));
 
       weeks.push({
@@ -204,7 +204,7 @@ export class QueueTabComponent {
           titleLoading: job.titleResolved === false,
           errorMessage: errorMessage,
           warnings: job.warnings,
-          statusNote: this.parkedNote(job)
+          statusNote: this.waitingNote(job)
         };
       });
 
@@ -254,12 +254,13 @@ export class QueueTabComponent {
   });
 
   /**
-   * A parked job's waiting reason, for the row's grey secondary line. Only
+   * Why a started job is waiting (its parked reason, else the backend's phase
+   * line, e.g. "Waiting in queue..."), for the row's grey secondary line. Only
    * while the backend still holds the job: Stop clears backendJobId, and a
    * reason about a job the backend no longer has would be stale.
    */
-  private parkedNote(job: QueueJob): string | undefined {
-    return job.backendJobId && job.parkedReason ? job.parkedReason : undefined;
+  private waitingNote(job: QueueJob): string | undefined {
+    return job.backendJobId ? job.parkedReason ?? job.waitingPhase : undefined;
   }
 
   // Computed property for AI processing queue item ID

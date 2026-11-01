@@ -245,7 +245,9 @@ export class QueueService implements OnDestroy {
           state: 'pending' as JobState,
           errorMessage: undefined,
           startedAt: undefined,
-          completedAt: undefined
+          completedAt: undefined,
+          parkedReason: undefined,
+          waitingPhase: undefined
         };
       })
     );
@@ -1118,7 +1120,7 @@ export class QueueService implements OnDestroy {
    * Patch a job's admission fields, only when something actually changed (the
    * reconcile runs often; don't churn the jobs signal / localStorage).
    */
-  private patchAdmission(jobId: string, patch: Pick<QueueJob, 'parkedReason' | 'lane' | 'venue'>): void {
+  private patchAdmission(jobId: string, patch: Partial<Pick<QueueJob, 'parkedReason' | 'lane' | 'venue' | 'waitingPhase'>>): void {
     const job = this.jobs().find(j => j.id === jobId);
     if (!job) return;
     const changed = (Object.keys(patch) as (keyof typeof patch)[])
@@ -1127,13 +1129,19 @@ export class QueueService implements OnDestroy {
     this.jobs.update(jobs => jobs.map(j => (j.id === jobId ? { ...j, ...patch } : j)));
   }
 
-  /** Carry parkedReason / lane / venue across from a GET /queue/jobs row. */
+  /** Carry parkedReason / lane / venue / waiting phase across from a GET /queue/jobs row. */
   private applyAdmission(jobId: string, backendJob: any): void {
     this.patchAdmission(jobId, {
       parkedReason: backendJob.parkedReason || undefined,
       lane: backendJob.lane || undefined,
       venue: backendJob.venue || undefined,
+      waitingPhase: this.waitingPhaseOf(backendJob),
     });
+  }
+
+  /** The backend's phase line while a started job waits for its turn (status 'pending'). */
+  private waitingPhaseOf(backendJob: any): string | undefined {
+    return backendJob.status === 'pending' ? backendJob.currentPhase || undefined : undefined;
   }
 
   /** Parked = waiting for admission. Never a failure: state is left alone. */
@@ -1150,7 +1158,8 @@ export class QueueService implements OnDestroy {
     if (!jobId) return;
     const job = this.jobs().find(j => j.id === jobId);
     if (!job) return;
-    this.patchAdmission(jobId, { parkedReason: undefined, lane: job.lane, venue: job.venue });
+    // Unparked = admitted to a lane: neither the reason nor the phase line (which held it) applies.
+    this.patchAdmission(jobId, { parkedReason: undefined, waitingPhase: undefined });
   }
 
   private handleTaskStarted(event: TaskStarted): void {
@@ -1170,6 +1179,7 @@ export class QueueService implements OnDestroy {
         parkedReason: undefined,
         lane: event.lane ?? startedJob.lane,
         venue: event.venue ?? startedJob.venue,
+        waitingPhase: undefined,
       });
     }
 
@@ -1327,12 +1337,15 @@ export class QueueService implements OnDestroy {
   }
 
   /**
-   * Map backend job status to frontend JobState
+   * Map backend job status to frontend JobState. Only a staged backend job
+   * ('paused', never started) belongs in staging; a backend 'pending' job was
+   * started and is waiting its turn (a lane, a park), so it is processing.
    */
   private mapBackendStatus(backendStatus: string): JobState {
     switch (backendStatus) {
-      case 'pending':
+      case 'paused':
         return 'pending';
+      case 'pending':
       case 'processing':
         return 'processing';
       case 'completed':
@@ -1370,7 +1383,8 @@ export class QueueService implements OnDestroy {
       completedAt: backendJob.completedAt ? new Date(backendJob.completedAt).getTime() : undefined,
       parkedReason: backendJob.parkedReason || undefined,
       lane: backendJob.lane || undefined,
-      venue: backendJob.venue || undefined
+      venue: backendJob.venue || undefined,
+      waitingPhase: this.waitingPhaseOf(backendJob)
     });
   }
 
