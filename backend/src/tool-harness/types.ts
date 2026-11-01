@@ -68,6 +68,13 @@ export interface Tool<Args = Record<string, unknown>, Result = unknown> {
   description: string;
   /** JSON Schema of the arguments object. */
   parameters: Record<string, unknown>;
+  /**
+   * Whether this tool's results may be dropped from the conversation when it
+   * outgrows the context budget (context.ts), and in what order: a lower
+   * number goes first. For a tool whose result can simply be fetched again (a
+   * page read); absent, its results are never dropped (what was done).
+   */
+  dropOrder?: number;
   execute(args: Args, ctx: ToolContext): Promise<{ content: string; data?: Result }>;
 }
 
