@@ -5,13 +5,21 @@
  * library guard, restart semantics, and (P7) the readiness gate at the door:
  * lanes are the only place AI work runs.
  */
-import { LANE_STALL_MS, STARVATION_MS } from '../../src/queue/crucible-lanes';
+import { CLOUD_LANE, CrucibleLanesService, LANE_STALL_MS, runsScorerStage, STARVATION_MS } from '../../src/queue/crucible-lanes';
+import { claudeCliTarget } from '../../src/claude-cli/claude-cli.service';
+import { crucibleTargetOf } from '../../src/crucible/llm/target';
+import type { Task } from '../../src/common/interfaces/task.interface';
 import { CrucibleRequiredError } from '../../src/crucible/readiness.service';
 import { analyzeJob, downloadJob, makeRig, StubLanes, StubReadiness, tick, transcribeJob, until, type Rig } from './queue-rig';
 
 const LOCAL_9B = 'local:qwen3.5-9b';
 const LOCAL_4B = 'local:qwen3.5-4b';
 const CLAUDE = 'claude:claude-sonnet-5';
+
+/** An analysis that makes flags only: no chapters, so no scorer stage. */
+function flagsJob(videoId: string, aiModel: string) {
+  return analyzeJob(videoId, aiModel, { tasks: [{ type: 'analyze', options: { aiModel, parts: ['flags'] } }] });
+}
 
 function gatedRig(lanes?: StubLanes): Rig {
   const rig = makeRig(lanes);
@@ -116,14 +124,14 @@ describe('lanes: assignment', () => {
     await until(() => rig.qm.getJob(mac2)?.status === 'completed' && rig.qm.getJob(pc1)?.status === 'completed');
   });
 
-  it('upstream models run two wide on the cloud lane, alongside a busy GPU lane', async () => {
+  it('upstream models that make no chapters run two wide on the cloud lane, alongside a busy GPU lane', async () => {
     const lanes = new StubLanes();
     lanes.busy.set('mac', 'Crucible is busy: bookforge, tts 40% done');
     const rig = gatedRig(lanes);
     const gpu = rig.qm.addJob(analyzeJob('v0', LOCAL_9B));
-    const c1 = rig.qm.addJob(analyzeJob('v1', CLAUDE));
-    const c2 = rig.qm.addJob(analyzeJob('v2', CLAUDE));
-    const c3 = rig.qm.addJob(analyzeJob('v3', CLAUDE));
+    const c1 = rig.qm.addJob(flagsJob('v1', CLAUDE));
+    const c2 = rig.qm.addJob(flagsJob('v2', CLAUDE));
+    const c3 = rig.qm.addJob(flagsJob('v3', CLAUDE));
     await until(() => rig.media.started('analyze').length === 2);
     await tick(20);
     expect(rig.media.started('analyze').sort()).toEqual([c1, c2].sort());
@@ -137,6 +145,39 @@ describe('lanes: assignment', () => {
     rig.qm.onModuleDestroy();
   });
 
+  it('an upstream analysis that makes chapters takes its server’s GPU lane: one at a time with a transcribe there', async () => {
+    const lanes = new StubLanes();
+    const rig = gatedRig(lanes);
+    rig.media.gated.add('transcribe');
+    const t = rig.qm.addJob(transcribeJob('v0'));
+    const a = rig.qm.addJob(analyzeJob('v1', CLAUDE, { tasks: [{ type: 'analyze', options: { aiModel: CLAUDE, parts: ['metadata', 'chapters', 'flags'] } }] }));
+    await until(() => rig.media.started('transcribe').includes(t));
+    await tick(20);
+    // The scorer stage holds the card: the analysis waits for the transcribe, never runs beside it.
+    expect(rig.media.started('analyze')).toEqual([]);
+    expect(rig.qm.getJob(a)).toMatchObject({ status: 'pending', lane: 'gpu:mac' });
+    rig.media.release('transcribe', t);
+    await until(() => rig.media.started('analyze').includes(a));
+    expect(lanes.admitted.find((x) => x.jobId === a)).toMatchObject({ lane: 'gpu:mac', model: 'anthropic/claude-sonnet-5' });
+    rig.media.release('analyze', a);
+    rig.qm.onModuleDestroy();
+  });
+
+  it('metadata alone takes the cloud lane on stored chapters, the GPU lane on a video that must make them first', async () => {
+    const lanes = new StubLanes();
+    const rig = gatedRig(lanes);
+    rig.media.storedChapters.add('v1');
+    const metadata = (videoId: string) => analyzeJob(videoId, CLAUDE, { tasks: [{ type: 'analyze', options: { aiModel: CLAUDE, parts: ['metadata'] } }] });
+    const onStored = rig.qm.addJob(metadata('v1'));
+    const makesChapters = rig.qm.addJob(metadata('v2'));
+    await until(() => rig.media.started('analyze').length === 2);
+    expect(rig.qm.getJob(onStored)).toMatchObject({ lane: 'cloud' });
+    expect(rig.qm.getJob(makesChapters)).toMatchObject({ lane: 'gpu:mac' });
+    rig.media.release('analyze', onStored);
+    rig.media.release('analyze', makesChapters);
+    rig.qm.onModuleDestroy();
+  });
+
   it('a model that is not one fails at once, by name; a model with no venue waits with the reason', async () => {
     const lanes = new StubLanes();
     lanes.waitFor.set('anthropic/claude-sonnet-5', 'No running Crucible server has Claude configured. Add it in Settings › Crucible Servers.');
@@ -147,6 +188,53 @@ describe('lanes: assignment', () => {
     expect(rig.qm.getJob(bad)?.error).toMatch(/not an AI provider/);
     expect(rig.qm.getJob(waiting)).toMatchObject({ status: 'pending', parkedReason: expect.stringMatching(/Claude configured/) });
     rig.qm.onModuleDestroy();
+  });
+});
+
+describe('lanes: the scorer stage decides an upstream’s lane', () => {
+  const analyze = (parts?: string[]): Task => ({ type: 'analyze', options: { aiModel: 'claude-sonnet-5', ...(parts ? { parts } : {}) } } as Task);
+  const never = (): boolean => { throw new Error('stored chapters read when the parts decide alone'); };
+
+  it('runs iff the analysis makes chapters: asked for, or first for metadata on a video with none', () => {
+    expect(runsScorerStage(analyze(), never)).toBe(true);
+    expect(runsScorerStage(analyze(['metadata', 'chapters', 'flags']), never)).toBe(true);
+    expect(runsScorerStage(analyze(['chapters']), never)).toBe(true);
+    expect(runsScorerStage(analyze(['flags']), never)).toBe(false);
+    expect(runsScorerStage(analyze(['metadata']), () => true)).toBe(false);
+    expect(runsScorerStage(analyze(['metadata']), () => false)).toBe(true);
+    expect(runsScorerStage(analyze(['metadata', 'flags']), () => false)).toBe(true);
+    expect(runsScorerStage({ type: 'analyze-webpage', options: { aiModel: 'claude-sonnet-5' } } as Task, never)).toBe(false);
+    expect(() => runsScorerStage(analyze([]), never)).toThrow(/at least one part/);
+  });
+
+  /** The real lanes over a selected `pc` that answers and can serve anything. */
+  function realLanes(): CrucibleLanesService {
+    const chat = {
+      effectiveTarget: async (target: unknown) => ({ target }),
+      canServe: async () => true,
+    };
+    return new CrucibleLanesService(
+      { selected: () => 'pc' } as never,
+      { reach: async () => ({ reach: 'ready', probe: { outcome: 'ok' } }) } as never,
+      chat as never, {} as never, { onChange: () => () => undefined } as never, {} as never,
+    );
+  }
+
+  it('claude-cli or an upstream that runs the scorer takes the server’s GPU lane; without it, the cloud lane', async () => {
+    const lanes = realLanes();
+    const cli = claudeCliTarget('claude-sonnet-5-5');
+    const upstream = crucibleTargetOf('claude', 'claude-sonnet-5');
+    expect(await lanes.place(cli, true)).toEqual({ kind: 'lane', placement: { lane: 'gpu:pc', server: 'pc', target: cli } });
+    expect(await lanes.place(upstream, true)).toEqual({ kind: 'lane', placement: { lane: 'gpu:pc', server: 'pc', target: upstream } });
+    expect(await lanes.place(cli, false)).toEqual({ kind: 'lane', placement: { lane: CLOUD_LANE, server: 'pc', target: cli } });
+    expect(await lanes.place(upstream, false)).toEqual({ kind: 'lane', placement: { lane: CLOUD_LANE, server: 'pc', target: upstream } });
+  });
+
+  it('a local model takes its server’s GPU lane, scorer or not', async () => {
+    const lanes = realLanes();
+    const local = crucibleTargetOf('local', 'qwen3.5-9b');
+    expect(await lanes.place(local, true)).toEqual({ kind: 'lane', placement: { lane: 'gpu:pc', server: 'pc', target: local } });
+    expect(await lanes.place(local, false)).toEqual({ kind: 'lane', placement: { lane: 'gpu:pc', server: 'pc', target: local } });
   });
 });
 

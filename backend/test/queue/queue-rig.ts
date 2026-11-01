@@ -121,6 +121,9 @@ export class StubMedia {
     }
     return this.op('analyze', id, taskId, () => ({ success: true, data: { sectionsCount: 1 } }));
   };
+  /** The videos with stored chapters a metadata run can be written from. */
+  readonly storedChapters = new Set<string>();
+  hasStoredChaptersForMetadata = (id: string): boolean => this.storedChapters.has(id);
   analyzeWebpage = (id: string, _o: unknown, taskId: string) => this.op('analyze-webpage', id, taskId, () => ({ success: true, data: {} }));
   regenerateThumbnail = async () => undefined;
   refreshVideoDimensions = async () => undefined;
@@ -147,7 +150,10 @@ export class StubLanes {
   ready: Promise<void> = Promise.resolve();
   offset = 0;
   now = (): number => Date.now() + this.offset;
-  /** model → server; upstream models go to the cloud lane on `cloudServer`. */
+  /**
+   * model → server; upstream models go to the cloud lane on `cloudServer`,
+   * or to its GPU lane when the task runs the scorer stage (as the real one).
+   */
   serverOf = new Map<string, string>();
   cloudServer = 'mac';
   /** A wait answer for a model (no venue). */
@@ -179,11 +185,13 @@ export class StubLanes {
     return crucibleTargetOf(o.aiProvider, o.aiModel ?? '');
   }
   widthOf(lane: string) { return lane === CLOUD_LANE ? 2 : 1; }
-  async place(target: CrucibleTarget): Promise<PlaceAnswer> {
+  async place(target: CrucibleTarget, scorer: boolean): Promise<PlaceAnswer> {
     this.placeCalls++;
     const wait = this.waitFor.get(target.model);
     if (wait !== undefined) return { kind: 'wait', reason: wait };
-    if (target.route === 'upstream') return { kind: 'lane', placement: { lane: CLOUD_LANE, server: this.cloudServer, target } };
+    if (target.route === 'upstream') {
+      return { kind: 'lane', placement: { lane: scorer ? gpuLaneOf(this.cloudServer) : CLOUD_LANE, server: this.cloudServer, target } };
+    }
     const server = this.serverOf.get(target.model) ?? 'mac';
     return { kind: 'lane', placement: { lane: gpuLaneOf(server), server, target } };
   }

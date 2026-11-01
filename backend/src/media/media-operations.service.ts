@@ -9,7 +9,7 @@ import { DownloaderService } from '../downloader/downloader.service';
 import { FileScannerService } from '../database/file-scanner.service';
 import { DatabaseService, type VideoRecord } from '../database/database.service';
 import { buildAsrContext, titleFromFilename } from '../crucible/asr/asr-context';
-import { AIAnalysisService, type Chapter } from '../analysis/ai-analysis.service';
+import { AIAnalysisService, usableStoredChapters, type Chapter } from '../analysis/ai-analysis.service';
 import {
   AnalysisPart,
   AnalysisRange,
@@ -960,6 +960,16 @@ export class MediaOperationsService {
         error: error instanceof Error ? error.message : 'Analysis failed',
       };
     }
+  }
+
+  /**
+   * Whether a metadata run on this video writes from its stored chapters
+   * (true) or makes the chapters first (false), read exactly as the run reads
+   * them. The queue asks it at placement: making chapters runs the scorer
+   * stage on the server's card, which decides the task's lane.
+   */
+  hasStoredChaptersForMetadata(videoId: string): boolean {
+    return usableStoredChapters(this.storedChaptersForMetadata(videoId)).length > 0;
   }
 
   /**

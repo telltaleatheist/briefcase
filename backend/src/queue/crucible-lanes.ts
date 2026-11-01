@@ -9,8 +9,11 @@
  *                  one resident model, so one task at a time, holding one queue
  *                  session for its whole run (a video is atomic on its card).
  *   cloud          one, width 2: an analysis whose model is an upstream
- *                  (`anthropic/…`, `openai/…`, `ollama/…`). It holds no card;
- *                  rate limits come back as 429 + Retry-After.
+ *                  (`anthropic/…`, `openai/…`, `ollama/…`) and that makes
+ *                  no chapters. It holds no card; rate limits come back as
+ *                  429 + Retry-After. An upstream analysis that makes
+ *                  chapters runs the scorer stage on its server's card, so
+ *                  it takes that server's GPU lane (see {@link runsScorerStage}).
  *
  * The main pool (5) is not touched: downloads, imports and every other non-AI
  * task never read anything in this file. A `transcribe` (P5) is placed here
@@ -19,7 +22,7 @@
  *
  * This service DECIDES; the queue (queue-manager.service.ts) holds the slots.
  *
- *   place(target)            venue-decision.ts: which lane, or wait/fail
+ *   place(target, scorer)    venue-decision.ts: which lane, or wait/fail
  *   preflight(server, target) a read of /v1/activity (cached 2 s): the
  *                            holder's sentence when someone else holds the
  *                            card, else null. A display and a preflight, never
@@ -64,6 +67,7 @@ import type { Task } from '../common/interfaces/task.interface';
 import { CrucibleTranscriptionService } from '../crucible/asr/crucible-transcription.service';
 import { SCORER_LOAD_CONTEXT, SCORER_PREFERRED_MODEL } from '../scorer/crucible-scorer.service';
 import { claudeCliModelOf, claudeCliTarget, isClaudeCliTarget } from '../claude-cli/claude-cli.service';
+import { partsToMake, resolveAnalysisParts } from '../analysis/analysis-parts';
 
 export const GPU_LANE_WIDTH = 1;
 export const CLOUD_LANE_WIDTH = 2;
@@ -89,6 +93,28 @@ export function asrTarget(model: string): CrucibleTarget {
 export type TranscribePlaceAnswer =
   | { kind: 'lane'; placement: LanePlacement }
   | { kind: 'wait'; reason: string };
+
+/**
+ * Whether an AI task runs the scorer stage, which loads the scorer model on
+ * its server's card inside the task's queue session. It runs iff the analysis
+ * makes chapters (analysis-parts.ts `partsToMake`): asked for, or made first
+ * for metadata on a video with no stored chapters. `hasStoredChapters` is
+ * asked only in that last case.
+ *
+ * The lane follows from it, whatever writes the text: a task that holds the
+ * card must not run beside other work on that card. Every request Briefcase
+ * sends carries the same client name, so a transcribe running alongside joins
+ * the analysis's queue session and waits behind the resident scorer, while the
+ * session's own next call waits behind the transcribe (seen on the PC,
+ * 2026-11-01: deadlocked until the call's 600 s max_wait). Throws the parts'
+ * named error for a request the pipeline cannot run.
+ */
+export function runsScorerStage(task: Task, hasStoredChapters: () => boolean): boolean {
+  if (task.type !== 'analyze') return false;
+  const asked = resolveAnalysisParts((task.options as { parts?: unknown } | undefined)?.parts);
+  const readsStored = asked.has('metadata') && !asked.has('chapters');
+  return partsToMake(asked, readsStored && hasStoredChapters()).made.includes('chapters');
+}
 
 export function gpuLaneOf(server: string): string {
   return `gpu:${server}`;
@@ -283,14 +309,22 @@ export class CrucibleLanesService implements OnModuleInit, BeforeApplicationShut
     return lane === CLOUD_LANE ? CLOUD_LANE_WIDTH : GPU_LANE_WIDTH;
   }
 
-  async place(chosen: CrucibleTarget): Promise<PlaceAnswer> {
+  /**
+   * Which lane a task on `chosen` runs on. A local model runs on its server's
+   * GPU lane. An upstream runs on the cloud lane unless the task runs the
+   * scorer stage (`scorer`, from {@link runsScorerStage}): the scorer holds the
+   * card of the server the venue rule chose, so the task takes that server's
+   * GPU lane and is serialised with every other task on the card.
+   */
+  async place(chosen: CrucibleTarget, scorer: boolean): Promise<PlaceAnswer> {
     // An ollama/ choice the server has a model of its own for runs on the
     // GPU lane as that model (ollama-map.ts), leased like any local model.
     // A size ceiling stays a ceiling: the run's session is opened with it
     // (runAdmitted → withModel), and the server's pick is read there.
-    // TEMPORARY (claude-cli): a claude-cli analysis takes the cloud lane and
-    // needs no upstream on the server; the run still needs a Crucible that
-    // answers (the scorer stage), so the selected server's reach decides.
+    // TEMPORARY (claude-cli): a claude-cli analysis needs no upstream on the
+    // server; it still needs a Crucible that answers when it runs the scorer
+    // stage, so the selected server's reach decides, and its lane follows
+    // `scorer` like any upstream's.
     const cli = isClaudeCliTarget(chosen);
     const target = cli || chosen.ceilingB !== undefined ? chosen : (await this.chat.effectiveTarget(chosen)).target;
     const answer: VenueAnswer = await decideVenue(target, {
@@ -302,7 +336,7 @@ export class CrucibleLanesService implements OnModuleInit, BeforeApplicationShut
       canServe: (server, t) => (cli ? Promise.resolve(true) : this.chat.canServe(server, t)),
     });
     if (answer.kind !== 'venue') return answer;
-    const lane = target.route === 'upstream' ? CLOUD_LANE : gpuLaneOf(answer.server);
+    const lane = target.route === 'upstream' && !scorer ? CLOUD_LANE : gpuLaneOf(answer.server);
     return { kind: 'lane', placement: { lane, server: answer.server, target } };
   }
 

@@ -261,8 +261,8 @@ describe('AIProviderService routing (TEMPORARY claude-cli)', () => {
 describe('the queue lanes and the picker (TEMPORARY claude-cli)', () => {
   beforeAll(() => Logger.overrideLogger(false));
 
-  it('a claude-cli analysis is a cloud-lane task: no upstream needed, nothing loaded, the run still opened', async () => {
-    const { CrucibleLanesService, CLOUD_LANE } = await import('../queue/crucible-lanes');
+  it('a claude-cli analysis that runs no scorer is a cloud-lane task: no upstream needed, nothing loaded, the run still opened', async () => {
+    const { CrucibleLanesService, CLOUD_LANE, gpuLaneOf } = await import('../queue/crucible-lanes');
     const touched: string[] = [];
     const chat = {
       effectiveTarget: () => { touched.push('effectiveTarget'); throw new Error('no'); },
@@ -278,8 +278,10 @@ describe('the queue lanes and the picker (TEMPORARY claude-cli)', () => {
     );
     const target = lanes.targetOf({ options: { aiProvider: 'claude-cli', aiModel: 'claude-sonnet-5-5' } } as any);
     expect(target.model).toBe('claude-cli/claude-sonnet-5-5');
-    const placed = await lanes.place(target);
+    const placed = await lanes.place(target, false);
     expect(placed).toEqual({ kind: 'lane', placement: { lane: CLOUD_LANE, server: 'mac', target } });
+    // One that makes chapters runs the scorer on mac's card: mac's GPU lane.
+    expect(await lanes.place(target, true)).toEqual({ kind: 'lane', placement: { lane: gpuLaneOf('mac'), server: 'mac', target } });
     const result = await lanes.runAdmitted({ lane: CLOUD_LANE, server: 'mac', target, signal: new AbortController().signal, localId: 'j1', onActivity: () => undefined }, async () => ({ success: true }));
     expect(result).toEqual({ success: true });
     expect(touched).toEqual(['withRun']);

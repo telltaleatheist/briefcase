@@ -266,7 +266,7 @@ const NO_SPEECH_SUMMARY = 'No speech in this video (music, ambient sound or sile
 const NO_SPEECH_DESCRIPTION = 'No speech in this video.';
 
 /** The stored chapters metadata can be written from: real ones, with a title. */
-function usableStoredChapters(chapters: Chapter[] | undefined): Chapter[] {
+export function usableStoredChapters(chapters: Chapter[] | undefined): Chapter[] {
   return (chapters ?? []).filter((ch) => !ch.failed && ch.title.trim() !== '');
 }
 const JSON_PARSE_RETRIES = 2;

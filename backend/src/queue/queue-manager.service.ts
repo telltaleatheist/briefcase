@@ -32,6 +32,7 @@ import {
   LANE_TASK_TYPES,
   STARVATION_MS,
   parkDelayMs,
+  runsScorerStage,
   type LanePlacement,
   type LanesStatus,
   type LaneTaskView,
@@ -1288,14 +1289,17 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         continue;
       }
       let target;
+      let scorer;
       try {
         target = lanes.targetOf(task);
+        scorer = this.runsScorer(task, job);
       } catch (err) {
         this.failWaitingJob(job, task, (err as Error).message);
         continue;
       }
-      if (!decisions.has(target.model)) decisions.set(target.model, lanes.place(target));
-      const answer = await decisions.get(target.model)!;
+      const decisionKey = `${target.model}${scorer ? ' +scorer' : ''}`;
+      if (!decisions.has(decisionKey)) decisions.set(decisionKey, lanes.place(target, scorer));
+      const answer = await decisions.get(decisionKey)!;
       if (!this.stillWaiting(job, index)) continue;
       if (answer.kind === 'wait') {
         this.parkJob(job, answer.reason, null);
@@ -1341,6 +1345,29 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
         free--;
       }
     }
+  }
+
+  /**
+   * Whether this AI task runs the scorer stage on its server's card
+   * (crucible-lanes `runsScorerStage`), which puts even an upstream analysis
+   * on that server's GPU lane. The video's stored chapters are read only for
+   * a metadata run without chapters, and only from the active library: the
+   * shared DB connection reads that one, and switching it for a placement
+   * would move it under a running task. A video that cannot be read here (a
+   * job for another library, a video not imported yet, a failed read) is
+   * placed as a run that makes its chapters: on the card, where at worst it
+   * waits its turn, never beside a transcribe it would deadlock with.
+   */
+  private runsScorer(task: Task, job: QueueJob): boolean {
+    return runsScorerStage(task, () => {
+      const active = this.libraryManager.getActiveLibrary()?.id;
+      if (!job.videoId || (job.libraryId !== undefined && job.libraryId !== active)) return false;
+      try {
+        return this.mediaOps.hasStoredChaptersForMetadata(job.videoId);
+      } catch {
+        return false;
+      }
+    });
   }
 
   /**
