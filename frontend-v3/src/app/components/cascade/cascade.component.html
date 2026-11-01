@@ -28,6 +28,27 @@
       </div>
     </div>
   } @else {
+    @if (columnSort(); as sort) {
+      <!-- Column headers (search results): click one to sort by it, again to flip -->
+      <div class="column-headers" role="row" (click)="$event.stopPropagation()" (mousedown)="$event.stopPropagation()">
+        @for (col of resultColumns; track col.column) {
+          <button
+            type="button"
+            role="columnheader"
+            class="column-header"
+            [ngClass]="'col-' + col.column"
+            [class.active]="sort.column === col.column"
+            [attr.aria-sort]="sort.column === col.column ? (sort.order === 'asc' ? 'ascending' : 'descending') : 'none'"
+            [title]="'Sort by ' + col.label.toLowerCase()"
+            (click)="sortClicked(col.column, $event)">
+            <span class="column-label">{{ col.label }}</span>
+            @if (sort.column === col.column) {
+              <svg class="sort-arrow" [class.asc]="sort.order === 'asc'" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            }
+          </button>
+        }
+      </div>
+    }
     <!-- Virtual Scroll Video List -->
     <cdk-virtual-scroll-viewport
       itemSize="56"
@@ -240,7 +261,11 @@
 
             <!-- Duration & Actions -->
             <div class="video-actions">
-              @if (showDuration && item.video.duration && item.video.duration !== '0:00' && item.video.duration !== '00:00:00' && item.video.duration !== '0:00:00') {
+              @if (columnSort()) {
+                <!-- Cells under the Downloaded and Length headers: fixed widths, blank when unknown -->
+                <span class="video-downloaded">{{ item.video.downloadDate ? formatDownloadDate(item.video.downloadDate) : '' }}</span>
+                <span class="video-duration column-cell">{{ formatLength(item.video.duration) }}</span>
+              } @else if (showDuration && item.video.duration && item.video.duration !== '0:00' && item.video.duration !== '00:00:00' && item.video.duration !== '0:00:00') {
                 <span class="video-duration">{{ item.video.duration }}</span>
               }
 

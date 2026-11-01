@@ -1,13 +1,13 @@
-import { LibraryFilterService, startOfRange } from '../services/library-filter.service';
+import { columnComparator, DEFAULT_RESULTS_SORT, startOfRange } from '../services/library-filter.service';
 import { highlightPieces, orderSearchHits, SearchHit } from './library-search.model';
 import { VideoItem } from './video.model';
 
 describe('orderSearchHits', () => {
-  const hit = (id: string, downloadDate: string, titleRank?: 0 | 1 | 2 | 3) =>
-    ({ video: { id, name: id, downloadDate: new Date(downloadDate) } as unknown as VideoItem, title: id, titleHighlights: [], titleRank, moments: [], momentCount: 0 }) as SearchHit;
-  const newestFirst = new LibraryFilterService().videoComparator({ sortBy: 'date', sortOrder: 'desc' });
+  const hit = (id: string, uploadDate: string, titleRank?: 0 | 1 | 2 | 3) =>
+    ({ video: { id, name: `${uploadDate} ${id}.mp4` } as unknown as VideoItem, title: id, titleHighlights: [], titleRank, moments: [], momentCount: 0 }) as SearchHit;
+  const newestFirst = columnComparator(DEFAULT_RESULTS_SORT);
 
-  it('lists the closest file name matches first and transcript-only hits last, newest first within each', () => {
+  it('lists the closest file name matches first and transcript-only hits last, newest upload first within each', () => {
     const hits = [
       hit('said-new', '2026-10-10'),
       hit('loose-new', '2026-10-01', 3),

@@ -14,6 +14,7 @@ import { LibraryService } from '../../services/library.service';
 import { NotificationService } from '../../services/notification.service';
 import { TabsService } from '../../services/tabs.service';
 import { CrucibleReadinessService } from '../../services/crucible-readiness.service';
+import { ColumnSort, ResultsColumn, parseDurationToSeconds } from '../../services/library-filter.service';
 import { extractTitleFromFilename, extractDateFromFilename, formatDateForDisplay } from '@shared/filename-utils';
 
 /**
@@ -97,6 +98,34 @@ export class CascadeComponent implements OnDestroy {
   /** Videos whose moments are all shown. */
   private readonly momentsExpanded = signal<ReadonlySet<string>>(new Set());
   readonly momentPieces = highlightPieces;
+
+  /**
+   * Column headers over the list (search results): Upload date, Name,
+   * Downloaded and Length, the sorted one marked with its direction, and a
+   * Downloaded cell on each row. Null: no headers (the library's week sections).
+   */
+  columnSort = input<ColumnSort | null>(null);
+  /** A column header was clicked; the parent decides the new sort. */
+  readonly columnSortClicked = output<ResultsColumn>();
+  readonly resultColumns: ReadonlyArray<{ column: ResultsColumn; label: string }> = [
+    { column: 'upload', label: 'Upload date' },
+    { column: 'name', label: 'Name' },
+    { column: 'download', label: 'Downloaded' },
+    { column: 'length', label: 'Length' },
+  ];
+  /** A length as HH:MM:SS; blank when there is none. */
+  formatLength(duration: string | undefined): string {
+    const seconds = parseDurationToSeconds(duration);
+    if (seconds <= 0) return '';
+    const hours = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  }
+  sortClicked(column: ResultsColumn, event: MouseEvent) {
+    event.stopPropagation();
+    this.columnSortClicked.emit(column);
+  }
 
   @Input() set weeks(value: VideoWeek[]) {
     // Preserve the user's prior expand/collapse state across re-emissions

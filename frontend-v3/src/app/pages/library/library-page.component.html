@@ -59,6 +59,8 @@
             [tabbedVideoIds]="tabbedVideoIds()"
             [emptyState]="cascadeEmptyState()"
             [moments]="searchQuery() ? searchMoments() : null"
+            [columnSort]="searchQuery() ? resultsSort() : null"
+            (columnSortClicked)="onResultsSort($event)"
             (momentOpened)="onOpenSearchHit($event)"
             (emptyAction)="onCascadeEmptyAction($event)"
             (selectionChanged)="onSelectionChanged($event)"

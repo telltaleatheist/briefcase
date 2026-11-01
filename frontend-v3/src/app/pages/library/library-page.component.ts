@@ -28,7 +28,7 @@ import { FileImportService } from '../../services/file-import.service';
 import { ElectronService } from '../../services/electron.service';
 import { TourService } from '../../services/tour.service';
 import { QueueService } from '../../services/queue.service';
-import { LibraryFilterService } from '../../services/library-filter.service';
+import { LibraryFilterService, ColumnSort, ResultsColumn, DEFAULT_RESULTS_SORT, columnComparator, nextColumnSort } from '../../services/library-filter.service';
 import { WebArchiveService } from '../../services/web-archive.service';
 import { QueueJob, QueueTask, createQueueJob, createQueueTask } from '../../models/queue-job.model';
 import { VideoJobSettings } from '../../models/video-processing.model';
@@ -316,14 +316,25 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       kept = new Set((narrowed[0]?.videos ?? []).map(v => v.id));
     }
     const shown = hits.filter(h => kept.has(h.video.id) && (type === 'all' || this.matchesTypeFilter(h.video, type)));
-    // Closest file name matches first, then the rest of the file name matches,
-    // then (Deep search) videos where it is only said: the filters' Sort By
-    // and Order apply within each (newest download first by default), so a
-    // newer video that barely matches never lists above the one named for
-    // the query. Relevance keeps the search's own best-first order.
-    if (!filters || filters.sortBy === 'relevance') return shown;
-    return orderSearchHits(shown, this.filterService.videoComparator(filters));
+    // Until a column header is clicked: closest file name matches first, then
+    // the rest of the file name matches, then (Deep search) videos where it is
+    // only said, newest upload first within each, so a newer video that barely
+    // matches never lists above the one named for the query. A clicked column
+    // sorts them all by it, like any list view.
+    const chosen = this.chosenResultsSort();
+    if (chosen) {
+      const compare = columnComparator(chosen);
+      return [...shown].sort((a, b) => compare(a.video, b.video));
+    }
+    return orderSearchHits(shown, columnComparator(DEFAULT_RESULTS_SORT));
   });
+  /** The column sort the user clicked in the search results; none (the search's own order) until then, and again after each search ends. */
+  private chosenResultsSort = signal<ColumnSort | null>(null);
+  /** The sort the results' column headers show. */
+  resultsSort = computed<ColumnSort>(() => this.chosenResultsSort() ?? DEFAULT_RESULTS_SORT);
+  onResultsSort(column: ResultsColumn) {
+    this.chosenResultsSort.set(nextColumnSort(this.resultsSort(), column));
+  }
   searchWeeks = computed<VideoWeek[]>(() => {
     const hits = this.searchHits();
     return hits.length ? [{ weekLabel: 'Search results', videos: hits.map(h => h.video) }] : [];
@@ -1743,6 +1754,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     } else {
       this.searchSeq++;
       this.searchKey = '';
+      this.chosenResultsSort.set(null);
       this.searchResponse.set(null);
       this.searchError.set(null);
       this.searchLoading.set(false);
@@ -1757,7 +1769,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       videos: [...week.videos]
     }));
     weeks = this.filterService.applyFilters(weeks, this.currentFilters);
-    this.filterService.sortVideos(weeks, this.currentFilters);
+    this.filterService.sortVideos(weeks);
     this.filteredWeeks.set(weeks);
   }
 

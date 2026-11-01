@@ -27,8 +27,8 @@ export interface SearchHit {
   titleHighlights: Array<[number, number]>;
   /**
    * How closely the file name holds the query (backend filename-match.ts), 0
-   * best; absent when only the transcript matched. Results list by it first,
-   * whatever they are sorted by.
+   * best; absent when only the transcript matched. Results list by it first
+   * until a column header is clicked.
    */
   titleRank?: 0 | 1 | 2 | 3;
   /** In time order, at most 25. */
@@ -55,9 +55,10 @@ export interface LibrarySearchResponse {
 }
 
 /**
- * Search hits in the order the library lists them: by how closely the file
- * name matched (titleRank, best first; transcript-only hits after), then by
- * `compare` (the filters' Sort By and Order) within each.
+ * Search hits in the order they open in: by how closely the file name matched
+ * (titleRank, best first; transcript-only hits after), then by `compare`
+ * (newest upload first) within each. A clicked column header sorts them all
+ * by that column instead.
  */
 export function orderSearchHits(hits: ReadonlyArray<SearchHit>, compare: (a: VideoItem, b: VideoItem) => number): SearchHit[] {
   const tier = (h: SearchHit) => h.titleRank ?? 4;

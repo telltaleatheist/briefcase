@@ -19,7 +19,7 @@
 • Exact phrase: &quot;strike and strike&quot; must be there in that order, run together
 • Exclude: -unwanted
 • Either: word1 OR word2
-• The closest matches come first, then the Sort By order
+• The closest matches come first, newest upload first; click a column header to sort by it
 • Deep search also finds what is said in the transcripts"
         class="search-input"
       />
@@ -122,42 +122,6 @@
           <option [ngValue]="null">Any</option>
           <option [ngValue]="true">Has</option>
           <option [ngValue]="false">None</option>
-        </select>
-      </div>
-    </div>
-
-    <div class="filter-divider"></div>
-
-    <!-- Sort Row -->
-    <div class="filter-row filter-row-sort">
-      <div class="filter-group filter-group-grow">
-        <label>Sort By</label>
-        <select
-          [(ngModel)]="filters.sortBy"
-          (ngModelChange)="onFilterChange()"
-          class="filter-select"
-        >
-          <option value="date">Download Date</option>
-          @if (filters.searchQuery.trim()) {
-            <option value="relevance">Relevance</option>
-          }
-          <option value="name">Name</option>
-          <option value="duration">Duration</option>
-          <option value="suggestions">Has AI Suggestions</option>
-          <option value="no-analysis">Missing Analysis</option>
-          <option value="no-transcript">Missing Transcript</option>
-        </select>
-      </div>
-
-      <div class="filter-group">
-        <label>Order</label>
-        <select
-          [(ngModel)]="filters.sortOrder"
-          (ngModelChange)="onFilterChange()"
-          class="filter-select"
-        >
-          <option value="desc">Desc</option>
-          <option value="asc">Asc</option>
         </select>
       </div>
 

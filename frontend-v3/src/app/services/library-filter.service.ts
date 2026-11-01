@@ -1,5 +1,6 @@
 import { Injectable } from '@angular/core';
 import { VideoItem, VideoWeek } from '../models/video.model';
+import { extractDateFromFilename, extractTitleFromFilename } from '@shared/filename-utils';
 
 export interface LibraryFilters {
   /** The library search (backend search/library-search.ts); filters below narrow its results too. */
@@ -15,29 +16,78 @@ export interface LibraryFilters {
   hasTranscript: boolean | null;
   hasAnalysis: boolean | null;
   hasSuggestions: boolean | null;
-  /** 'relevance' orders search results best match first; the library itself has no relevance and sorts by date. */
-  sortBy: 'date' | 'relevance' | 'name' | 'duration' | 'suggestions' | 'no-analysis' | 'no-transcript';
-  sortOrder: 'asc' | 'desc';
+}
+
+/**
+ * A column of the search results (the header over them, like Finder's list
+ * view): the name, the upload date (the file name's date prefix, when it was
+ * recorded or posted), the download date (when it was grabbed) and the length.
+ */
+export type ResultsColumn = 'name' | 'upload' | 'download' | 'length';
+
+export interface ColumnSort {
+  column: ResultsColumn;
+  order: 'asc' | 'desc';
+}
+
+/** Search results open newest upload first. */
+export const DEFAULT_RESULTS_SORT: ColumnSort = { column: 'upload', order: 'desc' };
+
+/**
+ * The sort after a column header is clicked: the same column flips, another
+ * starts the way it is most often wanted (names A to Z; dates and lengths
+ * newest or longest first).
+ */
+export function nextColumnSort(current: ColumnSort, column: ResultsColumn): ColumnSort {
+  if (current.column === column) return { column, order: current.order === 'asc' ? 'desc' : 'asc' };
+  return { column, order: column === 'name' ? 'asc' : 'desc' };
+}
+
+/**
+ * The upload date as a sortable string: the file name's date prefix (a third
+ * of a month, YYYY-MM-T#, sorts mid-way through it), else the stored upload
+ * date; empty when there is neither, so undated videos sort as the oldest.
+ */
+export function uploadDateKey(video: VideoItem): string {
+  const prefix = extractDateFromFilename(video.name);
+  if (prefix) return prefix.replace(/-T([123])$/, (_, third: string) => `-${['05', '15', '25'][Number(third) - 1]}`);
+  if (!video.uploadDate) return '';
+  const d = new Date(video.uploadDate);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** How two videos compare under a column sort (Name: the title shown, without the date prefix); ties go newest download first, then by file name. */
+export function columnComparator(sort: ColumnSort): (a: VideoItem, b: VideoItem) => number {
+  const sign = sort.order === 'asc' ? 1 : -1;
+  const downloaded = (v: VideoItem) => (v.downloadDate ? new Date(v.downloadDate).getTime() : 0);
+  const byName = (a: VideoItem, b: VideoItem) => (a.name || '').localeCompare(b.name || '', undefined, { numeric: true, sensitivity: 'base' });
+  // The name as the list shows it: without its date prefix and extension.
+  const byTitle = (a: VideoItem, b: VideoItem) =>
+    extractTitleFromFilename(a.name).localeCompare(extractTitleFromFilename(b.name), undefined, { numeric: true, sensitivity: 'base' });
+  const primary = (a: VideoItem, b: VideoItem): number => {
+    switch (sort.column) {
+      case 'name': return byTitle(a, b);
+      case 'upload': return uploadDateKey(a).localeCompare(uploadDateKey(b));
+      case 'download': return downloaded(a) - downloaded(b);
+      case 'length': return parseDurationToSeconds(a.duration) - parseDurationToSeconds(b.duration);
+    }
+  };
+  return (a, b) => sign * primary(a, b) || downloaded(b) - downloaded(a) || byName(a, b);
+}
+
+/** A duration (HH:MM:SS or MM:SS) in seconds; 0 when there is none. */
+export function parseDurationToSeconds(duration: string | undefined): number {
+  if (!duration) return 0;
+  const parts = duration.split(':').map(Number);
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  return 0;
 }
 
 @Injectable({
   providedIn: 'root'
 })
 export class LibraryFilterService {
-
-  /**
-   * Parse duration string (HH:MM:SS) to seconds
-   */
-  parseDurationToSeconds(duration: string | undefined): number {
-    if (!duration) return 0;
-    const parts = duration.split(':').map(Number);
-    if (parts.length === 3) {
-      return parts[0] * 3600 + parts[1] * 60 + parts[2];
-    } else if (parts.length === 2) {
-      return parts[0] * 60 + parts[1];
-    }
-    return 0;
-  }
 
   /**
    * Apply all non-search filters to video weeks
@@ -112,7 +162,7 @@ export class LibraryFilterService {
       result = result.map(week => ({
         weekLabel: week.weekLabel,
         videos: week.videos.filter(video => {
-          const durationSeconds = this.parseDurationToSeconds(video.duration);
+          const durationSeconds = parseDurationToSeconds(video.duration);
           return wantsUnder ? durationSeconds < threshold : durationSeconds >= threshold;
         })
       })).filter(week => week.videos.length > 0);
@@ -122,62 +172,19 @@ export class LibraryFilterService {
   }
 
   /**
-   * Sort videos based on filter settings
+   * The library's order: its week sections newest first ("New" on top,
+   * "Unknown" last), newest download first within each.
    */
-  sortVideos(weeks: VideoWeek[], filters: LibraryFilters): void {
-    const { sortBy, sortOrder } = filters;
-    const ascending = sortOrder === 'asc';
-
-    // For date sorting (and relevance, which only search results have),
-    // reorder the sections themselves
-    if (sortBy === 'date' || sortBy === 'relevance') {
-      weeks.sort((a, b) => {
-        if (a.weekLabel === 'New') return ascending ? 1 : -1;
-        if (b.weekLabel === 'New') return ascending ? -1 : 1;
-        if (a.weekLabel === 'Unknown') return 1;
-        if (b.weekLabel === 'Unknown') return -1;
-
-        const comparison = a.weekLabel.localeCompare(b.weekLabel);
-        return ascending ? comparison : -comparison;
-      });
-
-      // Also sort videos within each section by their specific date
-      const byDate = this.videoComparator({ ...filters, sortBy: 'date' });
-      for (const week of weeks) week.videos.sort(byDate);
-      return;
-    }
-
-    // For other sorts, flatten into single group and sort all videos
-    const allVideos = weeks.flatMap(w => w.videos).sort(this.videoComparator(filters));
-
-    // Replace weeks content with single "All" section
-    weeks.length = 0;
-    if (allVideos.length > 0) {
-      weeks.push({ weekLabel: 'All', videos: allVideos });
-    }
-  }
-
-  /**
-   * How two videos compare under the chosen Sort By and Order: the library's
-   * order, and the order of search results unless Sort By is relevance.
-   */
-  videoComparator(filters: Pick<LibraryFilters, 'sortBy' | 'sortOrder'>): (a: VideoItem, b: VideoItem) => number {
-    const sign = filters.sortOrder === 'asc' ? 1 : -1;
-    const key = (video: VideoItem): number | string => {
-      switch (filters.sortBy) {
-        case 'name': return video.name || '';
-        case 'duration': return this.parseDurationToSeconds(video.duration);
-        case 'suggestions': return video.suggestedTitle && video.suggestedTitle.trim().length > 0 ? 1 : 0;
-        case 'no-analysis': return video.hasAnalysis ? 0 : 1;
-        case 'no-transcript': return video.hasTranscript ? 0 : 1;
-        default: return video.downloadDate ? new Date(video.downloadDate).getTime() : 0;
-      }
-    };
-    return (a, b) => {
-      const ka = key(a);
-      const kb = key(b);
-      return sign * (typeof ka === 'string' ? ka.localeCompare(kb as string) : ka - (kb as number));
-    };
+  sortVideos(weeks: VideoWeek[]): void {
+    weeks.sort((a, b) => {
+      if (a.weekLabel === 'New') return -1;
+      if (b.weekLabel === 'New') return 1;
+      if (a.weekLabel === 'Unknown') return 1;
+      if (b.weekLabel === 'Unknown') return -1;
+      return b.weekLabel.localeCompare(a.weekLabel);
+    });
+    const newestDownloadFirst = columnComparator({ column: 'download', order: 'desc' });
+    for (const week of weeks) week.videos.sort(newestDownloadFirst);
   }
 
   /**
@@ -192,9 +199,7 @@ export class LibraryFilterService {
       duration: 'all',
       hasTranscript: null,
       hasAnalysis: null,
-      hasSuggestions: null,
-      sortBy: 'date',
-      sortOrder: 'desc'
+      hasSuggestions: null
     };
   }
 }

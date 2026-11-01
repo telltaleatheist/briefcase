@@ -88,6 +88,60 @@ cdk-virtual-scroll-viewport.library-content {
   }
 }
 
+// Column headers over the search results (Finder-style list view). The
+// left padding skips the status dot and thumbnail so Upload date sits over
+// the rows' date badges; the right padding allows for the scrollbar.
+.column-headers {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  height: 28px;
+  padding: 0 calc(#{$spacing-md} + 6px) 0 calc(#{$spacing-md} + 8px + #{$spacing-sm} * 2 + 85px);
+  box-sizing: border-box;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.column-header {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  background: none;
+  border: none;
+  font-size: 11px;
+  font-weight: $font-weight-medium;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color $transition-fast;
+
+  &:hover { color: var(--text-primary); }
+  &:focus-visible { outline: 2px solid var(--primary-orange); outline-offset: -2px; }
+  &.active { color: var(--text-primary); font-weight: $font-weight-semibold; }
+
+  .column-label { @include truncate; }
+
+  &.col-upload { width: 72px; flex-shrink: 0; justify-content: center; }
+  &.col-name { flex: 1; margin-left: calc(#{$spacing-xs} - #{$spacing-sm}); }
+  &.col-download { width: 84px; flex-shrink: 0; }
+  &.col-length { width: 70px; flex-shrink: 0; justify-content: flex-end; }
+}
+
+.sort-arrow {
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+  color: var(--primary-orange);
+  transition: transform $transition-fast;
+
+  &.asc { transform: rotate(180deg); }
+}
+
 // Week Header (Accordion) - Fixed height for virtual scroll (must match itemSize="56")
 .week-header {
   display: flex;
@@ -675,6 +729,16 @@ cdk-virtual-scroll-viewport.library-content {
   flex-shrink: 0; // Don't shrink - let video-content/title truncate instead
 }
 
+.video-downloaded {
+  width: 84px;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .video-duration {
   font-size: $font-size-sm;
   font-weight: $font-weight-semibold;
@@ -682,6 +746,8 @@ cdk-virtual-scroll-viewport.library-content {
   color: var(--text-secondary);
   text-align: right;
   flex-shrink: 0;
+
+  &.column-cell { width: 70px; }
 }
 
 .edit-btn,

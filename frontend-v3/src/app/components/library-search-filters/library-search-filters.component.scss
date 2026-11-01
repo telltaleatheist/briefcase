@@ -136,26 +136,12 @@
   min-width: 70px;
 }
 
-.filter-divider {
-  height: 1px;
-  background: var(--border-color);
-  margin: 12px 0;
-  opacity: 0.5;
-}
-
 // Filter row - horizontal flex with wrapping
 .filter-row {
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
   align-items: flex-end;
-}
-
-.filter-row-sort {
-  .filter-group-grow {
-    flex: 1;
-    min-width: 150px;
-  }
 }
 
 .filter-group {
@@ -268,14 +254,6 @@
     gap: 10px;
   }
 
-  .filter-row-sort {
-    grid-template-columns: 1fr auto auto;
-
-    .filter-group-grow {
-      grid-column: 1;
-    }
-  }
-
   .filter-group {
     min-width: unset;
   }
@@ -293,18 +271,6 @@
 
   .filter-row {
     grid-template-columns: repeat(2, 1fr);
-  }
-
-  .filter-row-sort {
-    grid-template-columns: 1fr 1fr;
-
-    .filter-group:last-child {
-      grid-column: span 2;
-
-      .clear-filters-btn {
-        width: 100%;
-      }
-    }
   }
 
   .accordion-toggle {
