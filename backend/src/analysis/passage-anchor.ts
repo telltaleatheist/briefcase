@@ -120,13 +120,32 @@ export function chunkWords(sentences: Array<Pick<RankedSentence, 'text'>>): Chun
 }
 
 /**
+ * How many sentences before a hinted one (matchPassage's `near`) the first
+ * words are looked for from: a model's sentence number may be the one after
+ * the passage's real start, or the one its quote reads most of.
+ */
+export const NEAR_SENTENCE_SLACK = 2;
+
+/**
  * The sentences a passage covers, as indices into the chunk's sentences: the
  * sentence its first words start in to the sentence its last words end in,
  * the last words found at or after the first. Null when either anchor can't be
  * found: the passage is dropped and counted, never guessed.
+ *
+ * `near` (a sentence index) is where the passage is said to start, for a
+ * phrase said more than once: the first words are looked for from a little
+ * before that sentence on, and from the start only when they are not there (a
+ * hint, not a limit: a wrong number never loses a quote that is in the
+ * transcript).
  */
-export function matchPassage(chunk: ChunkWords, firstWords: string, lastWords: string): { from: number; to: number } | null {
-  const start = findAnchor(chunk.words, anchorWords(firstWords), 0);
+export function matchPassage(chunk: ChunkWords, firstWords: string, lastWords: string, near?: number): { from: number; to: number } | null {
+  const first = anchorWords(firstWords);
+  let start: AnchorHit | null = null;
+  if (near !== undefined) {
+    const from = chunk.sentenceOf.findIndex((sentence) => sentence >= near - NEAR_SENTENCE_SLACK);
+    if (from >= 0) start = findAnchor(chunk.words, first, from);
+  }
+  start ??= findAnchor(chunk.words, first, 0);
   if (!start) return null;
   // The last words may begin inside the first words (a short, one-sentence
   // passage), but must end no earlier than they do.

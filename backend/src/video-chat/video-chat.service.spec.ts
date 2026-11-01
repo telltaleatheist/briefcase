@@ -67,7 +67,7 @@ suite('VideoChatService on a library database', () => {
   });
 
   type Reply = string | { text: string; toolCalls: Array<{ id: string; name: string; arguments: string }> };
-  async function setup(replies: Array<Reply | Error | ((req: any) => Reply)> = [], chatExtras: Record<string, unknown> = {}, extra: { readiness?: unknown; claudeCli?: unknown } = {}) {
+  async function setup(replies: Array<Reply | Error | ((req: any) => Reply)> = [], chatExtras: Record<string, unknown> = {}, extra: { readiness?: unknown; claudeCli?: unknown; srt?: string } = {}) {
     const { DatabaseService } = await import('../database/database.service');
     const { VideoChatService } = await import('./video-chat.service');
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'briefcase-ask-'));
@@ -76,7 +76,7 @@ suite('VideoChatService on a library database', () => {
     database.initializeDatabase(libraryPath);
     database.insertVideo({ id: 'v1', filename: 'budget night.mp4', fileHash: 'h1', currentPath: path.join(dir, 'v1.mp4') });
     database.insertVideo({ id: 'v2', filename: 'silent.mp4', fileHash: 'h2', currentPath: path.join(dir, 'v2.mp4') });
-    database.insertTranscript({ videoId: 'v1', plainText: '', srtFormat: SRT });
+    database.insertTranscript({ videoId: 'v1', plainText: '', srtFormat: extra.srt ?? SRT });
     const requests: any[] = [];
     const chat = {
       async chat(req: any) {
@@ -90,6 +90,7 @@ suite('VideoChatService on a library database', () => {
       },
       // A Crucible before native tools unless a spec says otherwise: the tag format.
       nativeToolsFor: async () => false,
+      registeredServers: () => ['mac', 'pc'],
       ...chatExtras,
     };
     const phases: string[] = [];
@@ -97,7 +98,7 @@ suite('VideoChatService on a library database', () => {
       database,
       chat as any,
       (extra.readiness ?? { assertReadyNow: () => undefined }) as any,
-      { emitVideoChatStatus: (p: { phase: string }) => phases.push(p.phase) } as any,
+      { emitVideoChatStatus: (p: { phase: string; detail?: string }) => phases.push(p.detail === undefined ? p.phase : `${p.phase}: ${p.detail}`) } as any,
       ...(extra.claudeCli === undefined ? [] : [extra.claudeCli as any]),
     );
     return { database, service, requests, phases, libraryPath };
@@ -149,7 +150,7 @@ suite('VideoChatService on a library database', () => {
     expect(third.slice(1)).toEqual([
       ['user', 'Is there a section about Trump?'],
       ['assistant', `Yes, there is. ${trumpCall}`],
-      ['user', '<tool_result>\nplaced "Trump on the ruling" at 00:10:00–00:10:12\n</tool_result>'],
+      ['user', '<tool_result>\nplaced "Trump on the ruling" at 00:10:00–00:10:12\n</tool_result>\nRead so far: all 4 sentences.'],
       ['assistant', 'Yes: "Trump on the ruling".'],
       ['user', 'When was that posted?'],
     ]);
@@ -203,12 +204,12 @@ suite('VideoChatService on a library database', () => {
     const { service, requests } = await setup([nativeTrump, 'Yes: "Trump on the ruling".'], { nativeToolsFor: async () => true });
     const thread = service.createThread('v1', null);
     const sent = await service.ask(thread.id, 'Is there a section about Trump?', 'claude:claude-sonnet-4-5');
-    expect(requests[0].tools).toEqual([expect.objectContaining({ type: 'function', function: expect.objectContaining({ name: 'add_marker' }) })]);
+    expect(requests[0].tools.map((t: any) => t.function.name)).toEqual(['outline', 'search', 'read', 'add_marker']);
     expect(requests[0].toolChoice).toBe('auto');
     expect(requests[0].messages[0].content).not.toMatch(/# Tools|<tool_use>/);
     expect(requests[1].messages.slice(-2)).toEqual([
       { role: 'assistant', content: 'Yes, there is.', toolCalls: nativeTrump.toolCalls },
-      { role: 'tool', toolCallId: 'toolu_01', content: 'placed "Trump on the ruling" at 00:10:00–00:10:12' },
+      { role: 'tool', toolCallId: 'toolu_01', content: 'placed "Trump on the ruling" at 00:10:00–00:10:12\n\nRead so far: all 4 sentences.' },
     ]);
     expect(sent.assistantMessage).toMatchObject({ content: 'Yes, there is.\n\nYes: "Trump on the ruling".' });
     expect(sent.assistantMessage.markers).toEqual([expect.objectContaining({ title: 'Trump on the ruling', startSeconds: 600, endSeconds: 612 })]);
@@ -222,7 +223,7 @@ suite('VideoChatService on a library database', () => {
     );
     const thread = service.createThread('v1', null);
     const sent = await service.ask(thread.id, 'Is there a section about Trump?', 'claude:claude-sonnet-4-5');
-    expect(requests[0].tools).toHaveLength(1);
+    expect(requests[0].tools).toHaveLength(4);
     expect(requests[1].tools).toBeUndefined();
     expect(requests[1].messages[0].content).toMatch(/# Tools/);
     expect(sent.assistantMessage.markers).toHaveLength(1);
@@ -238,7 +239,7 @@ suite('VideoChatService on a library database', () => {
     expect(requests[2].messages.slice(1)).toEqual([
       { role: 'user', content: 'Is there a section about Trump?' },
       { role: 'assistant', content: 'Yes, there is.', toolCalls: [{ id: 'replay_0_0', name: 'add_marker', arguments: JSON.stringify(trumpArgs) }] },
-      { role: 'tool', toolCallId: 'replay_0_0', content: 'placed "Trump on the ruling" at 00:10:00–00:10:12' },
+      { role: 'tool', toolCallId: 'replay_0_0', content: 'placed "Trump on the ruling" at 00:10:00–00:10:12\n\nRead so far: all 4 sentences.' },
       { role: 'assistant', content: 'Yes: "Trump on the ruling".' },
       { role: 'user', content: 'When was that posted?' },
     ]);
@@ -262,7 +263,7 @@ suite('VideoChatService on a library database', () => {
     expect(service.getThread(thread.id).messages).toHaveLength(1);
   });
 
-  it('a transcript larger than a local model\'s context: 422 transcript_too_long naming the model, nothing sent', async () => {
+  it('a context that can\'t hold even the prompt without the transcript and room to read: 422 context_too_small naming the model, nothing sent', async () => {
     const local = { target: { model: 'qwen3.5-9b', route: 'local', upstream: null, bareModel: 'qwen3.5-9b' }, server: null, mappedFrom: null };
     const { service, requests } = await setup([], {
       effectiveTarget: async () => local,
@@ -274,10 +275,10 @@ suite('VideoChatService on a library database', () => {
       maxLocalContext: async () => null,
     });
     const thread = service.createThread('v1', null);
-    const tooLong = await refusal(service.ask(thread.id, 'Summarise?', 'local:qwen3.5-9b'));
-    expect(tooLong).toMatchObject({ status: 422, code: 'transcript_too_long' });
-    expect(tooLong.message).toContain('local:qwen3.5-9b');
-    expect(tooLong.message).toContain('(2,048)');
+    const tooSmall = await refusal(service.ask(thread.id, 'Summarise?', 'local:qwen3.5-9b'));
+    expect(tooSmall).toMatchObject({ status: 422, code: 'context_too_small' });
+    expect(tooSmall.message).toContain('local:qwen3.5-9b');
+    expect(tooSmall.message).toContain('(2,048)');
     expect(requests).toHaveLength(0);
   });
 
@@ -323,20 +324,20 @@ suite('VideoChatService on a library database', () => {
     const thread = service.createThread('v1', null);
     await service.ask(thread.id, 'Budget?', 'local:qwen3.8-27b-8bit');
     const loadContext = model.held[0].loadContext!;
-    // The need here is about 6-7K tokens (a short transcript, the reserves): +8K, in steps of 4096.
-    expect(loadContext).toBe(16384);
+    // The need here is about 10K tokens (a short transcript, four tools, the reply's room and a few rounds'): +8K, in steps of 4096.
+    expect(loadContext).toBe(20480);
     expect(requests[0].loadContext).toBe(loadContext);
     expect(model.askedMax).toEqual(['qwen3.8-27b-8bit']);
     expect(phases[0]).toBe('loading-model');
   });
 
-  it('a need over the model\'s maximum: 422 naming that maximum, suggesting a cloud model or a new conversation, nothing loaded', async () => {
+  it('a maximum under even the paged need: 422 naming that maximum, suggesting a larger model or a new conversation, nothing loaded', async () => {
     const model = localModel(2048, 4096);
     const { service, requests } = await setup([], model.extras);
     const thread = service.createThread('v1', null);
-    const tooLong = await refusal(service.ask(thread.id, 'Summarise?', 'local:qwen3.8-27b-8bit'));
-    expect(tooLong).toMatchObject({ status: 422, code: 'transcript_too_long' });
-    expect(tooLong.message).toMatch(/more than local:qwen3\.8-27b-8bit can take at most \(4,096\)\. Pick a cloud model, or start a new conversation\./);
+    const tooSmall = await refusal(service.ask(thread.id, 'Summarise?', 'local:qwen3.8-27b-8bit'));
+    expect(tooSmall).toMatchObject({ status: 422, code: 'context_too_small' });
+    expect(tooSmall.message).toMatch(/more than local:qwen3\.8-27b-8bit can take at most \(4,096\)\. Pick a model with a larger context, or start a new conversation\./);
     expect(model.held).toEqual([]);
     expect(requests).toHaveLength(0);
   });
@@ -348,6 +349,112 @@ suite('VideoChatService on a library database', () => {
     await service.ask(thread.id, 'Budget?', 'local:qwen3.8-27b-8bit');
     expect(model.held).toEqual([{ loadContext: 49152 }]);
     expect(requests[0].loadContext).toBe(49152);
+  });
+
+  // ── any length ──────────────────────────────────────────────────────────
+  /** A two-hour-plus video: 2,000 sentences, one every 4 s, about 200K characters; every hundredth names Trump. */
+  const LONG_SRT = Array.from({ length: 2000 }, (_u, i) => {
+    const t = (s: number) => `${String(Math.floor(s / 3600)).padStart(2, '0')}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')},000`;
+    const text = i % 100 === 50 ? `Then Trump posted about ruling number ${i} late last night, and everybody in the room reacted at once.` : `This is sentence ${i} of a very long show about the budget, the weather and the news of the day.`;
+    return `${i + 1}\n${t(i * 4)} --> ${t(i * 4 + 4)}\n${text}`;
+  }).join('\n\n');
+  const toolTag = (name: string, args: unknown) => `<tool_use>\n${JSON.stringify({ name, arguments: args })}\n</tool_use>`;
+
+  it('a transcript that fits: in the system prompt as numbered sentences, and coverage starts all read', async () => {
+    const model = localModel(32768, 32768);
+    const { service, requests } = await setup([toolTag('search', { pattern: 'Trump' }), 'There is one.'], model.extras);
+    const thread = service.createThread('v1', null);
+    await service.ask(thread.id, 'Trump?', 'local:qwen3.8-27b-8bit');
+    expect(requests[0].messages[0].content).toContain('TRANSCRIPT:\n[1] Welcome back to the show, everybody.\n[2] Today we start');
+    const results = requests[1].messages[requests[1].messages.length - 1].content;
+    expect(results).toContain('[3] 00:10:00 Then Trump posted about the ruling late last night.');
+    expect(results).toMatch(/Read so far: all 4 sentences\.$/);
+  });
+
+  it('a transcript that does not fit a 32K model: no 422; the prompt carries none, and the model outlines, reads, searches and marks', async () => {
+    const model = localModel(32768, 32768);
+    const trump = { title: 'Trump on ruling 50', first_words: 'Then Trump posted about ruling number 50', last_words: 'everybody in the room reacted at once', sentence: 51 };
+    const { service, requests, phases } = await setup([
+      toolTag('outline', {}),
+      toolTag('read', { from: 1 }),
+      toolTag('search', { pattern: 'Trump' }),
+      toolTag('add_marker', trump),
+      'Marked "Trump on ruling 50".',
+    ], model.extras, { srt: LONG_SRT });
+    const thread = service.createThread('v1', null);
+    const sent = await service.ask(thread.id, 'Where does Trump come up first?', 'local:qwen3.8-27b-8bit');
+    // Loaded as it is: the paged need (about 24K) fits the 32,768 it loads at.
+    expect(model.held).toEqual([{ loadContext: undefined }]);
+    const system = requests[0].messages[0].content;
+    expect(system).not.toContain('TRANSCRIPT:');
+    expect(system).toContain('2 hours 13 minutes long, and its transcript has 2000 numbered sentences');
+    expect(system).toMatch(/Begin with outline/);
+    const resultOf = (n: number) => requests[n].messages[requests[n].messages.length - 1].content as string;
+    expect(resultOf(1)).toContain('This video has no chapters; here it is in ten-minute parts');
+    expect(resultOf(1)).toMatch(/Read so far: none of the 2000 sentences\. Unread: 1–2000\.$/);
+    expect(resultOf(2)).toContain('[1] 00:00:00 This is sentence 0 of a very long show');
+    expect(resultOf(2)).toMatch(/Read so far: sentences 1–\d+ \(00:00:00–\d{2}:\d{2}:\d{2}\) of 2000\. Unread: \d+–2000\./);
+    expect(resultOf(3)).toContain('"Trump" (case-insensitive) matches 20 sentences.');
+    expect(resultOf(4)).toContain('placed "Trump on ruling 50" at 00:03:20–00:03:24');
+    expect(sent.assistantMessage.markers).toEqual([expect.objectContaining({ title: 'Trump on ruling 50', startSeconds: 200, endSeconds: 204 })]);
+    // Every request within the 32K context less the reply's room.
+    for (const req of requests) expect(req.messages.reduce((n: number, m: any) => n + m.content.length, 0) / 3.5).toBeLessThanOrEqual(32768 - 4096);
+    expect(phases).toEqual([
+      'loading-model', 'thinking', 'reading: the outline', expect.stringMatching(/^reading: 00:00:00–\d{2}:\d{2}:\d{2}$/), 'searching: Trump', 'placing-markers', 'thinking', 'done',
+    ]);
+    // The stored trace keeps the pages only as the dropped note: the next question starts lean.
+    const stored = JSON.stringify(service.getThread(thread.id));
+    expect(stored).not.toContain('This is sentence 0 of a very long show');
+  });
+
+  it('a long read-through on a 32K model: old pages are dropped to fit, never a request over the budget', async () => {
+    const model = localModel(32768, 32768);
+    // Read the whole video page by page (about twenty pages), then answer.
+    let next = 1;
+    const reader = (req: any) => {
+      const last = req.messages[req.messages.length - 1]?.content as string;
+      const more = /continue with read from (\d+)|Next: read from (\d+)/.exec(last ?? '');
+      if (next === 1) { next = 2; return toolTag('read', { from: 1 }); }
+      if (more) return toolTag('read', { from: Number(more[1] ?? more[2]) });
+      return 'It is a show about the budget, all the way through.';
+    };
+    // The usage a server reports: the prompt as Briefcase's estimate counts it (the fake's fixed 10 tokens would hide the growth).
+    const requests: any[] = [];
+    const chat = async (req: any) => {
+      requests.push(req);
+      const promptTokens = Math.ceil(req.messages.reduce((n: number, m: any) => n + m.content.length, 0) / 3.5);
+      return { text: reader(req), toolCalls: [], usage: { promptTokens, completionTokens: 20, totalTokens: promptTokens + 20 }, finishReason: 'stop' };
+    };
+    const { service } = await setup([], { ...model.extras, chat }, { srt: LONG_SRT });
+    const thread = service.createThread('v1', null);
+    await service.ask(thread.id, 'Summarise the whole video.', 'local:qwen3.8-27b-8bit');
+    expect(requests.length).toBeGreaterThan(15);
+    for (const req of requests) expect(req.messages.reduce((n: number, m: any) => n + m.content.length, 0) / 3.5).toBeLessThanOrEqual(32768 - 4096);
+    const last = requests[requests.length - 1].messages.map((m: any) => m.content).join('\n');
+    expect(last).toContain('[Earlier pages were dropped to fit; read them again if you need them.]');
+    expect(last).toContain('Read so far: all 2000 sentences.');
+  });
+
+  it('the server picker: a question pins its whole answer to the server it names; an unknown one is refused', async () => {
+    const pinned: Record<string, unknown[]> = { effectiveTarget: [], withModel: [], nativeToolsFor: [], statedLocalContext: [] };
+    const model = localModel(32768, 131072);
+    const { service, requests } = await setup(['There.'], {
+      ...model.extras,
+      effectiveTarget: async (target: { model: string }, server?: string) => {
+        pinned.effectiveTarget.push(server);
+        return { target: { model: target.model, route: 'local', upstream: null, bareModel: target.model }, server: null, mappedFrom: null };
+      },
+      venueFor: async () => { throw new Error('the selected server was asked'); },
+      withModel: (server: string | undefined, _model: string, fn: () => Promise<unknown>) => { pinned.withModel.push(server); return fn(); },
+      nativeToolsFor: async (_target: unknown, server?: string) => { pinned.nativeToolsFor.push(server); return false; },
+      statedLocalContext: async (server: string) => { pinned.statedLocalContext.push(server); return { tokens: 32768 }; },
+    });
+    const thread = service.createThread('v1', null);
+    await service.ask(thread.id, 'Budget?', 'local:qwen3.8-27b-8bit', { server: 'pc' });
+    expect(pinned).toEqual({ effectiveTarget: ['pc', 'pc'], withModel: ['pc'], nativeToolsFor: ['pc'], statedLocalContext: ['pc'] });
+    expect(requests[0].server).toBe('pc');
+    expect(await refusal(service.ask(thread.id, 'Budget?', 'local:qwen3.8-27b-8bit', { server: 'nas' }))).toMatchObject({ status: 400, code: 'unknown_server' });
+    service.onModuleDestroy();
   });
 
   it('chatLoadContext: the need plus a quarter (at least 8K), in steps of 4096, never past the maximum', async () => {

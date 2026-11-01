@@ -61,6 +61,8 @@ export interface FitOptions {
   reserveTokens: number;
   /** The call runs inside the queue's own session, whose model is never reloaded for it. */
   inQueueSession?: boolean;
+  /** The server the call is pinned to (none: the run's venue, else the selected server). */
+  server?: string;
   signal?: AbortSignal;
   log?: (message: string) => void;
 }
@@ -68,15 +70,15 @@ export interface FitOptions {
 /** The context `target` gives a call of this size (see the file header). Call it inside the run the call is made in. */
 export async function fitContext(chat: CrucibleChatService, target: CrucibleTarget, options: FitOptions): Promise<FittedContext> {
   if (isCloudTarget(target)) return { tokens: CLOUD_CONTEXT_TOKENS };
-  const chosen = await chat.effectiveTarget(target, undefined, options.signal);
+  const chosen = await chat.effectiveTarget(target, options.server, options.signal);
   const model = chosen.target;
   if (model.route === 'upstream') {
     if (isCloudTarget(model)) return { tokens: CLOUD_CONTEXT_TOKENS };
-    const server = await chat.venueFor(model);
+    const server = options.server ?? await chat.venueFor(model);
     if (!(await chat.serverAtLeast(server, OLLAMA_CONTEXT_VERSION))) return { tokens: CRUCIBLE_OLLAMA_CONTEXT };
     return { tokens: numCtxMaxForModel(model.bareModel), contextTokens: estimateNumCtx(options.promptChars, model.bareModel, options.reserveTokens) };
   }
-  const server = chosen.server ?? await chat.venueFor(model);
+  const server = options.server ?? chosen.server ?? await chat.venueFor(model);
   let loaded: FittedContext;
   if (chosen.context !== undefined) loaded = { tokens: chosen.context, loadContext: chosen.context };
   else if (chosen.loadContext !== undefined) loaded = { tokens: chosen.loadContext, loadContext: chosen.loadContext };

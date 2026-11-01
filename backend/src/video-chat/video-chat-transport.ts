@@ -23,6 +23,8 @@ export interface CrucibleTransportOptions {
   /** The stored choice, read by target.ts. */
   provider: string;
   model: string;
+  /** The Crucible server every call goes to (none: the run's venue, else the selected server). */
+  server?: string;
   /** `ollama/` only: the window, sent as `context_tokens` (num_ctx), fixed for the whole answer. */
   contextTokens?: number;
   /** A local model: the context it is loaded at, at least. */
@@ -38,6 +40,7 @@ export interface CrucibleTransportOptions {
 export function crucibleTransport(chat: CrucibleChatService, options: CrucibleTransportOptions): ChatTransport {
   return async (messages, { signal, tools }) => {
     const result = await chat.chat({
+      ...(options.server === undefined ? {} : { server: options.server }),
       provider: options.provider,
       model: options.model,
       messages,

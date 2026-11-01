@@ -1226,6 +1226,11 @@ export class CrucibleChatService implements OnModuleDestroy {
 
   // ── venue ──────────────────────────────────────────────────────────────
 
+  /** Every registered server's name, in the order they were added. */
+  registeredServers(): string[] {
+    return this.servers.list().map((row) => row.name);
+  }
+
   /**
    * The selected server, when it answers. It is returned even when it can't
    * serve `target`, so its own refusal names the fix. Never another server.

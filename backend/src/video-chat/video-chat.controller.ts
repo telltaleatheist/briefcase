@@ -33,11 +33,15 @@ export class VideoChatController {
     return this.chat.deleteThread(threadId);
   }
 
-  /** Ask a question; answers when the model has (it may take minutes). Progress is `video-chat:status`. */
+  /**
+   * Ask a question; answers when the model has (it may take minutes).
+   * Progress is `video-chat:status`. `server` names the Crucible server it
+   * runs on (none: the selected one).
+   */
   @Post('threads/:threadId/messages')
   ask(
     @Param('threadId') threadId: string,
-    @Body() body: { content?: unknown; model?: unknown },
+    @Body() body: { content?: unknown; model?: unknown; server?: unknown },
     @Res({ passthrough: true }) res: Response,
   ): Promise<{ userMessage: ChatMessage; assistantMessage: ChatMessage }> {
     // The tab closed or the request was dropped before the answer: stop working on it.
@@ -45,7 +49,7 @@ export class VideoChatController {
     res.on('close', () => {
       if (!res.writableFinished) gone.abort(new Error('The request went away.'));
     });
-    return this.chat.ask(threadId, body?.content, body?.model, gone.signal);
+    return this.chat.ask(threadId, body?.content, body?.model, { server: body?.server, signal: gone.signal });
   }
 
   /**

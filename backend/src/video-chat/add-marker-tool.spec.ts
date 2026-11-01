@@ -1,7 +1,8 @@
 import { describe, expect, it } from '@jest/globals';
 import { buildVideoChatSystemPrompt } from '../analysis/prompts/video-chat-prompts';
 import { runToolLoop, type ChatMessage, type ChatTransport } from '../tool-harness';
-import { addMarkerTool, chatTranscript, placeMarker } from './add-marker-tool';
+import { addMarkerTool, placeMarker } from './add-marker-tool';
+import { chatTranscript } from './chat-transcript';
 
 /**
  * add_marker: the model quotes a passage's first and last words, Briefcase
@@ -62,6 +63,23 @@ describe('the add_marker tool', () => {
     });
   });
 
+  it('a phrase said twice: the sentence number places it on the mention the model meant', async () => {
+    const twice = chatTranscript([
+      { text: 'Let me say this clearly right now.', start: 0, end: 5 },
+      { text: 'The budget is a disaster for everyone.', start: 5, end: 10 },
+      { text: 'Much later, a different topic entirely.', start: 900, end: 905 },
+      { text: 'Let me say this clearly right now.', start: 1800, end: 1805 },
+      { text: 'The ruling was a disaster for everyone.', start: 1805, end: 1810 },
+    ]);
+    const quote = { title: 'Clearly', first_words: 'Let me say this clearly', last_words: 'a disaster for everyone' };
+    expect((await addMarkerTool(twice).execute(quote, {})).data).toMatchObject({ startSeconds: 0, endSeconds: 10 });
+    expect((await addMarkerTool(twice).execute({ ...quote, sentence: 4 }, {})).data).toMatchObject({ startSeconds: 1800, endSeconds: 1810 });
+    // A hint past the quote is only a hint: the words are still found.
+    expect((await addMarkerTool(twice).execute({ ...quote, first_words: 'The budget is a disaster', sentence: 5 }, {})).data).toMatchObject({ startSeconds: 5 });
+    // A number that is no sentence is ignored.
+    expect((await addMarkerTool(twice).execute({ ...quote, sentence: 99 }, {})).data).toMatchObject({ startSeconds: 0 });
+  });
+
   it('arguments missing an anchor are refused by name', async () => {
     await expect(addMarkerTool(transcript).execute({ title: 'T', first_words: 'Then Trump posted' }, {})).rejects.toThrow('the arguments have no last_words');
   });
@@ -83,7 +101,8 @@ describe('an Ask answer through the harness', () => {
       tag(trump),
       'Yes: see "Trump on the ruling".',
     ]);
-    const result = await runToolLoop({ transport: t, tools: [addMarkerTool(transcript)], system: buildVideoChatSystemPrompt('Budget night', transcript.sentences), userMessage: 'Trump?' });
+    const system = buildVideoChatSystemPrompt({ title: 'Budget night', duration: transcript.duration, sentences: transcript.sentences, transcriptInPrompt: true });
+    const result = await runToolLoop({ transport: t, tools: [addMarkerTool(transcript)], system, userMessage: 'Trump?' });
     expect(result.finalText).toBe('Yes, there is.\n\nYes: see "Trump on the ruling".');
     expect(result.toolCalls.map((c) => c.data)).toEqual([undefined, expect.objectContaining({ startSeconds: 600, endSeconds: 612 })]);
     const firstResults = t.sent[1][t.sent[1].length - 1].content;
@@ -92,12 +111,27 @@ describe('an Ask answer through the harness', () => {
 });
 
 describe('the system prompt', () => {
-  it('has the title and the transcript, one sentence per line, without a single time', () => {
-    const prompt = buildVideoChatSystemPrompt('Budget night', transcript.sentences);
-    expect(prompt).toContain('"Budget night"');
-    expect(prompt).toContain('Welcome back to the show, everybody.\nToday we start with the budget fight in Congress.');
+  const video = (transcriptInPrompt: boolean) =>
+    ({ title: 'Budget night', duration: 3705, sentences: transcript.sentences, transcriptInPrompt });
+
+  it('a transcript that fits: the title, the length in words, and the numbered sentences, without a single time', () => {
+    const prompt = buildVideoChatSystemPrompt(video(true));
+    expect(prompt).toContain('"Budget night", 1 hour 1 minute long, and its transcript has 6 numbered sentences');
+    expect(prompt).toContain('[1] Welcome back to the show, everybody.\n[2] Today we start with the budget fight in Congress.');
+    expect(prompt).toContain('so you have read all of it');
     expect(prompt).not.toMatch(/\d{2}:\d{2}:\d{2}/);
     // The set is asked for at the end of the results paragraph (see the prompt's note).
+    expect(prompt).toMatch(/then finish your answer for the person\. Each marker's set names/);
+    expect(prompt).toMatch(/never states a time or timestamp/);
+  });
+
+  it('one that does not: no transcript, the length, and to begin with the tools', () => {
+    const prompt = buildVideoChatSystemPrompt(video(false));
+    expect(prompt).not.toContain('Welcome back');
+    expect(prompt).not.toContain('TRANSCRIPT:');
+    expect(prompt).toContain('1 hour 1 minute long');
+    expect(prompt).toMatch(/Begin with outline, or with search when the question names something/);
+    expect(prompt).toMatch(/read through it in order, page after page/);
     expect(prompt).toMatch(/then finish your answer for the person\. Each marker's set names/);
   });
 });

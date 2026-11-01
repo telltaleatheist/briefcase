@@ -40,10 +40,16 @@ export interface ChatMessage {
   createdAt: string;
 }
 
-export type VideoChatPhase = 'loading-model' | 'thinking' | 'placing-markers' | 'done' | 'error';
+/**
+ * Where an answer is: 'searching' and 'reading' while the model takes in what
+ * it just searched for or read (in place of 'thinking').
+ */
+export type VideoChatPhase = 'loading-model' | 'thinking' | 'searching' | 'reading' | 'placing-markers' | 'done' | 'error';
 
 /** The `video-chat:status` socket event. */
 export interface VideoChatStatusPayload {
   threadId: string;
   phase: VideoChatPhase;
+  /** 'searching': the pattern; 'reading': the page's `HH:MM:SS–HH:MM:SS`, or 'the outline'. */
+  detail?: string;
 }
