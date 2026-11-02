@@ -2,13 +2,11 @@ import { TranscriptionSegment } from './video-info.model';
 
 /**
  * Volume the viewer opens at, on the player's 0-10 scale (1 = 100% native,
- * anything above that is amplified through a Web Audio gain node). Unity is
- * the right default now that library audio is normalized to -14 LUFS on the
- * way in: the old boosted default existed to compensate for quiet source
- * media, and it clipped. At exactly 1 the gain node never engages, so the
- * viewer hears the file as it is.
+ * anything above that is amplified through a Web Audio gain node). 250%: at
+ * unity the player sounded too quiet, even on audio normalized to -14 LUFS.
+ * Every video (each new tab) opens at this level.
  */
-export const DEFAULT_PLAYER_VOLUME = 1;
+export const DEFAULT_PLAYER_VOLUME = 2.5;
 
 export interface VideoEditorState {
   currentTime: number; // seconds
