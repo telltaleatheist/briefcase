@@ -31,6 +31,13 @@
         </div>
       </div>
 
+      @if (importStatus(); as status) {
+        <div class="import-status" role="status">
+          <div class="import-spinner"></div>
+          <span class="import-status-text" [title]="status">{{ status }}</span>
+        </div>
+      }
+
       <div class="unified-content">
         <!-- Library Tab: Media Library Cascade -->
         @if (activeTab() === 'library') {

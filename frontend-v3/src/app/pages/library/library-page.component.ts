@@ -25,6 +25,7 @@ import { CrucibleReadinessService, taskNeedsCrucible } from '../../services/cruc
 import { NotificationService } from '../../services/notification.service';
 import { TabsService } from '../../services/tabs.service';
 import { FileImportService } from '../../services/file-import.service';
+import { DragHoverTracker } from './drag-hover-tracker';
 import { ElectronService } from '../../services/electron.service';
 import { TourService } from '../../services/tour.service';
 import { QueueService } from '../../services/queue.service';
@@ -149,7 +150,9 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   tabbedVideoIds = signal<Set<string>>(new Set());
 
   // Drag and drop state
-  isDraggingOver = signal(false);
+  private dragHover = new DragHoverTracker();
+  isDraggingOver = this.dragHover.active;
+  importStatus = this.fileImportService.importStatus;
 
   videoWeeks = signal<VideoWeek[]>([]);
   filteredWeeks = signal<VideoWeek[]>([]);
@@ -1601,6 +1604,8 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       clearTimeout(this.triggerAnalysisTimeout);
     }
 
+    this.dragHover.end();
+
     if (this.navigateToQueueHandler) {
       window.removeEventListener('electron-navigate-to-queue', this.navigateToQueueHandler);
       window.removeEventListener('navigate-to-queue', this.navigateToQueueHandler);
@@ -2939,6 +2944,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     if (!this.requireLibrary()) return;
     const filePaths = await this.fileImportService.openFileDialog();
     if (filePaths && filePaths.length > 0) {
+      this.dragHover.end();
       await this.fileImportService.importFilesByPath(filePaths, () => this.loadLibrary());
     }
   }
@@ -2949,7 +2955,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   async onDrop(event: DragEvent) {
     event.preventDefault();
     event.stopPropagation();
-    this.isDraggingOver.set(false);
+    console.log(`Drop received ${this.dragHover.end()}ms after the last dragover`);
 
     if (!this.requireLibrary()) return;
 
@@ -2973,7 +2979,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   onDragOver(event: DragEvent) {
     event.preventDefault();
     event.stopPropagation();
-    this.isDraggingOver.set(true);
+    this.dragHover.over();
   }
 
   /**
@@ -2982,7 +2988,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   onDragLeave(event: DragEvent) {
     event.preventDefault();
     event.stopPropagation();
-    this.isDraggingOver.set(false);
+    this.dragHover.end();
   }
 
   /**

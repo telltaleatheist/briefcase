@@ -1,4 +1,4 @@
-import { Injectable, inject } from '@angular/core';
+import { Injectable, computed, inject, signal } from '@angular/core';
 import { NotificationService } from './notification.service';
 import { ErrorSurface } from '../core/error-surface.service';
 
@@ -8,6 +8,15 @@ import { ErrorSurface } from '../core/error-surface.service';
 export class FileImportService {
   private notificationService = inject(NotificationService);
   private errorSurface = inject(ErrorSurface);
+
+  /** One entry per import in flight, so one finishing doesn't clear another. */
+  private inFlight = signal<string[][]>([]);
+
+  /** What's importing right now, for display; null when nothing is. */
+  readonly importStatus = computed(() => {
+    const paths = this.inFlight().flat();
+    return paths.length === 0 ? null : `Importing ${describeFiles(paths)}…`;
+  });
 
   /**
    * Open Electron file dialog and return selected file paths.
@@ -117,6 +126,7 @@ export class FileImportService {
    * @param onSuccess - Callback to execute on successful import (e.g., refresh library)
    */
   async importFilesByPath(filePaths: string[], onSuccess?: () => void): Promise<void> {
+    this.inFlight.update(batches => [...batches, filePaths]);
     try {
       console.log('Importing files:', filePaths);
 
@@ -133,6 +143,7 @@ export class FileImportService {
       if (response?.success && failures.length === 0) {
         onSuccess?.();
         console.log(`✓ Successfully imported ${successCount} of ${filePaths.length} file(s)`);
+        this.notificationService.toastOnly('success', 'Import complete', describeFiles(filePaths));
         return;
       }
 
@@ -154,6 +165,8 @@ export class FileImportService {
       console.error('Import failures:', response);
     } catch (error) {
       this.errorSurface.surfaceError('Import failed', error);
+    } finally {
+      this.inFlight.update(batches => batches.filter(batch => batch !== filePaths));
     }
   }
 
@@ -189,6 +202,11 @@ export class FileImportService {
       this.errorSurface.surfaceError('Import failed', error);
     }
   }
+}
+
+/** The file's name when there's one, otherwise how many. */
+function describeFiles(paths: string[]): string {
+  return paths.length === 1 ? basename(paths[0]) : `${paths.length} files`;
 }
 
 /** Last path segment for readable per-file failure lists. */
