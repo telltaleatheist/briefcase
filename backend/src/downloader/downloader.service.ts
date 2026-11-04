@@ -4,6 +4,7 @@ import { OnEvent } from '@nestjs/event-emitter';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
+import { pathToFileURL } from 'url';
 import { DownloadOptions, DownloadResult, HistoryItem } from '../common/interfaces/download.interface';
 import { PathService } from '../path/path.service';
 import { YtDlpManager } from './yt-dlp-manager';
@@ -18,6 +19,11 @@ import {
   extractThreadsMedia,
   parseThreadsPostUrl,
 } from './threads-extractor';
+import {
+  assertLiveWindow,
+  buildLiveFormatSelector,
+  buildLiveSnapshot,
+} from './live-snapshot';
 
 @Injectable()
 export class DownloaderService implements OnModuleInit {
@@ -579,6 +585,7 @@ export class DownloaderService implements OnModuleInit {
       // Extract upload date and live status for filename formatting and download path
       let uploadDate: string | undefined;
       let isLive = false;
+      let liveTitle: string | undefined;
       try {
         const videoInfo = await this.getVideoInfo(options.url, jobId);
         if (videoInfo && videoInfo.uploadDate) {
@@ -588,6 +595,7 @@ export class DownloaderService implements OnModuleInit {
         }
         if (videoInfo && videoInfo.isLive) {
           isLive = true;
+          liveTitle = videoInfo.title;
           this.logger.log(`Detected live stream for URL: ${options.url}`);
         }
         if (videoInfo) {
@@ -603,6 +611,17 @@ export class DownloaderService implements OnModuleInit {
         this.logger.warn(message);
         downloadWarnings.push(message);
       }
+
+      // Live streams other than YouTube are pulled from a frozen playlist.
+      const isYouTubeUrl = options.url.includes('youtube.com') || options.url.includes('youtu.be');
+      const useLiveSnapshot = isLive && !isYouTubeUrl;
+      if (useLiveSnapshot) {
+        // A permanent live room reports the day the room was created as its upload
+        // date (Rumble), so the broadcast being pulled is dated today.
+        uploadDate = this.getLocalDateString();
+      }
+      // The snapshot's input is a local file, so yt-dlp can't supply the real title.
+      const displayName = options.displayName || (useLiveSnapshot ? liveTitle : undefined);
 
       // Emit download-started event
       this.eventService.emitDownloadStarted(options.url, jobId);
@@ -724,9 +743,9 @@ export class DownloaderService implements OnModuleInit {
       // Format: YYYY-MM-DD Title.ext
       let outputTemplate: string;
 
-      if (options.displayName) {
+      if (displayName) {
         // Sanitize displayName - NEVER allow URLs or paths as filenames!
-        let sanitizedName = options.displayName;
+        let sanitizedName = displayName;
 
         // Check if it looks like a URL and reject it
         if (sanitizedName.includes('://') || sanitizedName.includes('www.')) {
@@ -957,6 +976,16 @@ export class DownloaderService implements OnModuleInit {
             // Reset isLive so we fall through to the regular YouTube path below
             isLive = false;
           }
+        }
+        // Live streams elsewhere stop by themselves at what has streamed so far.
+        // A failure is final: the normal path below would record forward until
+        // the broadcast ends.
+        if (useLiveSnapshot) {
+          const snapshot = await this.downloadLiveSnapshot(options, outputTemplate, downloadFolder, downloadStartTime, jobId);
+          outputFile = snapshot.outputFile;
+          downloadWarnings.push(
+            `Captured ${this.formatDuration(snapshot.durationSeconds)} of this live stream. That is what the stream still keeps, which may not be the whole broadcast.`
+          );
         }
         // For YouTube (non-live, or livestream fallback), try multiple client methods if the first one fails
         if (!outputFile && (options.url.includes('youtube.com') || options.url.includes('youtu.be'))) {
@@ -1385,6 +1414,110 @@ export class DownloaderService implements OnModuleInit {
     if (payload?.jobId) {
       this.cancelDownload(payload.jobId);
     }
+  }
+
+  /**
+   * Download what a live stream has aired so far, by freezing its media playlist
+   * into a finite one (see live-snapshot.ts). Every failure throws, including a
+   * missing output file, so the caller can never fall through to a forward recording.
+   */
+  private async downloadLiveSnapshot(
+    options: DownloadOptions,
+    outputTemplate: string,
+    downloadFolder: string,
+    downloadStartTime: number,
+    jobId?: string,
+  ): Promise<{ outputFile: string; durationSeconds: number }> {
+    const resolver = new YtDlpManager();
+    resolver.input(options.url)
+            .addOption('--no-playlist')
+            .addOption('--format', buildLiveFormatSelector(this.parseQualityCap(options.quality)))
+            .addOption('--print', 'url')
+            .addOption('--skip-download');
+    if (jobId) {
+      this.activeDownloads.set(jobId, resolver);
+    }
+    const resolved = await resolver.run();
+    const playlistUrl = resolved.split(/\r?\n/).map((line) => line.trim()).filter((line) => /^https?:\/\//.test(line)).pop();
+    if (!playlistUrl) {
+      throw new Error("yt-dlp did not report a playlist URL for this live stream");
+    }
+
+    const playlistText = await this.fetchPageContent(playlistUrl);
+    if (this.isDownloadCancelled(jobId)) {
+      throw new Error('Download was cancelled');
+    }
+
+    // The window is measured from this list: it is what the download will contain.
+    const snapshot = buildLiveSnapshot(playlistText, playlistUrl);
+    assertLiveWindow(snapshot.durationSeconds);
+    this.logger.log(`Live snapshot: ${snapshot.segmentCount} segments, ${Math.round(snapshot.durationSeconds)}s`);
+
+    const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'briefcase-live-'));
+    try {
+      const snapshotPath = path.join(tempDir, 'snapshot.m3u8');
+      await fs.promises.writeFile(snapshotPath, snapshot.playlist);
+
+      const manager = new YtDlpManager();
+      manager.input(pathToFileURL(snapshotPath).href).output(outputTemplate);
+
+      const ffmpegPath = this.sharedConfigService.getFfmpegPath();
+      if (ffmpegPath) {
+        manager.addOption('--ffmpeg-location', ffmpegPath);
+      }
+
+      manager.addOption('--verbose')
+             .addOption('--no-check-certificates')
+             .addOption('--enable-file-urls')
+             .addOption('--force-generic-extractor')
+             .addOption('--concurrent-fragments', '10')
+             .addOption('--fragment-retries', '20')
+             .addOption('--remux-video', 'mp4');
+
+      if (jobId) {
+        this.activeDownloads.set(jobId, manager);
+      }
+
+      manager.on('progress', (progress) => {
+        const elapsedMs = Date.now() - downloadStartTime;
+        this.eventService.emitDownloadProgress(
+          progress.percent,
+          'Downloading livestream',
+          jobId,
+          {
+            speed: progress.downloadSpeed,
+            eta: progress.eta,
+            elapsedMs,
+            totalSize: progress.totalSize,
+            downloadedBytes: progress.downloadedBytes
+          }
+        );
+      });
+
+      const output = await manager.run();
+      const outputFile = await this.determineOutputFile(output, downloadFolder, downloadStartTime, outputTemplate);
+      if (!outputFile) {
+        throw new Error('The live stream downloaded but its output file could not be found');
+      }
+      return { outputFile, durationSeconds: snapshot.durationSeconds };
+    } finally {
+      await fs.promises.rm(tempDir, { recursive: true, force: true });
+    }
+  }
+
+  /** Today's date in the user's timezone, YYYY-MM-DD. */
+  private getLocalDateString(): string {
+    const now = new Date();
+    const month = (now.getMonth() + 1).toString().padStart(2, '0');
+    const day = now.getDate().toString().padStart(2, '0');
+    return `${now.getFullYear()}-${month}-${day}`;
+  }
+
+  private formatDuration(seconds: number): string {
+    const hours = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   }
 
   /** True once this job has been cancelled (persists across fallback attempts). */
