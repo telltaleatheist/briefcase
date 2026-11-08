@@ -41,6 +41,8 @@ export class YtDlpManager extends EventEmitter {
   private ffmpegPath: string;
   private currentProcessId: string | null = null;
   private aborted = false;
+  /** yt-dlp's log from the last finished run, kept when it failed or was cancelled. */
+  private lastOutput = '';
 
   constructor() {
     super();
@@ -130,6 +132,11 @@ export class YtDlpManager extends EventEmitter {
     }
   }
 
+  /** yt-dlp's log from the last run that finished, whatever its outcome. */
+  get log(): string {
+    return this.lastOutput;
+  }
+
   /**
    * Verify a file exists with retries
    */
@@ -196,6 +203,7 @@ export class YtDlpManager extends EventEmitter {
       );
 
       this.currentProcessId = null;
+      this.lastOutput = result.stdout;
 
       if (this.aborted) {
         throw new Error('Download was cancelled');
@@ -256,6 +264,7 @@ export class YtDlpManager extends EventEmitter {
       );
 
       this.currentProcessId = null;
+      this.lastOutput = result.stdout;
 
       if (this.aborted) {
         throw new Error('Download was cancelled');

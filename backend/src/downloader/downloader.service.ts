@@ -8,6 +8,7 @@ import { pathToFileURL } from 'url';
 import { DownloadOptions, DownloadResult, HistoryItem } from '../common/interfaces/download.interface';
 import { PathService } from '../path/path.service';
 import { YtDlpManager } from './yt-dlp-manager';
+import { removePartialFiles, stemOfOutputTemplate, stemsFromYtDlpOutput } from './partial-files';
 import { SharedConfigService } from '../config/shared-config.service';
 import { MediaEventService } from '../media/media-event.service';
 import { FilenameDateUtil } from '../common/utils/filename-date.util';
@@ -35,6 +36,8 @@ export class DownloaderService implements OnModuleInit {
   // (each attempt spawns a fresh YtDlpManager) so a cancel that lands between
   // attempts still stops the chain instead of spawning the next process.
   private cancelledDownloads: Set<string> = new Set();
+  // Every yt-dlp run a download started, so a cancel can find what each one wrote.
+  private jobManagers: Map<string, YtDlpManager[]> = new Map();
 
   constructor(
     private readonly pathService: PathService,
@@ -528,6 +531,8 @@ export class DownloaderService implements OnModuleInit {
     if (jobId) {
       this.cancelledDownloads.delete(jobId);
     }
+    // Where yt-dlp writes; a cancel clears out what it left there (see finally).
+    let outputTemplate: string | undefined;
     try {
       // Transform ABC News URLs if needed
       options.url = await this.transformAbcNewsUrl(options.url);
@@ -741,8 +746,6 @@ export class DownloaderService implements OnModuleInit {
       // Configure output template
       // Use displayName from metadata if available, otherwise fall back to yt-dlp title
       // Format: YYYY-MM-DD Title.ext
-      let outputTemplate: string;
-
       if (displayName) {
         // Sanitize displayName - NEVER allow URLs or paths as filenames!
         let sanitizedName = displayName;
@@ -892,7 +895,7 @@ export class DownloaderService implements OnModuleInit {
       
       // Store the download manager for potential cancellation
       if (jobId) {
-        this.activeDownloads.set(jobId, ytDlpManager);
+        this.trackDownload(jobId, ytDlpManager);
       }
       
       // Set up progress tracking
@@ -948,7 +951,7 @@ export class DownloaderService implements OnModuleInit {
 
             // Update active downloads reference
             if (jobId) {
-              this.activeDownloads.set(jobId, livestreamManager);
+              this.trackDownload(jobId, livestreamManager);
             }
 
             // Set up progress tracking
@@ -1026,7 +1029,7 @@ export class DownloaderService implements OnModuleInit {
 
               // Update active downloads reference
               if (jobId) {
-                this.activeDownloads.set(jobId, newYtDlpManager);
+                this.trackDownload(jobId, newYtDlpManager);
               }
 
               // Set up progress tracking
@@ -1127,7 +1130,7 @@ export class DownloaderService implements OnModuleInit {
                     );
 
                     if (jobId) {
-                      this.activeDownloads.set(jobId, vimeoManager);
+                      this.trackDownload(jobId, vimeoManager);
                     }
 
                     vimeoManager.on('progress', (progress) => {
@@ -1179,7 +1182,7 @@ export class DownloaderService implements OnModuleInit {
                   }
 
                   if (jobId) {
-                    this.activeDownloads.set(jobId, fallbackManager);
+                    this.trackDownload(jobId, fallbackManager);
                   }
 
                   fallbackManager.on('progress', (progress) => {
@@ -1229,7 +1232,7 @@ export class DownloaderService implements OnModuleInit {
                              .addOption('--merge-output-format', 'mp4');
 
                 if (jobId) {
-                  this.activeDownloads.set(jobId, cookieManager);
+                  this.trackDownload(jobId, cookieManager);
                 }
 
                 cookieManager.on('progress', (progress) => {
@@ -1278,7 +1281,7 @@ export class DownloaderService implements OnModuleInit {
                               .addOption('--merge-output-format', 'mp4');
 
                 if (jobId) {
-                  this.activeDownloads.set(jobId, genericManager);
+                  this.trackDownload(jobId, genericManager);
                 }
 
                 genericManager.on('progress', (progress) => {
@@ -1400,6 +1403,12 @@ export class DownloaderService implements OnModuleInit {
       // Release the per-job cancellation flag once the download has fully
       // unwound, whatever the outcome.
       if (jobId) {
+        // Every yt-dlp run has exited by now (a run's promise settles only on
+        // its process's close), so nothing is still writing what is removed.
+        if (this.isDownloadCancelled(jobId)) {
+          await this.removeCancelledLeftovers(jobId, outputTemplate);
+        }
+        this.jobManagers.delete(jobId);
         this.cancelledDownloads.delete(jobId);
       }
     }
@@ -1435,7 +1444,7 @@ export class DownloaderService implements OnModuleInit {
             .addOption('--print', 'url')
             .addOption('--skip-download');
     if (jobId) {
-      this.activeDownloads.set(jobId, resolver);
+      this.trackDownload(jobId, resolver);
     }
     const resolved = await resolver.run();
     const playlistUrl = resolved.split(/\r?\n/).map((line) => line.trim()).filter((line) => /^https?:\/\//.test(line)).pop();
@@ -1475,7 +1484,7 @@ export class DownloaderService implements OnModuleInit {
              .addOption('--remux-video', 'mp4');
 
       if (jobId) {
-        this.activeDownloads.set(jobId, manager);
+        this.trackDownload(jobId, manager);
       }
 
       manager.on('progress', (progress) => {
@@ -1546,6 +1555,37 @@ export class DownloaderService implements OnModuleInit {
     return false;
   }
   
+  /** Make `manager` the job's cancellable run, and remember it for cleanup. */
+  private trackDownload(jobId: string, manager: YtDlpManager): void {
+    this.activeDownloads.set(jobId, manager);
+    const managers = this.jobManagers.get(jobId) ?? [];
+    managers.push(manager);
+    this.jobManagers.set(jobId, managers);
+  }
+
+  /**
+   * Remove the working files a cancelled download left behind: those of its
+   * output template's name, and those of every destination its yt-dlp runs
+   * reported (the only record of a name yt-dlp filled in from the title).
+   * Finished files and other downloads are never touched (partial-files.ts).
+   */
+  private async removeCancelledLeftovers(jobId: string, outputTemplate?: string): Promise<void> {
+    const stems = new Set<string>();
+    const templateStem = outputTemplate ? stemOfOutputTemplate(outputTemplate) : null;
+    if (templateStem) stems.add(templateStem);
+    for (const manager of this.jobManagers.get(jobId) ?? []) {
+      for (const stem of stemsFromYtDlpOutput(manager.log)) stems.add(stem);
+    }
+    if (stems.size === 0) return;
+
+    const removed = await removePartialFiles([...stems], (filePath, error) => {
+      this.logger.warn(`Couldn't remove a cancelled download's file ${filePath}: ${error instanceof Error ? error.message : error}`);
+    });
+    if (removed.length > 0) {
+      this.logger.log(`Removed ${removed.length} file(s) left by cancelled download ${jobId}`);
+    }
+  }
+
   /**
    * Determine the output file from yt-dlp output or file system
    */
