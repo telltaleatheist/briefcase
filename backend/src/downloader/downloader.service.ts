@@ -24,6 +24,7 @@ import {
   assertLiveWindow,
   buildLiveFormatSelector,
   buildLiveSnapshot,
+  withoutTodaysStamp,
 } from './live-snapshot';
 
 @Injectable()
@@ -626,7 +627,11 @@ export class DownloaderService implements OnModuleInit {
         uploadDate = this.getLocalDateString();
       }
       // The snapshot's input is a local file, so yt-dlp can't supply the real title.
-      const displayName = options.displayName || (useLiveSnapshot ? liveTitle : undefined);
+      // The date prefix already says the day, so a stamp of today in the title goes.
+      const liveName = options.displayName || liveTitle;
+      const displayName = useLiveSnapshot && liveName && uploadDate
+        ? withoutTodaysStamp(liveName, uploadDate)
+        : options.displayName;
 
       // Emit download-started event
       this.eventService.emitDownloadStarted(options.url, jobId);

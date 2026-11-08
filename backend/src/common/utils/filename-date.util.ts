@@ -336,7 +336,9 @@ export class FilenameDateUtil {
     sanitized = sanitized
       .replace(/\s+/g, ' ')                     // Multiple spaces to single
       .replace(/^\s+|\s+$/g, '')                // Trim
-      .replace(/\s*-\s*/g, ' - ')               // Normalize around dashes
+      // A dash set off by a space on either side separates ("Title - Part 2");
+      // one with none joins ("Spider-Man", "COVID-19", "2026-11-04") and stays.
+      .replace(/\s+-\s*|\s*-\s+/g, ' - ')       // Normalize around separating dashes
       .replace(/-+/g, '-')                      // Multiple dashes to single
       .replace(/^-+|-+$/g, '');                 // Trim leading/trailing dashes
 

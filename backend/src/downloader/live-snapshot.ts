@@ -61,6 +61,18 @@ export function buildLiveSnapshot(playlistText: string, playlistUrl: string): Li
   return { playlist: `${output.join('\n')}\n`, segmentCount, durationSeconds };
 }
 
+/**
+ * Drop a trailing date stamp from a live title when it is `today` (YYYY-MM-DD).
+ * A permanent live room names each broadcast after the moment it was fetched
+ * ("Alex Jones Live 2026-11-04 13:38"), and the file's date prefix already says
+ * the day, so the name would otherwise carry it twice.
+ */
+export function withoutTodaysStamp(title: string, today: string): string {
+  const match = title.match(/^(.*?)[\s\-–—|:,]*(\d{4}-\d{2}-\d{2})(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?\s*$/);
+  if (!match || match[2] !== today || !match[1].trim()) return title;
+  return match[1].trim();
+}
+
 /** Refuse a window too short to be worth delivering. */
 export function assertLiveWindow(durationSeconds: number): void {
   if (durationSeconds < MIN_LIVE_WINDOW_SECONDS) {

@@ -6,6 +6,7 @@ import {
   assertLiveWindow,
   buildLiveFormatSelector,
   buildLiveSnapshot,
+  withoutTodaysStamp,
 } from './live-snapshot';
 
 const PLAYLIST_URL = 'https://cdn.example.com/live/abc/chunklist_DVR.m3u8?token=playlist';
@@ -94,5 +95,27 @@ describe('buildLiveFormatSelector', () => {
 
   it('honours a height cap', () => {
     expect(buildLiveFormatSelector(360)).toBe('best[protocol*=m3u8][height<=360]');
+  });
+});
+
+describe('withoutTodaysStamp', () => {
+  it("drops today's date and time from a live room's title", () => {
+    expect(withoutTodaysStamp('Alex Jones Live 2026-11-04 13:38', '2026-11-04')).toBe('Alex Jones Live');
+  });
+
+  it('drops a bare date and the separator before it', () => {
+    expect(withoutTodaysStamp('Morning Show - 2026-11-04', '2026-11-04')).toBe('Morning Show');
+  });
+
+  it('keeps a stamp of another day, which says something the prefix does not', () => {
+    expect(withoutTodaysStamp('Alex Jones Live 2026-11-03 13:38', '2026-11-04')).toBe('Alex Jones Live 2026-11-03 13:38');
+  });
+
+  it('keeps a title that is only a date', () => {
+    expect(withoutTodaysStamp('2026-11-04', '2026-11-04')).toBe('2026-11-04');
+  });
+
+  it('keeps a date in the middle of a title', () => {
+    expect(withoutTodaysStamp('The 2026-11-04 Election Night', '2026-11-04')).toBe('The 2026-11-04 Election Night');
   });
 });
