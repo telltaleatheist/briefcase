@@ -2955,7 +2955,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   async onDrop(event: DragEvent) {
     event.preventDefault();
     event.stopPropagation();
-    console.log(`Drop received ${this.dragHover.end()}ms after the last dragover`);
+    this.dragHover.end();
 
     if (!this.requireLibrary()) return;
 
@@ -2988,6 +2988,10 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
   onDragLeave(event: DragEvent) {
     event.preventDefault();
     event.stopPropagation();
+    // dragleave also bubbles up from every child the drag crosses; only leaving
+    // the container itself ends the hover.
+    const container = event.currentTarget as Node | null;
+    if (container?.contains(event.relatedTarget as Node | null)) return;
     this.dragHover.end();
   }
 

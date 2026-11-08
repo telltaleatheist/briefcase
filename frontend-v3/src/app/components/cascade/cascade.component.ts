@@ -2414,10 +2414,12 @@ export class CascadeComponent implements OnDestroy {
    * Handle drop on a tab header (move videos between tabs)
    */
   onDropToTab(event: DragEvent, targetTabName: string): void {
+    // Outside Collections this header is not a drop target: let the drop bubble
+    // to the library page, which imports it and clears its drop cover.
+    if (!this.tabsMode) return;
+
     event.preventDefault();
     event.stopPropagation();
-
-    if (!this.tabsMode) return;
 
     const sourceTabName = this.draggingFromTab();
     const videoIds = this.draggingVideoIds();

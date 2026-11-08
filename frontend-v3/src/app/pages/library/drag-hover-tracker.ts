@@ -12,10 +12,8 @@ export class DragHoverTracker {
   readonly active = signal(false);
 
   private timer: ReturnType<typeof setTimeout> | null = null;
-  private lastOverAt: number | null = null;
 
   over(): void {
-    this.lastOverAt = Date.now();
     this.active.set(true);
     this.clearTimer();
     this.timer = setTimeout(() => {
@@ -24,13 +22,9 @@ export class DragHoverTracker {
     }, DRAG_HOVER_TIMEOUT_MS);
   }
 
-  /** Ends the hover; returns ms since the last dragover, or null if there was none. */
-  end(): number | null {
-    const elapsed = this.lastOverAt === null ? null : Date.now() - this.lastOverAt;
-    this.lastOverAt = null;
+  end(): void {
     this.active.set(false);
     this.clearTimer();
-    return elapsed;
   }
 
   private clearTimer(): void {
