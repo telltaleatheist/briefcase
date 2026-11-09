@@ -65,6 +65,8 @@ export class AddPopoverComponent {
   /** Out-of-range pair flagged by the timecode input (host disables submit). */
   trimStartInvalid = signal(false);
   trimEndInvalid = signal(false);
+  /** Live links keep recording instead of stopping at what has aired. Off each time. */
+  keepRecordingLive = signal(false);
 
   readonly qualityOptions = QUALITY_OPTIONS;
 
@@ -140,6 +142,7 @@ export class AddPopoverComponent {
     // option survives (stripBlackBars, customInstructions, the AI model).
     const steps = config?.composedSteps() ?? [];
     const quality = this.quality();
+    const keepRecordingLive = this.keepRecordingLive();
 
     this.submitAdd.emit({
       items: urls.map(url => ({
@@ -151,9 +154,11 @@ export class AddPopoverComponent {
         // Zero on either side = no trim there; card ON with no values does nothing.
         trimStartSeconds: startSeconds > 0 ? startSeconds : undefined,
         trimEndSeconds: endSeconds > 0 ? endSeconds : undefined,
+        keepRecordingLive: keepRecordingLive || undefined,
       })),
     });
     this.urlText.set('');
+    this.keepRecordingLive.set(false);
   }
 
 }

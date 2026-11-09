@@ -75,6 +75,7 @@ export class QueueTabComponent {
   @Output() configureSelected = new EventEmitter<string[]>();
   @Output() removeSelected = new EventEmitter<string[]>();
   @Output() cancelProcessing = new EventEmitter<string[]>();
+  @Output() stopRecording = new EventEmitter<string[]>();
   @Output() viewInLibrary = new EventEmitter<string>();
   @Output() configureItem = new EventEmitter<VideoItem>();
   @Output() previewRequested = new EventEmitter<VideoItem>();
@@ -317,6 +318,9 @@ export class QueueTabComponent {
         break;
       case 'cancel':
         this.cancelProcessing.emit(videoIds);
+        break;
+      case 'stop-recording':
+        this.stopRecording.emit(videoIds);
         break;
       case 'view-in-library':
         if (videoIds.length === 1) {

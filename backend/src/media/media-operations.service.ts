@@ -102,6 +102,7 @@ export class MediaOperationsService {
       browser?: string;
       displayName?: string;
       outputDir?: string;
+      keepRecordingLive?: boolean;
     },
     jobId?: string,
   ): Promise<DownloadResult> {
@@ -122,6 +123,7 @@ export class MediaOperationsService {
           browser: options.browser || 'auto',
           displayName: options.displayName,
           outputDir: options.outputDir,
+          keepRecordingLive: options.keepRecordingLive === true,
           fixAspectRatio: false, // Never process during download
           useRmsNormalization: false,
           useCompression: false,

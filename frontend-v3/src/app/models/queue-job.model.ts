@@ -24,6 +24,7 @@ export interface QueueTask {
   errorMessage?: string;
   eta?: number;           // Estimated seconds remaining
   taskLabel?: string;     // Human-readable task name (e.g., "Transcribing...")
+  recording?: boolean;    // Recording a live stream, with no end to measure against
 }
 
 /**

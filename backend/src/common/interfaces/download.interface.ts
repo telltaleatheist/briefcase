@@ -72,6 +72,8 @@ export interface DownloadOptions {
   shouldImport?: boolean; // For library downloads
   skipProcessing?: boolean; // Skip processing entirely - just download and mark as completed
   libraryId?: string; // Library ID for database import
+  /** A live stream keeps recording after what it has kept, until it ends or the user stops it. */
+  keepRecordingLive?: boolean;
 }
 
 export interface DownloadResult {

@@ -677,6 +677,22 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
   }
 
   /**
+   * End a job's live recording and keep it: the download finishes the file and
+   * the job carries on (import, processing) as if the stream had ended. Routed
+   * by jobId like a cancel; the downloader ignores it unless that job is
+   * recording. False if the job isn't downloading right now.
+   */
+  stopRecording(jobId: string): boolean {
+    const active = this.mainPool.get(jobId);
+    if (!active || active.type !== 'download') {
+      return false;
+    }
+    this.eventEmitter.emit('job.stop-recording-requested', { jobId });
+    this.logger.log(`Stop recording requested for job ${jobId}`);
+    return true;
+  }
+
+  /**
    * Check if a job has been cancelled
    */
   isJobCancelled(jobId: string): boolean {

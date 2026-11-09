@@ -80,6 +80,8 @@ describe('assertLiveWindow', () => {
   it('fails a stream that keeps no history rather than delivering seconds of video', () => {
     expect(() => assertLiveWindow(18)).toThrow(/keeps no history \(only 18 seconds/);
     expect(() => assertLiveWindow(59.9)).toThrow(/keeps no history/);
+    // The way out is named: recording it from now.
+    expect(() => assertLiveWindow(18)).toThrow(/Keep recording live/);
   });
 
   it('accepts a window of a minute or more', () => {

@@ -17,6 +17,8 @@ export interface YtDlpProgress {
   downloadSpeed: number;
   eta: number;
   phase: 'download' | 'postprocess' | 'complete';
+  /** Media recorded so far, when ffmpeg is the downloader (a live recording). */
+  recordedSeconds?: number;
 }
 
 export interface YtDlpProcessInfo {
@@ -559,6 +561,8 @@ export class YtDlpBridge extends EventEmitter {
    * Download a livestream with automatic stop at live edge
    * Adds --live-from-start and monitors fragment timing to detect when
    * the download has caught up to the live edge, then gracefully stops.
+   * With stopAtLiveEdge false it keeps recording until the stream ends or
+   * gracefulStop() is called.
    */
   downloadLivestream(
     url: string,
@@ -570,9 +574,18 @@ export class YtDlpBridge extends EventEmitter {
       cookies?: string;
       cookiesFromBrowser?: string;
       additionalArgs?: string[];
+      stopAtLiveEdge?: boolean;
     }
   ): Promise<YtDlpResult> {
     const processId = options?.processId || crypto.randomBytes(8).toString('hex');
+
+    if (options?.stopAtLiveEdge === false) {
+      return this.download(url, outputTemplate, {
+        ...options,
+        processId,
+        additionalArgs: [...(options.additionalArgs || []), '--live-from-start'],
+      });
+    }
 
     // Track fragment timing for live-edge detection
     // With --concurrent-fragments, events come in bursts so we need higher thresholds
@@ -820,6 +833,24 @@ export class YtDlpBridge extends EventEmitter {
         downloadSpeed: speed,
         eta: 0,
         phase: 'download',
+      } as YtDlpProgress);
+      return;
+    }
+
+    // ffmpeg as the downloader (a live recording) reports how much media it has
+    // written, "time=01:02:03.45", several records to a line; the last is current.
+    const ffmpegTimes = [...line.matchAll(/\btime=(\d+):(\d{2}):(\d{2}(?:\.\d+)?)/g)];
+    if (ffmpegTimes.length > 0) {
+      const [, h, m, sec] = ffmpegTimes[ffmpegTimes.length - 1];
+      this.emit('progress', {
+        processId,
+        percent: 0,
+        totalSize: 0,
+        downloadedBytes: 0,
+        downloadSpeed: 0,
+        eta: 0,
+        phase: 'download',
+        recordedSeconds: parseInt(h) * 3600 + parseInt(m) * 60 + parseFloat(sec),
       } as YtDlpProgress);
       return;
     }

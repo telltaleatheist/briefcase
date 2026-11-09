@@ -88,6 +88,20 @@
       }
     </div>
 
+    <!-- Live streams: by default a live link pulls what it has aired so far and
+         stops. This keeps recording until the stream ends or the queue item's
+         Stop recording. Per download, never remembered: a sticky "record for
+         hours" would surprise the next paste. -->
+    <div class="live-card" [class.on]="keepRecordingLive()">
+      <label class="live-toggle">
+        <input type="checkbox" [ngModel]="keepRecordingLive()" (ngModelChange)="keepRecordingLive.set($event)" />
+        <span class="trim-text">
+          <span class="trim-title">Keep recording live</span>
+          <span class="trim-sub">For a live stream: keep recording after what it has aired, until it ends or you stop it.</span>
+        </span>
+      </label>
+    </div>
+
     <!-- Full pipeline configuration — the same step cards the inspector uses,
          in compose mode. Its steps are shared sticky state (last-used composition
          is the same one the inspector edits). Header + footer hidden; the popover

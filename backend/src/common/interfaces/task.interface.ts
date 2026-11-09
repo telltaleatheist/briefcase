@@ -34,6 +34,7 @@ export interface DownloadTask extends BaseTask {
     convertToMp4?: boolean;
     useCookies?: boolean;
     browser?: string;
+    keepRecordingLive?: boolean;
   };
 }
 

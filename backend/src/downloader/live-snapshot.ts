@@ -78,7 +78,8 @@ export function assertLiveWindow(durationSeconds: number): void {
   if (durationSeconds < MIN_LIVE_WINDOW_SECONDS) {
     throw new Error(
       `This live stream keeps no history (only ${Math.round(durationSeconds)} seconds are available), ` +
-      'so there is nothing to pull yet. Try again after the broadcast ends.',
+      'so there is nothing to pull yet. Turn on "Keep recording live" to record it from now, ' +
+      'or try again after the broadcast ends.',
     );
   }
 }

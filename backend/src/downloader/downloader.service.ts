@@ -27,6 +27,24 @@ import {
   withoutTodaysStamp,
 } from './live-snapshot';
 
+/**
+ * Pass on at most one progress event per interval. A live pull reports every
+ * fragment, hundreds a second, and each one is a socket message to the
+ * renderer; the last (100%) always goes through.
+ */
+function throttleProgress<T extends { percent: number }>(
+  handler: (progress: T) => void,
+  intervalMs = 500,
+): (progress: T) => void {
+  let last = 0;
+  return (progress) => {
+    const now = Date.now();
+    if (progress.percent < 100 && now - last < intervalMs) return;
+    last = now;
+    handler(progress);
+  };
+}
+
 @Injectable()
 export class DownloaderService implements OnModuleInit {
   private readonly logger = new Logger(DownloaderService.name);
@@ -39,6 +57,8 @@ export class DownloaderService implements OnModuleInit {
   private cancelledDownloads: Set<string> = new Set();
   // Every yt-dlp run a download started, so a cancel can find what each one wrote.
   private jobManagers: Map<string, YtDlpManager[]> = new Map();
+  // Jobs whose live recording is running, which "Stop recording" may end.
+  private recordingDownloads: Set<string> = new Set();
 
   constructor(
     private readonly pathService: PathService,
@@ -618,10 +638,12 @@ export class DownloaderService implements OnModuleInit {
         downloadWarnings.push(message);
       }
 
-      // Live streams other than YouTube are pulled from a frozen playlist.
+      // Live streams other than YouTube are pulled from a frozen playlist, or
+      // recorded on from their oldest kept segment when the user asked for that.
       const isYouTubeUrl = options.url.includes('youtube.com') || options.url.includes('youtu.be');
-      const useLiveSnapshot = isLive && !isYouTubeUrl;
-      if (useLiveSnapshot) {
+      const liveElsewhere = isLive && !isYouTubeUrl;
+      const keepRecording = isLive && options.keepRecordingLive === true;
+      if (liveElsewhere) {
         // A permanent live room reports the day the room was created as its upload
         // date (Rumble), so the broadcast being pulled is dated today.
         uploadDate = this.getLocalDateString();
@@ -629,7 +651,7 @@ export class DownloaderService implements OnModuleInit {
       // The snapshot's input is a local file, so yt-dlp can't supply the real title.
       // The date prefix already says the day, so a stamp of today in the title goes.
       const liveName = options.displayName || liveTitle;
-      const displayName = useLiveSnapshot && liveName && uploadDate
+      const displayName = liveElsewhere && liveName && uploadDate
         ? withoutTodaysStamp(liveName, uploadDate)
         : options.displayName;
 
@@ -960,23 +982,35 @@ export class DownloaderService implements OnModuleInit {
             }
 
             // Set up progress tracking
-            livestreamManager.on('progress', (progress) => {
+            livestreamManager.on('progress', throttleProgress((progress) => {
               const elapsedMs = Date.now() - downloadStartTime;
+              // YouTube's live-from-start reports fragments, not media time, so a
+              // recording shows how long it has been recording.
+              const label = keepRecording ? `Recording live — ${this.formatDuration(elapsedMs / 1000)}` : 'Downloading livestream';
               this.eventService.emitDownloadProgress(
-                progress.percent,
-                'Downloading livestream',
+                keepRecording ? 0 : progress.percent,
+                label,
                 jobId,
                 {
                   speed: progress.downloadSpeed,
                   eta: progress.eta,
                   elapsedMs,
                   totalSize: progress.totalSize,
-                  downloadedBytes: progress.downloadedBytes
+                  downloadedBytes: progress.downloadedBytes,
+                  ...(keepRecording ? { taskLabel: label, recording: true } : {}),
                 }
               );
-            });
+            }));
 
-            const output = await livestreamManager.runLivestream();
+            if (keepRecording && jobId) {
+              this.recordingDownloads.add(jobId);
+            }
+            let output: string;
+            try {
+              output = await livestreamManager.runLivestream({ stopAtLiveEdge: !keepRecording });
+            } finally {
+              if (jobId) this.recordingDownloads.delete(jobId);
+            }
             outputFile = await this.determineOutputFile(output, downloadFolder, downloadStartTime, outputTemplate);
           } catch (livestreamError) {
             const errMsg = livestreamError instanceof Error ? livestreamError.message : String(livestreamError);
@@ -988,7 +1022,13 @@ export class DownloaderService implements OnModuleInit {
         // Live streams elsewhere stop by themselves at what has streamed so far.
         // A failure is final: the normal path below would record forward until
         // the broadcast ends.
-        if (useLiveSnapshot) {
+        if (liveElsewhere && keepRecording) {
+          const recording = await this.downloadLiveRecording(options, outputTemplate, downloadFolder, downloadStartTime, jobId);
+          outputFile = recording.outputFile;
+          downloadWarnings.push(
+            `Recorded ${this.formatDuration(recording.durationSeconds)} of this live stream, starting from the oldest part it still kept, which may not be the start of the broadcast.`
+          );
+        } else if (liveElsewhere) {
           const snapshot = await this.downloadLiveSnapshot(options, outputTemplate, downloadFolder, downloadStartTime, jobId);
           outputFile = snapshot.outputFile;
           downloadWarnings.push(
@@ -1492,7 +1532,8 @@ export class DownloaderService implements OnModuleInit {
         this.trackDownload(jobId, manager);
       }
 
-      manager.on('progress', (progress) => {
+      // A snapshot reports every fragment, hundreds a second at full speed.
+      manager.on('progress', throttleProgress((progress) => {
         const elapsedMs = Date.now() - downloadStartTime;
         this.eventService.emitDownloadProgress(
           progress.percent,
@@ -1506,7 +1547,7 @@ export class DownloaderService implements OnModuleInit {
             downloadedBytes: progress.downloadedBytes
           }
         );
-      });
+      }));
 
       const output = await manager.run();
       const outputFile = await this.determineOutputFile(output, downloadFolder, downloadStartTime, outputTemplate);
@@ -1517,6 +1558,91 @@ export class DownloaderService implements OnModuleInit {
     } finally {
       await fs.promises.rm(tempDir, { recursive: true, force: true });
     }
+  }
+
+  /**
+   * Record a live stream from the oldest segment it still keeps until it ends or
+   * the user stops the recording (stopRecording). One ffmpeg reads the live
+   * playlist from its first entry and keeps following it, so what aired before
+   * and what airs after land in one continuous file with no join. It fetches
+   * that history one segment at a time, so catching up is slower than a
+   * snapshot pull (about 17x real time on Rumble).
+   */
+  private async downloadLiveRecording(
+    options: DownloadOptions,
+    outputTemplate: string,
+    downloadFolder: string,
+    downloadStartTime: number,
+    jobId?: string,
+  ): Promise<{ outputFile: string; durationSeconds: number }> {
+    const manager = new YtDlpManager();
+    manager.input(options.url).output(outputTemplate);
+
+    const ffmpegPath = this.sharedConfigService.getFfmpegPath();
+    if (ffmpegPath) {
+      manager.addOption('--ffmpeg-location', ffmpegPath);
+    }
+
+    manager.addOption('--no-check-certificates')
+           .addOption('--no-playlist')
+           .addOption('--format', buildLiveFormatSelector(this.parseQualityCap(options.quality)))
+           // For a live stream yt-dlp has ffmpeg write MPEG-TS, which survives
+           // being cut off, then fixes it up into a real MP4. Passing
+           // --hls-use-mpegts would skip that fixup and leave TS in a .mp4.
+           .addOption('--downloader', 'ffmpeg')
+           .addOption('--downloader-args', 'ffmpeg_i:-live_start_index 0')
+           .addOption('--remux-video', 'mp4');
+
+    let recordedSeconds = 0;
+    manager.on('progress', throttleProgress((progress) => {
+      if (progress.recordedSeconds === undefined) return;
+      recordedSeconds = progress.recordedSeconds;
+      const label = `Recording live — ${this.formatDuration(recordedSeconds)}`;
+      this.eventService.emitDownloadProgress(0, label, jobId, {
+        elapsedMs: Date.now() - downloadStartTime,
+        taskLabel: label,
+        recording: true,
+      });
+    }));
+
+    if (jobId) {
+      this.trackDownload(jobId, manager);
+      this.recordingDownloads.add(jobId);
+    }
+    let output: string;
+    try {
+      output = await manager.run();
+    } finally {
+      if (jobId) this.recordingDownloads.delete(jobId);
+    }
+
+    const outputFile = await this.determineOutputFile(output, downloadFolder, downloadStartTime, outputTemplate);
+    if (!outputFile) {
+      throw new Error('The live recording finished but its output file could not be found');
+    }
+    return { outputFile, durationSeconds: recordedSeconds };
+  }
+
+  /**
+   * Route a queue "Stop recording" to the job's live recording. Idempotent and
+   * safe if the job isn't recording.
+   */
+  @OnEvent('job.stop-recording-requested')
+  handleStopRecordingRequested(payload: { jobId?: string }): void {
+    if (payload?.jobId) {
+      this.stopRecording(payload.jobId);
+    }
+  }
+
+  /**
+   * End a live recording and keep it: unlike a cancel, the file is finished and
+   * the download completes (then imports) as usual. False if not recording.
+   */
+  stopRecording(jobId: string): boolean {
+    if (!this.recordingDownloads.has(jobId)) return false;
+    const stopped = this.activeDownloads.get(jobId)?.stopGracefully() ?? false;
+    if (stopped) this.logger.log(`Stopping live recording for job ${jobId}`);
+    return stopped;
   }
 
   /** Today's date in the user's timezone, YYYY-MM-DD. */

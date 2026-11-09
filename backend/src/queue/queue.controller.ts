@@ -218,6 +218,25 @@ export class QueueController {
   }
 
   /**
+   * End a live recording and keep what it recorded
+   * POST /queue/job/:jobId/stop-recording
+   */
+  @Post('job/:jobId/stop-recording')
+  async stopRecording(@Param('jobId') jobId: string) {
+    if (!this.queueManager.stopRecording(jobId)) {
+      throw new HttpException(
+        'Job not found or not recording',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    return {
+      success: true,
+      message: 'Recording stopping',
+    };
+  }
+
+  /**
    * Start paused jobs
    * POST /queue/jobs/start
    * Body: { jobIds: string[] }

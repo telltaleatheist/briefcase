@@ -24,6 +24,8 @@ export interface AddDownloadsPayload {
      *  tail (NOT an absolute timestamp), resolved against the file's real
      *  duration by the backend. Maps to QueueJob.trimEndTime → trimEndSeconds. */
     trimEndSeconds?: number;
+    /** A live link keeps recording until it ends or is stopped from the queue. */
+    keepRecordingLive?: boolean;
   }[];
 }
 

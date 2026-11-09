@@ -159,7 +159,9 @@ export class MediaEventService {
         timestamp: this.getTimestamp(),
         eta: additionalInfo?.eta,
         elapsedMs: additionalInfo?.elapsedMs,
-        taskLabel,
+        // A live recording names itself ("Recording live — 00:12:34").
+        taskLabel: additionalInfo?.taskLabel ?? taskLabel,
+        recording: additionalInfo?.recording === true ? true : undefined,
       });
     }
   }

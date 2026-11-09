@@ -107,7 +107,9 @@ textarea {
 
 // Designated trim option — download-time configuration, visually distinct
 // from the processing steps below it. Whole card toggles; chevron expands.
-.trim-card {
+// The live-recording option is the same card without the chevron.
+.trim-card,
+.live-card {
   margin: 12px 0 0;
   border: 1px solid var(--border-color);
   border-radius: 8px;
@@ -129,7 +131,8 @@ textarea {
   gap: 6px;
 }
 
-.trim-toggle {
+.trim-toggle,
+.live-toggle {
   display: flex;
   align-items: flex-start;
   gap: 9px;
@@ -137,6 +140,11 @@ textarea {
   min-width: 0;
   padding: 9px 0 9px 11px;
   cursor: pointer;
+
+  // No chevron beside it, so it pads its own right edge.
+  &.live-toggle {
+    padding-right: 11px;
+  }
 
   input[type='checkbox'] {
     accent-color: var(--primary-orange);

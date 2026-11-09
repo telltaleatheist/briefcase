@@ -422,6 +422,17 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
 
     // Find the currently running task for ETA and label
     const runningTask = job.tasks.find(t => t.state === 'running');
+
+    // A live recording has no end to measure: say how much it has recorded.
+    if (runningTask?.recording) {
+      return {
+        value: 0,
+        color: 'var(--primary-orange)',
+        indeterminate: true,
+        taskLabel: runningTask.taskLabel,
+        recording: true
+      };
+    }
     const taskLabel = runningTask?.taskLabel;
     const etaLabel = runningTask?.eta !== undefined ? this.formatEta(runningTask.eta) : undefined;
 
@@ -2783,6 +2794,7 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       // option survives (stripBlackBars, customInstructions, the AI model).
       const downloadOptions: Record<string, unknown> =
         item.quality && item.quality !== 'best' ? { quality: item.quality } : {};
+      if (item.keepRecordingLive) downloadOptions['keepRecordingLive'] = true;
       const tasks: QueueTask[] = [
         createQueueTask('download-import', downloadOptions),
         ...item.steps.map(step => createQueueTask(step.type, { ...step.config })),
@@ -3193,6 +3205,13 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
       'Processing Cancelled',
       `Cancelled ${itemIds.length} ${itemIds.length === 1 ? 'item' : 'items'}`
     );
+  }
+
+  /** End live recordings and keep them; each job then imports as usual. */
+  onStopRecording(itemIds: string[]) {
+    for (const id of itemIds) {
+      this.queueService.stopRecording(id);
+    }
   }
 
   /**

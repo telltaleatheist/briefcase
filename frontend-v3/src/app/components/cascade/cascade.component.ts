@@ -1324,6 +1324,12 @@ export class CascadeComponent implements OnDestroy {
     this.openDeleteModal([video]);
   }
 
+  /** End a live recording and keep it (the × beside it cancels and discards). */
+  onStopRecordingClick(video: VideoItem, event: Event) {
+    event.stopPropagation();
+    this.videoAction.emit({ action: 'stop-recording', videos: [video] });
+  }
+
   /**
    * Handle inline edit button click
    */

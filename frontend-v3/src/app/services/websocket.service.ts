@@ -20,6 +20,7 @@ export interface TaskProgress {
   eta?: number;           // Estimated seconds remaining
   elapsedMs?: number;     // Milliseconds elapsed since task started
   taskLabel?: string;     // Human-readable task name (e.g., "Transcribing...")
+  recording?: boolean;    // A live recording: open-ended, and "Stop recording" keeps it
 }
 
 export interface TaskStarted {
@@ -263,7 +264,8 @@ export class WebsocketService implements OnDestroy {
         type: event.taskType || event.type,
         eta: event.eta,
         elapsedMs: event.elapsedMs,
-        taskLabel: event.taskLabel
+        taskLabel: event.taskLabel,
+        recording: event.recording === true
       };
       this.dispatch(this.taskProgressCallbacks, progress);
     });

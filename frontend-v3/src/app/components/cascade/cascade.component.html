@@ -278,6 +278,16 @@
                 </button>
               }
 
+              <!-- A live recording runs until stopped: Stop keeps it (and the job
+                   carries on to import), where × cancels and discards it. -->
+              @if (getProgress(item.video)?.recording) {
+                <button class="action-btn stop-recording-btn"
+                  (click)="onStopRecordingClick(item.video, $event)"
+                  title="Stop recording and keep what was recorded">
+                  Stop recording
+                </button>
+              }
+
               <!-- Per-row quick-action buttons removed (Phase 7a): the toolbar,
                    inspector, double-click, and context menu cover open /
                    analysis / transcript / process. -->

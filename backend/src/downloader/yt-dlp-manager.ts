@@ -16,6 +16,8 @@ export interface YtDlpProgress {
   downloadedBytes: number;
   downloadSpeed: number;
   eta: number;
+  /** Media recorded so far, when ffmpeg is the downloader (a live recording). */
+  recordedSeconds?: number;
 }
 
 export interface YtDlpRetryInfo {
@@ -73,6 +75,7 @@ export class YtDlpManager extends EventEmitter {
         downloadedBytes: progress.downloadedBytes,
         downloadSpeed: progress.downloadSpeed,
         eta: progress.eta,
+        recordedSeconds: progress.recordedSeconds,
       } as YtDlpProgress);
     });
 
@@ -130,6 +133,18 @@ export class YtDlpManager extends EventEmitter {
       this.aborted = true;
       this.ytdlp.abort(this.currentProcessId);
     }
+  }
+
+  /**
+   * Stop a recording and keep it: yt-dlp gets SIGINT, finishes the file and
+   * exits as a success. False when nothing is running.
+   */
+  stopGracefully(): boolean {
+    if (this.currentProcessId && this.ytdlp.isRunning(this.currentProcessId)) {
+      this.logger.log('Stopping yt-dlp recording');
+      return this.ytdlp.gracefulStop(this.currentProcessId);
+    }
+    return false;
   }
 
   /** yt-dlp's log from the last run that finished, whatever its outcome. */
@@ -224,7 +239,7 @@ export class YtDlpManager extends EventEmitter {
    * Execute a livestream download with automatic stop at live edge
    * Uses --live-from-start and monitors fragment timing to detect catch-up
    */
-  async runLivestream(): Promise<string> {
+  async runLivestream(options: { stopAtLiveEdge?: boolean } = {}): Promise<string> {
     if (!this.inputUrl) {
       throw new Error('No input URL specified.');
     }
@@ -260,6 +275,7 @@ export class YtDlpManager extends EventEmitter {
         {
           processId,
           additionalArgs,
+          stopAtLiveEdge: options.stopAtLiveEdge,
         }
       );
 

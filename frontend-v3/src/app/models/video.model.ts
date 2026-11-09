@@ -76,6 +76,7 @@ export interface ItemProgress {
   indeterminate?: boolean; // Show spinner/indeterminate progress instead of bar
   taskLabel?: string;     // Human-readable task name (e.g., "Transcribing...")
   etaLabel?: string;      // Formatted ETA (e.g., "~2:30 remaining")
+  recording?: boolean;    // A live recording: offer "Stop recording"
 }
 
 /**

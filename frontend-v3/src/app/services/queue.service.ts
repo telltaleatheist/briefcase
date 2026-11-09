@@ -280,7 +280,7 @@ export class QueueService implements OnDestroy {
   /**
    * Update a task's progress within a job
    */
-  updateTaskProgress(jobId: string, taskType: TaskType, progress: number, eta?: number, taskLabel?: string): void {
+  updateTaskProgress(jobId: string, taskType: TaskType, progress: number, eta?: number, taskLabel?: string, recording?: boolean): void {
     this.jobs.update(jobs =>
       jobs.map(job => {
         if (job.id !== jobId) return job;
@@ -295,7 +295,8 @@ export class QueueService implements OnDestroy {
             progress: Math.max(0, Math.min(100, progress)),
             // Preserve existing eta/taskLabel if new values are undefined
             eta: eta !== undefined ? eta : task.eta,
-            taskLabel: taskLabel || task.taskLabel
+            taskLabel: taskLabel || task.taskLabel,
+            recording: recording || task.recording
           };
         });
 
@@ -442,6 +443,25 @@ export class QueueService implements OnDestroy {
     // Optimistic removal stands; the backend is told to cancel and any
     // failure to confirm is surfaced (job may still be running server-side).
     this.notifyBackendCancel(backendJobIds);
+  }
+
+  /**
+   * End a job's live recording and keep it. The row stays: the download
+   * finishes its file and the job carries on to import. A refusal (the job
+   * finished, or never was recording) is surfaced.
+   */
+  stopRecording(frontendJobId: string): void {
+    const backendJobId = this.frontendToBackendIdMap.get(frontendJobId);
+    if (!backendJobId) {
+      this.errorSurface.surfaceError("Couldn't stop the recording", new Error('This job has not reached the backend yet'));
+      return;
+    }
+    this.http.post<{ success?: boolean }>(`${this.API_BASE}/queue/job/${backendJobId}/stop-recording`, {}).pipe(
+      catchError(error => {
+        this.errorSurface.surfaceError("Couldn't stop the recording", error);
+        return of(undefined);
+      })
+    ).subscribe();
   }
 
   /**
@@ -1204,7 +1224,7 @@ export class QueueService implements OnDestroy {
       this.updateTaskProgress(jobId, 'fix-aspect-ratio', progress, event.eta, event.taskLabel);
       this.updateTaskProgress(jobId, 'normalize-audio', progress, event.eta, event.taskLabel);
     } else {
-      this.updateTaskProgress(jobId, taskType, progress, event.eta, event.taskLabel);
+      this.updateTaskProgress(jobId, taskType, progress, event.eta, event.taskLabel, event.recording);
     }
   }
 
@@ -1470,8 +1490,13 @@ export class QueueService implements OnDestroy {
     const backendTasks: BackendTask[] = [];
 
     if (isUrl) {
+      // The download-import task's options (quality cap, keep recording live)
+      // are the download's.
+      const downloadOptions = tasks.find(t => t.type === 'download-import')?.options;
       backendTasks.push({ type: 'get-info' });
-      backendTasks.push({ type: 'download' });
+      backendTasks.push(downloadOptions && Object.keys(downloadOptions).length > 0
+        ? { type: 'download', options: { ...downloadOptions } }
+        : { type: 'download' });
       backendTasks.push({ type: 'import' });
     }
 
