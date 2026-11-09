@@ -193,6 +193,31 @@
   }
 }
 
+.volume-default-btn {
+  padding: 2px $spacing-xs;
+  font-size: 10px;
+  white-space: nowrap;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: $radius-sm;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover:not(:disabled) {
+    border-color: var(--primary-orange);
+    color: var(--text-primary);
+  }
+
+  // Already the default: shown as a quiet label, not a button to press.
+  &:disabled {
+    cursor: default;
+    background: transparent;
+    border-color: transparent;
+    opacity: 0.6;
+  }
+}
+
 .header-right {
   @include flex-center;
   gap: $spacing-sm;

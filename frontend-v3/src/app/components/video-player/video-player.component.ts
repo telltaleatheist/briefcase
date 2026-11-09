@@ -24,7 +24,8 @@ import {
   MuteSection,
   EditorTab,
   createEditorTab,
-  DEFAULT_PLAYER_VOLUME
+  getDefaultPlayerVolume,
+  setDefaultPlayerVolume
 } from '../../models/video-editor.model';
 import {
   FlagFilter,
@@ -512,10 +513,13 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
     currentTime: 0,
     duration: 120,
     isPlaying: false,
-    volume: DEFAULT_PLAYER_VOLUME,
+    volume: getDefaultPlayerVolume(),
     playbackRate: 1,
     zoomState: { level: 1, offset: 0 }
   });
+
+  /** The volume new videos open at; "Set default" saves the current one. */
+  defaultVolume = signal(getDefaultPlayerVolume());
 
   // Current active tool
   currentTool = signal<EditorTool>(EditorTool.CURSOR);
@@ -1856,6 +1860,17 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
     // Initialize audio context on user interaction (needed for amplification)
     if (clampedVolume > 1 && this.videoPlayer) {
       this.videoPlayer.ensureAudioContext();
+    }
+  }
+
+  /** Every video opened from now on starts at the current volume. */
+  setVolumeAsDefault() {
+    const volume = this.editorState().volume;
+    try {
+      setDefaultPlayerVolume(volume);
+      this.defaultVolume.set(volume);
+    } catch (error) {
+      console.error('Could not save the default volume:', error);
     }
   }
 

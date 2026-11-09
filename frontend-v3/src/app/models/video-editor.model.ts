@@ -4,9 +4,30 @@ import { TranscriptionSegment } from './video-info.model';
  * Volume the viewer opens at, on the player's 0-10 scale (1 = 100% native,
  * anything above that is amplified through a Web Audio gain node). 250%: at
  * unity the player sounded too quiet, even on audio normalized to -14 LUFS.
- * Every video (each new tab) opens at this level.
+ * Every video (each new tab) opens at this level unless the viewer has set
+ * their own default with the player's "Set default" button.
  */
 export const DEFAULT_PLAYER_VOLUME = 2.5;
+
+const DEFAULT_VOLUME_KEY = 'briefcase-player-default-volume';
+
+/** The volume every video opens at: the viewer's saved default, else 250%. */
+export function getDefaultPlayerVolume(): number {
+  try {
+    const saved = Number(localStorage.getItem(DEFAULT_VOLUME_KEY));
+    if (localStorage.getItem(DEFAULT_VOLUME_KEY) !== null && Number.isFinite(saved) && saved >= 0 && saved <= 10) {
+      return saved;
+    }
+  } catch {
+    // Storage unavailable: use the built-in default.
+  }
+  return DEFAULT_PLAYER_VOLUME;
+}
+
+/** Saves the volume new videos open at (0-10 scale). */
+export function setDefaultPlayerVolume(volume: number): void {
+  localStorage.setItem(DEFAULT_VOLUME_KEY, String(volume));
+}
 
 export interface VideoEditorState {
   currentTime: number; // seconds
@@ -234,7 +255,7 @@ export function createEditorTab(
       currentTime: 0,
       duration: 120,
       isPlaying: false,
-      volume: DEFAULT_PLAYER_VOLUME,
+      volume: getDefaultPlayerVolume(),
       playbackRate: 1,
       zoomState: { level: 1, offset: 0 }
     },

@@ -260,6 +260,13 @@
                 <span class="volume-percent" [class.boosted]="editorState().volume > 1">
                   {{ Math.round(editorState().volume * 100) }}%
                 </span>
+                <button
+                  class="volume-default-btn"
+                  [disabled]="Math.round(editorState().volume * 100) === Math.round(defaultVolume() * 100)"
+                  (click)="setVolumeAsDefault()"
+                  [title]="'Videos open at ' + Math.round(defaultVolume() * 100) + '%. Click to open them at ' + Math.round(editorState().volume * 100) + '% instead.'">
+                  {{ Math.round(editorState().volume * 100) === Math.round(defaultVolume() * 100) ? 'Default' : 'Set default' }}
+                </button>
               </div>
             </div>
             <div class="toolbar-right">
