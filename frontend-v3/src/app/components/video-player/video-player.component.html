@@ -418,6 +418,13 @@
               (input)="setVolume(+$any($event.target).value)"
               [title]="'Volume: ' + Math.round(editorState().volume * 100) + '%'"
             />
+            <button
+              class="volume-default-btn"
+              [disabled]="Math.round(editorState().volume * 100) === Math.round(defaultVolume() * 100)"
+              (click)="setVolumeAsDefault()"
+              [title]="'Videos open at ' + Math.round(defaultVolume() * 100) + '%. Click to open them at ' + Math.round(editorState().volume * 100) + '% instead.'">
+              {{ Math.round(editorState().volume * 100) === Math.round(defaultVolume() * 100) ? 'Default' : 'Set default' }}
+            </button>
           </div>
         </div>
       }
