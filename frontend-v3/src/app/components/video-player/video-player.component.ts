@@ -521,6 +521,10 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
   /** The volume new videos open at; "Set default" saves the current one. */
   defaultVolume = signal(getDefaultPlayerVolume());
 
+  /** Whether the slider sits at the saved default (to the displayed percent). */
+  isAtDefaultVolume = computed(() =>
+    Math.round(this.editorState().volume * 100) === Math.round(this.defaultVolume() * 100));
+
   // Current active tool
   currentTool = signal<EditorTool>(EditorTool.CURSOR);
 

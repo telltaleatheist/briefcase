@@ -183,6 +183,7 @@
   .volume-percent {
     font-size: 10px;
     min-width: 36px;
+    font-variant-numeric: tabular-nums;
     text-align: right;
     color: var(--text-secondary);
 
@@ -193,7 +194,13 @@
   }
 }
 
+// Both labels share one grid cell and only one is visible, so the button is
+// always as wide as "Set default" and the slider beside it never shifts when
+// the label flips as the slider passes the saved default.
 .volume-default-btn {
+  display: inline-grid;
+  flex-shrink: 0;
+  justify-items: center;
   padding: 2px $spacing-xs;
   font-size: 10px;
   white-space: nowrap;
@@ -203,6 +210,14 @@
   color: var(--text-secondary);
   cursor: pointer;
   transition: all $transition-fast;
+
+  > span {
+    grid-area: 1 / 1;
+  }
+
+  .label-hidden {
+    visibility: hidden;
+  }
 
   &:hover:not(:disabled) {
     border-color: var(--primary-orange);
