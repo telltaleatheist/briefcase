@@ -31,12 +31,13 @@ describe('buildGenericFormatSelector', () => {
     expect(buildGenericFormatSelector('best')).toBe('bestvideo+bestaudio/best');
   });
 
-  it('honours a height cap on both sides of the muxed fallback', () => {
+  it('aims for the cap on the short side of either orientation, then takes the best available', () => {
     expect(buildGenericFormatSelector('720')).toBe(
-      'bestvideo[height<=720]+bestaudio/best[height<=720]',
-    );
-    expect(buildGenericFormatSelector('480')).toBe(
-      'bestvideo[height<=480]+bestaudio/best[height<=480]',
+      'bestvideo[aspect_ratio>=?1][height<=720]+bestaudio'
+        + '/bestvideo[aspect_ratio<1][width<=720]+bestaudio'
+        + '/best[aspect_ratio>=?1][height<=720]'
+        + '/best[aspect_ratio<1][width<=720]'
+        + '/bestvideo+bestaudio/best',
     );
   });
 

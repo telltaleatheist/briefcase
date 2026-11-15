@@ -28,7 +28,9 @@ export const QUALITY_OPTIONS: { value: DownloadQuality; label: string }[] = [
 
 const STORAGE_KEY = 'briefcase-add-defaults';
 const FALLBACK_DEFAULTS: AddDefaults = {
-  quality: 'best',
+  // 720p unless the user picks otherwise; it is a target, and a site with
+  // nothing that small still downloads at its best (backend format-selector.ts).
+  quality: '720',
   trim: false,
   trimStartSeconds: 0,
   trimEndSeconds: 0,

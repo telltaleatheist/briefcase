@@ -31,9 +31,10 @@ export interface VideoJobSettings {
   outputFormat?: 'mp4' | 'webm' | 'mov' | 'avi';
   outputQuality?: 'low' | 'medium' | 'high' | 'ultra';
   /**
-   * Max download resolution passed to yt-dlp as a height cap
-   * (bestvideo[height<=N]+bestaudio per-site). 'best' (or absent) omits the
-   * cap and keeps the site default behavior.
+   * Target download resolution, measured on the short side (a 720x1280
+   * vertical video is 720p). The best rendition at or under it is taken, and
+   * the best available when the site has nothing that small; see the backend's
+   * downloader/format-selector.ts. 'best' (or absent) means best available.
    */
   downloadQuality?: '480' | '720' | '1080' | 'best';
 }

@@ -9,6 +9,8 @@
  * DownloaderService.downloadLiveSnapshot().
  */
 
+import { buildMuxedFormatSelector } from './format-selector';
+
 /** Below this the stream keeps no real history; a file would be seconds long. */
 export const MIN_LIVE_WINDOW_SECONDS = 60;
 
@@ -20,7 +22,7 @@ export interface LiveSnapshot {
 
 /** yt-dlp selector for one muxed HLS rendition, the only shape a snapshot can hold. */
 export function buildLiveFormatSelector(cap: number | null): string {
-  return cap === null ? 'best[protocol*=m3u8]' : `best[protocol*=m3u8][height<=${cap}]`;
+  return buildMuxedFormatSelector(cap, 'best[protocol*=m3u8]');
 }
 
 /**

@@ -26,6 +26,7 @@ import {
   buildLiveSnapshot,
   withoutTodaysStamp,
 } from './live-snapshot';
+import { buildFormatSelector, buildMergedFormatSelector } from './format-selector';
 
 /**
  * Pass on at most one progress event per interval. A live pull reports every
@@ -148,13 +149,10 @@ export class DownloaderService implements OnModuleInit {
    * other Akamai/Brightcove news players — publish no muxed format at all, so
    * `best` failed outright with "Requested format is not available". Select
    * video+audio and merge, falling back to a muxed format for the sites that
-   * only offer one. An explicit cap is honoured on both sides of that fallback.
+   * only offer one. A quality is a target: see buildMergedFormatSelector.
    */
   private buildGenericFormatSelector(quality?: string): string {
-    const cap = this.parseQualityCap(quality);
-    return cap === null
-      ? 'bestvideo+bestaudio/best'
-      : `bestvideo[height<=${cap}]+bestaudio/best[height<=${cap}]`;
+    return buildMergedFormatSelector(this.parseQualityCap(quality));
   }
 
   /**
@@ -164,16 +162,17 @@ export class DownloaderService implements OnModuleInit {
   private configureYouTubeDownload(ytDlpManager: YtDlpManager, options: DownloadOptions, clientType: string = 'android'): void {
     this.logger.log(`Configuring YouTube download with client: ${clientType}`);
 
-    // Use QuickTime-compatible format (mp4 with avc1 video codec), honoring
-    // the user's quality cap when one was chosen. No uncapped last-resort
-    // selector when capped: if the site has nothing at or below the cap the
-    // download fails loudly rather than silently upgrading.
+    // Use QuickTime-compatible format (mp4 with avc1 video codec), aiming for
+    // the user's quality (short side, so Shorts work) and taking the best
+    // available when nothing is that small.
     const cap = this.parseQualityCap(options.quality);
-    const format = cap === null
-      ? 'bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/best[ext=mp4]/best'
-      : `bestvideo[ext=mp4][vcodec^=avc1][height<=${cap}]+bestaudio[ext=m4a]/best[ext=mp4][height<=${cap}]/best[height<=${cap}]`;
+    const format = buildFormatSelector(cap, {
+      video: 'bestvideo[ext=mp4][vcodec^=avc1]',
+      audio: 'bestaudio[ext=m4a]',
+      muxed: ['best[ext=mp4]', 'best'],
+    });
     ytDlpManager.addOption('--format', format);
-    this.logger.log(cap === null ? 'YouTube format: best available' : `YouTube format: capped at ${cap}p`);
+    this.logger.log(cap === null ? 'YouTube format: best available' : `YouTube format: aiming for ${cap}p`);
 
     // Set the player client based on type
     switch (clientType) {
@@ -532,14 +531,7 @@ export class DownloaderService implements OnModuleInit {
 
     // Vimeo serves separate HLS video-only + audio-only streams,
     // so we must use bestvideo+bestaudio to merge them with ffmpeg.
-    // Absent/'best' → best available; explicit cap → strictly honored.
-    const cap = this.parseQualityCap(quality);
-    manager.addOption(
-      '--format',
-      cap === null
-        ? 'bestvideo+bestaudio/best'
-        : `bestvideo[height<=${cap}]+bestaudio/best[height<=${cap}]`,
-    );
+    manager.addOption('--format', buildMergedFormatSelector(this.parseQualityCap(quality)));
 
     return manager;
   }
@@ -888,14 +880,7 @@ export class DownloaderService implements OnModuleInit {
         }
       } else if (options.url.includes('vimeo.com') || options.url.includes('player.vimeo.com')) {
         // Vimeo-specific configuration — Vimeo serves separate HLS video + audio streams.
-        // Absent/'best' → best available; explicit cap → strictly honored.
-        const vimeoCap = this.parseQualityCap(options.quality);
-        ytDlpManager.addOption(
-          '--format',
-          vimeoCap === null
-            ? 'bestvideo+bestaudio/best'
-            : `bestvideo[height<=${vimeoCap}]+bestaudio/best[height<=${vimeoCap}]`,
-        );
+        ytDlpManager.addOption('--format', buildMergedFormatSelector(this.parseQualityCap(options.quality)));
         ytDlpManager.addOption('--merge-output-format', 'mp4');
 
         // Add referer if this is an embed URL (player.vimeo.com)

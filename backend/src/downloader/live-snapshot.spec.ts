@@ -95,8 +95,12 @@ describe('buildLiveFormatSelector', () => {
     expect(buildLiveFormatSelector(null)).toBe('best[protocol*=m3u8]');
   });
 
-  it('honours a height cap', () => {
-    expect(buildLiveFormatSelector(360)).toBe('best[protocol*=m3u8][height<=360]');
+  it('aims for the cap on the short side, then takes the best rendition', () => {
+    expect(buildLiveFormatSelector(360)).toBe(
+      'best[protocol*=m3u8][aspect_ratio>=?1][height<=360]'
+        + '/best[protocol*=m3u8][aspect_ratio<1][width<=360]'
+        + '/best[protocol*=m3u8]',
+    );
   });
 });
 

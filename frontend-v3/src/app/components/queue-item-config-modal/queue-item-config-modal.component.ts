@@ -318,7 +318,7 @@ export class QueueItemConfigModalComponent implements OnInit {
   getDefaultConfig(taskType: TaskType): any {
     switch (taskType) {
       case 'download-import':
-        return { quality: 'best', format: 'mp4' } as DownloadImportConfig;
+        return { quality: '720', format: 'mp4' } as DownloadImportConfig;
       case 'transcribe':
         // No options: the asr model is Settings › Transcription's (P7).
         return {};
