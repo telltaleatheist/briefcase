@@ -15,6 +15,17 @@
       (click)="onSectionClick(section, $event)"
       (mouseenter)="onSectionMouseEnter(section)"
       (mouseleave)="onSectionMouseLeave()">
+      <!-- Drag an edge to stretch or shrink the section -->
+      @if (!getSectionStyle(section).clippedLeft) {
+        <div class="resize-handle left"
+             title="Drag to move the start"
+             (mousedown)="onResizeHandleMouseDown(section, 'left', $event)"></div>
+      }
+      @if (!getSectionStyle(section).clippedRight) {
+        <div class="resize-handle right"
+             title="Drag to move the end"
+             (mousedown)="onResizeHandleMouseDown(section, 'right', $event)"></div>
+      }
     </div>
   }
 </div>

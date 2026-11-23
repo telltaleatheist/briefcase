@@ -1,6 +1,6 @@
 import { Component, Input, Output, EventEmitter } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { TimelineSectionsLayerComponent } from '../timeline-sections-layer/timeline-sections-layer.component';
+import { TimelineSectionsLayerComponent, SectionResizeEvent } from '../timeline-sections-layer/timeline-sections-layer.component';
 import { TimelineChaptersLayerComponent } from '../timeline-chapters-layer/timeline-chapters-layer.component';
 import { TimelineMuteLayerComponent, MuteResizeEvent } from '../timeline-mute-layer/timeline-mute-layer.component';
 import { TimelineWaveformComponent } from '../timeline-waveform/timeline-waveform.component';
@@ -44,6 +44,7 @@ export class TimelineTrackComponent {
 
   @Output() sectionClick = new EventEmitter<TimelineSection>();
   @Output() sectionHover = new EventEmitter<TimelineSection | null>();
+  @Output() sectionResizeStart = new EventEmitter<SectionResizeEvent>();
   @Output() chapterClick = new EventEmitter<TimelineChapter>();
   @Output() chapterHover = new EventEmitter<TimelineChapter | null>();
   @Output() proposalClick = new EventEmitter<ChatMarker>();

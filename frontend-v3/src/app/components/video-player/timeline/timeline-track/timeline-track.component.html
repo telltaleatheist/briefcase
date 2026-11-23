@@ -59,7 +59,8 @@
       [zoomState]="zoomState"
       [selectedSection]="selectedSection"
       (sectionClick)="onSectionClick($event)"
-      (sectionHover)="onSectionHover($event)">
+      (sectionHover)="onSectionHover($event)"
+      (sectionResizeStart)="sectionResizeStart.emit($event)">
     </app-timeline-sections-layer>
 
     <!-- Selection overlay - positioned within waveform container -->

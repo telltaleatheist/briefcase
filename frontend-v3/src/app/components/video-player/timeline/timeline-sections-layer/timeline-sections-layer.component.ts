@@ -3,12 +3,22 @@ import { CommonModule } from '@angular/common';
 import { TimelineSection, ZoomState } from '../../../../models/video-editor.model';
 import { VERIFIER_REJECTION_LABEL, ghostLabel, isGhosted } from '../../../../models/flag-filter';
 
+export interface SectionResizeEvent {
+  section: TimelineSection;
+  handle: 'left' | 'right';
+  event: MouseEvent;
+}
+
 interface SectionStyle {
   left: string;
   width: string;
   backgroundColor: string;
   borderColor: string;
   display: string;
+  /** The section runs past the visible window on this side (zoomed in): the
+   *  drawn edge isn't its real edge, so it gets no resize handle. */
+  clippedLeft?: boolean;
+  clippedRight?: boolean;
 }
 
 @Component({
@@ -42,6 +52,14 @@ export class TimelineSectionsLayerComponent implements OnChanges {
   @Input() selectedSection?: TimelineSection;
   @Output() sectionClick = new EventEmitter<TimelineSection>();
   @Output() sectionHover = new EventEmitter<TimelineSection | null>();
+  @Output() sectionResizeStart = new EventEmitter<SectionResizeEvent>();
+
+  /**
+   * Set when an edge drag begins and cleared just after the mouse comes back
+   * up: the click that ends a drag must not count as a click on the section
+   * (which would jump the playhead to its start).
+   */
+  private resizing = false;
 
   sectionStyles: Map<string, SectionStyle> = new Map();
 
@@ -93,7 +111,9 @@ export class TimelineSectionsLayerComponent implements OnChanges {
         width: `${endPercentage - startPercentage}%`,
         backgroundColor: this.adjustColorOpacity(section.color, this.SECTION_BACKGROUND_OPACITY),
         borderColor: this.adjustColorOpacity(section.color, this.SECTION_BORDER_OPACITY),
-        display: 'block'
+        display: 'block',
+        clippedLeft: section.startTime < visibleStart,
+        clippedRight: section.endTime > visibleEnd
       });
     }
   }
@@ -129,6 +149,7 @@ export class TimelineSectionsLayerComponent implements OnChanges {
 
   onSectionClick(section: TimelineSection, event: MouseEvent): void {
     event.stopPropagation();
+    if (this.resizing) return;
     this.sectionClick.emit(section);
   }
 
@@ -138,5 +159,16 @@ export class TimelineSectionsLayerComponent implements OnChanges {
 
   onSectionMouseLeave(): void {
     this.sectionHover.emit(null);
+  }
+
+  onResizeHandleMouseDown(section: TimelineSection, handle: 'left' | 'right', event: MouseEvent): void {
+    if (event.button !== 0) return;
+    event.stopPropagation();
+    event.preventDefault();
+    this.resizing = true;
+    // The click (if any) fires right after mouseup in the same task; clear the
+    // flag after it so the next real click on a section works.
+    document.addEventListener('mouseup', () => setTimeout(() => { this.resizing = false; }), { once: true, capture: true });
+    this.sectionResizeStart.emit({ section, handle, event });
   }
 }

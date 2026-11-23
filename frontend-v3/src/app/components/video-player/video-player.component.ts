@@ -45,6 +45,7 @@ import { TimelineRulerComponent } from './timeline/timeline-ruler/timeline-ruler
 import { TimelinePlayheadComponent } from './timeline/timeline-playhead/timeline-playhead.component';
 import { TimelineTrackComponent } from './timeline/timeline-track/timeline-track.component';
 import { MuteResizeEvent } from './timeline/timeline-mute-layer/timeline-mute-layer.component';
+import { SectionResizeEvent } from './timeline/timeline-sections-layer/timeline-sections-layer.component';
 import { TimelineZoomBarComponent } from './timeline/timeline-zoom-bar/timeline-zoom-bar.component';
 import { TimelineWaveformComponent } from './timeline/timeline-waveform/timeline-waveform.component';
 import { ContextMenuComponent, ContextMenuAction, ContextMenuPosition } from './context-menu/context-menu.component';
@@ -2435,6 +2436,74 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
     }));
     // Seek to section start
     this.seekTo(section.startTime);
+  }
+
+  /**
+   * Drag a highlighted section's edge to stretch or shrink it — e.g. a flag
+   * that starts late or cuts off mid-word — before exporting. The playhead
+   * follows the edge so you can see (and then play) where it lands. Saved on
+   * release; a failed save reloads the sections so the timeline shows the truth.
+   */
+  onSectionResizeStart({ section, handle }: SectionResizeEvent) {
+    const videoId = this.videoId();
+    if (!videoId) return;
+
+    const MIN_LENGTH = 0.1;
+    const original = { startTime: section.startTime, endTime: section.endTime };
+    let current = { ...original };
+    document.body.style.cursor = 'ew-resize';
+
+    const applyBounds = (bounds: { startTime: number; endTime: number }) => {
+      this.sections.update(list =>
+        list.map(s => s.id === section.id ? { ...s, ...bounds } : s)
+      );
+      const selected = this.editorState().selectedSection;
+      if (selected?.id === section.id) {
+        this.editorState.update(state => ({ ...state, selectedSection: { ...selected, ...bounds } }));
+      }
+    };
+
+    const onMouseMove = (e: MouseEvent) => {
+      const time = this.getTimeFromMousePositionDocument(e);
+      if (time === null) return;
+
+      if (handle === 'left') {
+        current = { ...current, startTime: Math.max(0, Math.min(time, current.endTime - MIN_LENGTH)) };
+        this.seekTo(current.startTime);
+      } else {
+        const duration = this.editorState().duration;
+        current = { ...current, endTime: Math.min(duration, Math.max(time, current.startTime + MIN_LENGTH)) };
+        this.seekTo(current.endTime);
+      }
+      applyBounds(current);
+    };
+
+    const onMouseUp = async () => {
+      document.body.style.cursor = '';
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+
+      if (current.startTime === original.startTime && current.endTime === original.endTime) return;
+
+      try {
+        const response = await firstValueFrom(
+          this.http.patch<{ success: boolean; error?: string }>(
+            `${this.API_BASE}/database/videos/${videoId}/sections/${section.id}`,
+            { startSeconds: current.startTime, endSeconds: current.endTime }
+          )
+        );
+        if (!response.success) {
+          this.showEditorError("Section resize didn't save — reverting", response.error);
+          await this.loadAnalysisForVideo(videoId);
+        }
+      } catch (error) {
+        this.showEditorError("Section resize didn't save — reverting", error);
+        await this.loadAnalysisForVideo(videoId);
+      }
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
   }
 
   onSectionHover(section: TimelineSection | null) {

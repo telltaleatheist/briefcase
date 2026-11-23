@@ -3068,6 +3068,29 @@ export class DatabaseService {
   }
 
   /**
+   * Move a section's start/end — an AI section or a custom marker, whichever
+   * table holds the id (GET /videos/:id/sections returns both, so the timeline
+   * doesn't know which). Throws when neither does, so a stale id surfaces
+   * instead of silently saving nothing.
+   */
+  updateSectionBounds(sectionId: string, startSeconds: number, endSeconds: number, timestampText: string) {
+    const db = this.ensureInitialized();
+    const ai = db
+      .prepare('UPDATE analysis_sections SET start_seconds = ?, end_seconds = ?, timestamp_text = ? WHERE id = ?')
+      .run(startSeconds, endSeconds, timestampText, sectionId);
+    if (ai.changes === 0) {
+      const custom = db
+        .prepare('UPDATE custom_markers SET start_seconds = ?, end_seconds = ?, timestamp_text = ? WHERE id = ?')
+        .run(startSeconds, endSeconds, timestampText, sectionId);
+      if (custom.changes === 0) {
+        throw new Error(`Section ${sectionId} not found`);
+      }
+    }
+    this.saveDatabase();
+    this.logger.log(`Updated section ${sectionId}: ${startSeconds}s - ${endSeconds}s`);
+  }
+
+  /**
    * Delete a specific analysis section by ID
    */
   deleteAnalysisSection(sectionId: string) {

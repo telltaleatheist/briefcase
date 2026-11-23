@@ -895,6 +895,41 @@ export class DatabaseController {
   }
 
   /**
+   * PATCH /api/database/videos/:videoId/sections/:sectionId
+   * Move a section's edges (AI section or custom marker) — the timeline's
+   * drag-to-resize handles.
+   */
+  @Patch('videos/:videoId/sections/:sectionId')
+  updateSectionBounds(
+    @Param('videoId') videoId: string,
+    @Param('sectionId') sectionId: string,
+    @Body() body: { startSeconds: number; endSeconds: number }
+  ) {
+    const { startSeconds, endSeconds } = body ?? ({} as any);
+    if (!Number.isFinite(startSeconds) || !Number.isFinite(endSeconds)) {
+      return { success: false, error: 'startSeconds and endSeconds must be numbers' };
+    }
+    if (startSeconds < 0 || endSeconds <= startSeconds) {
+      return { success: false, error: 'Start must be at or after 0 and before the end' };
+    }
+    try {
+      const fmt = (seconds: number): string => {
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        const s = Math.floor(seconds % 60);
+        return [h, m, s].map(n => n.toString().padStart(2, '0')).join(':');
+      };
+      this.databaseService.updateSectionBounds(
+        sectionId, startSeconds, endSeconds, `${fmt(startSeconds)} - ${fmt(endSeconds)}`
+      );
+      return { success: true };
+    } catch (error: any) {
+      this.logger.error(`Failed to resize section ${sectionId} on video ${videoId}: ${error?.message}`);
+      return { success: false, error: error?.message || 'Failed to resize section' };
+    }
+  }
+
+  /**
    * PUT /api/database/markers/:markerId
    * Update a custom marker
    */
