@@ -97,7 +97,7 @@ suite('DatabaseService chapter outline round-trip', () => {
     ]);
     expect(svc.getChapters('v2').map((r) => [r.level, r.parent_id])).toEqual([[null, null]]);
 
-    svc.deleteChapter('ch1');
+    svc.removeEditorRows('v1', { chapters: ['ch1'] });
     expect(svc.getChapters('v1').map((r) => r.id)).toEqual(['ch4']);
   });
 
@@ -139,7 +139,7 @@ suite('DatabaseService chapter outline round-trip', () => {
       ['Storm track', 600, 'The track.'],
     ]);
     // Deleting a story deletes its chapters.
-    svc.deleteChapter('ch4');
+    svc.removeEditorRows('v1', { chapters: ['ch4'] });
     expect(svc.getChapters('v1').map((r) => r.id)).toEqual(['ch1', 'ch2', 'ch3']);
   });
 });

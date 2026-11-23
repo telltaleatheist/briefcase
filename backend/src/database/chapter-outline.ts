@@ -31,18 +31,6 @@ export function migrateChaptersOutline(db: Database.Database): boolean {
   return true;
 }
 
-/** Delete a chapter and every chapter nested under it. */
-export function deleteChapterSubtree(db: Database.Database, chapterId: string): number {
-  return db
-    .prepare(
-      `WITH RECURSIVE sub(id) AS (
-         SELECT ? UNION ALL SELECT c.id FROM chapters c JOIN sub ON c.parent_id = sub.id
-       )
-       DELETE FROM chapters WHERE id IN (SELECT id FROM sub)`,
-    )
-    .run(chapterId).changes;
-}
-
 /**
  * The outline's LEAVES among stored chapter rows, in time order: every row no
  * other row names as its parent. On a stories outline these are the chapters

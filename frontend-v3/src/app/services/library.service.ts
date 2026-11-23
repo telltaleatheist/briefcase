@@ -1116,26 +1116,6 @@ export class LibraryService {
   }
 
   /**
-   * Delete a mute section
-   * DELETE /api/database/mute-sections/:id
-   */
-  deleteMuteSection(sectionId: string): Observable<ApiResponse<void>> {
-    return this.http.delete<{ success: boolean; error?: string }>(
-      `${this.API_BASE}/database/mute-sections/${sectionId}`
-    ).pipe(
-      map(response => ({
-        success: response.success,
-        data: undefined,
-        error: response.error
-      })),
-      catchError(error => {
-        console.error('Failed to delete mute section:', error);
-        return of({ success: false, data: undefined, error: error.message });
-      })
-    );
-  }
-
-  /**
    * Update a mute section's start/end times
    * PATCH /api/database/mute-sections/:id
    */

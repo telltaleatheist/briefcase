@@ -1,5 +1,5 @@
 import type { TimelineChapter } from '../../../models/video-editor.model';
-import { chapterRows, chapterSubtreeIds, isLoneStory, isNested, leafChapters, storyStarts, topLevelChapters } from './chapter-outline';
+import { chapterRows, isLoneStory, isNested, leafChapters, storyStarts, topLevelChapters } from './chapter-outline';
 
 // Plain describe/it/expect only, so this runs under Karma/Jasmine (ng test) and Jest alike.
 const ch = (id: string, sequence: number, start: number, end: number, parentId?: string): TimelineChapter => ({
@@ -74,11 +74,6 @@ describe('chapter outline', () => {
     const flat = [ch('x', 1, 0, 10), ch('y', 2, 10, 20)];
     expect(leafChapters(flat).map((c) => c.id)).toEqual(['x', 'y']);
     expect(storyStarts(flat).size).toBe(0);
-  });
-
-  it('deleting a chapter removes its subtree', () => {
-    expect([...chapterSubtreeIds(nested, 'A')].sort()).toEqual(['A', 'A1', 'A1a', 'A1b', 'A2']);
-    expect([...chapterSubtreeIds(nested, 'B')]).toEqual(['B']);
   });
 
   it('one story is shown as its chapters alone: no story row, numbered 1..n, no story mark', () => {

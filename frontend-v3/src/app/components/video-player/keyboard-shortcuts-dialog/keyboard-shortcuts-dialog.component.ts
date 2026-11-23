@@ -243,6 +243,13 @@ export class KeyboardShortcutsDialogComponent {
       ]
     },
     {
+      title: 'Edit',
+      shortcuts: [
+        { keys: ['Ctrl', 'Z'], description: 'Undo (markers, sections, chapters, mutes, highlight)' },
+        { keys: ['Ctrl', 'Shift', 'Z'], description: 'Redo' },
+      ]
+    },
+    {
       title: 'View',
       shortcuts: [
         { keys: ['F'], description: 'Toggle fullscreen' },

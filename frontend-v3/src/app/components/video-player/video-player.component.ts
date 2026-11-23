@@ -46,6 +46,7 @@ import { TimelinePlayheadComponent } from './timeline/timeline-playhead/timeline
 import { TimelineTrackComponent } from './timeline/timeline-track/timeline-track.component';
 import { MuteResizeEvent } from './timeline/timeline-mute-layer/timeline-mute-layer.component';
 import { SectionResizeEvent } from './timeline/timeline-sections-layer/timeline-sections-layer.component';
+import { EditorHistory, EditorRowIds, EditorRows, idsOfRows } from './editor-history';
 import { TimelineZoomBarComponent } from './timeline/timeline-zoom-bar/timeline-zoom-bar.component';
 import { TimelineWaveformComponent } from './timeline/timeline-waveform/timeline-waveform.component';
 import { ContextMenuComponent, ContextMenuAction, ContextMenuPosition } from './context-menu/context-menu.component';
@@ -56,7 +57,7 @@ import { getApiBase } from '../../core/runtime-url';
 import { CrucibleReadinessService } from '../../services/crucible-readiness.service';
 import { PipelinePresetsService } from '../../core/stores/pipeline-presets.service';
 import { splitAiModelValue } from '../../models/ai-model-value';
-import { chapterSubtreeIds, leafChapters, storyStarts } from './analysis-panel/chapter-outline';
+import { leafChapters, storyStarts } from './analysis-panel/chapter-outline';
 
 // Tool types for editor
 export enum EditorTool {
@@ -72,6 +73,31 @@ export enum EditorTool {
  * all differ.
  */
 // The same 500/600 weight as the flag colors above, in the hues they don't use.
+/**
+ * A text field, where keys (Cmd+Z included) belong to the field, not the
+ * editor. Checked by tag rather than instanceof: the popped-out sidebar's
+ * elements come from another window, whose HTMLInputElement is another class.
+ * Range sliders, checkboxes and selects keep focus after a click but are not
+ * text entry, so shortcuts still work after using them.
+ */
+const TEXT_INPUT_TYPES = new Set([
+  'text', 'search', 'email', 'url', 'tel', 'password', 'number', 'date',
+  'datetime-local', 'month', 'week', 'time'
+]);
+function isTextEntry(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el || typeof el.tagName !== 'string') return false;
+  if (el.isContentEditable) return true;
+  const tag = el.tagName.toUpperCase();
+  if (tag === 'TEXTAREA') return true;
+  return tag === 'INPUT' && TEXT_INPUT_TYPES.has((el as HTMLInputElement).type);
+}
+
+function sameSelection(a: TimelineSelection | null, b: TimelineSelection | null): boolean {
+  if (!a || !b) return a === b;
+  return a.startTime === b.startTime && a.endTime === b.endTime;
+}
+
 const SET_COLORS = ['#3b82f6', '#10b981', '#14b8a6', '#0ea5e9', '#6366f1', '#22c55e', '#0891b2', '#2563eb'];
 
 function isKnownCategory(category: string | null | undefined): boolean {
@@ -196,25 +222,23 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
   // Keyboard shortcuts
   @HostListener('document:keydown', ['$event'])
   handleKeyboardEvent(event: KeyboardEvent) {
-    // Don't trigger if user is typing in a text-entry field.
-    // We deliberately allow range sliders, checkboxes, radios, selects, etc.
-    // to pass through — those elements retain focus after interaction (e.g.
-    // scale slider, border checkbox) but shouldn't block shortcuts like Cmd+E.
-    const target = event.target;
-    if (target instanceof HTMLTextAreaElement) {
+    // Typing in a text field: its keys (and its own Cmd+Z) belong to it.
+    if (isTextEntry(event.target)) {
       return;
     }
-    if (target instanceof HTMLInputElement) {
-      const textEntryTypes = new Set([
-        'text', 'search', 'email', 'url', 'tel', 'password', 'number', 'date',
-        'datetime-local', 'month', 'week', 'time'
-      ]);
-      if (textEntryTypes.has(target.type)) {
+
+    // Cmd+Z undo, Cmd+Shift+Z redo (Ctrl on Windows, where Ctrl+Y redoes too).
+    if ((event.metaKey || event.ctrlKey) && !event.altKey) {
+      const key = event.key.toLowerCase();
+      if (key === 'z' || (key === 'y' && event.ctrlKey && !event.metaKey)) {
+        event.preventDefault();
+        if (key === 'y' || event.shiftKey) {
+          this.redo();
+        } else {
+          this.undo();
+        }
         return;
       }
-    }
-    if (target instanceof HTMLElement && target.isContentEditable) {
-      return;
     }
 
     if (event.code === 'Space') {
@@ -600,6 +624,125 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
     this.editorInfoToast.set(null);
   }
 
+  /**
+   * Cmd+Z / Cmd+Shift+Z: undo and redo of the editor's changes — sections and
+   * markers (add, delete, resize), chapters (add, delete), mutes (add, delete,
+   * resize) and the highlight. One history per video, kept for the session.
+   */
+  readonly history = new EditorHistory();
+
+  undo(): Promise<void> {
+    return this.stepHistory('undo');
+  }
+
+  redo(): Promise<void> {
+    return this.stepHistory('redo');
+  }
+
+  private async stepHistory(direction: 'undo' | 'redo'): Promise<void> {
+    const videoId = this.videoId();
+    if (!videoId) return;
+    const can = direction === 'undo' ? this.history.canUndo(videoId) : this.history.canRedo(videoId);
+    if (!can) {
+      this.showEditorInfo(`Nothing to ${direction}`);
+      return;
+    }
+    try {
+      const step = await this.history[direction](videoId);
+      if (step) this.showEditorInfo(`${direction === 'undo' ? 'Undid' : 'Redid'}: ${step.label}`);
+    } catch (error) {
+      this.showEditorError(`Couldn't ${direction} that, so it was skipped`, error);
+      // Show what is stored now, whatever part of the step landed.
+      await this.reloadEditorRows(videoId).catch(() => undefined);
+    }
+  }
+
+  /** Delete editor rows and get them back in full (for undo). Throws when the delete fails. */
+  private async removeEditorRows(videoId: string, ids: EditorRowIds): Promise<EditorRows> {
+    const response = await firstValueFrom(
+      this.http.post<{ success: boolean; removed?: EditorRows; error?: string }>(
+        `${this.API_BASE}/database/videos/${videoId}/editor-rows/remove`, ids
+      )
+    );
+    if (!response.success) throw new Error(response.error || 'Delete failed');
+    return response.removed ?? {};
+  }
+
+  /** Put rows from removeEditorRows back exactly as they were. */
+  private async restoreEditorRows(videoId: string, rows: EditorRows): Promise<void> {
+    const response = await firstValueFrom(
+      this.http.post<{ success: boolean; error?: string }>(
+        `${this.API_BASE}/database/videos/${videoId}/editor-rows/restore`, rows
+      )
+    );
+    if (!response.success) throw new Error(response.error || 'Restore failed');
+  }
+
+  private async reloadEditorRows(videoId: string): Promise<void> {
+    await Promise.all([this.loadAnalysisForVideo(videoId), this.loadMuteSections(videoId)]);
+  }
+
+  /**
+   * Record rows that were just added or removed. Undo and redo move them
+   * between the library and this step: a removal hands back the rows exactly
+   * as stored (ids, scores, outline links), so a redo after an undo restores
+   * the same rows. `selection` is the highlight before and after, when the
+   * change also cleared it (a marker made from a highlight).
+   */
+  private recordRows(
+    videoId: string,
+    label: string,
+    change: 'added' | 'removed',
+    what: { ids: EditorRowIds; rows?: EditorRows },
+    selection?: { before: TimelineSelection | null; after: TimelineSelection | null }
+  ): void {
+    let rows: EditorRows = what.rows ?? {};
+    const take = async () => { rows = await this.removeEditorRows(videoId, what.ids); };
+    const put = () => this.restoreEditorRows(videoId, rows);
+    const apply = async (run: () => Promise<void>, highlight: TimelineSelection | null | undefined) => {
+      await run();
+      await this.reloadEditorRows(videoId);
+      if (selection) this.highlightSelection.set(highlight ?? null);
+    };
+    this.history.record(videoId, {
+      label,
+      undo: () => apply(change === 'added' ? take : put, selection?.before),
+      redo: () => apply(change === 'added' ? put : take, selection?.after),
+    });
+  }
+
+  /**
+   * Record a highlight change that just finished (a drag, a handle, in/out
+   * point, a clear), when it changed anything.
+   */
+  private recordSelection(label: string, before: TimelineSelection | null): void {
+    const videoId = this.videoId();
+    const after = this.highlightSelection();
+    if (!videoId || sameSelection(before, after)) return;
+    this.history.record(videoId, {
+      label,
+      undo: () => this.highlightSelection.set(before),
+      redo: () => this.highlightSelection.set(after),
+    });
+  }
+
+  /** Save a section's (or custom marker's) edges. Throws when the save fails. */
+  private async saveSectionBounds(videoId: string, sectionId: string, bounds: { startTime: number; endTime: number }): Promise<void> {
+    const response = await firstValueFrom(
+      this.http.patch<{ success: boolean; error?: string }>(
+        `${this.API_BASE}/database/videos/${videoId}/sections/${sectionId}`,
+        { startSeconds: bounds.startTime, endSeconds: bounds.endTime }
+      )
+    );
+    if (!response.success) throw new Error(response.error || 'Resize failed');
+  }
+
+  /** Save a mute section's edges. Throws when the save fails. */
+  private async saveMuteBounds(sectionId: string, startSeconds: number, endSeconds: number): Promise<void> {
+    const response = await firstValueFrom(this.libraryService.updateMuteSection(sectionId, startSeconds, endSeconds));
+    if (!response.success) throw new Error(response.error || 'Resize failed');
+  }
+
   /** The chapter whose flag analysis is being queued (its button waits). */
   chapterAnalyzeBusyId = signal<string | null>(null);
   /** Chapter analysis is an AI action: disabled, with the reason, while Crucible is not ready. */
@@ -953,6 +1096,8 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
     // here, or any other run): show what is stored now.
     this.unsubAnalysisCompleted = this.websocketService.onAnalysisCompleted((event) => {
       if (event.videoId !== this.videoId()) return;
+      // The run replaced the AI sections the video's undo steps name.
+      this.history.clear(event.videoId);
       this.loadAnalysisForVideo(event.videoId).catch(err => console.error('Failed to reload analysis:', err));
     });
 
@@ -1208,6 +1353,8 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
         await this.loadMuteSections(videoId);
         // Clear selection after adding mute
         this.highlightSelection.set(null);
+        this.recordRows(videoId, 'Mute', 'added', { ids: { muteSections: [response.data!.id] } },
+          { before: selection, after: null });
       } else {
         this.showEditorError("Mute didn't save — try again", response);
       }
@@ -1220,20 +1367,15 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
    * Delete a mute section
    */
   async deleteMuteSection(section: MuteSection) {
+    const videoId = section.videoId;
     try {
-      const response = await firstValueFrom(
-        this.libraryService.deleteMuteSection(section.id)
+      const removed = await this.removeEditorRows(videoId, { muteSections: [section.id] });
+      // Remove from local state
+      this.muteSections.update(sections =>
+        sections.filter(s => s.id !== section.id)
       );
-
-      if (response.success) {
-        // Remove from local state
-        this.muteSections.update(sections =>
-          sections.filter(s => s.id !== section.id)
-        );
-        this.selectedMuteSection.set(undefined);
-      } else {
-        this.showEditorError("Mute didn't delete — try again", response);
-      }
+      this.selectedMuteSection.set(undefined);
+      this.recordRows(videoId, 'Delete mute', 'removed', { ids: idsOfRows(removed), rows: removed });
     } catch (error) {
       this.showEditorError("Mute didn't delete — try again", error);
     }
@@ -1268,6 +1410,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
 
     this.resizingMuteSection = event.section;
     this.resizingMuteHandle = event.handle;
+    const original = { startSeconds: event.section.startSeconds, endSeconds: event.section.endSeconds };
     document.body.style.cursor = 'ew-resize';
 
     const onMouseMove = (e: MouseEvent) => {
@@ -1301,24 +1444,26 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
       document.removeEventListener('mouseup', onMouseUp);
 
       // Save the final position to the database
-      if (this.resizingMuteSection) {
-        const section = this.resizingMuteSection;
+      const section = this.resizingMuteSection;
+      if (section && (section.startSeconds !== original.startSeconds || section.endSeconds !== original.endSeconds)) {
+        const videoId = section.videoId;
+        const after = { startSeconds: section.startSeconds, endSeconds: section.endSeconds };
         try {
-          const response = await firstValueFrom(
-            this.libraryService.updateMuteSection(section.id, section.startSeconds, section.endSeconds)
-          );
-          if (!response.success) {
-            // Revert-worthy: the DB still has the old bounds — reload so the
-            // timeline shows the truth instead of an unsaved resize.
-            this.showEditorError("Mute resize didn't save — reverting", response.error);
-            await this.loadMuteSections(section.videoId);
-          }
+          await this.saveMuteBounds(section.id, after.startSeconds, after.endSeconds);
+          const move = async (bounds: { startSeconds: number; endSeconds: number }) => {
+            await this.saveMuteBounds(section.id, bounds.startSeconds, bounds.endSeconds);
+            await this.loadMuteSections(videoId);
+          };
+          this.history.record(videoId, {
+            label: 'Resize mute',
+            undo: () => move(original),
+            redo: () => move(after),
+          });
         } catch (error) {
+          // The DB still has the old bounds: reload so the timeline shows the
+          // truth instead of an unsaved resize.
           this.showEditorError("Mute resize didn't save — reverting", error);
-          const vid = this.activeTab()?.videoId;
-          if (vid) {
-            await this.loadMuteSections(vid);
-          }
+          await this.loadMuteSections(videoId);
         }
       }
 
@@ -2017,6 +2162,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
         endTime: currentTime
       });
     }
+    this.recordSelection('Set in point', selection);
   }
 
   // Set out-point at current playhead position
@@ -2037,10 +2183,18 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
         endTime: currentTime
       });
     }
+    this.recordSelection('Set out point', selection);
   }
 
-  // Clear current selection
+  // Clear current selection (undoable)
   clearSelection() {
+    const before = this.highlightSelection();
+    this.resetSelection();
+    this.recordSelection('Clear highlight', before);
+  }
+
+  /** Clear the highlight without recording it: the caller records it as part of its own change. */
+  private resetSelection() {
     this.highlightSelection.set(null);
     this.selectionStart.set(null);
     this.isSelecting.set(false);
@@ -2056,6 +2210,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
 
     this.draggingHandle = handle;
     document.body.style.cursor = 'ew-resize';
+    const before = this.highlightSelection();
 
     const onMouseMove = (e: MouseEvent) => {
       const time = this.getTimeFromMousePositionDocument(e);
@@ -2090,6 +2245,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
       document.body.style.cursor = '';
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
+      this.recordSelection('Resize highlight', before);
     };
 
     document.addEventListener('mousemove', onMouseMove);
@@ -2131,6 +2287,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
       document.body.style.cursor = '';
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
+      this.recordSelection('Move highlight', selection);
     };
 
     document.addEventListener('mousemove', onMouseMove);
@@ -2183,6 +2340,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
   // Handle marker dialog save
   async onMarkerSave(marker: Partial<CustomMarker>) {
     this.showMarkerDialog.set(false);
+    const selectionBefore = this.highlightSelection();
 
     try {
       const result = await firstValueFrom(
@@ -2198,9 +2356,11 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
 
       if (result.success) {
         // Refresh sections to include new marker
-        await this.loadAnalysisForVideo(this.videoId()!);
+        await this.loadAnalysisForVideo(marker.videoId!);
         // Clear selection after adding marker
-        this.clearSelection();
+        this.resetSelection();
+        this.recordRows(marker.videoId!, 'Add marker', 'added', { ids: { customMarkers: [result.sectionId] } },
+          { before: selectionBefore, after: null });
       } else {
         this.showEditorError("Marker didn't save — try again", result.error);
       }
@@ -2217,6 +2377,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
   // Handle chapter save from marker dialog
   async onChapterSave(chapter: Partial<TimelineChapter>) {
     this.showMarkerDialog.set(false);
+    const selectionBefore = this.highlightSelection();
 
     try {
       const result = await firstValueFrom(
@@ -2232,9 +2393,11 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
 
       if (result.success) {
         // Refresh chapters to include new chapter
-        await this.loadAnalysisForVideo(this.videoId()!);
+        await this.loadAnalysisForVideo(chapter.videoId!);
         // Clear selection after adding chapter
-        this.clearSelection();
+        this.resetSelection();
+        this.recordRows(chapter.videoId!, 'Add chapter', 'added', { ids: { chapters: [result.id] } },
+          { before: selectionBefore, after: null });
       } else {
         this.showEditorError("Chapter didn't save — try again", result.error);
       }
@@ -2251,18 +2414,13 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
     if (!videoId) return;
 
     try {
-      const result = await firstValueFrom(
-        this.http.delete<any>(`${this.API_BASE}/database/videos/${videoId}/sections/${markerId}`)
-      );
-
-      if (result.success) {
-        // Refresh sections
-        await this.loadAnalysisForVideo(this.videoId()!);
-      } else {
-        this.showEditorError("Marker didn't delete — try again", result.error);
-      }
+      // The id is an AI section's or a custom marker's; only one table has it.
+      const removed = await this.removeEditorRows(videoId, { analysisSections: [markerId], customMarkers: [markerId] });
+      await this.loadAnalysisForVideo(videoId);
+      const label = removed.customMarkers?.length ? 'Delete marker' : 'Delete section';
+      this.recordRows(videoId, label, 'removed', { ids: idsOfRows(removed), rows: removed });
     } catch (error) {
-      console.error('Error deleting marker:', error);
+      this.showEditorError("Marker didn't delete — try again", error);
     }
   }
 
@@ -2485,17 +2643,18 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
 
       if (current.startTime === original.startTime && current.endTime === original.endTime) return;
 
+      const after = current;
       try {
-        const response = await firstValueFrom(
-          this.http.patch<{ success: boolean; error?: string }>(
-            `${this.API_BASE}/database/videos/${videoId}/sections/${section.id}`,
-            { startSeconds: current.startTime, endSeconds: current.endTime }
-          )
-        );
-        if (!response.success) {
-          this.showEditorError("Section resize didn't save — reverting", response.error);
+        await this.saveSectionBounds(videoId, section.id, after);
+        const move = async (bounds: { startTime: number; endTime: number }) => {
+          await this.saveSectionBounds(videoId, section.id, bounds);
           await this.loadAnalysisForVideo(videoId);
-        }
+        };
+        this.history.record(videoId, {
+          label: 'Resize section',
+          undo: () => move(original),
+          redo: () => move(after),
+        });
       } catch (error) {
         this.showEditorError("Section resize didn't save — reverting", error);
         await this.loadAnalysisForVideo(videoId);
@@ -2527,19 +2686,17 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
     if (!videoId) return;
 
     try {
-      await firstValueFrom(
-        this.http.delete(`${this.API_BASE}/database/videos/${videoId}/chapters/${chapterId}`)
-      );
-      // Remove from local state
-      // The backend deletes the chapter's sub-chapters with it.
-      const gone = chapterSubtreeIds(this.chapters(), chapterId);
+      // The backend deletes the chapter's sub-chapters with it, and returns them all.
+      const removed = await this.removeEditorRows(videoId, { chapters: [chapterId] });
+      const gone = new Set((removed.chapters ?? []).map(c => c.id));
       this.chapters.update(chapters => chapters.filter(c => !gone.has(c.id)));
       // Clear selection if deleted chapter was selected
       if (this.selectedChapterId() === chapterId) {
         this.selectedChapterId.set(undefined);
       }
+      this.recordRows(videoId, 'Delete chapter', 'removed', { ids: idsOfRows(removed), rows: removed });
     } catch (error) {
-      console.error('Failed to delete chapter:', error);
+      this.showEditorError("Chapter didn't delete — try again", error);
     }
   }
 
@@ -2710,6 +2867,8 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
 
   // Dragging state
   private isDraggingTimeline = false;
+  /** The highlight when a highlight drag began, for its undo step. */
+  private selectionGestureBefore: TimelineSelection | null = null;
 
   // Timeline mouse down to start seeking or selection
   onTimelineMouseDown(event: MouseEvent) {
@@ -2719,6 +2878,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
       // Start selection for highlight tool
       const time = this.getTimeFromMousePosition(event);
       if (time !== null) {
+        this.selectionGestureBefore = this.highlightSelection();
         this.selectionStart.set(time);
         this.isSelecting.set(true);
         this.highlightSelection.set({ startTime: time, endTime: time });
@@ -2767,6 +2927,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
       if (selection && Math.abs(selection.endTime - selection.startTime) < 0.1) {
         this.highlightSelection.set(null);
       }
+      this.recordSelection(this.highlightSelection() ? 'Highlight' : 'Clear highlight', this.selectionGestureBefore);
     }
 
     this.isDraggingTimeline = false;

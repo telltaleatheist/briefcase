@@ -1,4 +1,5 @@
 import { Controller, Get, Post, Put, Delete, Patch, Logger, Body, Query, Param, Res, Req, HttpException, HttpStatus, NotFoundException, UploadedFiles, UseInterceptors } from '@nestjs/common';
+import type { EditorRowIds, EditorRows } from './editor-rows';
 import { ModuleRef } from '@nestjs/core';
 import { Response, Request } from 'express';
 import { QueueManagerService } from '../queue/queue-manager.service';
@@ -728,26 +729,6 @@ export class DatabaseController {
   }
 
   /**
-   * DELETE /api/database/videos/:videoId/chapters/:chapterId
-   * Delete a specific chapter
-   */
-  @Delete('videos/:videoId/chapters/:chapterId')
-  deleteChapter(
-    @Param('videoId') videoId: string,
-    @Param('chapterId') chapterId: string
-  ) {
-    try {
-      this.databaseService.deleteChapter(chapterId);
-      return { success: true };
-    } catch (error) {
-      return {
-        success: false,
-        error: (error as Error).message
-      };
-    }
-  }
-
-  /**
    * POST /api/database/chapters
    * Add a chapter to a video
    */
@@ -860,37 +841,38 @@ export class DatabaseController {
   }
 
   /**
-   * DELETE /api/database/videos/:videoId/sections/:sectionId
-   * Delete a specific section (AI section or custom marker)
+   * POST /api/database/videos/:videoId/editor-rows/remove
+   * Delete editor rows — AI sections, custom markers, chapters (with their
+   * sub-chapters) and mute sections — and return them in full, so the editor's
+   * undo can put them back exactly. Body: `{ analysisSections?, customMarkers?,
+   * chapters?, muteSections? }`, each a list of ids. Unknown ids are skipped.
    */
-  @Delete('videos/:videoId/sections/:sectionId')
-  async deleteAnalysisSection(
-    @Param('videoId') videoId: string,
-    @Param('sectionId') sectionId: string
-  ) {
+  @Post('videos/:videoId/editor-rows/remove')
+  removeEditorRows(@Param('videoId') videoId: string, @Body() body: EditorRowIds) {
     try {
-      // Try to delete from analysis_sections first
-      this.databaseService.deleteAnalysisSection(sectionId);
-
-      // Also try to delete from custom_markers (one of them will succeed)
-      try {
-        this.databaseService.deleteCustomMarker(sectionId);
-      } catch (e) {
-        // Ignore if it doesn't exist in custom_markers
-      }
-
-      this.logger.log(`Deleted section ${sectionId} from video ${videoId}`);
-
-      return {
-        success: true,
-        message: 'Section deleted successfully'
-      };
+      const removed = this.databaseService.removeEditorRows(videoId, body ?? {});
+      const count = Object.values(removed).reduce((n, rows) => n + (rows?.length ?? 0), 0);
+      this.logger.log(`Removed ${count} editor row(s) from video ${videoId}`);
+      return { success: true, removed };
     } catch (error: any) {
-      this.logger.error(`Failed to delete section ${sectionId}:`, error);
-      return {
-        success: false,
-        error: error.message || 'Failed to delete section'
-      };
+      this.logger.error(`Failed to remove editor rows on video ${videoId}: ${error?.message}`);
+      return { success: false, error: error?.message || 'Failed to delete' };
+    }
+  }
+
+  /**
+   * POST /api/database/videos/:videoId/editor-rows/restore
+   * Put back rows that /remove returned (undo of a delete, redo of an add).
+   */
+  @Post('videos/:videoId/editor-rows/restore')
+  restoreEditorRows(@Param('videoId') videoId: string, @Body() body: EditorRows) {
+    try {
+      const restored = this.databaseService.restoreEditorRows(videoId, body ?? {});
+      this.logger.log(`Restored ${restored} editor row(s) on video ${videoId}`);
+      return { success: true, restored };
+    } catch (error: any) {
+      this.logger.error(`Failed to restore editor rows on video ${videoId}: ${error?.message}`);
+      return { success: false, error: error?.message || 'Failed to restore' };
     }
   }
 
@@ -1058,29 +1040,6 @@ export class DatabaseController {
       return {
         success: false,
         error: error?.message || 'Failed to add mute section'
-      };
-    }
-  }
-
-  /**
-   * DELETE /api/database/mute-sections/:id
-   * Delete a mute section
-   */
-  @Delete('mute-sections/:id')
-  async deleteMuteSection(@Param('id') sectionId: string) {
-    try {
-      this.databaseService.deleteMuteSection(sectionId);
-      this.logger.log(`Deleted mute section ${sectionId}`);
-
-      return {
-        success: true,
-        message: 'Mute section deleted successfully'
-      };
-    } catch (error: any) {
-      this.logger.error(`Failed to delete mute section ${sectionId}:`, error);
-      return {
-        success: false,
-        error: error.message || 'Failed to delete mute section'
       };
     }
   }

@@ -6,7 +6,8 @@ import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { ThumbnailService } from './thumbnail.service';
 import { migrateAnalysisSectionsRanker } from './ranker-migration';
-import { deleteChapterSubtree, migrateChaptersOutline } from './chapter-outline';
+import { migrateChaptersOutline } from './chapter-outline';
+import { removeEditorRows, restoreEditorRows, type EditorRowIds, type EditorRows } from './editor-rows';
 import { sweepOrphans } from './orphan-sweep';
 import { FilenameDateUtil } from '../common/utils/filename-date.util';
 import {
@@ -3068,6 +3069,24 @@ export class DatabaseService {
   }
 
   /**
+   * Delete editor rows (AI sections, custom markers, chapters with their
+   * sub-chapters, mute sections) of one video and return them in full, for the
+   * editor's undo stack. See editor-rows.ts.
+   */
+  removeEditorRows(videoId: string, ids: EditorRowIds): EditorRows {
+    const removed = removeEditorRows(this.ensureInitialized(), videoId, ids);
+    this.saveDatabase();
+    return removed;
+  }
+
+  /** Put rows from `removeEditorRows` back exactly as they were (undo of a delete, redo of an add). */
+  restoreEditorRows(videoId: string, rows: EditorRows): number {
+    const restored = restoreEditorRows(this.ensureInitialized(), videoId, rows);
+    this.saveDatabase();
+    return restored;
+  }
+
+  /**
    * Move a section's start/end — an AI section or a custom marker, whichever
    * table holds the id (GET /videos/:id/sections returns both, so the timeline
    * doesn't know which). Throws when neither does, so a stale id surfaces
@@ -3088,15 +3107,6 @@ export class DatabaseService {
     }
     this.saveDatabase();
     this.logger.log(`Updated section ${sectionId}: ${startSeconds}s - ${endSeconds}s`);
-  }
-
-  /**
-   * Delete a specific analysis section by ID
-   */
-  deleteAnalysisSection(sectionId: string) {
-    const db = this.ensureInitialized();
-    db.prepare('DELETE FROM analysis_sections WHERE id = ?').run(sectionId);
-    this.logger.log(`Deleted analysis section ${sectionId}`);
   }
 
   /**
@@ -3269,16 +3279,6 @@ export class DatabaseService {
   }
 
   /**
-   * Delete a specific custom marker by ID
-   */
-  deleteCustomMarker(markerId: string) {
-    const db = this.ensureInitialized();
-    db.prepare('DELETE FROM custom_markers WHERE id = ?').run(markerId);
-    this.saveDatabase();
-    this.logger.log(`Deleted custom marker ${markerId}`);
-  }
-
-  /**
    * Delete all custom markers for a video
    */
   deleteCustomMarkers(videoId: string) {
@@ -3380,16 +3380,6 @@ export class DatabaseService {
   }
 
   /**
-   * Delete a specific mute section by ID
-   */
-  deleteMuteSection(sectionId: string) {
-    const db = this.ensureInitialized();
-    db.prepare('DELETE FROM mute_sections WHERE id = ?').run(sectionId);
-    this.saveDatabase();
-    this.logger.log(`Deleted mute section ${sectionId}`);
-  }
-
-  /**
    * Update a mute section's start/end times
    */
   updateMuteSection(sectionId: string, startSeconds: number, endSeconds: number) {
@@ -3460,16 +3450,6 @@ export class DatabaseService {
       'SELECT * FROM chapters WHERE video_id = ? ORDER BY sequence'
     );
     return stmt.all(videoId) as ChapterRecord[];
-  }
-
-  /**
-   * Delete a specific chapter by ID, with the chapters nested under it
-   */
-  deleteChapter(chapterId: string) {
-    const db = this.ensureInitialized();
-    deleteChapterSubtree(db, chapterId);
-    this.saveDatabase();
-    this.logger.log(`Deleted chapter ${chapterId}`);
   }
 
   /**

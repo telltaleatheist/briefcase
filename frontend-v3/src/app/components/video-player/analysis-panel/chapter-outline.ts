@@ -76,21 +76,6 @@ export function chapterRows(chapters: TimelineChapter[], expanded: ReadonlySet<s
   return rows;
 }
 
-/** The id and every descendant id (what deleting a chapter removes). */
-export function chapterSubtreeIds(chapters: TimelineChapter[], id: string): Set<string> {
-  const out = new Set([id]);
-  for (let grew = true; grew; ) {
-    grew = false;
-    for (const c of chapters) {
-      if (c.parentId && out.has(c.parentId) && !out.has(c.id)) {
-        out.add(c.id);
-        grew = true;
-      }
-    }
-  }
-  return out;
-}
-
 /** The leaves: rows no row in the list names as its parent (on a flat list, every row), in time order. */
 export function leafChapters(chapters: TimelineChapter[]): TimelineChapter[] {
   const ids = new Set(chapters.map((c) => c.id));
