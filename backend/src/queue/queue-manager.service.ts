@@ -2014,6 +2014,19 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
     if (!opts.videoPath && job.videoPath) opts.videoPath = job.videoPath;
     if (!opts.videoId && job.videoId) opts.videoId = job.videoId;
 
+    // The library is the truth for where a video lives. The path the client
+    // sent was read when the editor opened, so a rename or move since then
+    // (accepting a suggested title with the video open) leaves it pointing at
+    // a file that no longer exists.
+    const sourceVideo = opts.videoId ? this.databaseService.getVideoById(opts.videoId) : null;
+    if (sourceVideo?.current_path) {
+      const currentPath = path.normalize(String(sourceVideo.current_path));
+      if (opts.videoPath && path.normalize(opts.videoPath) !== currentPath) {
+        this.logger.log(`[EXPORT-CLIP] Video ${opts.videoId} has moved since the export was set up: ${opts.videoPath} -> ${currentPath}`);
+      }
+      opts.videoPath = currentPath;
+    }
+
     this.logger.log(`[EXPORT-CLIP] ========== Starting export-clip task ==========`);
     this.logger.log(`[EXPORT-CLIP] Job ID: ${job.id}`);
     this.logger.log(`[EXPORT-CLIP] Video path: ${opts?.videoPath}`);
@@ -2051,22 +2064,24 @@ export class QueueManagerService implements OnModuleDestroy, OnModuleInit {
       // Find parent video for linking
       let parentVideoId: string | undefined;
       try {
-        const allVideos = this.databaseService.getAllVideos({ includeChildren: true });
-        const clipsRoot = this.libraryService.getLibraryPaths().clipsDir;
-        const normalizedVideoPath = path.normalize(opts.videoPath);
+        // Known by id (the editor's exports): no need to match it by path.
+        const source = sourceVideo ?? (() => {
+          const allVideos = this.databaseService.getAllVideos({ includeChildren: true });
+          const clipsRoot = this.libraryService.getLibraryPaths().clipsDir;
+          const normalizedVideoPath = path.normalize(opts.videoPath);
+          return allVideos.find((v: any) => {
+            if (!v.current_path) return false;
+            const dbAbsolutePath = this.databaseService.toAbsolutePath(String(v.current_path), clipsRoot);
+            return path.normalize(dbAbsolutePath) === normalizedVideoPath;
+          });
+        })();
 
-        const sourceVideo = allVideos.find((v: any) => {
-          if (!v.current_path) return false;
-          const dbAbsolutePath = this.databaseService.toAbsolutePath(String(v.current_path), clipsRoot);
-          return path.normalize(dbAbsolutePath) === normalizedVideoPath;
-        });
-
-        if (sourceVideo && sourceVideo.id) {
-          if (sourceVideo.parent_id) {
+        if (source && source.id) {
+          if (source.parent_id) {
             // Source is already a child clip — don't create nested children
             this.logger.log(`[EXPORT-CLIP] Source video is a child clip — skipping parent linking`);
           } else {
-            parentVideoId = String(sourceVideo.id);
+            parentVideoId = String(source.id);
             this.logger.log(`[EXPORT-CLIP] Source video found — will link as child of: ${parentVideoId}`);
           }
         } else {
