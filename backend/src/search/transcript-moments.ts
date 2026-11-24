@@ -24,6 +24,7 @@ import type { Database } from 'better-sqlite3';
 
 import {
   buildVocabulary,
+  compoundSpellings,
   highlightRanges,
   matchExpression,
   matcherOf,
@@ -259,6 +260,8 @@ export interface Moment {
   score: number;
   /** Found by meaning (meaning-search.ts), not by its words: nothing is highlighted. */
   meaning?: boolean;
+  /** Says only some of the query's words (a partial match, library-search.ts). */
+  partial?: boolean;
 }
 
 export interface VideoMoments {
@@ -311,13 +314,22 @@ export interface Speller {
   spellings: Record<string, string[]>;
 }
 
-/** Near spellings from the transcript index's vocabulary, or exact words when `fuzzy` is false. */
-export function spellerFor(db: Database, fuzzy: boolean): Speller {
+/**
+ * Near spellings from the transcript index's vocabulary, and, given the
+ * query, its words written together or apart the other way
+ * (compoundSpellings); exact words when `fuzzy` is false.
+ */
+export function spellerFor(db: Database, fuzzy: boolean, query?: ParsedMomentQuery): Speller {
   const spellings: Record<string, string[]> = {};
   const vocab = fuzzy ? vocabularyOf(db) : null;
+  const said = db.prepare('SELECT 1 FROM transcript_windows_fts WHERE transcript_windows_fts MATCH ? LIMIT 1');
+  const compounds = vocab && query ? compoundSpellings(query, vocab, (words) => said.get(`"${words.join(' ')}"`) !== undefined) : {};
   return {
     spellings,
-    spell: (term) => (vocab ? (spellings[term] ??= nearSpellings(term, vocab)) : [term]),
+    spell: (term) => {
+      if (!vocab) return [term];
+      return (spellings[term] ??= [...new Set([...nearSpellings(term, vocab), ...(compounds[term] ?? [])])]);
+    },
   };
 }
 
@@ -359,19 +371,28 @@ export function snippetRange(groupHits: boolean[][], segments: ReadonlyArray<{ s
   return [anyHit, last];
 }
 
-/** Step 1, cheap: the windows a query matches, grouped and ranked by video (no text read). */
-export function findMomentWindows(db: Database, parsed: ParsedMomentQuery, spell: (term: string) => string[]): MomentWindows {
-  if (parsed.groups.length === 0) return { ranked: [], momentCount: 0, capped: false };
+/**
+ * Step 1, cheap: the windows a query matches, grouped and ranked by video (no
+ * text read); only in `videoIds` when given.
+ */
+export function findMomentWindows(db: Database, parsed: ParsedMomentQuery, spell: (term: string) => string[], videoIds?: readonly string[]): MomentWindows {
+  if (parsed.groups.length === 0 || videoIds?.length === 0) return { ranked: [], momentCount: 0, capped: false };
+  const params: unknown[] = [matchExpression(parsed, spell)];
+  if (videoIds) params.push(JSON.stringify(videoIds));
   const hits = db.prepare(`
     SELECT w.video_id AS videoId, w.first_idx AS firstIdx, w.last_idx AS lastIdx, w.start_s AS start, w.end_s AS end, -f.rank AS score
     FROM transcript_windows_fts f JOIN transcript_windows w ON w.id = f.rowid
-    WHERE transcript_windows_fts MATCH ?
+    WHERE transcript_windows_fts MATCH ?${videoIds ? ' AND w.video_id IN (SELECT value FROM json_each(?))' : ''}
     ORDER BY f.rank
     LIMIT ?
-  `).all(matchExpression(parsed, spell), MAX_WINDOWS) as MomentWindow[];
+  `).all(...params, MAX_WINDOWS) as MomentWindow[];
+  return { ...rankWindows(hits), capped: hits.length === MAX_WINDOWS };
+}
 
+/** Windows grouped by video, the best of each overlapping run kept, videos by their best window (then how many). */
+function rankWindows(hits: MomentWindow[]): Omit<MomentWindows, 'capped'> {
   const byVideo = new Map<string, MomentWindow[]>();
-  for (const hit of hits) {
+  for (const hit of [...hits].sort((a, b) => b.score - a.score)) {
     let kept = byVideo.get(hit.videoId);
     if (!kept) byVideo.set(hit.videoId, (kept = []));
     if (kept.some((k) => hit.start < k.end && k.start < hit.end)) continue;
@@ -382,13 +403,26 @@ export function findMomentWindows(db: Database, parsed: ParsedMomentQuery, spell
   const ranked = [...byVideo.entries()]
     .map(([videoId, windows]) => ({ videoId, windows }))
     .sort((a, b) => b.windows[0].score - a.windows[0].score || b.windows.length - a.windows.length);
-  return { ranked, momentCount, capped: hits.length === MAX_WINDOWS };
+  return { ranked, momentCount };
 }
 
-/** Step 2, for the videos shown: each window's matching sentences, in time order. */
-export function momentsOf(db: Database, windows: MomentWindow[], parsed: ParsedMomentQuery, spell: (term: string) => string[]): Moment[] {
+/**
+ * Step 2, for the videos shown: each window's matching sentences, in time
+ * order. The snippet holds the groups in `focus` (default all: the ones the
+ * window was found for; the rest may be in the file name or not said), and
+ * highlights every word of the query it holds.
+ */
+export function momentsOf(
+  db: Database,
+  windows: MomentWindow[],
+  parsed: ParsedMomentQuery,
+  spell: (term: string) => string[],
+  focus?: readonly boolean[],
+): Moment[] {
   const matcher = matcherOf(parsed, spell);
-  const groupMatchers = parsed.groups.map((group) => matcherOf({ groups: [group], excluded: [] }, spell));
+  const groupMatchers = parsed.groups
+    .filter((_, g) => !focus || focus[g])
+    .map((group) => matcherOf({ groups: [group], excluded: [] }, spell));
   const segmentsOf = db.prepare('SELECT idx, start_s AS start, end_s AS end, text FROM transcript_segments WHERE video_id = ? AND idx BETWEEN ? AND ? ORDER BY idx');
   return windows
     .slice(0, MAX_MOMENTS_PER_VIDEO)
@@ -407,6 +441,99 @@ export function momentsOf(db: Database, windows: MomentWindow[], parsed: ParsedM
       };
     })
     .sort((a, b) => a.start - b.start);
+}
+
+// =============================================================================
+// WHERE EACH PART IS SAID (partial matches)
+// =============================================================================
+
+const windowCounts = new WeakMap<Database, { generation: number; count: number }>();
+
+/** The windows the index holds. */
+export function windowCount(db: Database): number {
+  const generation = generations.get(db) ?? 0;
+  const cached = windowCounts.get(db);
+  if (cached && cached.generation === generation) return cached.count;
+  const count = (db.prepare('SELECT COUNT(*) AS n FROM transcript_windows').get() as { n: number }).n;
+  windowCounts.set(db, { generation, count });
+  return count;
+}
+
+/** Where each group of a query is said, window by window. */
+export interface GroupWindows {
+  /**
+   * Per group, the windows saying it; null for a group said in more than
+   * `limit` windows ("the", "and", "people"): it tells no video from another,
+   * and reading it would cost the most.
+   */
+  windows: Array<Set<number> | null>;
+  /** Windows saying each group (`limit + 1` for a common one). */
+  counts: number[];
+  /** Windows holding an excluded word or phrase. */
+  excluded: Set<number>;
+}
+
+/** Each group of `parsed` on its own: the windows that say it, up to `limit`. */
+export function groupWindows(db: Database, parsed: ParsedMomentQuery, spell: (term: string) => string[], limit: number): GroupWindows {
+  const read = db.prepare('SELECT rowid FROM transcript_windows_fts WHERE transcript_windows_fts MATCH ? LIMIT ?').pluck();
+  const windows = parsed.groups.map((group) => {
+    const ids = read.all(matchExpression({ groups: [group], excluded: [] }, spell), limit + 1) as number[];
+    return ids.length > limit ? null : new Set(ids);
+  });
+  const counts = windows.map((w) => (w ? w.size : limit + 1));
+  const excluded = new Set<number>();
+  for (const term of parsed.excluded) {
+    for (const id of read.all(matchExpression({ groups: [[term]], excluded: [] }, (t) => [t]), -1) as number[]) excluded.add(id);
+  }
+  return { windows, counts, excluded };
+}
+
+/** The windows with these ids (score 0), in no particular order. */
+export function windowsById(db: Database, ids: readonly number[]): Array<MomentWindow & { id: number }> {
+  if (ids.length === 0) return [];
+  return db.prepare(`
+    SELECT id, video_id AS videoId, first_idx AS firstIdx, last_idx AS lastIdx, start_s AS start, end_s AS end, 0 AS score
+    FROM transcript_windows WHERE id IN (SELECT value FROM json_each(?))
+  `).all(JSON.stringify(ids)) as Array<MomentWindow & { id: number }>;
+}
+
+/** The windows of these videos (score 0). */
+export function windowsOfVideos(db: Database, videoIds: readonly string[]): Array<MomentWindow & { id: number }> {
+  if (videoIds.length === 0) return [];
+  return db.prepare(`
+    SELECT id, video_id AS videoId, first_idx AS firstIdx, last_idx AS lastIdx, start_s AS start, end_s AS end, 0 AS score
+    FROM transcript_windows WHERE video_id IN (SELECT value FROM json_each(?))
+  `).all(JSON.stringify(videoIds)) as Array<MomentWindow & { id: number }>;
+}
+
+/**
+ * Of `windows`, those whose words hold every group of `parsed` and no
+ * excluded term, scored by how many of the query's words they hold. The
+ * same check as the index's (the words are split and folded as it splits
+ * them), made on a few known windows: asking the index instead reads every
+ * window a common word is in ("for" and the words it starts: force,
+ * forward...), tens of milliseconds a time.
+ */
+export function windowsHolding(db: Database, windows: readonly MomentWindow[], parsed: ParsedMomentQuery, spell: (term: string) => string[]): MomentWindow[] {
+  const groupMatchers = parsed.groups.map((group) => matcherOf({ groups: [group], excluded: [] }, spell));
+  const excluded = matcherOf({ groups: [parsed.excluded], excluded: [] }, (t) => [t]);
+  const textOf = db.prepare(`SELECT group_concat(text, ' ') AS text FROM (SELECT text FROM transcript_segments WHERE video_id = ? AND idx BETWEEN ? AND ? ORDER BY idx)`).pluck();
+  return windows.flatMap((w) => {
+    const text = (textOf.get(w.videoId, w.firstIdx, w.lastIdx) as string | null) ?? '';
+    if (parsed.excluded.length && highlightRanges(text, excluded).length) return [];
+    let score = 0;
+    for (const m of groupMatchers) {
+      const n = highlightRanges(text, m).length;
+      if (n === 0) return [];
+      score += n;
+    }
+    return [{ ...w, score }];
+  });
+}
+
+/** Windows grouped by video, overlapping ones dropped (the higher score kept). */
+export function windowsByVideo(windows: MomentWindow[]): Map<string, MomentWindow[]> {
+  return new Map(rankWindows(windows).ranked.map((r) => [r.videoId, r.windows]));
 }
 
 /** Both steps, for the best `maxVideos` videos. */

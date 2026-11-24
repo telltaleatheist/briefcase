@@ -3,8 +3,9 @@ import { VideoItem } from './video.model';
 /**
  * The library search (GET /api/database/search; backend
  * search/library-search.ts): videos whose file name matches, best match
- * first, then with Deep search videos where the transcript says it, each with
- * the moments where it is said.
+ * first, then with Deep search videos whose name holds some of it and the
+ * transcript says the rest, videos where the transcript says it, and partial
+ * matches (most of the words), each with the moments where it is said.
  */
 export interface TranscriptMoment {
   /** Where to play from, in seconds. */
@@ -17,6 +18,8 @@ export interface TranscriptMoment {
   score: number;
   /** Found by meaning (Deep search), not by its words: nothing is highlighted. */
   meaning?: boolean;
+  /** Says only some of the words searched for (a partial match). */
+  partial?: boolean;
 }
 
 export interface SearchHit {
@@ -26,11 +29,17 @@ export interface SearchHit {
   /** Ranges of `title` that matched; empty when only the transcript did. */
   titleHighlights: Array<[number, number]>;
   /**
-   * How closely the file name holds the query (backend filename-match.ts), 0
-   * best; absent when only the transcript matched. Results list by it first
-   * until a column header is clicked.
+   * How closely the file name holds the whole query (backend
+   * filename-match.ts), 0 best; absent unless it holds it all. Results list
+   * by it first until a column header is clicked.
    */
   titleRank?: 0 | 1 | 2 | 3;
+  /**
+   * Deep search, 3 or more words: the name and one stretch of speech hold
+   * only `found` of the `of` telling words (those not said nearly
+   * everywhere). Listed after every full match.
+   */
+  partial?: { found: number; of: number };
   /** In time order, at most 25. */
   moments: TranscriptMoment[];
   /** Moments that matched in all, before the cap. */
@@ -55,14 +64,16 @@ export interface LibrarySearchResponse {
 }
 
 /**
- * Search hits in the order they open in: by how closely the file name matched
- * (titleRank, best first; transcript-only hits after), then by `compare`
- * (newest upload first) within each. A clicked column header sorts them all
- * by that column instead.
+ * Search hits in the order they open in: names holding the whole query, by
+ * how closely (titleRank, best first); names holding some of it where the
+ * transcript says the rest; videos that say it (or mean it); each by
+ * `compare` (newest upload first) within. Then partial matches, in the
+ * search's own order (most of the words first). A clicked column header
+ * sorts them all by that column instead.
  */
 export function orderSearchHits(hits: ReadonlyArray<SearchHit>, compare: (a: VideoItem, b: VideoItem) => number): SearchHit[] {
-  const tier = (h: SearchHit) => h.titleRank ?? 4;
-  return [...hits].sort((a, b) => tier(a) - tier(b) || compare(a.video, b.video));
+  const tier = (h: SearchHit) => h.titleRank ?? (h.partial ? 6 : h.titleHighlights.length ? 4 : 5);
+  return [...hits].sort((a, b) => tier(a) - tier(b) || (a.partial ? 0 : compare(a.video, b.video)));
 }
 
 /** Text cut into plain and matched pieces, in order. */

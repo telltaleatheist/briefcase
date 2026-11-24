@@ -17,6 +17,19 @@ describe('orderSearchHits', () => {
     ];
     expect(orderSearchHits(hits, newestFirst).map(h => h.video.id)).toEqual(['exact-old', 'words', 'loose-new', 'loose-old', 'said-new']);
   });
+
+  it('then names holding some of it, then what is said, then partial matches in the order the search gave', () => {
+    const named = (h: SearchHit): SearchHit => ({ ...h, titleHighlights: [[0, 1]] });
+    const partial = (h: SearchHit, found: number): SearchHit => ({ ...h, partial: { found, of: 4 } });
+    const hits = [
+      partial(hit('most', '2020-01-01'), 3),
+      hit('said', '2024-01-01'),
+      partial(hit('some-new', '2026-01-01'), 2),
+      named(hit('mixed', '2021-01-01')),
+      hit('exact', '2019-01-01', 0),
+    ];
+    expect(orderSearchHits(hits, newestFirst).map(h => h.video.id)).toEqual(['exact', 'mixed', 'said', 'most', 'some-new']);
+  });
 });
 
 describe('highlightPieces', () => {

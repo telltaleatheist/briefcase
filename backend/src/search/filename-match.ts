@@ -110,12 +110,14 @@ function needleOf(term: QueryTerm): string {
   return foldName(text).folded;
 }
 
+/**
+ * The query as substrings, group for group: `groups[g]` is the parsed
+ * query's group g (every parsed term has a letter or digit, so no needle is
+ * empty), which Deep search relies on to pair what a name holds with what
+ * the transcript says.
+ */
 export function filenameQueryOf(parsed: ParsedMomentQuery): FilenameQuery {
-  const groups = parsed.groups
-    .map((group) => group.map(needleOf).filter((n) => n.length > 0))
-    .filter((group) => group.length > 0);
-  const excluded = parsed.excluded.map(needleOf).filter((n) => n.length > 0);
-  return { groups, excluded };
+  return { groups: parsed.groups.map((group) => group.map(needleOf)), excluded: parsed.excluded.map(needleOf) };
 }
 
 /**
@@ -151,16 +153,10 @@ const bounded = (name: FoldedName, i: number, len: number) => name.breaks[i] && 
  */
 export function matchFilename(title: string, query: FilenameQuery): FilenameMatch | null {
   if (query.groups.length === 0) return null;
+  const parts = partsIn(title, query);
+  if (!parts || parts.some((p) => p === undefined)) return null;
+  const chosen = parts as string[];
   const hay = foldedOf(title);
-  if (query.excluded.some((n) => hay.includes(n))) return null;
-
-  // The part each group matched by (its first present one), in query order.
-  const chosen: string[] = [];
-  for (const group of query.groups) {
-    const present = group.find((n) => hay.includes(n));
-    if (present === undefined) return null;
-    chosen.push(present);
-  }
   const needed = new Map<string, number>();
   query.groups.forEach((group, g) => {
     if (group.length === 1) needed.set(chosen[g], (needed.get(chosen[g]) ?? 0) + 1);
@@ -169,6 +165,37 @@ export function matchFilename(title: string, query: FilenameQuery): FilenameMatc
 
   const name = foldName(title);
   return { rank: rankOf(name, chosen), highlights: highlightsOf(name, chosen) };
+}
+
+/**
+ * The part each group of the query is in the title by (its first present
+ * one), in query order, undefined for a group the title does not hold; null
+ * when an excluded part is in it.
+ */
+function partsIn(title: string, query: FilenameQuery): Array<string | undefined> | null {
+  const hay = foldedOf(title);
+  if (query.excluded.some((n) => hay.includes(n))) return null;
+  return query.groups.map((group) => group.find((n) => hay.includes(n)));
+}
+
+/**
+ * Deep search: which groups of the query a title holds, when it holds some
+ * (the transcript may say the rest: the user, 2026-11-23, searched
+ * "kunneman" and words he says, and the clip named for Kunneman never came
+ * up). Null when it holds none, or an excluded part. No repeat counts here:
+ * a name either holds a group or not.
+ */
+export function filenameGroups(title: string, query: FilenameQuery): boolean[] | null {
+  const parts = partsIn(title, query);
+  if (!parts || parts.every((p) => p === undefined)) return null;
+  return parts.map((p) => p !== undefined);
+}
+
+/** Where the groups `held` (filenameGroups) are in the title, for highlighting. */
+export function filenameGroupHighlights(title: string, query: FilenameQuery, held: boolean[]): Array<[number, number]> {
+  const parts = partsIn(title, query) ?? [];
+  const chosen = parts.filter((p, g): p is string => p !== undefined && held[g]);
+  return chosen.length ? highlightsOf(foldName(title), chosen) : [];
 }
 
 /** Folded names already made, by title; emptied when it outgrows any one library (renames leave old names behind). */

@@ -354,12 +354,14 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     const res = this.searchResponse();
     if (!res) return { line: this.searchLoading() ? 'Searching…' : '', notes: [] as string[] };
     const hits = this.searchHits();
-    const titled = hits.filter(h => h.titleHighlights.length > 0).length;
+    const titled = hits.filter(h => h.titleRank !== undefined).length;
+    const partial = hits.filter(h => h.partial).length;
     const moments = hits.reduce((n, h) => n + h.momentCount, 0);
     const parts = [`${hits.length} ${hits.length === 1 ? 'video' : 'videos'}`];
     if (res.deep) {
       if (titled) parts.push(`${titled} by filename`);
       parts.push(`${res.capped ? 'at least ' : ''}${moments} ${moments === 1 ? 'moment' : 'moments'}`);
+      if (partial) parts.push(`${partial} with only some of the words`);
     }
     const notes: string[] = [];
     if (res.indexing?.error) {

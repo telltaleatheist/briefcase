@@ -7,7 +7,9 @@
  *                 search follows typing ("sha" finds "shane"); a word the
  *                 transcripts rarely or never hold also matches near
  *                 spellings (transcription slips: "somalies" finds
- *                 "somalis"); a word under 3 letters is exact
+ *                 "somalis"), and words written together or apart the
+ *                 other way ("five fold" finds "fivefold",
+ *                 compoundSpellings); a word under 3 letters is exact
  *   "a phrase"    those words in that order, exactly
  *   word*         any word starting with it
  *   a OR b        either
@@ -195,6 +197,58 @@ export function nearSpellings(term: string, vocab: Vocabulary): string[] {
 }
 
 // =============================================================================
+// COMPOUNDS
+// =============================================================================
+
+/** Each half of a word split in two is at least this long ("five|fold", never "a|lot"). */
+export const MIN_COMPOUND_PART = 3;
+
+/**
+ * Words the transcription wrote together or apart where the query has them
+ * the other way (the user, 2026-11-23: "five fold prophet" never found
+ * Kunneman's "fivefold office of a prophet"). Returned as extra spellings per
+ * query word; a spelling with a space is a phrase.
+ *   two plain words typed side by side  each also matches the two joined,
+ *                                       when the index holds that word
+ *                                       ("five fold": fold also matches
+ *                                       fivefold; five already does, as a
+ *                                       word it starts)
+ *   one plain word                      also matches itself split in two,
+ *                                       as a phrase, when the index holds
+ *                                       the word rarely (as near spellings,
+ *                                       below WIDEN_BELOW_WINDOWS) and the
+ *                                       phrase is said (`said`): a common
+ *                                       word is taken as written, or
+ *                                       "therapist" would find "the rapist"
+ */
+export function compoundSpellings(query: ParsedMomentQuery, vocab: Vocabulary, said: (words: string[]) => boolean): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  const add = (word: string, spelling: string) => {
+    const list = (out[word] ??= []);
+    if (!list.includes(spelling)) list.push(spelling);
+  };
+  const plain = query.groups.map((group) => (group.length === 1 && group[0].kind === 'word' ? group[0].term : null));
+  for (let g = 0; g + 1 < plain.length; g++) {
+    const a = plain[g];
+    const b = plain[g + 1];
+    if (!a || !b) continue;
+    const joined = a + b;
+    if (!vocab.docs.has(joined)) continue;
+    add(a, joined);
+    add(b, joined);
+  }
+  for (const word of plain) {
+    if (!word || (vocab.docs.get(word) ?? 0) >= WIDEN_BELOW_WINDOWS) continue;
+    const letters = [...word];
+    for (let at = MIN_COMPOUND_PART; at <= letters.length - MIN_COMPOUND_PART; at++) {
+      const parts = [letters.slice(0, at).join(''), letters.slice(at).join('')];
+      if (parts.every((p) => vocab.docs.has(p)) && said(parts)) add(word, parts.join(' '));
+    }
+  }
+  return out;
+}
+
+// =============================================================================
 // THE FTS5 EXPRESSION
 // =============================================================================
 
@@ -240,7 +294,11 @@ export function matcherOf(query: ParsedMomentQuery, spell: (term: string) => str
   for (const group of query.groups) {
     for (const term of group) {
       if (term.kind === 'word') {
-        for (const w of spell(term.term)) words.add(w);
+        // A spelling with a space is a phrase (a compound written apart).
+        for (const w of spell(term.term)) {
+          if (w.includes(' ')) phrases.push(w.split(' '));
+          else words.add(w);
+        }
         if (term.starts) prefixes.push(term.term);
       }
       else if (term.kind === 'prefix') prefixes.push(term.term);

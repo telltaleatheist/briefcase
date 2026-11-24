@@ -1,7 +1,16 @@
 import { describe, expect, it } from '@jest/globals';
 import Database = require('better-sqlite3');
 
-import { boundedDistance, highlightRanges, matchExpression, matcherOf, parseMomentQuery, tokenize } from './moment-query';
+import {
+  boundedDistance,
+  buildVocabulary,
+  compoundSpellings,
+  highlightRanges,
+  matchExpression,
+  matcherOf,
+  parseMomentQuery,
+  tokenize,
+} from './moment-query';
 import {
   ensureMomentSchema,
   indexPendingTranscripts,
@@ -113,6 +122,32 @@ describe('the query', () => {
     const m = matcherOf(parseMomentQuery('"god debate" pray*'), (t) => [t]);
     const text = 'The God debate began; they prayed.';
     expect(highlightRanges(text, m).map(([a, b]) => text.slice(a, b))).toEqual(['God debate', 'prayed']);
+  });
+
+  it('compounds: words typed apart match them written together, a rare word matches itself written apart', () => {
+    const vocab = buildVocabulary([
+      { term: 'five', docs: 400 },
+      { term: 'fold', docs: 9 },
+      { term: 'fivefold', docs: 2 },
+      { term: 'the', docs: 900 },
+      { term: 'rapist', docs: 30 },
+      { term: 'therapist', docs: 40 },
+      { term: 'office', docs: 50 },
+    ]);
+    const said = (words: string[]) => ['five fold', 'the rapist'].includes(words.join(' '));
+    expect(compoundSpellings(parseMomentQuery('five fold prophet'), vocab, said)).toEqual({ five: ['fivefold'], fold: ['fivefold'] });
+    expect(compoundSpellings(parseMomentQuery('fivefold office'), vocab, said)).toEqual({ fivefold: ['five fold'] });
+    // A word the index holds often is taken as written: "therapist" never finds "the rapist".
+    expect(compoundSpellings(parseMomentQuery('therapist'), vocab, said)).toEqual({});
+    // Quoted words and ORs are left as typed.
+    expect(compoundSpellings(parseMomentQuery('"five fold" office'), vocab, said)).toEqual({});
+
+    // A spelling with a space is matched and highlighted as a phrase.
+    const spell = (t: string) => (t === 'fivefold' ? ['fivefold', 'five fold'] : [t]);
+    const q = parseMomentQuery('fivefold');
+    expect(matchExpression(q, spell)).toBe('("fivefold" OR "five fold" OR "fivefold"*)');
+    const text = 'A five fold office, a fivefold call.';
+    expect(highlightRanges(text, matcherOf(q, spell)).map(([a, b]) => text.slice(a, b))).toEqual(['five fold', 'fivefold']);
   });
 });
 

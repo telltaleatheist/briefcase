@@ -131,6 +131,75 @@ describe('searchLibrary', () => {
     expect(searchLibrary(db, 'renamed').hits).toEqual([]);
   });
 
+  // Speech that says none of the words searched for, so the words below are rare, as in a real library.
+  const filler = (n: number) => Array.from({ length: n }, (_, i) => `The weather was mild and the garden grew, day ${i}.`);
+  // The clip the user could not find (2026-11-23), told much as its transcript tells it.
+  const kunneman = {
+    id: 'clip',
+    filename: '2021-05-10 kunneman explains why you cant call him a false prophet.mov',
+    downloaded: '2022-04-24',
+    lines: [
+      "There's been a lot of signing of petitions",
+      "and accountability that they're calling for for the profits.",
+      ...filler(10),
+      'Do they stand in a fivefold office of a prophet?',
+    ],
+  };
+
+  it('Deep search pairs the name with what is said: part of the query in the name, the rest said in one window', () => {
+    const db = library([
+      kunneman,
+      { id: 'said', filename: 'a podcast.mp4', lines: ['Kunneman never spoke of accountability.', ...filler(5)] },
+      { id: 'named', filename: 'kunneman on accountability.mp4', lines: filler(5) },
+      { id: 'apart', filename: 'kunneman again.mp4', lines: ['accountability', ...filler(10), 'more'] },
+      { id: 'excluded', filename: 'kunneman reaction.mp4', lines: ['accountability now'] },
+      { id: 'none', filename: 'other.mp4', lines: ['accountability matters.'] },
+      { id: 'filler', filename: 'weather.mp4', lines: filler(200) },
+    ]);
+    const res = searchLibrary(db, 'kunneman accountability -reaction', { deep: true });
+    // The whole name first, then the name with the rest said, then all of it said.
+    expect(ids(res)).toEqual(['named', 'clip', 'apart', 'said']);
+    const clip = res.hits[1];
+    expect(clip.titleRank).toBeUndefined();
+    expect(marked(clip)).toEqual(['kunneman']);
+    expect(clip.moments[0].text).toContain('accountability');
+    // Without Deep search only the whole name counts.
+    expect(ids(searchLibrary(db, 'kunneman accountability'))).toEqual(['named']);
+  });
+
+  it('Deep search finds words typed apart that the transcript wrote together ("five fold" is "fivefold")', () => {
+    const db = library([kunneman, { id: 'filler', filename: 'weather.mp4', lines: filler(200) }]);
+    const res = searchLibrary(db, 'five fold prophet', { deep: true });
+    expect(ids(res)).toEqual(['clip']);
+    expect(res.hits[0].moments[0].highlights.map(([a, b]) => res.hits[0].moments[0].text.slice(a, b))).toEqual(['fivefold', 'prophet']);
+    expect(res.spellings.fold).toEqual(['fold', 'fivefold']);
+  });
+
+  it('Deep search lists partial matches after every full one: most of the telling words, by name and one window', () => {
+    const db = library([
+      kunneman,
+      { id: 'full', filename: 'a sermon.mp4', lines: ['Resignations, accountability, a prophet.', ...filler(5)] },
+      { id: 'two', filename: 'a talk.mp4', lines: ['A prophet on accountability.', ...filler(5)] },
+      { id: 'one', filename: 'a prophet speaks.mp4', lines: filler(5) },
+      { id: 'filler', filename: 'weather.mp4', lines: filler(200) },
+    ]);
+    // "resignations" was misheard in the clip: it holds the other two, prophet by name.
+    const res = searchLibrary(db, 'resignations accountability prophet', { deep: true });
+    // As many words, as rare: newest download first.
+    expect(ids(res)).toEqual(['full', 'clip', 'two']);
+    expect(res.hits[0].partial).toBeUndefined();
+    expect(res.hits.slice(1).map((h) => h.partial)).toEqual([{ found: 2, of: 3 }, { found: 2, of: 3 }]);
+    const clip = res.hits[1];
+    expect(marked(clip)).toEqual(['prophet']);
+    expect(clip.moments.every((m) => m.partial)).toBe(true);
+    expect(clip.moments[0].text).toContain('accountability');
+
+    // Words said nearly everywhere neither count nor are required ("the", "and", "was" are in every filler window).
+    expect(ids(searchLibrary(db, 'the resignations and accountability was prophet', { deep: true }))).toEqual(['full', 'clip', 'two']);
+    // Two words are not enough to go on: no partial matches.
+    expect(ids(searchLibrary(db, 'resignations prophet', { deep: true }))).toEqual(['full']);
+  });
+
   it('titleOf drops the extension only', () => {
     expect(titleOf('a.b.mp4')).toBe('a.b');
     expect(titleOf('no extension')).toBe('no extension');
