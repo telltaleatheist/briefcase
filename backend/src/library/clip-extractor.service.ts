@@ -10,6 +10,7 @@ import {
   verifyBinary,
   type FfmpegProgress,
 } from '../bridges';
+import { fitNameBytes, MAX_NAME_BYTES } from '../common/utils/filename-date.util';
 
 export interface MuteSectionInput {
   startSeconds: number;
@@ -450,7 +451,10 @@ export class ClipExtractorService {
   }
 
   /**
-   * Generate a clip filename based on metadata
+   * A clip's file name: its title (after the upload date) when it has one,
+   * else the source's name with the category and time range. The stem is
+   * held to MAX_NAME_BYTES (fitNameBytes), so a long AI title or a long
+   * source name still makes a name the filesystem accepts.
    */
   generateClipFilename(
     originalFilename: string,
@@ -461,40 +465,23 @@ export class ClipExtractorService {
     uploadDate?: string
   ): string {
     const ext = path.extname(originalFilename);
-
-    if (title && title.trim()) {
-      const safeTitle = title
-        .replace(/[<>:"/\\|?*]/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-
-      if (uploadDate) {
-        return `${uploadDate} ${safeTitle}${ext}`;
-      }
-      return `${safeTitle}${ext}`;
-    }
-
-    // If times are null (full video), use original basename with optional category
-    if (startTime === null || endTime === null) {
-      const basename = path.basename(originalFilename, ext);
-      if (category) {
-        const safeCategory = category.replace(/[^a-zA-Z0-9]/g, '_');
-        return `${basename}_${safeCategory}${ext}`;
-      }
-      return `${basename}_scaled${ext}`;
-    }
-
     const basename = path.basename(originalFilename, ext);
-    const startStr = this.formatTimestamp(startTime).replace(/:/g, '-');
-    const endStr = this.formatTimestamp(endTime).replace(/:/g, '-');
+    const safeCategory = category ? category.replace(/[^a-zA-Z0-9]/g, '_') : '';
 
-    let filename = `${basename}_${startStr}_${endStr}`;
-
-    if (category) {
-      const safeCategory = category.replace(/[^a-zA-Z0-9]/g, '_');
-      filename = `${basename}_${safeCategory}_${startStr}_${endStr}`;
+    let stem: string;
+    const safeTitle = (title ?? '').replace(/[<>:"/\\|?*]/g, '').replace(/\s+/g, ' ').trim();
+    if (safeTitle) {
+      stem = uploadDate ? `${uploadDate} ${safeTitle}` : safeTitle;
+    } else if (startTime === null || endTime === null) {
+      // A full video: the original name with the category, or marked as scaled.
+      stem = `${basename}_${safeCategory || 'scaled'}`;
+    } else {
+      const startStr = this.formatTimestamp(startTime).replace(/:/g, '-');
+      const endStr = this.formatTimestamp(endTime).replace(/:/g, '-');
+      const tail = safeCategory ? `_${safeCategory}_${startStr}_${endStr}` : `_${startStr}_${endStr}`;
+      // Cut the source name, not the time range that tells clips apart.
+      return `${fitNameBytes(basename, Math.max(1, MAX_NAME_BYTES - Buffer.byteLength(tail, 'utf8')))}${tail}${ext}`;
     }
-
-    return filename + ext;
+    return `${fitNameBytes(stem, MAX_NAME_BYTES)}${ext}`;
   }
 }

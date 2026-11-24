@@ -55,6 +55,20 @@ export interface FfmpegResult {
   error?: string;
 }
 
+/**
+ * What a failed run reports: the exit code and ffmpeg's own last word on why,
+ * the last line it wrote to stderr (with the line before when that is only
+ * "Conversion failed!"). Without it a failure read "exited with code 1" and
+ * the reason (2026-11-23: "File name too long") was only in the log.
+ */
+export function ffmpegFailure(code: number | null, stderr: string): string {
+  const lines = stderr.split(/[\r\n]+/).map((l) => l.trim()).filter(Boolean);
+  let reason = lines.slice(-1);
+  if (/^Conversion failed!?$/i.test(reason[0] ?? '') && lines.length > 1) reason = lines.slice(-2);
+  const why = reason.join(' ').slice(-400);
+  return why ? `FFmpeg exited with code ${code}: ${why}` : `FFmpeg exited with code ${code}`;
+}
+
 export class FfmpegBridge extends EventEmitter {
   private binaryPath: string;
   private activeProcesses = new Map<string, FfmpegProcessInfo>();
@@ -150,7 +164,7 @@ export class FfmpegBridge extends EventEmitter {
             success: false,
             exitCode: code,
             duration,
-            error: `FFmpeg exited with code ${code}`,
+            error: ffmpegFailure(code, stderrBuffer),
           });
         }
       });
@@ -238,7 +252,7 @@ export class FfmpegBridge extends EventEmitter {
             success: false,
             exitCode: code,
             duration,
-            error: `FFmpeg exited with code ${code}`,
+            error: ffmpegFailure(code, stderrBuffer),
           });
         }
       });

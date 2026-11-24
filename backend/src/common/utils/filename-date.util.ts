@@ -22,6 +22,36 @@ export interface DateInfo {
   hasDate: boolean;
 }
 
+/**
+ * The most bytes (UTF-8) a file name's stem may take. Filesystems cap a name
+ * at 255 BYTES (APFS, ext4) or 255 UTF-16 units (NTFS, which UTF-8 bytes
+ * bound), not characters: an em dash is 3 bytes. 200 leaves room for a date
+ * prefix, an extension and a suffix such as " (censored)". (2026-11-23: a clip
+ * named from a highlight's title and description, ~260 bytes, failed to
+ * export with ffmpeg's "File name too long".)
+ */
+export const MAX_NAME_BYTES = 200;
+
+/**
+ * `name` cut to at most `maxBytes` UTF-8 bytes, never inside a character, at
+ * a word break when one sits in the back half of what fits, without trailing
+ * spaces or separators. A name that fits comes back unchanged.
+ */
+export function fitNameBytes(name: string, maxBytes: number = MAX_NAME_BYTES): string {
+  if (Buffer.byteLength(name, 'utf8') <= maxBytes) return name;
+  let cut = '';
+  let bytes = 0;
+  for (const ch of name) {
+    const n = Buffer.byteLength(ch, 'utf8');
+    if (bytes + n > maxBytes) break;
+    cut += ch;
+    bytes += n;
+  }
+  const lastBreak = cut.lastIndexOf(' ');
+  if (lastBreak >= cut.length / 2) cut = cut.slice(0, lastBreak);
+  return cut.replace(/[\s\-\u2013\u2014,;:.]+$/u, '');
+}
+
 export class FilenameDateUtil {
   // Standard date format: YYYY-MM-DD
   private static readonly STANDARD_DATE_PATTERN = /^(\d{4}-\d{2}-\d{2})\s+(.+)$/;
@@ -345,13 +375,8 @@ export class FilenameDateUtil {
     // 6. Remove leading/trailing dots and spaces (Windows issue)
     sanitized = sanitized.replace(/^[\s.]+|[\s.]+$/g, '');
 
-    // 7. Limit length (255 chars max for most filesystems, leave room for extension)
-    const maxLength = 200;
-    if (sanitized.length > maxLength) {
-      sanitized = sanitized.substring(0, maxLength).trim();
-      // Don't end with a dash or space
-      sanitized = sanitized.replace(/[-\s]+$/, '');
-    }
+    // 7. Limit length: filesystems count bytes, not characters
+    sanitized = fitNameBytes(sanitized);
 
     // 8. Fallback if completely empty
     if (!sanitized || sanitized.length === 0) {
