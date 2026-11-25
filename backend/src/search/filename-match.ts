@@ -173,8 +173,8 @@ export function matchFilename(title: string, query: FilenameQuery): FilenameMatc
  * when an excluded part is in it.
  */
 function partsIn(title: string, query: FilenameQuery): Array<string | undefined> | null {
+  if (filenameExcluded(title, query)) return null;
   const hay = foldedOf(title);
-  if (query.excluded.some((n) => hay.includes(n))) return null;
   return query.groups.map((group) => group.find((n) => hay.includes(n)));
 }
 
@@ -189,6 +189,12 @@ export function filenameGroups(title: string, query: FilenameQuery): boolean[] |
   const parts = partsIn(title, query);
   if (!parts || parts.every((p) => p === undefined)) return null;
   return parts.map((p) => p !== undefined);
+}
+
+/** Whether a title holds an excluded part of the query. */
+export function filenameExcluded(title: string, query: FilenameQuery): boolean {
+  const hay = foldedOf(title);
+  return query.excluded.some((n) => hay.includes(n));
 }
 
 /** Where the groups `held` (filenameGroups) are in the title, for highlighting. */

@@ -3,8 +3,8 @@ import { VideoItem } from './video.model';
 /**
  * The library search (GET /api/database/search; backend
  * search/library-search.ts): videos whose file name matches, best match
- * first, then with Deep search videos whose name holds some of it and the
- * transcript says the rest, videos where the transcript says it, and partial
+ * first, then with Deep search the closest matches, videos whose name holds
+ * some of it and the transcript says the rest, videos where the transcript says it, and partial
  * matches (most of the words), each with the moments where it is said.
  */
 export interface TranscriptMoment {
@@ -40,6 +40,12 @@ export interface SearchHit {
    * everywhere). Listed after every full match.
    */
   partial?: { found: number; of: number };
+  /**
+   * Deep search, 3 or more words: one of the few closest matches, its place
+   * among them from 0 (words said side by side as typed and rare words count
+   * most). Listed right after the names that hold the whole query.
+   */
+  closest?: number;
   /** In time order, at most 25. */
   moments: TranscriptMoment[];
   /** Moments that matched in all, before the cap. */
@@ -65,15 +71,19 @@ export interface LibrarySearchResponse {
 
 /**
  * Search hits in the order they open in: names holding the whole query, by
- * how closely (titleRank, best first); names holding some of it where the
- * transcript says the rest; videos that say it (or mean it); each by
- * `compare` (newest upload first) within. Then partial matches, in the
- * search's own order (most of the words first). A clicked column header
- * sorts them all by that column instead.
+ * how closely (titleRank, best first); the closest matches, closest first;
+ * names holding some of it where the transcript says the rest; videos that
+ * say it (or mean it); each but the closest by `compare` (newest upload
+ * first) within. Then partial matches, in the search's own order (most of the
+ * words first). A clicked column header sorts them all by that column instead.
  */
 export function orderSearchHits(hits: ReadonlyArray<SearchHit>, compare: (a: VideoItem, b: VideoItem) => number): SearchHit[] {
-  const tier = (h: SearchHit) => h.titleRank ?? (h.partial ? 6 : h.titleHighlights.length ? 4 : 5);
-  return [...hits].sort((a, b) => tier(a) - tier(b) || (a.partial ? 0 : compare(a.video, b.video)));
+  const tier = (h: SearchHit) => h.titleRank ?? (h.closest !== undefined ? 4 : h.partial ? 7 : h.titleHighlights.length ? 5 : 6);
+  const within = (a: SearchHit, b: SearchHit) => {
+    if (a.closest !== undefined && b.closest !== undefined) return a.closest - b.closest;
+    return a.partial ? 0 : compare(a.video, b.video);
+  };
+  return [...hits].sort((a, b) => tier(a) - tier(b) || within(a, b));
 }
 
 /** Text cut into plain and matched pieces, in order. */

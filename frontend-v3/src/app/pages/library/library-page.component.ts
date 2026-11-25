@@ -320,8 +320,8 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     }
     const shown = hits.filter(h => kept.has(h.video.id) && (type === 'all' || this.matchesTypeFilter(h.video, type)));
     // Until a column header is clicked: closest file name matches first, then
-    // the rest of the file name matches, then (Deep search) videos where it is
-    // only said, newest upload first within each, so a newer video that barely
+    // the rest of the file name matches, then (Deep search) the few closest
+    // matches by name and speech, then videos where it is only said, newest upload first within each, so a newer video that barely
     // matches never lists above the one named for the query. A clicked column
     // sorts them all by it, like any list view.
     const chosen = this.chosenResultsSort();
@@ -356,10 +356,12 @@ export class LibraryPageComponent implements OnInit, OnDestroy {
     const hits = this.searchHits();
     const titled = hits.filter(h => h.titleRank !== undefined).length;
     const partial = hits.filter(h => h.partial).length;
+    const closest = hits.filter(h => h.closest !== undefined).length;
     const moments = hits.reduce((n, h) => n + h.momentCount, 0);
     const parts = [`${hits.length} ${hits.length === 1 ? 'video' : 'videos'}`];
     if (res.deep) {
       if (titled) parts.push(`${titled} by filename`);
+      if (closest && !this.chosenResultsSort()) parts.push(titled ? `then the ${closest} closest` : `the ${closest} closest first`);
       parts.push(`${res.capped ? 'at least ' : ''}${moments} ${moments === 1 ? 'moment' : 'moments'}`);
       if (partial) parts.push(`${partial} with only some of the words`);
     }

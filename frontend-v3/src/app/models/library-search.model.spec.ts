@@ -32,6 +32,22 @@ describe('orderSearchHits', () => {
   });
 });
 
+describe('orderSearchHits, the closest matches', () => {
+  const hit = (id: string, extra: Partial<SearchHit>) =>
+    ({ video: { id, name: `2024-01-01 ${id}.mp4` } as unknown as VideoItem, title: id, titleHighlights: [], moments: [], momentCount: 0, ...extra }) as SearchHit;
+
+  it('list after whole-name matches and before the rest, closest first, partial or not', () => {
+    const hits = [
+      hit('said', {}),
+      hit('second', { closest: 1 }),
+      hit('partial', { partial: { found: 2, of: 4 } }),
+      hit('first', { closest: 0, partial: { found: 3, of: 4 } }),
+      hit('named', { titleRank: 3 }),
+    ];
+    expect(orderSearchHits(hits, columnComparator(DEFAULT_RESULTS_SORT)).map(h => h.video.id)).toEqual(['named', 'first', 'second', 'said', 'partial']);
+  });
+});
+
 describe('highlightPieces', () => {
   it('cuts text into plain and matched pieces, skipping ranges that overlap or fall outside', () => {
     expect(highlightPieces('I hate Logan Paul.', [[7, 12], [13, 17]])).toEqual([

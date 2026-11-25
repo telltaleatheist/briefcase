@@ -488,6 +488,42 @@ export function groupWindows(db: Database, parsed: ParsedMomentQuery, spell: (te
   return { windows, counts, excluded };
 }
 
+/** Windows saying two of the query's words side by side, as typed. */
+export interface PairWindows {
+  ids: number[];
+  /** How many windows say the pair. */
+  count: number;
+}
+
+/**
+ * Each two plain words typed one after the other ("vote again"), said exactly
+ * so: the windows that do. A pair said nowhere, or in more than `limit`
+ * windows, is left out.
+ */
+export function pairWindows(db: Database, parsed: ParsedMomentQuery, limit: number): PairWindows[] {
+  const read = db.prepare('SELECT rowid FROM transcript_windows_fts WHERE transcript_windows_fts MATCH ? LIMIT ?').pluck();
+  const plain = parsed.groups.map((group) => (group.length === 1 && group[0].kind === 'word' ? group[0].term : null));
+  return plain.flatMap((word, g) => {
+    const next = plain[g + 1];
+    if (!word || !next) return [];
+    const ids = read.all(`"${word} ${next}"`, limit + 1) as number[];
+    return ids.length > 0 && ids.length <= limit ? [{ ids, count: ids.length }] : [];
+  });
+}
+
+const videoWindowCounts = new WeakMap<Database, { generation: number; counts: Map<string, number> }>();
+
+/** The windows each video has: its length, as the index sees it. */
+export function windowCountsByVideo(db: Database): ReadonlyMap<string, number> {
+  const generation = generations.get(db) ?? 0;
+  const cached = videoWindowCounts.get(db);
+  if (cached && cached.generation === generation) return cached.counts;
+  const rows = db.prepare('SELECT video_id AS id, COUNT(*) AS n FROM transcript_windows GROUP BY video_id').all() as Array<{ id: string; n: number }>;
+  const counts = new Map(rows.map((r) => [r.id, r.n]));
+  videoWindowCounts.set(db, { generation, counts });
+  return counts;
+}
+
 /** The windows with these ids (score 0), in no particular order. */
 export function windowsById(db: Database, ids: readonly number[]): Array<MomentWindow & { id: number }> {
   if (ids.length === 0) return [];

@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import Database = require('better-sqlite3');
 
-import { searchLibrary, titleOf } from './library-search';
+import { MAX_PARTIAL_VIDEOS, searchLibrary, titleOf } from './library-search';
 import { DIMENSIONS } from './embeddings/embedding-model.service';
 import { indexVideoMeaning, searchLibraryMeaning, type Embed } from './meaning-search';
 import { ensureMomentSchema, indexPendingTranscripts, removeVideoMoments } from './transcript-moments';
@@ -20,7 +20,7 @@ function library(videos: Array<{ id: string; filename: string; downloaded?: stri
     db.prepare('INSERT INTO videos (id, filename, download_date) VALUES (?, ?, ?)').run(v.id, v.filename, v.downloaded ?? null);
     if (v.lines) db.prepare('INSERT INTO transcripts VALUES (?, ?, ?)').run(v.id, srtOf(v.lines), 'x');
   }
-  indexPendingTranscripts(db, 100);
+  indexPendingTranscripts(db, 1000);
   return db;
 }
 
@@ -195,9 +195,60 @@ describe('searchLibrary', () => {
     expect(clip.moments[0].text).toContain('accountability');
 
     // Words said nearly everywhere neither count nor are required ("the", "and", "was" are in every filler window).
-    expect(ids(searchLibrary(db, 'the resignations and accountability was prophet', { deep: true }))).toEqual(['full', 'clip', 'two']);
+    expect(ids(searchLibrary(db, 'resignations the accountability was the prophet', { deep: true }))).toEqual(['full', 'clip', 'two']);
     // Two words are not enough to go on: no partial matches.
     expect(ids(searchLibrary(db, 'resignations prophet', { deep: true }))).toEqual(['full']);
+  });
+
+  // The clip the user could not find (2026-11-25), as its transcript tells it: it never says "never".
+  const trump = {
+    id: 'clip',
+    filename: '2024-07-27 trump says people wont have to vote in 4 years because hell fix it.mp4',
+    lines: ['get out and vote in four years you don\'t', "have to vote again we'll have it fixed so good you're not gonna have to vote"],
+  };
+  // All six words within 30 s, none of them together.
+  const scattered = (id: string) => ({
+    id,
+    filename: `a podcast ${id}.mp4`,
+    lines: ['Trump, I have never said so.', ...filler(1), 'Again, they went to see who can vote.', ...filler(5)],
+  });
+
+  it('Deep search lists the closest matches first: words said side by side outweigh every word scattered', () => {
+    const db = library([trump, scattered('one'), scattered('two'), { id: 'filler', filename: 'weather.mp4', lines: filler(400) }]);
+    const res = searchLibrary(db, 'trump never have to vote again', { deep: true });
+    expect(ids(res)).toEqual(['clip', 'one', 'two']);
+    expect(res.hits.map((h) => h.closest)).toEqual([0, 1, 2]);
+    const clip = res.hits[0];
+    expect(clip.partial).toBeDefined();
+    expect(marked(clip)).toContain('vote');
+    expect(clip.moments[0].text).toContain('have to vote again');
+    // The others hold every word: no partial mark.
+    expect(res.hits[1].partial).toBeUndefined();
+    // Two words list as they did, and a name holding the whole query stays first.
+    expect(searchLibrary(db, 'vote again', { deep: true }).hits.every((h) => h.closest === undefined)).toBe(true);
+    const named = library([trump, scattered('one'), { id: 'named', filename: 'trump never have to vote again.mp4' }, { id: 'filler', filename: 'weather.mp4', lines: filler(400) }]);
+    const first = searchLibrary(named, 'trump never have to vote again', { deep: true });
+    expect(ids(first)).toEqual(['named', 'clip', 'one']);
+    expect(first.hits[0].closest).toBeUndefined();
+  });
+
+  it('a closest match is found past the cap on partial matches, and never by an excluded name', () => {
+    const many = Array.from({ length: MAX_PARTIAL_VIDEOS + 20 }, (_, i) => ({
+      id: `p${i}`, filename: `show ${i}.mp4`, lines: ['Trump would never vote.', ...filler(6)],
+    }));
+    const db = library([...many, trump, { id: 'filler', filename: 'weather.mp4', lines: filler(4000) }]);
+    expect(ids(searchLibrary(db, 'trump never have to vote again', { deep: true }))[0]).toBe('clip');
+    expect(searchLibrary(db, 'trump never have to vote again -fix', { deep: true }).hits.find((h) => h.videoId === 'clip')?.closest).toBeUndefined();
+  });
+
+  it('a word said elsewhere in a short video counts, outside the best 30 seconds', () => {
+    const line = 'A prophet speaks of resignations.';
+    const db = library([
+      { id: 'without', filename: 'a talk.mp4', downloaded: '2026-01-01', lines: [line, ...filler(20)] },
+      { id: 'with', filename: 'another talk.mp4', downloaded: '2020-01-01', lines: [line, ...filler(14), 'Accountability matters.', ...filler(5)] },
+      { id: 'filler', filename: 'weather.mp4', lines: filler(400) },
+    ]);
+    expect(ids(searchLibrary(db, 'prophet resignations accountability', { deep: true }))).toEqual(['with', 'without']);
   });
 
   it('titleOf drops the extension only', () => {

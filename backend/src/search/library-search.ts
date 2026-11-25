@@ -18,27 +18,38 @@
  * "resignations". Every word had to be in the name, or all in one stretch of
  * speech, so it never came up. Deep search now lists, in this order:
  *   1. names that hold the whole query, closest first (FilenameRank)
- *   2. names that hold some of it, where the transcript says the rest
+ *   2. with 3 or more words, the CLOSEST matches, whatever words they lack
+ *      (closestMatches)
+ *   3. names that hold some of it, where the transcript says the rest
  *      within one window (about 30 s)
- *   3. videos that say all of it within one window, best first; then
+ *   4. videos that say all of it within one window, best first; then
  *      videos found only by meaning
- *   4. with 3 or more words, PARTIAL matches: videos whose name and one
+ *   5. with 3 or more words, PARTIAL matches: videos whose name and one
  *      window together hold most of the telling words (those not said nearly
  *      everywhere), the most first; misheard or misremembered words then
  *      still leave the clip findable
+ *
+ * The closest matches came on 2026-11-25: "trump never have to vote again"
+ * did not list the clip of Trump saying "in four years you don't have to vote
+ * again" at all. Only that clip says "have to vote again", but it lacks
+ * "never", so videos that scatter all six words over 30 s came first and the
+ * cap on partial matches dropped it. Holding every word is weak evidence when
+ * the words are ordinary; saying them side by side is strong.
  * Everything is local SQLite.
  */
 import type { Database } from 'better-sqlite3';
 
-import { filenameGroupHighlights, filenameGroups, filenameQueryOf, matchFilename, type FilenameQuery, type FilenameRank } from './filename-match';
+import { filenameExcluded, filenameGroupHighlights, filenameGroups, filenameQueryOf, matchFilename, type FilenameQuery, type FilenameRank } from './filename-match';
 import { parseMomentQuery, type ParsedMomentQuery } from './moment-query';
 import { meaningIndexCounts, searchLibraryMeaning } from './meaning-search';
 import {
   findMomentWindows,
   groupWindows,
   momentsOf,
+  pairWindows,
   spellerFor,
   windowCount,
+  windowCountsByVideo,
   windowsById,
   windowsByVideo,
   windowsHolding,
@@ -70,6 +81,8 @@ export interface LibraryHit {
    * are. Absent when the video holds the whole query (or was found by meaning).
    */
   partial?: { found: number; of: number };
+  /** One of the closest matches (Deep search, 3 or more words): its place among them, from 0. */
+  closest?: number;
 }
 
 export interface LibrarySearchResult {
@@ -115,6 +128,21 @@ export const PARTIAL_MIN_GROUPS = 3;
 export const COMMON_SHARE = 0.1;
 /** The most partial matches listed. */
 export const MAX_PARTIAL_VIDEOS = 100;
+/** The most closest matches listed, and the least score (of the best one's) to be one. */
+export const MAX_CLOSEST_VIDEOS = 10;
+export const CLOSEST_SHARE = 0.5;
+/**
+ * What the closest-match score counts, as shares of a word's weight (its
+ * rarity). Measured on the clips library (2026-11-25): 1,500 half-remembered
+ * searches made from real names and transcripts, the weights chosen on one
+ * half and checked on the other.
+ *   NAME_WEIGHT       a word the name holds: names are written to be found
+ *   PAIR_WEIGHT       two words said side by side as typed (the pair's rarity)
+ *   ELSEWHERE_WEIGHT  a word said in the video, outside its best window
+ */
+export const NAME_WEIGHT = 1.5;
+export const PAIR_WEIGHT = 0.6;
+export const ELSEWHERE_WEIGHT = 0.5;
 
 /** A video's name against the query: which parts it holds, and its match when it holds them all. */
 interface NameParts {
@@ -196,7 +224,7 @@ export function searchLibrary(db: Database, query: string, options: LibrarySearc
     someNamed || parsed.groups.length >= PARTIAL_MIN_GROUPS ? groupWindows(db, parsed, spell, Math.floor(total * COMMON_SHARE)) : null;
   const telling = said ? said.windows.map((w) => w !== null) : [];
 
-  // 2. Some of it in the name, the rest said in one window: one search per set of parts the names lack.
+  // 3. Some of it in the name, the rest said in one window: one search per set of parts the names lack.
   // A name holding only common parts ("for" is in "before") says nothing about the video.
   const lacking = new Map<string, NameParts[]>();
   for (const v of names.values()) {
@@ -224,7 +252,7 @@ export function searchLibrary(db: Database, query: string, options: LibrarySearc
   mixed.sort((a, b) => countOf(b.held) - countOf(a.held) || b.windows.length - a.windows.length || b.downloaded.localeCompare(a.downloaded));
   for (const v of mixed) listed.add(v.videoId);
 
-  // 3. All of it said in one window.
+  // 4. All of it said in one window.
   const filenameOf = db.prepare('SELECT filename FROM videos WHERE id = ?');
   const spoken = found.ranked
     .filter((r) => !listed.has(r.videoId))
@@ -253,7 +281,7 @@ export function searchLibrary(db: Database, query: string, options: LibrarySearc
   ];
   const byId = new Map(hits.map((h) => [h.videoId, h]));
 
-  // 4. Partial matches, kept aside until meaning has had its say (a video found by meaning is not partial).
+  // 5. Partial matches, kept aside until meaning has had its say (a video found by meaning is not partial).
   const partial = said && parsed.groups.length >= PARTIAL_MIN_GROUPS ? partialMatches(db, parsed, spell, said, total, nameQuery, names, listed) : [];
   const partialIds = new Set(partial.map((p) => p.videoId));
 
@@ -286,22 +314,149 @@ export function searchLibrary(db: Database, query: string, options: LibrarySearc
       meaningMoments += v.moments.length;
     }
   }
-  for (const p of partial) {
-    if (hits.length >= maxVideos) break;
-    if (!partialIds.has(p.videoId)) continue;
-    hits.push(p);
-    momentsPer.set(p.videoId, p.momentCount);
+
+  // 2. The closest, wherever they would have listed; their best stretch is among their moments.
+  const closest = said && parsed.groups.length >= PARTIAL_MIN_GROUPS ? closestMatches(db, parsed, said, total, names) : [];
+  const first: LibraryHit[] = [];
+  const partialById = new Map(partial.map((p) => [p.videoId, p]));
+  for (const c of closest) {
+    const row = filenameOf.get(c.videoId) as { filename: string } | undefined;
+    if (!row) continue;
+    const title = titleOf(row.filename);
+    if (filenameExcluded(title, nameQuery)) continue;
+    const held = names.get(c.videoId)?.held;
+    const existing: LibraryHit = byId.get(c.videoId) ?? partialById.get(c.videoId) ?? {
+      videoId: c.videoId,
+      title,
+      titleHighlights: held ? filenameGroupHighlights(title, nameQuery, held) : [],
+      moments: [],
+      momentCount: 0,
+      ...(listed.has(c.videoId) ? {} : { partial: { found: c.found, of: countOf(telling) } }),
+    };
+    partialIds.delete(c.videoId);
+    if (c.window) {
+      const whole = !existing.partial && parsed.groups.every((_, g) => c.says[g] || held?.[g]);
+      const [moment] = momentsOf(db, [c.window], parsed, spell, c.says.some(Boolean) ? c.says : undefined);
+      if (existing.moments.every((m) => moment.end <= m.start || moment.start >= m.end)) {
+        existing.moments = [...existing.moments, whole ? moment : { ...moment, partial: true }].sort((a, b) => a.start - b.start);
+        existing.momentCount += 1;
+        momentsPer.set(c.videoId, existing.momentCount);
+      }
+    }
+    existing.closest = first.length;
+    first.push(existing);
   }
+  const ordered = [
+    ...hits.filter((h) => h.titleRank !== undefined),
+    ...first,
+    ...hits.filter((h) => h.titleRank === undefined && h.closest === undefined),
+    ...partial.filter((p) => partialIds.has(p.videoId)),
+  ].slice(0, maxVideos);
+  for (const h of ordered) if (h.partial && !momentsPer.has(h.videoId)) momentsPer.set(h.videoId, h.momentCount);
 
   let momentCount = meaningMoments;
   for (const n of momentsPer.values()) momentCount += n;
   return {
-    hits,
+    hits: ordered,
     momentCount,
     capped: found.capped,
     spellings,
     ...(options.meaningQuery ? { meaning: meaningIndexCounts(db) } : {}),
   };
+}
+
+/** How much a word or pair said in `count` of `total` windows tells: its rarity. */
+const rarity = (total: number, count: number) => Math.log((total + 1) / (count + 1));
+
+/** A video by how close its name and speech come to the query. */
+interface Closest {
+  videoId: string;
+  /** Telling words its name and best window hold. */
+  found: number;
+  /** The window that comes closest, and the parts it says; null when only the name does. */
+  window: MomentWindow | null;
+  says: boolean[];
+}
+
+/**
+ * The videos that come closest to the query, whichever of its words they
+ * lack. A video scores by its best window: each telling word the name or the
+ * window holds, by its rarity; each two words said side by side as typed, by
+ * the pair's; and, for less, words said elsewhere in the video, by how
+ * unlikely that is in a video so long (a four-hour stream says most words
+ * somewhere, a one-minute clip does not). Names that hold the whole query are
+ * left out: they list before these.
+ */
+function closestMatches(
+  db: Database,
+  parsed: ParsedMomentQuery,
+  said: GroupWindows,
+  total: number,
+  names: ReadonlyMap<string, NameParts>,
+): Closest[] {
+  const weight = said.windows.map((ids, g) => (ids ? rarity(total, said.counts[g]) : 0));
+  const none = parsed.groups.map(() => false);
+
+  // What each window says: the telling parts, and the pairs' weight.
+  const inWindow = new Map<number, { says: number[]; pairs: number }>();
+  const at = (id: number) => {
+    let w = inWindow.get(id);
+    if (!w) inWindow.set(id, (w = { says: [], pairs: 0 }));
+    return w;
+  };
+  said.windows.forEach((ids, g) => {
+    for (const id of ids ?? []) at(id).says.push(g);
+  });
+  for (const pair of pairWindows(db, parsed, Math.floor(total * COMMON_SHARE))) {
+    const w = PAIR_WEIGHT * rarity(total, pair.count);
+    for (const id of pair.ids) at(id).pairs += w;
+  }
+  for (const id of said.excluded) inWindow.delete(id);
+
+  // Each video's telling words in its name, what it says anywhere, and its best window.
+  interface Scored { named: boolean[]; nameScore: number; anywhere: boolean[]; score: number; pairs: number; says: number[]; window: MomentWindow | null }
+  const best = new Map<string, Scored>();
+  const start = (named: boolean[]): Scored => {
+    const nameScore = named.reduce((sum, h, g) => sum + (h ? NAME_WEIGHT * weight[g] : 0), 0);
+    return { named, nameScore, anywhere: [...none], score: nameScore, pairs: 0, says: [], window: null };
+  };
+  for (const v of names.values()) {
+    if (v.match) continue;
+    const named = v.held.map((h, g) => h && weight[g] > 0);
+    if (named.some(Boolean)) best.set(v.videoId, start(named));
+  }
+  for (const window of windowsById(db, [...inWindow.keys()])) {
+    let video = best.get(window.videoId);
+    if (!video) {
+      if (names.get(window.videoId)?.match) continue;
+      best.set(window.videoId, (video = start(none)));
+    }
+    const { says, pairs } = inWindow.get(window.id)!;
+    let score = video.nameScore + pairs;
+    for (const g of says) {
+      video.anywhere[g] = true;
+      if (!video.named[g]) score += weight[g];
+    }
+    if (video.window && video.score >= score) continue;
+    Object.assign(video, { score, pairs, says, window });
+  }
+
+  const lengths = windowCountsByVideo(db);
+  const scored = [...best.entries()].map(([videoId, v]) => {
+    const says = [...none];
+    for (const g of v.says) says[g] = true;
+    const held = says.map((s, g) => s || v.named[g]);
+    let score = v.score;
+    v.anywhere.forEach((s, g) => {
+      if (!s || held[g]) return;
+      const chance = 1 - Math.pow(1 - Math.exp(-weight[g]), lengths.get(videoId) ?? 1);
+      score -= ELSEWHERE_WEIGHT * Math.log(chance);
+    });
+    return { videoId, score, found: countOf(held), pairs: v.pairs, window: v.window, says };
+  });
+  // One word alone is not close to three.
+  const close = scored.filter((v) => v.found >= 2 || v.pairs > 0).sort((a, b) => b.score - a.score || (a.videoId < b.videoId ? -1 : 1));
+  return close.filter((v) => v.score >= CLOSEST_SHARE * close[0].score).slice(0, MAX_CLOSEST_VIDEOS);
 }
 
 /**
@@ -325,7 +480,7 @@ function partialMatches(
   // More than half: "kenneth copeland private jet" does not list every video named for Kenneth Copeland.
   const need = Math.max(2, Math.floor(of / 2) + 1);
   if (of < need) return [];
-  const weight = said.counts.map((n) => Math.log((total + 1) / (n + 1)));
+  const weight = said.counts.map((n) => rarity(total, n));
 
   // The telling groups each window says.
   const saysOf = new Map<number, number[]>();
